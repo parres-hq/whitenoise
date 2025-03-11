@@ -285,7 +285,10 @@ impl EventProcessor {
             .map_err(NostrManagerError::TauriError)?;
 
         let key_package_relays: Vec<String> = if cfg!(dev) {
-            vec!["ws://localhost:8080".to_string()]
+            vec![
+                "ws://localhost:8080".to_string(),
+                "ws://localhost:7777".to_string(),
+            ]
         } else {
             account.relays(RelayType::KeyPackage, wn.clone()).await?
         };

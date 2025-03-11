@@ -55,6 +55,7 @@ impl Default for NostrManagerSettings {
         let mut relays = vec![];
         if cfg!(dev) {
             relays.push("ws://localhost:8080".to_string());
+            relays.push("ws://localhost:7777".to_string());
             relays.push("wss://purplepag.es".to_string());
             // relays.push("wss://nos.lol".to_string());
         } else {

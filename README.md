@@ -56,10 +56,12 @@ The resulting build artifacts (`.deb`, `.rpm` and `.AppImage` packages) will be 
 
 White Noise is built with [Tauri](https://tauri.app/) & [SvelteKit](https://kit.svelte.dev/). To get started contributing you'll need to have the [Rust](https://www.rust-lang.org/tools/install) toolchain installed and the [Bun](https://bun.sh/docs/installation) JavaScript package manager.
 
-1. First off, you'll need to install [`nostr-rs-relay`](https://github.com/scsibug/nostr-rs-relay?tab=readme-ov-file) and run it locally when developing. At the moment, to simplify development everything happens over a local relay on `ws://localhost:8080`.
-2. Clone the repo: `git clone https://github.com/erskingardner/whitenoise.git` and `cd whitenoise`.
-3. Run `bun install` to install the front-end dependencies.
-4. Run `bun tauri dev` to start the app. If you want to see more comprehensive logging, run `RUST_LOG=debug bun tauri dev`.
+The easiest way to run all the local development services is to use Docker and run `docker compose up`. This will start two local relays (nostr-rs-relay and strfry) and a blossom server. The app is configured to only publish events to these relays in development to simplify development & debugging.
+
+1. Clone the repo: `git clone https://github.com/erskingardner/whitenoise.git` and `cd whitenoise`.
+1. Run `bun install` to install the front-end dependencies.
+1. Run `docker compose up` in one terminal.
+1. Run `bun tauri dev` to start the app in another terminal. If you want to see more comprehensive logging, run `RUST_LOG=debug bun tauri dev`.
 
 ### Formatting and Linting
 

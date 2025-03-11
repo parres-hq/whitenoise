@@ -22,11 +22,11 @@ let {
     keyPackagePublished: boolean;
 }>();
 
-let keyPackageRelays: string[] = $state(import.meta.env.DEV ? ["ws://localhost:8080"] : [
-    "wss://relay.damus.io",
-    "wss://relay.primal.net",
-    "wss://nos.lol",
-]);
+let keyPackageRelays: string[] = $state(
+    import.meta.env.DEV
+        ? ["ws://localhost:8080", "ws://localhost:7777"]
+        : ["wss://relay.damus.io", "wss://relay.primal.net", "wss://nos.lol"]
+);
 let newKeyPackageRelay: string = $state("");
 let inputError: string | null = $state(null);
 
