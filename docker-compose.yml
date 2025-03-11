@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   nostr-rs-relay:
     image: scsibug/nostr-rs-relay:latest
@@ -7,18 +5,19 @@ services:
       - "8080:8080"
     volumes:
       - ./dev/data/nostr-rs-relay:/usr/src/app/data
-      - ./dev/nostr-rs-relay-config.toml:/usr/src/app/config
+      - ./dev/nostr-rs-relay-config.toml:/usr/src/app/config.toml
     environment:
       - RUST_LOG=info
-    restart: unless-stopped 
+    restart: unless-stopped
   blossom:
     image: ghcr.io/hzrd149/blossom-server:master
     build: .
-    ports:
-      - 3000:3000
     volumes:
       - ./dev/data/blossom-ts-server:/app/data
       - ./dev/blossom-server-ts-config.yml:/app/config.yml
+    ports:
+      - 3000:3000
+    restart: unless-stopped
   strfry-nostr-relay:
     image: dockurr/strfry:latest
     volumes:
@@ -26,3 +25,4 @@ services:
       - ./dev/data/strfry-db:/app/strfry-db
     ports:
       - "7777:7777"
+    restart: unless-stopped
