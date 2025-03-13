@@ -174,13 +174,40 @@ impl BlossomClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mockito::{Server, ServerGuard};
+
+    async fn setup_mock_server() -> (ServerGuard, BlossomClient) {
+        let server = Server::new_async().await;
+        let client = BlossomClient::new(&server.url());
+        (server, client)
+    }
 
     #[tokio::test]
     async fn test_upload() {
-        let client = BlossomClient::new("http://localhost:3000");
+        let (mut server, client) = setup_mock_server().await;
 
         // Generate random bytes for testing
         let random_bytes: Vec<u8> = uuid::Uuid::new_v4().as_bytes().to_vec();
+
+        // Create mock response
+        let mock_response = BlobDescriptor {
+            url: format!("{}/blob/123", server.url()),
+            sha256: "test_sha256".to_string(),
+            size: random_bytes.len() as u64,
+            r#type: Some("application/octet-stream".to_string()),
+            uploaded: chrono::Utc::now().timestamp() as u64,
+            compressed: None,
+        };
+
+        // Setup mock
+        let _m = server
+            .mock("PUT", "/upload")
+            .match_header("content-type", "application/octet-stream")
+            .match_header("content-length", random_bytes.len().to_string().as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&mock_response).unwrap())
+            .create();
 
         // First upload the file
         let blob_descriptor = client
@@ -188,76 +215,88 @@ mod tests {
             .await
             .expect("Failed to upload file");
 
-        // Verify that we got a valid URL back
-        assert!(!blob_descriptor.url.is_empty(), "URL should not be empty");
-        assert!(
-            blob_descriptor.url.starts_with("http"),
-            "URL should start with http"
-        );
-
-        // Now download the file and verify contents
-        let downloaded_bytes = client
-            .download(&blob_descriptor.url)
-            .await
-            .expect("Failed to download file");
-
-        // Assert that we got the same bytes back
-        assert_eq!(
-            downloaded_bytes, random_bytes,
-            "Downloaded file contents don't match original"
-        );
+        // Verify response matches expectations
+        assert_eq!(blob_descriptor.url, mock_response.url);
+        assert_eq!(blob_descriptor.size, random_bytes.len() as u64);
     }
 
     #[tokio::test]
     async fn test_upload_empty_file() {
-        let client = BlossomClient::new("http://localhost:3000");
+        let (mut server, client) = setup_mock_server().await;
         let empty_bytes: Vec<u8> = Vec::new();
+
+        // Create mock response
+        let mock_response = BlobDescriptor {
+            url: format!("{}/blob/empty", server.url()),
+            sha256: "empty_sha256".to_string(),
+            size: 0,
+            r#type: Some("application/octet-stream".to_string()),
+            uploaded: chrono::Utc::now().timestamp() as u64,
+            compressed: None,
+        };
+
+        // Setup mock
+        let _m = server
+            .mock("PUT", "/upload")
+            .match_header("content-type", "application/octet-stream")
+            .match_header("content-length", "0")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&mock_response).unwrap())
+            .create();
 
         let blob_descriptor = client
             .upload(empty_bytes)
             .await
             .expect("Failed to upload empty file");
 
-        assert_eq!(blob_descriptor.size, 0, "Size should be 0 for empty file");
-        assert!(!blob_descriptor.url.is_empty(), "URL should not be empty");
+        assert_eq!(blob_descriptor.size, 0);
+        assert!(!blob_descriptor.url.is_empty());
     }
 
     #[tokio::test]
     async fn test_upload_large_file() {
-        let client = BlossomClient::new("http://localhost:3000");
-
-        // Create a 1MB file
+        let (mut server, client) = setup_mock_server().await;
         let large_bytes: Vec<u8> = vec![0; 1024 * 1024];
 
+        // Create mock response
+        let mock_response = BlobDescriptor {
+            url: format!("{}/blob/large", server.url()),
+            sha256: "large_sha256".to_string(),
+            size: large_bytes.len() as u64,
+            r#type: Some("application/octet-stream".to_string()),
+            uploaded: chrono::Utc::now().timestamp() as u64,
+            compressed: None,
+        };
+
+        // Setup mock
+        let _m = server
+            .mock("PUT", "/upload")
+            .match_header("content-type", "application/octet-stream")
+            .match_header("content-length", large_bytes.len().to_string().as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&mock_response).unwrap())
+            .create();
+
         let blob_descriptor = client
-            .upload(large_bytes.clone())
+            .upload(large_bytes)
             .await
             .expect("Failed to upload large file");
 
-        assert_eq!(
-            blob_descriptor.size,
-            1024 * 1024,
-            "Size should match large file size"
-        );
-
-        // Download and verify
-        let downloaded_bytes = client
-            .download(&blob_descriptor.url)
-            .await
-            .expect("Failed to download large file");
-
-        assert_eq!(
-            downloaded_bytes.len(),
-            1024 * 1024,
-            "Downloaded file size should match original"
-        );
+        assert_eq!(blob_descriptor.size, 1024 * 1024);
     }
 
     #[tokio::test]
     async fn test_download_nonexistent_file() {
-        let client = BlossomClient::new("http://localhost:3000");
-        let result = client.download("http://localhost:3000/nonexistent").await;
+        let (mut server, client) = setup_mock_server().await;
 
+        // Setup mock for 404 response
+        let _m = server.mock("GET", "/nonexistent").with_status(404).create();
+
+        let result = client
+            .download(&format!("{}/nonexistent", server.url()))
+            .await;
         assert!(result.is_err(), "Downloading nonexistent file should fail");
     }
 

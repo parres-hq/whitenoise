@@ -74,6 +74,7 @@ nostr-sdk = { version = "0.38", features = [
 ] }
 
 [dev-dependencies]
+mockito = "1.2"
 
 [profile.release]
 debug = true
