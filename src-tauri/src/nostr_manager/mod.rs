@@ -1,4 +1,5 @@
 use crate::accounts::Account;
+use crate::nostr_manager::blossom::BlossomClient;
 use crate::nostr_manager::event_processor::EventProcessor;
 use crate::types::NostrEncryptionMethod;
 use crate::Whitenoise;
@@ -10,8 +11,10 @@ use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use tokio::{spawn, sync::Mutex};
 
+pub mod blossom;
 pub mod event_processor;
 pub mod fetch;
+pub mod media;
 pub mod query;
 pub mod search;
 pub mod subscriptions;
@@ -41,11 +44,13 @@ pub enum NostrManagerError {
 pub struct NostrManagerSettings {
     pub timeout: Duration,
     pub relays: Vec<String>,
+    pub blossom_server: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct NostrManager {
     pub client: Client,
+    pub blossom: BlossomClient,
     pub settings: Arc<Mutex<NostrManagerSettings>>,
     event_processor: Arc<Mutex<EventProcessor>>,
 }
@@ -68,6 +73,11 @@ impl Default for NostrManagerSettings {
         Self {
             timeout: Duration::from_secs(5),
             relays,
+            blossom_server: if cfg!(dev) {
+                "http://localhost:3000".to_string()
+            } else {
+                "https://blossom.primal.net".to_string()
+            },
         }
     }
 }
@@ -97,6 +107,8 @@ impl NostrManager {
 
         let settings = NostrManagerSettings::default();
 
+        let blossom = BlossomClient::new(&settings.blossom_server);
+
         // Add the default relays
         for relay in &settings.relays {
             client.add_relay(relay).await?;
@@ -109,6 +121,7 @@ impl NostrManager {
 
         Ok(Self {
             client,
+            blossom,
             settings: Arc::new(Mutex::new(settings)),
             event_processor,
         })

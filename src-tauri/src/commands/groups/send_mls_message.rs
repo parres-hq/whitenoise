@@ -1,4 +1,5 @@
 use crate::groups::Group;
+use crate::nostr_manager::media::{process_media_file, MediaFile};
 use crate::secrets_store;
 use crate::whitenoise::Whitenoise;
 use lightning_invoice::SignedRawBolt11Invoice;
@@ -14,26 +15,19 @@ pub async fn send_mls_message(
     message: String,
     kind: u16,
     tags: Option<Vec<Tag>>,
+    media: Option<Vec<MediaFile>>,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
 ) -> Result<UnsignedEvent, String> {
     let nostr_keys = wn.nostr.client.signer().await.map_err(|e| e.to_string())?;
+    let mut final_tags = tags.unwrap_or_default();
+    let mut final_content = message;
 
-    let inner_event = create_unsigned_nostr_event(&nostr_keys, message, kind, tags)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let json_event_string = serde_json::to_string(&inner_event).map_err(|e| e.to_string())?;
-
-    let serialized_message;
+    // Get export secret early as we need it for file encryption
     let export_secret_hex;
     let epoch;
     {
         let nostr_mls = wn.nostr_mls.lock().await;
-        serialized_message = nostr_mls
-            .create_message_for_group(group.mls_group_id.clone(), json_event_string)
-            .map_err(|e| e.to_string())?;
-
         (export_secret_hex, epoch) = nostr_mls
             .export_secret_as_hex_secret_key_and_epoch(group.mls_group_id.clone())
             .map_err(|e| e.to_string())?;
@@ -49,6 +43,68 @@ pub async fn send_mls_message(
     .map_err(|e| e.to_string())?;
 
     let export_nostr_keys = Keys::parse(&export_secret_hex).map_err(|e| e.to_string())?;
+
+    // Process media files if present
+    if let Some(media_files) = media {
+        let mut uploaded_media = Vec::new();
+        let files_count = media_files.len();
+
+        // Process files sequentially
+        for file in media_files {
+            match process_media_file(file, &export_secret_hex, &wn).await {
+                Ok(media) => uploaded_media.push(media),
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::commands::groups::send_mls_message",
+                        "Media processing error: {}",
+                        e
+                    );
+                    // Continue processing other files instead of failing completely
+                }
+            }
+        }
+
+        // If no files were processed successfully, return an error
+        if uploaded_media.is_empty() && files_count > 0 {
+            return Err("Failed to process any media files".to_string());
+        }
+
+        // Add media content and tags
+        let mut media_urls = Vec::new();
+        for media in uploaded_media {
+            media_urls.push(media.blob_descriptor.url.clone());
+            final_tags.push(media.imeta_tag);
+        }
+
+        // Add all URLs to content with consistent formatting
+        if !media_urls.is_empty() {
+            if !final_content.is_empty() {
+                final_content.push('\n');
+            }
+            final_content.push_str(&media_urls.join("\n"));
+        }
+    }
+
+    let inner_event =
+        create_unsigned_nostr_event(&nostr_keys, final_content, kind, Some(final_tags))
+            .await
+            .map_err(|e| e.to_string())?;
+
+    tracing::debug!(
+        target: "whitenoise::commands::groups::send_mls_message",
+        "Sending MLSMessage event to group relays: {:?}",
+        inner_event.clone()
+    );
+
+    let json_event_string = serde_json::to_string(&inner_event).map_err(|e| e.to_string())?;
+
+    let serialized_message;
+    {
+        let nostr_mls = wn.nostr_mls.lock().await;
+        serialized_message = nostr_mls
+            .create_message_for_group(group.mls_group_id.clone(), json_event_string)
+            .map_err(|e| e.to_string())?;
+    }
 
     let encrypted_content = nip44::encrypt(
         export_nostr_keys.secret_key(),
@@ -190,15 +246,15 @@ mod tests {
         let signer: Arc<dyn NostrSigner> = Arc::new(keys.clone());
         let message = "Stay humble & stack sats!".to_string();
         let kind = 1;
-        let tags = Some(vec![Tag::reference("test_id")]);
+        let tags = vec![Tag::reference("test_id")];
 
         let result =
-            create_unsigned_nostr_event(&signer, message.clone(), kind, tags.clone()).await;
+            create_unsigned_nostr_event(&signer, message.clone(), kind, Some(tags.clone())).await;
 
         assert!(result.is_ok());
         let event = result.unwrap();
         assert_eq!(event.content, message);
-        assert_eq!(event.tags.to_vec(), tags.unwrap());
+        assert_eq!(event.tags.to_vec(), tags);
         assert_eq!(event.kind, kind.into());
         assert_eq!(event.pubkey, keys.public_key());
     }
@@ -212,7 +268,7 @@ mod tests {
 
         // Test case 1: Message with invoice and existing tags
         let invoice = "lnbc15u1p3xnhl2pp5jptserfk3zk4qy42tlucycrfwxhydvlemu9pqr93tuzlv9cc7g3sdqsvfhkcap3xyhx7un8cqzpgxqzjcsp5f8c52y2stc300gl6s4xswtjpc37hrnnr3c9wvtgjfuvqmpm35evq9qyyssqy4lgd8tj637qcjp05rdpxxykjenthxftej7a2zzmwrmrl70fyj9hvj0rewhzj7jfyuwkwcg9g2jpwtk3wkjtwnkdks84hsnu8xps5vsq4gj5hs";
-        let message: String = "Please pay me here: ".to_string() + &invoice;
+        let message = format!("Please pay me here: {}", invoice);
         let existing_tag = Tag::reference("test_id");
         let result =
             create_unsigned_nostr_event(&signer, message, 1, Some(vec![existing_tag.clone()]))

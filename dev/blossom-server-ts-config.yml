@@ -74,14 +74,14 @@ upload:
   enabled: true
   # require auth to upload
   # requireAuth: true
-  requireAuth: false
+  requireAuth: true
   # only check rules that include "pubkeys"
   requirePubkeyInRule: false
 
 # Config for the /media endpoint
 media:
   # /media endpoint enabled (default false)
-  enabled: true
+  enabled: false
   # require auth to upload to /media
   requireAuth: true
   # only check rules that include "pubkeys"
