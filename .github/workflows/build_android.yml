@@ -56,6 +56,8 @@ jobs:
       NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
       VERSION: ${{ needs.setup.outputs.version }}
+      OPENSSL_DIR: /usr/lib/ssl
+      PKG_CONFIG_ALLOW_CROSS: 1
     steps:
       - uses: actions/checkout@v4
 
@@ -107,6 +109,13 @@ jobs:
           sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
           mkdir -p ${{ env.ANDROID_NDK_HOME }}
           cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* ${{ env.ANDROID_NDK_HOME }}/
+
+      - name: Install Android OpenSSL
+        run: |
+          mkdir -p $HOME/.cargo/
+          echo '[target.aarch64-linux-android]' >> $HOME/.cargo/config.toml
+          echo 'rustflags = ["-C", "link-arg=-landroid", "-C", "link-arg=-llog"]' >> $HOME/.cargo/config.toml
+          sudo apt-get install -y libssl-dev pkg-config
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -164,6 +173,8 @@ jobs:
       NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
       VERSION: ${{ needs.setup.outputs.version }}
+      OPENSSL_DIR: /usr/lib/ssl
+      PKG_CONFIG_ALLOW_CROSS: 1
     steps:
       - uses: actions/checkout@v4
 
@@ -215,6 +226,13 @@ jobs:
           sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
           mkdir -p ${{ env.ANDROID_NDK_HOME }}
           cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* ${{ env.ANDROID_NDK_HOME }}/
+
+      - name: Install Android OpenSSL
+        run: |
+          mkdir -p $HOME/.cargo/
+          echo '[target.aarch64-linux-android]' >> $HOME/.cargo/config.toml
+          echo 'rustflags = ["-C", "link-arg=-landroid", "-C", "link-arg=-llog"]' >> $HOME/.cargo/config.toml
+          sudo apt-get install -y libssl-dev pkg-config
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4

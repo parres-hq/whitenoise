@@ -217,6 +217,7 @@ mod tests {
         let tag_values = tag.to_vec();
 
         assert_eq!(tag_values[0], "imeta");
+        assert_ne!(tag_values[1], "imeta");
         assert!(tag_values.contains(&"url https://example.com/test.txt".to_string()));
         assert!(tag_values.contains(&"m text/plain".to_string()));
         assert!(tag_values.contains(&"x abcdef".to_string()));
@@ -233,9 +234,10 @@ mod tests {
         let blob = create_test_blob("https://example.com/test.png", "abcdef");
 
         let tag = generate_imeta_tag(&file, &blob).unwrap();
-        let tag_values = tag.clone().to_vec();
+        let tag_values = tag.to_vec();
 
         assert_eq!(tag_values[0], "imeta");
+        assert_ne!(tag_values[1], "imeta");
         assert!(tag_values.contains(&"url https://example.com/test.png".to_string()));
         assert!(tag_values.contains(&"m image/png".to_string()));
         assert!(tag_values.iter().any(|v| v.starts_with("dim ")));
