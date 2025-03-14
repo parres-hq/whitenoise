@@ -56,8 +56,6 @@ jobs:
       NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
       VERSION: ${{ needs.setup.outputs.version }}
-      OPENSSL_DIR: /usr/lib/ssl
-      PKG_CONFIG_ALLOW_CROSS: 1
     steps:
       - uses: actions/checkout@v4
 
@@ -109,26 +107,6 @@ jobs:
           sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
           mkdir -p ${{ env.ANDROID_NDK_HOME }}
           cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* ${{ env.ANDROID_NDK_HOME }}/
-
-      - name: Install Android OpenSSL
-        run: |
-          mkdir -p $HOME/.cargo/
-          echo '[target.aarch64-linux-android]' >> $HOME/.cargo/config.toml
-          echo 'rustflags = ["-C", "link-arg=-landroid", "-C", "link-arg=-llog"]' >> $HOME/.cargo/config.toml
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
-
-          # Create OpenSSL directory structure
-          mkdir -p /usr/lib/ssl/include
-          mkdir -p /usr/lib/ssl/lib
-
-          # Copy OpenSSL headers from Android NDK
-          cp -r ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/openssl/* /usr/lib/ssl/include/
-
-          # Set environment variables for OpenSSL
-          echo "OPENSSL_DIR=/usr/lib/ssl" >> $GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=/usr/lib/ssl/lib" >> $GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=/usr/lib/ssl/include" >> $GITHUB_ENV
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -186,8 +164,6 @@ jobs:
       NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
       VERSION: ${{ needs.setup.outputs.version }}
-      OPENSSL_DIR: /usr/lib/ssl
-      PKG_CONFIG_ALLOW_CROSS: 1
     steps:
       - uses: actions/checkout@v4
 
@@ -239,26 +215,6 @@ jobs:
           sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
           mkdir -p ${{ env.ANDROID_NDK_HOME }}
           cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* ${{ env.ANDROID_NDK_HOME }}/
-
-      - name: Install Android OpenSSL
-        run: |
-          mkdir -p $HOME/.cargo/
-          echo '[target.aarch64-linux-android]' >> $HOME/.cargo/config.toml
-          echo 'rustflags = ["-C", "link-arg=-landroid", "-C", "link-arg=-llog"]' >> $HOME/.cargo/config.toml
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
-
-          # Create OpenSSL directory structure
-          mkdir -p /usr/lib/ssl/include
-          mkdir -p /usr/lib/ssl/lib
-
-          # Copy OpenSSL headers from Android NDK
-          cp -r ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/openssl/* /usr/lib/ssl/include/
-
-          # Set environment variables for OpenSSL
-          echo "OPENSSL_DIR=/usr/lib/ssl" >> $GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=/usr/lib/ssl/lib" >> $GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=/usr/lib/ssl/include" >> $GITHUB_ENV
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4

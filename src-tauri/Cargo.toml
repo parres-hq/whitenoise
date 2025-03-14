@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["rustls-tls"], default-features = false }
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -46,7 +46,7 @@ lightning-invoice = "0.33.1"
 async-trait = "0.1.86"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
-reqwest = { version = "0.11", features = ["multipart", "json"] }
+reqwest = { version = "0.11", features = ["multipart", "json", "rustls-tls"], default-features = false }
 image = "0.24"
 blurhash = "0.1"
 sha2 = "0.10"
