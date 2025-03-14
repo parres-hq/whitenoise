@@ -115,7 +115,10 @@ jobs:
           mkdir -p $HOME/.cargo/
           echo '[target.aarch64-linux-android]' >> $HOME/.cargo/config.toml
           echo 'rustflags = ["-C", "link-arg=-landroid", "-C", "link-arg=-llog"]' >> $HOME/.cargo/config.toml
+          sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config
+          sudo ln -s /usr/include/x86_64-linux-gnu/openssl /usr/lib/ssl/include
+          sudo ln -s /usr/lib/x86_64-linux-gnu /usr/lib/ssl/lib
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -232,7 +235,10 @@ jobs:
           mkdir -p $HOME/.cargo/
           echo '[target.aarch64-linux-android]' >> $HOME/.cargo/config.toml
           echo 'rustflags = ["-C", "link-arg=-landroid", "-C", "link-arg=-llog"]' >> $HOME/.cargo/config.toml
+          sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config
+          sudo ln -s /usr/include/x86_64-linux-gnu/openssl /usr/lib/ssl/include
+          sudo ln -s /usr/lib/x86_64-linux-gnu /usr/lib/ssl/lib
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
