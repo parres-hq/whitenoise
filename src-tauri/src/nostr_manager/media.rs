@@ -84,14 +84,13 @@ pub async fn process_media_file(
     let blob_descriptor = upload_encrypted_file(encrypted_file_data, wn).await?;
 
     // Generate metadata and IMETA tag
-    let mut imeta_tag = generate_imeta_tag(&file, &blob_descriptor, &original_sha256)?;
+    let mut imeta_values = generate_imeta_tag_values(&file, &blob_descriptor, &original_sha256)?;
 
     // Add nonce to the IMETA tag
     let nonce_hex = hex::encode(nonce);
-    let mut imeta_values = imeta_tag.to_vec();
     imeta_values.push(format!("decryption-nonce {}", nonce_hex));
     imeta_values.push(format!("encryption-algorithm {}", "aes-gcm"));
-    imeta_tag = Tag::custom(TagKind::from("imeta"), imeta_values);
+    let imeta_tag = Tag::custom(TagKind::from("imeta"), imeta_values);
 
     Ok(UploadedMedia {
         blob_descriptor,
@@ -162,12 +161,12 @@ async fn upload_encrypted_file(
 /// # Returns
 /// * `Ok(Tag)` - The generated IMETA tag
 /// * `Err(String)` - Error message if metadata generation fails
-fn generate_imeta_tag(
+fn generate_imeta_tag_values(
     file: &MediaFile,
     blob: &BlobDescriptor,
     original_sha256: &str,
-) -> Result<Tag, String> {
-    let mut imeta = vec![format!("url {}", blob.url), format!("m {}", file.mime_type)];
+) -> Result<Vec<String>, String> {
+    let mut imeta_values = vec![format!("url {}", blob.url), format!("m {}", file.mime_type)];
 
     // Add dimensions and blurhash for images
     if file.mime_type.starts_with("image/") {
@@ -175,12 +174,12 @@ fn generate_imeta_tag(
         match ::image::load_from_memory(&file.data) {
             Ok(img) => {
                 let (width, height) = img.dimensions();
-                imeta.push(format!("dim {}x{}", width, height));
+                imeta_values.push(format!("dim {}x{}", width, height));
 
                 // Calculate blurhash
                 let rgb_img = img.to_rgba8().into_vec();
                 let blurhash = encode(4, 3, width, height, &rgb_img);
-                imeta.push(format!("blurhash {}", blurhash));
+                imeta_values.push(format!("blurhash {}", blurhash));
             }
             Err(e) => {
                 return Err(format!("Failed to load image: {}", e));
@@ -188,10 +187,12 @@ fn generate_imeta_tag(
         }
     }
 
-    // Use SHA256 hash of original file
-    imeta.push(format!("x {}", original_sha256));
+    // TODO: This is where we'd do any video or other file type processing
 
-    Ok(Tag::custom(TagKind::from("imeta"), imeta))
+    // Use SHA256 hash of original file
+    imeta_values.push(format!("x {}", original_sha256));
+
+    Ok(imeta_values)
 }
 
 #[cfg(test)]
@@ -223,11 +224,9 @@ mod tests {
         let file = create_test_file("test.txt", "text/plain", b"test data");
         let blob = create_test_blob("https://example.com/test.txt", "abcdef");
 
-        let tag = generate_imeta_tag(&file, &blob, "abcdef").unwrap();
-        let tag_values = tag.to_vec();
+        let tag_values = generate_imeta_tag_values(&file, &blob, "abcdef").unwrap();
 
-        assert_eq!(tag_values[0], "imeta");
-        assert_ne!(tag_values[1], "imeta");
+        assert_ne!(tag_values[0], "imeta");
         assert!(tag_values.contains(&"url https://example.com/test.txt".to_string()));
         assert!(tag_values.contains(&"m text/plain".to_string()));
         assert!(tag_values.contains(&"x abcdef".to_string()));
@@ -243,11 +242,9 @@ mod tests {
         let file = create_test_file("test.png", "image/png", &image_data);
         let blob = create_test_blob("https://example.com/test.png", "abcdef");
 
-        let tag = generate_imeta_tag(&file, &blob, "abcdef").unwrap();
-        let tag_values = tag.to_vec();
+        let tag_values = generate_imeta_tag_values(&file, &blob, "abcdef").unwrap();
 
-        assert_eq!(tag_values[0], "imeta");
-        assert_ne!(tag_values[1], "imeta");
+        assert_ne!(tag_values[0], "imeta");
         assert!(tag_values.contains(&"url https://example.com/test.png".to_string()));
         assert!(tag_values.contains(&"m image/png".to_string()));
         assert!(tag_values.iter().any(|v| v.starts_with("dim ")));
@@ -261,7 +258,7 @@ mod tests {
         let file = create_test_file("test.png", "image/png", b"not a real image");
         let blob = create_test_blob("https://example.com/test.png", "abcdef");
 
-        let result = generate_imeta_tag(&file, &blob, "abcdef");
+        let result = generate_imeta_tag_values(&file, &blob, "abcdef");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Failed to load image"));
     }
