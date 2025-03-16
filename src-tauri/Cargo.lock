@@ -7471,10 +7471,10 @@ dependencies = [
 name = "whitenoise"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "async-trait",
  "base64 0.22.1",
  "blurhash",
+ "chacha20poly1305",
  "chrono",
  "hex",
  "image 0.24.9",

@@ -1,11 +1,11 @@
 use crate::nostr_manager::blossom::BlobDescriptor;
 use crate::whitenoise::Whitenoise;
 use ::image::GenericImageView;
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Key, Nonce,
-};
 use blurhash::encode;
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Key, Nonce,
+};
 use nostr_sdk::prelude::*;
 use rand::RngCore;
 use serde::Deserialize;
@@ -38,7 +38,7 @@ pub struct UploadedMedia {
 /// Processes a media file for sending in a Nostr message.
 ///
 /// This function handles the complete workflow for preparing a media file for sending:
-/// 1. Encrypts the file data using AES-GCM
+/// 1. Encrypts the file data using ChaCha20-Poly1305
 /// 2. Uploads the encrypted data to the Blossom server
 /// 3. Generates appropriate metadata including image-specific data if applicable
 ///
@@ -74,10 +74,10 @@ pub async fn process_media_file(
     hasher.update(&file.data);
     let original_sha256 = format!("{:x}", hasher.finalize());
 
-    // Get the raw secret key bytes for AES-GCM
+    // Get the raw secret key bytes
     let secret_key = hex::decode(export_secret_hex).map_err(|e| e.to_string())?;
 
-    // Encrypt the file using AES-GCM
+    // Encrypt the file using ChaCha20-Poly1305
     let (encrypted_file_data, nonce) = encrypt_file(&file.data, &secret_key)?;
 
     // Upload encrypted file to Blossom
@@ -89,7 +89,7 @@ pub async fn process_media_file(
     // Add nonce to the IMETA tag
     let nonce_hex = hex::encode(nonce);
     imeta_values.push(format!("decryption-nonce {}", nonce_hex));
-    imeta_values.push(format!("encryption-algorithm {}", "aes-gcm"));
+    imeta_values.push("encryption-algorithm chacha20-poly1305".to_string());
     let imeta_tag = Tag::custom(TagKind::from("imeta"), imeta_values);
 
     Ok(UploadedMedia {
@@ -98,10 +98,11 @@ pub async fn process_media_file(
     })
 }
 
-/// Encrypts file data using AES-GCM encryption.
+/// Encrypts file data using ChaCha20-Poly1305 encryption.
 ///
-/// This function encrypts the raw file data using AES-GCM,
-/// which provides authenticated encryption.
+/// This function encrypts the raw file data using ChaCha20-Poly1305,
+/// which provides authenticated encryption with better cross-platform performance
+/// characteristics compared to AES-GCM.
 ///
 /// # Arguments
 /// * `data` - The raw file data to encrypt
@@ -115,7 +116,7 @@ fn encrypt_file(data: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
         return Err("Key must be 32 bytes".to_string());
     }
 
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let mut nonce_bytes = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -166,7 +167,11 @@ fn generate_imeta_tag_values(
     blob: &BlobDescriptor,
     original_sha256: &str,
 ) -> Result<Vec<String>, String> {
-    let mut imeta_values = vec![format!("url {}", blob.url), format!("m {}", file.mime_type)];
+    let mut imeta_values = vec![
+        format!("url {}", blob.url),
+        format!("m {}", file.mime_type),
+        format!("filename {}", file.name),
+    ];
 
     // Add dimensions and blurhash for images
     if file.mime_type.starts_with("image/") {
@@ -230,6 +235,8 @@ mod tests {
         assert!(tag_values.contains(&"url https://example.com/test.txt".to_string()));
         assert!(tag_values.contains(&"m text/plain".to_string()));
         assert!(tag_values.contains(&"x abcdef".to_string()));
+        assert!(tag_values.contains(&"filename test.txt".to_string()));
+        // We don't test for encryption-algorithm or decryption-nonce because those are added after generate_imeta_tag_values method
     }
 
     #[test]
@@ -251,6 +258,8 @@ mod tests {
         assert!(tag_values.contains(&"dim 1x1".to_string()));
         assert!(tag_values.iter().any(|v| v.starts_with("blurhash ")));
         assert!(tag_values.contains(&"x abcdef".to_string()));
+        assert!(tag_values.contains(&"filename test.png".to_string()));
+        // We don't test for encryption-algorithm or decryption-nonce because those are added after generate_imeta_tag_values method
     }
 
     #[test]
