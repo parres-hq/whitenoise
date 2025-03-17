@@ -123,13 +123,13 @@ async function uploadFile(file: File) {
     try {
         const arrayBuffer = await file.arrayBuffer();
         const fileData = {
-            name: file.name,
-            type: file.type,
+            filename: file.name,
+            mime_type: file.type,
             data: Array.from(new Uint8Array(arrayBuffer)),
         };
 
         await invoke("upload_file", {
-            groupId: hexMlsGroupId(group.mls_group_id),
+            groupId: group.mls_group_id,
             file: fileData,
         });
 
