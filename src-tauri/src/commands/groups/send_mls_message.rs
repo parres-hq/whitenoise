@@ -1,5 +1,5 @@
 use crate::groups::Group;
-use crate::nostr_manager::media::{process_media_file, MediaFile};
+use crate::media::{add_media_file, FileUpload};
 use crate::secrets_store;
 use crate::whitenoise::Whitenoise;
 use lightning_invoice::SignedRawBolt11Invoice;
@@ -15,7 +15,7 @@ pub async fn send_mls_message(
     message: String,
     kind: u16,
     tags: Option<Vec<Tag>>,
-    media: Option<Vec<MediaFile>>,
+    uploaded_files: Option<Vec<FileUpload>>,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
 ) -> Result<UnsignedEvent, String> {
@@ -45,13 +45,22 @@ pub async fn send_mls_message(
     let export_nostr_keys = Keys::parse(&export_secret_hex).map_err(|e| e.to_string())?;
 
     // Process media files if present
-    if let Some(media_files) = media {
+    if let Some(uploaded_files) = uploaded_files {
         let mut uploaded_media = Vec::new();
-        let files_count = media_files.len();
+        let files_count = uploaded_files.len();
 
         // Process files sequentially
-        for file in media_files {
-            match process_media_file(file, &export_secret_hex, &wn).await {
+        for file in uploaded_files {
+            match add_media_file(
+                &group.mls_group_id,
+                file,
+                &export_secret_hex,
+                wn.data_dir.to_str().unwrap(),
+                &wn.database,
+                &wn.nostr.blossom,
+            )
+            .await
+            {
                 Ok(media) => uploaded_media.push(media),
                 Err(e) => {
                     tracing::error!(

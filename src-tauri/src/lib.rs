@@ -4,6 +4,7 @@ mod database;
 mod groups;
 mod invites;
 mod key_packages;
+mod media;
 mod messages;
 mod nostr_manager;
 mod payments;
@@ -18,6 +19,7 @@ use crate::commands::delete_all_data;
 use crate::commands::groups::*;
 use crate::commands::invites::*;
 use crate::commands::key_packages::*;
+use crate::commands::media::*;
 use crate::commands::messages::*;
 use crate::commands::nostr::*;
 use crate::commands::payments::*;
@@ -120,7 +122,8 @@ pub fn run() {
             search_for_enriched_contacts,
             invite_to_white_noise,
             query_message,
-            export_nsec
+            export_nsec,
+            upload_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

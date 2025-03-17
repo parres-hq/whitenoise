@@ -64,29 +64,30 @@ impl BlossomClient {
         }
     }
 
-    /// Creates a Nostr event for upload authorization
+    /// Creates a Nostr event for authorization
     ///
     /// # Arguments
-    /// * `sha256` - The SHA-256 hash of the file being uploaded
+    /// * `sha256` - The SHA-256 hash of the file
+    /// * `action` - The action being authorized (e.g., "upload", "delete")
+    /// * `keys` - The Nostr keys to use for signing the event
     ///
     /// # Returns
     /// A Result containing the authorization header value or an error
-    async fn create_upload_auth_event(
+    async fn create_auth_event(
         &self,
         sha256: &str,
+        action: &str,
+        keys: &Keys,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        // Generate a new key pair for this upload
-        let keys = Keys::generate();
-
         let tags = vec![
-            Tag::custom(TagKind::Custom("t".into()), vec!["upload".to_string()]),
+            Tag::custom(TagKind::Custom("t".into()), vec![action.to_string()]),
             Tag::expiration(Timestamp::now() + 24 * 60 * 60),
             Tag::custom(TagKind::Custom("x".into()), vec![sha256.to_string()]),
         ];
 
         let event = EventBuilder::new(Kind::Custom(24242), "")
             .tags(tags)
-            .sign(&keys)
+            .sign(keys)
             .await?;
 
         // Convert event to JSON string
@@ -105,11 +106,11 @@ impl BlossomClient {
     /// * `file` - The file contents as a byte vector
     ///
     /// # Returns
-    /// A Result containing the BlobDescriptor or an error
+    /// A Result containing the BlobDescriptor and Nostr keys used to upload the file or an error
     pub async fn upload(
         &self,
         file: Vec<u8>,
-    ) -> Result<BlobDescriptor, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(BlobDescriptor, Keys), Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::new();
         tracing::info!(
             target: "whitenoise::nostr_manager::blossom",
@@ -122,8 +123,11 @@ impl BlossomClient {
         hasher.update(&file);
         let sha256 = format!("{:x}", hasher.finalize());
 
+        // Generate keys for this upload
+        let keys = Keys::generate();
+
         // Create the authorization header
-        let auth_header = self.create_upload_auth_event(&sha256).await?;
+        let auth_header = self.create_auth_event(&sha256, "upload", &keys).await?;
 
         // Upload the file with the auth header
         let response = client
@@ -142,6 +146,52 @@ impl BlossomClient {
                 response
             );
             return Err(format!("Upload failed with status: {}", response.status()).into());
+        }
+
+        let blob_descriptor: BlobDescriptor = response.json().await?;
+        Ok((blob_descriptor, keys))
+    }
+
+    /// Deletes a file from the Blossom server
+    ///
+    /// # Arguments
+    /// * `sha256` - The SHA-256 hash of the file to delete
+    /// * `nostr_key` - The Nostr key used to upload the file
+    ///
+    /// # Returns
+    /// A Result containing the deleted BlobDescriptor or an error
+    pub async fn delete(
+        &self,
+        sha256: &str,
+        nostr_secret_key: &str,
+    ) -> Result<BlobDescriptor, Box<dyn std::error::Error + Send + Sync>> {
+        let client = reqwest::Client::new();
+        tracing::info!(
+            target: "whitenoise::nostr_manager::blossom",
+            "Deleting file from Blossom server: {}",
+            self.url
+        );
+
+        // Parse the nostr key
+        let keys = Keys::parse(nostr_secret_key)?;
+
+        // Create the authorization header
+        let auth_header = self.create_auth_event(sha256, "delete", &keys).await?;
+
+        // Delete the file with the auth header
+        let response = client
+            .delete(format!("{}/{}", self.url, sha256))
+            .header("Authorization", auth_header)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            tracing::error!(
+                target: "whitenoise::nostr_manager::blossom",
+                "Delete failed: {:?}",
+                response
+            );
+            return Err(format!("Delete failed with status: {}", response.status()).into());
         }
 
         let blob_descriptor: BlobDescriptor = response.json().await?;
@@ -210,7 +260,7 @@ mod tests {
             .create();
 
         // First upload the file
-        let blob_descriptor = client
+        let (blob_descriptor, _keys) = client
             .upload(random_bytes.clone())
             .await
             .expect("Failed to upload file");
@@ -245,7 +295,7 @@ mod tests {
             .with_body(serde_json::to_string(&mock_response).unwrap())
             .create();
 
-        let blob_descriptor = client
+        let (blob_descriptor, _keys) = client
             .upload(empty_bytes)
             .await
             .expect("Failed to upload empty file");
@@ -279,12 +329,62 @@ mod tests {
             .with_body(serde_json::to_string(&mock_response).unwrap())
             .create();
 
-        let blob_descriptor = client
+        let (blob_descriptor, _keys) = client
             .upload(large_bytes)
             .await
             .expect("Failed to upload large file");
 
         assert_eq!(blob_descriptor.size, 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn test_delete() {
+        let (mut server, client) = setup_mock_server().await;
+        let sha256 = "test_sha256";
+        let keys = Keys::generate();
+        let nostr_key = keys.secret_key().to_secret_hex();
+
+        // Create mock response
+        let mock_response = BlobDescriptor {
+            url: format!("{}/{}", server.url(), sha256),
+            sha256: sha256.to_string(),
+            size: 1000,
+            r#type: Some("application/octet-stream".to_string()),
+            uploaded: chrono::Utc::now().timestamp() as u64,
+            compressed: None,
+        };
+
+        // Setup mock
+        let _m = server
+            .mock("DELETE", format!("/{}", sha256).as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&mock_response).unwrap())
+            .create();
+
+        let deleted_descriptor = client
+            .delete(sha256, &nostr_key)
+            .await
+            .expect("Failed to delete file");
+
+        assert_eq!(deleted_descriptor.sha256, sha256);
+        assert_eq!(deleted_descriptor.size, 1000);
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_file() {
+        let (mut server, client) = setup_mock_server().await;
+        let sha256 = "nonexistent_sha256";
+        let nostr_key = "test_nostr_key";
+
+        // Setup mock for 404 response
+        let _m = server
+            .mock("DELETE", format!("/{}", sha256).as_str())
+            .with_status(404)
+            .create();
+
+        let result = client.delete(sha256, nostr_key).await;
+        assert!(result.is_err(), "Deleting nonexistent file should fail");
     }
 
     #[tokio::test]

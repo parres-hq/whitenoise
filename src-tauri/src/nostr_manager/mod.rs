@@ -1,5 +1,5 @@
 use crate::accounts::Account;
-use crate::nostr_manager::blossom::BlossomClient;
+use crate::media::blossom::BlossomClient;
 use crate::nostr_manager::event_processor::EventProcessor;
 use crate::types::NostrEncryptionMethod;
 use crate::Whitenoise;
@@ -11,10 +11,8 @@ use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use tokio::{spawn, sync::Mutex};
 
-pub mod blossom;
 pub mod event_processor;
 pub mod fetch;
-pub mod media;
 pub mod query;
 pub mod search;
 pub mod subscriptions;

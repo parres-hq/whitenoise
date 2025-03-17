@@ -1,12 +1,13 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
+import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { Message } from "$lib/types/chat";
 import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { PaperPlaneTilt, Plus, TrashSimple, X } from "phosphor-svelte";
+import { Check, PaperPlaneTilt, Plus, TrashSimple, X } from "phosphor-svelte";
 import { onMount } from "svelte";
 import Loader from "./Loader.svelte";
 
@@ -24,8 +25,12 @@ let {
 
 let message = $state("");
 let media = $state<File[]>([]);
+let uploadingFiles = $state<
+    Map<string, { progress: number; status: "uploading" | "error" | "success" }>
+>(new Map());
 let textarea: HTMLTextAreaElement;
 let sendingMessage: boolean = $state(false);
+let toastState = getToastState();
 
 $inspect(media);
 
@@ -50,18 +55,6 @@ async function sendMessage() {
         tags.push(["q", replyToMessage.id, groupWithRelays.relays[0], replyToMessage.pubkey]);
     }
 
-    // Convert media files to binary data
-    let mediaData = await Promise.all(
-        media.map(async (file) => {
-            const arrayBuffer = await file.arrayBuffer();
-            return {
-                name: file.name,
-                type: file.type,
-                data: Array.from(new Uint8Array(arrayBuffer)),
-            };
-        })
-    );
-
     let tmpMessage = {
         id: "temp",
         content: message,
@@ -79,12 +72,12 @@ async function sendMessage() {
         message,
         kind,
         tags,
-        media: mediaData,
     })
         .then((messageEvent) => {
             handleNewMessage(messageEvent as NEvent);
             message = "";
             media = []; // Clear media after successful send
+            uploadingFiles.clear(); // Clear upload status
             setTimeout(adjustTextareaHeight, 0);
         })
         .finally(() => {
@@ -114,9 +107,38 @@ async function handleFileUpload() {
             type: getMimeType(filePath),
         });
 
+        // Add file to media array and start upload
         media = [...media, file];
+        await uploadFile(file);
     } catch (error) {
         console.error("Error reading file:", error);
+        toastState.add("Error", "Failed to read file", "error");
+    }
+}
+
+async function uploadFile(file: File) {
+    const fileId = `${file.name}-${Date.now()}`;
+    uploadingFiles.set(fileId, { progress: 0, status: "uploading" });
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const fileData = {
+            name: file.name,
+            type: file.type,
+            data: Array.from(new Uint8Array(arrayBuffer)),
+        };
+
+        await invoke("upload_file", {
+            groupId: hexMlsGroupId(group.mls_group_id),
+            file: fileData,
+        });
+
+        // Update status to success
+        uploadingFiles.set(fileId, { progress: 100, status: "success" });
+    } catch (error) {
+        console.error("Error uploading file:", error);
+        uploadingFiles.set(fileId, { progress: 0, status: "error" });
+        toastState.add("Error", `Failed to upload ${file.name}`, "error");
     }
 }
 
@@ -167,6 +189,8 @@ onMount(() => {
     {#if media.length > 0}
         <div class="w-full py-2 px-6 pl-8 bg-gray-800/50 backdrop-blur-sm border-t border-gray-700 flex flex-row gap-2 items-center overflow-x-auto">
             {#each media as file, index}
+                {@const fileId = `${file.name}-${Date.now()}`}
+                {@const uploadStatus = uploadingFiles.get(fileId)}
                 <div class="relative group">
                     {#if file.type.startsWith('image/')}
                         <img
@@ -187,9 +211,29 @@ onMount(() => {
                             <span class="text-white text-sm">PDF</span>
                         </div>
                     {/if}
+                    {#if uploadStatus}
+                        <div class="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                            {#if uploadStatus.status === 'uploading'}
+                                <div class="w-12 h-12">
+                                    <Loader fullscreen={false} size={48} />
+                                </div>
+                            {:else if uploadStatus.status === 'error'}
+                                <div class="text-red-500">
+                                    <X size={24} />
+                                </div>
+                            {:else if uploadStatus.status === 'success'}
+                                <div class="text-green-500">
+                                    <Check size={24} />
+                                </div>
+                            {/if}
+                        </div>
+                    {/if}
                     <button
                         class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                        onclick={() => media = media.filter((_, i) => i !== index)}
+                        onclick={() => {
+                            media = media.filter((_, i) => i !== index);
+                            uploadingFiles.delete(fileId);
+                        }}
                     >
                         <X size={12} />
                     </button>
