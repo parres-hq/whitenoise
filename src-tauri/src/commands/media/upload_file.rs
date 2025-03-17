@@ -14,10 +14,11 @@ pub async fn upload_file(
     app_handle: tauri::AppHandle,
 ) -> Result<UploadedMedia, String> {
     let export_secret_hex;
+    let epoch;
 
     {
         let nostr_mls = wn.nostr_mls.lock().await;
-        (export_secret_hex, _) = nostr_mls
+        (export_secret_hex, epoch) = nostr_mls
             .export_secret_as_hex_secret_key_and_epoch(group_id.clone())
             .map_err(|e| e.to_string())?;
     }
