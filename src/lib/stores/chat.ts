@@ -236,7 +236,6 @@ export function createChatStore() {
         message: Message
     ): Promise<NEvent | null> {
         if (!message.lightningInvoice) {
-            console.log('HERE MESSAGE IS', message);
             console.error("Message does not have a lightning invoice");
             return null;
         }

@@ -641,8 +641,6 @@ describe('Chat Store', () => {
         group: createTestGroup(),
         relays: ['test-relay']
       };
-
-      console.log('HERE INVOICE MESSAGE INSIDE TEST IS', invoiceMessage);
       
       const result = await chatStore.payLightningInvoice(groupWithRelays, invoiceMessage);
       
