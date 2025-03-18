@@ -341,7 +341,7 @@ describe('Chat Store', () => {
       expect(get(chatStore).messages).toHaveLength(0);
     });
 
-    it('clears reactions', () => {
+    it('clears messages reactions', () => {
       const messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
       chatStore.handleEvent(messageEvent);
       const reactionEvent = createReactionEvent('reaction-1', '👍', 1500, 'msg-1');
@@ -352,6 +352,18 @@ describe('Chat Store', () => {
       chatStore.handleEvent(messageEvent);
       const newMessage = chatStore.findMessage('msg-1');
       expect(newMessage?.reactions).toEqual([]);
+    });
+
+    it('clears reactions', () => {
+      const messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
+      chatStore.handleEvent(messageEvent);
+      const reactionEvent = createReactionEvent('reaction-1', '👍', 1500, 'msg-1');
+      chatStore.handleEvent(reactionEvent);
+      const oldMessage = chatStore.findMessage('msg-1');
+      expect(oldMessage?.reactions).toHaveLength(1);
+      chatStore.clear();
+      chatStore.handleEvent(messageEvent);
+      expect(chatStore.findReaction('reaction-1')).toBeUndefined();
     });
 
     it('clears deletions', () => {
@@ -392,6 +404,31 @@ describe('Chat Store', () => {
       const message = chatStore.findMessage('non-existent');
       
       expect(message).toBeUndefined();
+    });
+  });
+
+  describe('findReaction', () => {
+    it('finds a reaction by id', () => {
+      const messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
+      chatStore.handleEvent(messageEvent);
+      const reactionEvent = createReactionEvent('reaction-1', '👋', 1001, 'msg-1');
+      chatStore.handleEvent(reactionEvent);
+      const reaction = chatStore.findReaction('reaction-1');
+      expect(reaction).toEqual({
+        id: 'reaction-1',
+        pubkey: 'other-pubkey',
+        content: '👋',
+        targetId: 'msg-1',
+        createdAt: 1001,
+        isMine: false,
+        event: reactionEvent
+      });
+    });
+
+    it('returns undefined for a non-existent reaction', () => {
+      const reaction = chatStore.findReaction('non-existent');
+      
+      expect(reaction).toBeUndefined();
     });
   });
 

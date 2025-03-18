@@ -128,6 +128,7 @@ export type DeletionsMap = Map<string, Deletion>;
  * @property {function} handleEvents - Processes multiple Nostr events and updates state
  * @property {function} clear - Clears all messages and state
  * @property {function} findMessage - Finds a message by its ID
+ * @property {function} findReaction - Finds a reaction by its ID
  * @property {function} findReplyToMessage - Finds the message that another message is replying to
  * @property {function} isDeleted - Checks if a message has been deleted
  * @property {function} getMessageReactionsSummary - Gets a summary of reactions for a message
@@ -144,6 +145,7 @@ export type ChatState = {
     handleEvents: (events: NEvent[]) => void;
     clear: () => void;
     findMessage: (id: string) => Message | undefined;
+    findReaction: (id: string) => Reaction | undefined;
     findReplyToMessage: (message: Message) => Message | undefined;
     isDeleted: (eventId: string) => boolean;
     getMessageReactionsSummary: (messageId: string) => ReactionSummary[];

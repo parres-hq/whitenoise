@@ -38,6 +38,7 @@ export function createChatStore() {
         handleEvents,
         clear,
         findMessage,
+        findReaction,
         findReplyToMessage,
         isDeleted,
         getMessageReactionsSummary,
@@ -151,6 +152,7 @@ export function createChatStore() {
     function clear() {
         messagesMap.set(new Map());
         deletionsMap.set(new Map());
+        reactionsMap.set(new Map());
     }
 
     /**
@@ -161,6 +163,15 @@ export function createChatStore() {
     function findMessage(id: string): Message | undefined {
         const messages = get(messagesMap); 
         return messages.get(id);
+    }
+    /**
+     * Finds a reaction by its ID
+     * @param {string} id - The ID of the reaction to find
+     * @returns {Reaction | undefined} The found reaction or undefined
+     */
+    function findReaction(id: string): Reaction | undefined {
+        const reactions = get(reactionsMap);
+        return reactions.get(id);
     }
 
     /**
@@ -368,6 +379,7 @@ export function createChatStore() {
         handleEvents,
         clear,
         findMessage,
+        findReaction,
         findReplyToMessage,
         isDeleted,
         getMessageReactionsSummary,
