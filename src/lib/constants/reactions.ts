@@ -6,6 +6,6 @@ export const DEFAULT_REACTION_EMOJIS: ReactionEmoji[] = [
     { emoji: "👎", name: "thumbs_down" },
     { emoji: "😂", name: "laugh" },
     { emoji: "🤔", name: "thinking" },
-    { emoji: "🤙", name: "call_me" },
+    { emoji: "🤙", name: "pura_vida" },
     { emoji: "😥", name: "sad" },
 ];
