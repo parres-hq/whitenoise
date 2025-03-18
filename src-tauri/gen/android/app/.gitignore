@@ -1,4 +1,3 @@
-/src/main/java/com/paper_robin/whitenoise/generated
 /src/main/java/org/parres/whitenoise/generated
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json
