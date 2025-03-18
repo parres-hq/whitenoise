@@ -6,7 +6,7 @@
     <string>app-store-connect</string>
     <key>provisioningProfiles</key>
         <dict>
-            <key>com.paper-paper.whitenoise</key> <!-- set your app bundle identifier -->
+            <key>org.parres.whitenoise</key> <!-- set your app bundle identifier -->
             <string>White Noise App Store Profile</string> <!-- set your provisioning profile name -->
         </dict>
 </dict>

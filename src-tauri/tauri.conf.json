@@ -2,7 +2,7 @@
     "$schema": "https://schema.tauri.app/config/2",
     "productName": "White Noise",
     "version": "0.1.0",
-    "identifier": "com.paper-robin.whitenoise",
+    "identifier": "org.parres.whitenoise",
     "build": {
         "beforeDevCommand": "bun run dev",
         "devUrl": "http://localhost:1420",
@@ -28,10 +28,10 @@
         "category": "SocialNetworking",
         "homepage": "https://whitenoise.chat",
         "license": "GNU AGPL v3.0",
-        "copyright": "Copyright © 2025 White Noise",
-        "publisher": "White Noise",
+        "copyright": "Copyright © 2025 Parres",
+        "publisher": "Parres",
         "iOS": {
-            "developmentTeam": "8Z6Q2LZ77W"
+            "developmentTeam": "QL6TB358UB"
         },
         "macOS": {
             "frameworks": []

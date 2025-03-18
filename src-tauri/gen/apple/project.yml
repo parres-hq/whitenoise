@@ -1,6 +1,6 @@
 name: whitenoise
 options:
-  bundleIdPrefix: com.paper-robin.whitenoise
+  bundleIdPrefix: org.parres.whitenoise
   deploymentTarget:
     iOS: 13.0
 fileGroups: [../../src]
@@ -11,7 +11,7 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: White Noise
-      PRODUCT_BUNDLE_IDENTIFIER: com.paper-robin.whitenoise
+      PRODUCT_BUNDLE_IDENTIFIER: org.parres.whitenoise
       DEVELOPMENT_TEAM: 8Z6Q2LZ77W
 targetTemplates:
   app:

@@ -382,7 +382,7 @@
 				CODE_SIGN_ENTITLEMENTS = whitenoise_iOS/whitenoise_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "8Z6Q2LZ77W";
+				DEVELOPMENT_TEAM = QL6TB358UB;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = "arm64-sim x86_64";
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = arm64;
@@ -416,7 +416,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.paper-robin.whitenoise;
+				PRODUCT_BUNDLE_IDENTIFIER = org.parres.whitenoise;
 				PRODUCT_NAME = "White Noise";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -441,7 +441,7 @@
 				CODE_SIGN_ENTITLEMENTS = whitenoise_iOS/whitenoise_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "8Z6Q2LZ77W";
+				DEVELOPMENT_TEAM = QL6TB358UB;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = "arm64-sim x86_64";
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = arm64;
@@ -475,7 +475,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.paper-robin.whitenoise;
+				PRODUCT_BUNDLE_IDENTIFIER = org.parres.whitenoise;
 				PRODUCT_NAME = "White Noise";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
