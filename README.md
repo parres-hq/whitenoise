@@ -18,7 +18,7 @@ White Noise aims to be the most secure private chat app on Nostr, with a focus o
 
 ## The Spec
 
-White Noise is an implemenetation of the [NIP-104](https://github.com/nostr-protocol/nips/pull/1427) spec. This is still a draft spec, so it may change before it is finalized.
+White Noise is an implementation of the [NIP-104](https://github.com/nostr-protocol/nips/pull/1427) spec. This is still a draft spec, so it may change before it is finalized.
 
 ## Running White Noise
 
