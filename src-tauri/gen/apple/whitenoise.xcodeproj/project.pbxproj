@@ -416,7 +416,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.paper-robin.whitenoise;
+				PRODUCT_BUNDLE_IDENTIFIER = org.parres.whitenoise;
 				PRODUCT_NAME = "White Noise";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -475,7 +475,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.paper-robin.whitenoise;
+				PRODUCT_BUNDLE_IDENTIFIER = org.parres.whitenoise;
 				PRODUCT_NAME = "White Noise";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;

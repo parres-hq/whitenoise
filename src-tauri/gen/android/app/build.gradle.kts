@@ -17,7 +17,7 @@ val tauriProperties = Properties().apply {
 
 android {
     compileSdk = 34
-    namespace = "com.paper_robin.whitenoise"
+    namespace = "org.parres.whitenoise"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -26,7 +26,7 @@ android {
 
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.paper_robin.whitenoise"
+        applicationId = "org.parres.whitenoise"
         minSdk = 24
         targetSdk = 34
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

@@ -1,3 +1,3 @@
-package com.paper_robin.whitenoise
+package org.parres.whitenoise
 
 class MainActivity : TauriActivity()
