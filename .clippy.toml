@@ -1,0 +1,4 @@
+# Clippy configuration
+cognitive-complexity-threshold = 30
+too-many-arguments-threshold = 8
+# Add other clippy configurations as needed
