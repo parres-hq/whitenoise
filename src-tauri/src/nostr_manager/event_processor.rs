@@ -69,7 +69,7 @@ impl EventProcessor {
     pub fn new(app_handle: AppHandle) -> Self {
         let (sender, receiver) = mpsc::channel(500);
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
-        let app_handle_clone = app_handle.clone();
+        let app_handle_clone = app_handle;
 
         // Spawn the processing loop
         tokio::spawn(async move {

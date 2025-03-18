@@ -94,9 +94,9 @@ pub struct Account {
 
 impl Account {
     /// Generates a new keypair and saves the mostly blank account to the database
-    pub async fn new(wn: tauri::State<'_, Whitenoise>) -> Result<Account> {
+    pub async fn new(wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
         let keys = Keys::generate();
-        let account = Account {
+        let account = Self {
             pubkey: keys.public_key(),
             metadata: Metadata::default(),
             settings: AccountSettings::default(),
@@ -118,7 +118,7 @@ impl Account {
         set_active: bool,
         wn: tauri::State<'_, Whitenoise>,
         app_handle: &tauri::AppHandle,
-    ) -> Result<Account> {
+    ) -> Result<Self> {
         let pubkey = keys.public_key();
 
         tracing::debug!(target: "whitenoise::accounts", "Adding account for pubkey: {}", pubkey.to_hex());
@@ -178,7 +178,7 @@ impl Account {
 
         tracing::debug!(target: "whitenoise::accounts", "Creating account with metadata: {:?}", unwrapped_metadata);
 
-        let account = Account {
+        let account = Self {
             pubkey,
             metadata: unwrapped_metadata,
             settings: AccountSettings::default(),
@@ -225,7 +225,7 @@ impl Account {
     pub async fn find_by_pubkey(
         pubkey: &PublicKey,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Account> {
+    ) -> Result<Self> {
         let mut txn = wn.database.pool.begin().await?;
 
         let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
@@ -233,7 +233,7 @@ impl Account {
             .fetch_one(&mut *txn)
             .await?;
 
-        Ok(Account {
+        Ok(Self {
             pubkey: PublicKey::parse(row.pubkey.as_str())?,
             metadata: serde_json::from_str(&row.metadata)?,
             settings: serde_json::from_str(&row.settings)?,
@@ -245,7 +245,7 @@ impl Account {
     }
 
     /// Returns all accounts
-    pub async fn all(wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Account>> {
+    pub async fn all(wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Self>> {
         let mut txn = wn.database.pool.begin().await?;
 
         let iter = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts")
@@ -253,8 +253,8 @@ impl Account {
             .await?;
 
         iter.into_iter()
-            .map(|row| -> Result<Account> {
-                Ok(Account {
+            .map(|row| -> Result<Self> {
+                Ok(Self {
                     pubkey: PublicKey::parse(row.pubkey.as_str())?,
                     metadata: serde_json::from_str(&row.metadata)?,
                     settings: serde_json::from_str(&row.settings)?,
@@ -268,7 +268,7 @@ impl Account {
     }
 
     /// Returns the currently active account
-    pub async fn get_active(wn: tauri::State<'_, Whitenoise>) -> Result<Account> {
+    pub async fn get_active(wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
         // First validate/fix the active state
         Self::validate_active_state(wn.clone()).await?;
 
@@ -279,7 +279,7 @@ impl Account {
             .await?;
 
         match row {
-            Some(row) => Ok(Account {
+            Some(row) => Ok(Self {
                 pubkey: PublicKey::parse(row.pubkey.as_str())?,
                 metadata: serde_json::from_str(&row.metadata)?,
                 settings: serde_json::from_str(&row.settings)?,
@@ -327,7 +327,7 @@ impl Account {
         &self,
         wn: tauri::State<'_, Whitenoise>,
         app_handle: &tauri::AppHandle,
-    ) -> Result<Account> {
+    ) -> Result<Self> {
         tracing::debug!(
             target: "whitenoise::accounts::set_active",
             "Starting set_active for pubkey: {}",
@@ -502,7 +502,7 @@ impl Account {
         relay_type: RelayType,
         relays: &Vec<String>,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Account> {
+    ) -> Result<Self> {
         if relays.is_empty() {
             return Ok(self.clone());
         }
@@ -528,7 +528,7 @@ impl Account {
     }
 
     /// Saves the account to the database
-    pub async fn save(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Account> {
+    pub async fn save(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
         tracing::debug!(
             target: "whitenoise::accounts::save",
             "Beginning save transaction for pubkey: {}",
@@ -619,7 +619,7 @@ impl Account {
         secrets_store::remove_private_key_for_pubkey(&hex_pubkey, &wn.data_dir)?;
 
         // Update Nostr client & Nostr MLS
-        let account = Account::get_active(wn.clone()).await?;
+        let account = Self::get_active(wn.clone()).await?;
         wn.nostr
             .set_nostr_identity(&account, wn.clone(), &app_handle)
             .await?;
@@ -686,9 +686,17 @@ impl Account {
     }
 
     /// Stores a Nostr Wallet Connect URI for this account
-    pub fn store_nostr_wallet_connect_uri(&self, nostr_wallet_connect_uri: &str, wn: tauri::State<'_, Whitenoise>) -> Result<()> {
-        secrets_store::store_nostr_wallet_connect_uri(&self.pubkey.to_hex(), nostr_wallet_connect_uri, &wn.data_dir)
-            .map_err(AccountError::SecretsStoreError)
+    pub fn store_nostr_wallet_connect_uri(
+        &self,
+        nostr_wallet_connect_uri: &str,
+        wn: tauri::State<'_, Whitenoise>,
+    ) -> Result<()> {
+        secrets_store::store_nostr_wallet_connect_uri(
+            &self.pubkey.to_hex(),
+            nostr_wallet_connect_uri,
+            &wn.data_dir,
+        )
+        .map_err(AccountError::SecretsStoreError)
     }
 
     /// Retrieves the Nostr Wallet Connect URI for this account
@@ -696,7 +704,10 @@ impl Account {
     /// # Returns
     /// * `Result<Option<String>>` - Some(uri) if a URI is stored, None if no URI is stored,
     ///   or an error if the operation fails
-    pub fn get_nostr_wallet_connect_uri(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Option<String>> {
+    pub fn get_nostr_wallet_connect_uri(
+        &self,
+        wn: tauri::State<'_, Whitenoise>,
+    ) -> Result<Option<String>> {
         secrets_store::get_nostr_wallet_connect_uri(&self.pubkey.to_hex(), &wn.data_dir)
             .map_err(AccountError::SecretsStoreError)
     }

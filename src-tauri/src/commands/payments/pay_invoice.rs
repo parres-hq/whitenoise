@@ -20,7 +20,7 @@ pub enum CommandError {
 
 impl From<PaymentError> for CommandError {
     fn from(err: PaymentError) -> Self {
-        CommandError::PaymentError(err.to_string())
+        Self::PaymentError(err.to_string())
     }
 }
 
@@ -94,7 +94,7 @@ async fn pay_invoice_and_get_msg_params(
     Ok(MlsMessageParams {
         message: "".to_string(),
         kind: 9,
-        tags: Some(create_payment_tags(tags, &preimage.to_string())),
+        tags: Some(create_payment_tags(tags, &preimage)),
     })
 }
 

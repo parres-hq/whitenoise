@@ -1,0 +1,8 @@
+[target.'cfg(all())']
+rustflags = [
+    "-W", "warnings",           # Show warnings but don't treat them as errors
+    "-W", "clippy::style",      # Style-related lints
+    "-W", "clippy::correctness", # Correctness-related lints
+    "-W", "clippy::complexity",  # Complexity-related lints
+    "-W", "clippy::perf",       # Performance-related lints
+]

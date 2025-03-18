@@ -114,8 +114,7 @@ pub async fn create_group(
         let member_pubkey = PublicKey::from_hex(&member.pubkey).map_err(|e| e.to_string())?;
         let contact =
             fetch_enriched_contact(member.pubkey.clone(), false, wn.clone(), app_handle.clone())
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
 
         // We only want to connect to user relays in release mode
         let relay_urls: Vec<String> = if cfg!(dev) {
@@ -282,7 +281,7 @@ pub async fn create_group(
         .await
         .map_err(|e| format!("Failed to get groups: {}", e))?
         .into_iter()
-        .map(|group| group.nostr_group_id.clone())
+        .map(|group| group.nostr_group_id)
         .collect::<Vec<_>>();
 
     wn.nostr
