@@ -24,10 +24,12 @@ let {
 } = $props();
 
 let message = $state("");
-let media = $state<File[]>([]);
-let uploadingFiles = $state<
-    Map<string, { progress: number; status: "uploading" | "error" | "success" }>
->(new Map());
+let media = $state<
+    Array<{
+        file: File;
+        status: "uploading" | "error" | "success";
+    }>
+>([]);
 let textarea: HTMLTextAreaElement;
 let sendingMessage: boolean = $state(false);
 let toastState = getToastState();
@@ -72,12 +74,23 @@ async function sendMessage() {
         message,
         kind,
         tags,
+        uploadedFiles: await Promise.all(
+            media
+                .filter((item) => item.status === "success")
+                .map(async (item) => {
+                    const arrayBuffer = await item.file.arrayBuffer();
+                    return {
+                        filename: item.file.name,
+                        mime_type: item.file.type,
+                        data: Array.from(new Uint8Array(arrayBuffer)),
+                    };
+                })
+        ),
     })
         .then((messageEvent) => {
             handleNewMessage(messageEvent as NEvent);
             message = "";
             media = []; // Clear media after successful send
-            uploadingFiles.clear(); // Clear upload status
             setTimeout(adjustTextareaHeight, 0);
         })
         .finally(() => {
@@ -108,7 +121,7 @@ async function handleFileUpload() {
         });
 
         // Add file to media array and start upload
-        media = [...media, file];
+        media = [...media, { file, status: "uploading" }];
         await uploadFile(file);
     } catch (error) {
         console.error("Error reading file:", error);
@@ -117,9 +130,6 @@ async function handleFileUpload() {
 }
 
 async function uploadFile(file: File) {
-    const fileId = `${file.name}-${Date.now()}`;
-    uploadingFiles.set(fileId, { progress: 0, status: "uploading" });
-
     try {
         const arrayBuffer = await file.arrayBuffer();
         const fileData = {
@@ -134,10 +144,14 @@ async function uploadFile(file: File) {
         });
 
         // Update status to success
-        uploadingFiles.set(fileId, { progress: 100, status: "success" });
+        media = media.map((item) =>
+            item.file.name === file.name ? { ...item, status: "success" } : item
+        );
     } catch (error) {
         console.error("Error uploading file:", error);
-        uploadingFiles.set(fileId, { progress: 0, status: "error" });
+        media = media.map((item) =>
+            item.file.name === file.name ? { ...item, status: "error" } : item
+        );
         toastState.add("Error", `Failed to upload ${file.name}`, "error");
     }
 }
@@ -188,21 +202,19 @@ onMount(() => {
     {/if}
     {#if media.length > 0}
         <div class="w-full py-2 px-6 pl-8 bg-gray-800/50 backdrop-blur-sm border-t border-gray-700 flex flex-row gap-2 items-center overflow-x-auto">
-            {#each media as file, index}
-                {@const fileId = `${file.name}-${Date.now()}`}
-                {@const uploadStatus = uploadingFiles.get(fileId)}
+            {#each media as item, index}
                 <div class="relative group">
-                    {#if file.type.startsWith('image/')}
+                    {#if item.file.type.startsWith('image/')}
                         <img
-                            src={URL.createObjectURL(file)}
+                            src={URL.createObjectURL(item.file)}
                             alt="Preview"
                             class="h-16 w-16 object-cover rounded-lg"
                         />
-                    {:else if file.type.startsWith('video/')}
+                    {:else if item.file.type.startsWith('video/')}
                         <div class="h-16 w-16 bg-gray-700 rounded-lg flex items-center justify-center">
                             <span class="text-white text-sm">Video</span>
                         </div>
-                    {:else if file.type.startsWith('audio/')}
+                    {:else if item.file.type.startsWith('audio/')}
                         <div class="h-16 w-16 bg-gray-700 rounded-lg flex items-center justify-center">
                             <span class="text-white text-sm">Audio</span>
                         </div>
@@ -211,28 +223,25 @@ onMount(() => {
                             <span class="text-white text-sm">PDF</span>
                         </div>
                     {/if}
-                    {#if uploadStatus}
-                        <div class="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
-                            {#if uploadStatus.status === 'uploading'}
-                                <div class="w-12 h-12">
-                                    <Loader fullscreen={false} size={48} />
-                                </div>
-                            {:else if uploadStatus.status === 'error'}
-                                <div class="text-red-500">
-                                    <X size={24} />
-                                </div>
-                            {:else if uploadStatus.status === 'success'}
-                                <div class="text-green-500">
-                                    <Check size={24} />
-                                </div>
-                            {/if}
-                        </div>
-                    {/if}
+                    <div class="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">
+                        {#if item.status === 'uploading'}
+                            <div class="w-12 h-12">
+                                <Loader fullscreen={false} size={48} />
+                            </div>
+                        {:else if item.status === 'error'}
+                            <div class="text-red-500">
+                                <X size={24} />
+                            </div>
+                        {:else if item.status === 'success'}
+                            <div class="text-green-500">
+                                <Check size={24} />
+                            </div>
+                        {/if}
+                    </div>
                     <button
                         class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                         onclick={() => {
                             media = media.filter((_, i) => i !== index);
-                            uploadingFiles.delete(fileId);
                         }}
                     >
                         <X size={12} />

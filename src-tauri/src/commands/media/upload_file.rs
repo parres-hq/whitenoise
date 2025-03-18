@@ -1,3 +1,4 @@
+use crate::accounts::Account;
 use crate::media::{add_media_file, FileUpload, UploadedMedia};
 use crate::secrets_store;
 use crate::whitenoise::Whitenoise;
@@ -35,9 +36,14 @@ pub async fn upload_file(
     let mut retries = 0;
     let mut last_error = None;
 
+    let active_account = Account::get_active(wn.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
     while retries < MAX_RETRIES {
         match add_media_file(
             &group_id,
+            &active_account.pubkey.to_string(),
             file.clone(),
             &export_secret_hex,
             wn.data_dir.to_str().unwrap(),

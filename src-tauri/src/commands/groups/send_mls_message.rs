@@ -1,3 +1,4 @@
+use crate::accounts::Account;
 use crate::groups::Group;
 use crate::media::{add_media_file, FileUpload};
 use crate::secrets_store;
@@ -44,6 +45,10 @@ pub async fn send_mls_message(
 
     let export_nostr_keys = Keys::parse(&export_secret_hex).map_err(|e| e.to_string())?;
 
+    let active_account = Account::get_active(wn.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
     // Process media files if present
     if let Some(uploaded_files) = uploaded_files {
         let mut uploaded_media = Vec::new();
@@ -53,6 +58,7 @@ pub async fn send_mls_message(
         for file in uploaded_files {
             match add_media_file(
                 &group.mls_group_id,
+                &active_account.pubkey.to_string(),
                 file,
                 &export_secret_hex,
                 wn.data_dir.to_str().unwrap(),

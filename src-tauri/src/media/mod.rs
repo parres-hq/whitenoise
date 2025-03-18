@@ -75,6 +75,7 @@ use nostr_sdk::prelude::*;
 /// * `Err(MediaError)` - Error if any step of the process fails
 pub async fn add_media_file(
     mls_group_id: &Vec<u8>,
+    account_pubkey: &str,
     uploaded_file: FileUpload,
     exporter_secret_hex: &str,
     data_dir: &str,
@@ -101,6 +102,7 @@ pub async fn add_media_file(
     let media_file = cache::add_to_cache(
         &uploaded_file.data,
         mls_group_id,
+        account_pubkey,
         Some(blob_descriptor.url.clone()),
         Some(keys.secret_key().to_secret_hex()),
         Some(sanitized_file.metadata),

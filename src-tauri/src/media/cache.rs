@@ -1,15 +1,15 @@
 //! This module contains functions for managing cached media files.
-
 use crate::database::Database;
 use crate::media::errors::MediaError;
 use crate::media::types::{CachedMediaFile, MediaFile};
 use sha2::{Digest, Sha256};
-use sqlx::types::JsonValue;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::sanitizer::SafeMediaMetadata;
+
+const MEDIA_CACHE_DIR: &str = "media_cache";
 
 /// Adds a file to the cache, saving it to disk and creating a database entry.
 ///
@@ -25,9 +25,11 @@ use super::sanitizer::SafeMediaMetadata;
 /// # Returns
 /// * `Ok(MediaFile)` - The created media file
 /// * `Err(MediaError)` - Error if caching fails
+#[allow(clippy::too_many_arguments)]
 pub async fn add_to_cache(
     data: &[u8],
     mls_group_id: &Vec<u8>,
+    account_pubkey: &str,
     blossom_url: Option<String>,
     nostr_key: Option<String>,
     file_metadata: Option<SafeMediaMetadata>,
@@ -40,7 +42,13 @@ pub async fn add_to_cache(
     let file_hash = format!("{:x}", hasher.finalize());
 
     // Create file path
-    let file_path = format!("{}/{}/{}", data_dir, hex::encode(mls_group_id), file_hash);
+    let file_path = format!(
+        "{}/{}/{}/{}",
+        data_dir,
+        MEDIA_CACHE_DIR,
+        hex::encode(mls_group_id),
+        file_hash
+    );
 
     // Ensure directory exists
     if let Some(parent) = Path::new(&file_path).parent() {
@@ -60,12 +68,13 @@ pub async fn add_to_cache(
     let media_file = sqlx::query_as::<_, MediaFile>(
         "
         INSERT INTO media_files (
-            mls_group_id, file_path, blossom_url,
+            mls_group_id, account_pubkey, file_path, blossom_url,
             file_hash, nostr_key, created_at, file_metadata
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *",
     )
     .bind(mls_group_id)
+    .bind(account_pubkey)
     .bind(&file_path)
     .bind(blossom_url)
     .bind(file_hash)
@@ -154,7 +163,6 @@ pub async fn delete_cached_file(
 mod tests {
     use super::*;
     use crate::database::Database;
-    use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
     use tempfile::tempdir;
 
@@ -179,6 +187,7 @@ mod tests {
             "CREATE TABLE media_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 mls_group_id BLOB NOT NULL,
+                account_pubkey TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 blossom_url TEXT,
                 file_hash TEXT NOT NULL,
@@ -207,7 +216,7 @@ mod tests {
         let test_data = b"test file content";
         let mls_group_id = vec![1, 2, 3];
         let data_dir = temp_dir.path().to_str().unwrap();
-
+        let account_pubkey = "test_pubkey";
         // Calculate expected file hash
         let mut hasher = Sha256::new();
         hasher.update(test_data);
@@ -239,6 +248,7 @@ mod tests {
         let media_file = add_to_cache(
             test_data,
             &mls_group_id,
+            account_pubkey,
             Some("https://example.com/test.txt".to_string()),
             Some("nostr_key".to_string()),
             Some(metadata),
@@ -265,8 +275,9 @@ mod tests {
 
         // Verify file path structure
         let expected_path = format!(
-            "{}/{}/{}",
+            "{}/{}/{}/{}",
             data_dir,
+            MEDIA_CACHE_DIR,
             hex::encode(&mls_group_id),
             expected_hash
         );
@@ -300,14 +311,24 @@ mod tests {
         let expected_hash = format!("{:x}", hasher.finalize());
 
         // Add file to cache
-        let _media_file = add_to_cache(test_data, &mls_group_id, None, None, None, data_dir, &db)
-            .await
-            .unwrap();
+        let _media_file = add_to_cache(
+            test_data,
+            &mls_group_id,
+            "test_pubkey",
+            None,
+            None,
+            None,
+            data_dir,
+            &db,
+        )
+        .await
+        .unwrap();
 
         // Verify file exists
         let expected_path = format!(
-            "{}/{}/{}",
+            "{}/{}/{}/{}",
             data_dir,
+            MEDIA_CACHE_DIR,
             hex::encode(&mls_group_id),
             expected_hash
         );
