@@ -69,7 +69,7 @@ pub async fn accept_invite(
         .await
         .map_err(|e| format!("Failed to get groups: {}", e))?
         .into_iter()
-        .map(|group| group.nostr_group_id.clone())
+        .map(|group| group.nostr_group_id)
         .collect::<Vec<_>>();
 
     wn.nostr

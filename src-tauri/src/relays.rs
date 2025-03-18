@@ -18,7 +18,7 @@ pub struct Relay {
     pub group_id: Option<Vec<u8>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RelayType {
     Nostr,
     Inbox,
@@ -29,10 +29,10 @@ pub enum RelayType {
 impl From<String> for RelayType {
     fn from(s: String) -> Self {
         match s.to_lowercase().as_str() {
-            "nostr" => RelayType::Nostr,
-            "inbox" => RelayType::Inbox,
-            "key_package" => RelayType::KeyPackage,
-            "group" => RelayType::Group,
+            "nostr" => Self::Nostr,
+            "inbox" => Self::Inbox,
+            "key_package" => Self::KeyPackage,
+            "group" => Self::Group,
             _ => panic!("Invalid relay type: {}", s),
         }
     }

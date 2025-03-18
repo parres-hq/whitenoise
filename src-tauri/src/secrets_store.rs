@@ -351,7 +351,11 @@ pub fn get_export_secret_keys_for_group(
 /// # Returns
 ///
 /// * `Result<()>` - Ok(()) if successful, or an error if the operation fails
-pub fn store_nostr_wallet_connect_uri(pubkey: &str, nostr_wallet_connect_uri: &str, data_dir: &Path) -> Result<()> {
+pub fn store_nostr_wallet_connect_uri(
+    pubkey: &str,
+    nostr_wallet_connect_uri: &str,
+    data_dir: &Path,
+) -> Result<()> {
     let mut secrets = read_secrets_file(data_dir).unwrap_or(json!({}));
     let key = format!("nwc:{}", pubkey);
     let obfuscated_uri = obfuscate(nostr_wallet_connect_uri, data_dir);
@@ -373,7 +377,7 @@ pub fn store_nostr_wallet_connect_uri(pubkey: &str, nostr_wallet_connect_uri: &s
 pub fn get_nostr_wallet_connect_uri(pubkey: &str, data_dir: &Path) -> Result<Option<String>> {
     let secrets = read_secrets_file(data_dir)?;
     let key = format!("nwc:{}", pubkey);
-    
+
     match secrets[key].as_str() {
         Some(obfuscated_uri) => Ok(Some(deobfuscate(obfuscated_uri, data_dir)?)),
         None => Ok(None),
@@ -562,7 +566,8 @@ mod tests {
         store_nostr_wallet_connect_uri(pubkey, nostr_wallet_connect_uri, temp_dir.path())?;
 
         // Retrieve the NWC URI
-        let retrieved_uri = get_nostr_wallet_connect_uri(pubkey, temp_dir.path())?.expect("URI should exist");
+        let retrieved_uri =
+            get_nostr_wallet_connect_uri(pubkey, temp_dir.path())?.expect("URI should exist");
         assert_eq!(nostr_wallet_connect_uri, retrieved_uri);
 
         // Clean up

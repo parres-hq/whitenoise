@@ -55,8 +55,8 @@ pub enum ProcessedMessageState {
 impl From<String> for ProcessedMessageState {
     fn from(s: String) -> Self {
         match s.to_lowercase().as_str() {
-            "processed" => ProcessedMessageState::Processed,
-            "failed" => ProcessedMessageState::Failed,
+            "processed" => Self::Processed,
+            "failed" => Self::Failed,
             _ => panic!("Invalid processed message state: {}", s),
         }
     }
@@ -94,7 +94,7 @@ pub struct ProcessedMessage {
 
 impl From<ProcessedMessageRow> for ProcessedMessage {
     fn from(row: ProcessedMessageRow) -> Self {
-        ProcessedMessage {
+        Self {
             event_id: EventId::parse(&row.event_id).unwrap(),
             message_event_id: row.message_event_id.map(|id| EventId::parse(&id).unwrap()),
             account_pubkey: PublicKey::from_hex(&row.account_pubkey).unwrap(),
@@ -123,7 +123,7 @@ impl ProcessedMessage {
     pub async fn find_by_event_id(
         event_id: EventId,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Option<ProcessedMessage>> {
+    ) -> Result<Option<Self>> {
         let active_account = Account::get_active(wn.clone()).await?;
 
         let processed_message_row = sqlx::query_as::<_, ProcessedMessageRow>(
@@ -164,7 +164,7 @@ impl ProcessedMessage {
         state: ProcessedMessageState,
         reason: String,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<ProcessedMessage> {
+    ) -> Result<Self> {
         let active_account = Account::get_active(wn.clone()).await?;
 
         let mut txn = wn.database.pool.begin().await?;
@@ -180,7 +180,7 @@ impl ProcessedMessage {
             .await?;
         txn.commit().await?;
 
-        Ok(ProcessedMessage {
+        Ok(Self {
             event_id,
             message_event_id,
             account_pubkey: active_account.pubkey,
@@ -195,7 +195,7 @@ impl Message {
     pub async fn find_by_event_id(
         event_id: EventId,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Message> {
+    ) -> Result<Self> {
         let active_account = Account::get_active(wn.clone()).await?;
 
         let message_row = sqlx::query_as::<_, MessageRow>(
@@ -215,7 +215,7 @@ impl Message {
 
 impl From<MessageRow> for Message {
     fn from(row: MessageRow) -> Self {
-        Message {
+        Self {
             event_id: EventId::parse(&row.event_id).unwrap(),
             account_pubkey: PublicKey::from_hex(&row.account_pubkey).unwrap(),
             author_pubkey: PublicKey::from_hex(&row.author_pubkey).unwrap(),

@@ -94,7 +94,7 @@ pub struct ProcessedInvite {
 
 impl From<ProcessedInviteRow> for ProcessedInvite {
     fn from(row: ProcessedInviteRow) -> Self {
-        ProcessedInvite {
+        Self {
             event_id: row.event_id,
             invite_event_id: row.invite_event_id,
             account_pubkey: PublicKey::from_hex(&row.account_pubkey).unwrap(),
@@ -107,7 +107,7 @@ impl From<ProcessedInviteRow> for ProcessedInvite {
 
 impl From<ProcessedInvite> for ProcessedInviteRow {
     fn from(invite: ProcessedInvite) -> Self {
-        ProcessedInviteRow {
+        Self {
             event_id: invite.event_id,
             invite_event_id: invite.invite_event_id,
             account_pubkey: invite.account_pubkey.to_hex(),
@@ -118,7 +118,7 @@ impl From<ProcessedInvite> for ProcessedInviteRow {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum ProcessedInviteState {
     Processed,
     Failed,
@@ -127,8 +127,8 @@ pub enum ProcessedInviteState {
 impl From<String> for ProcessedInviteState {
     fn from(s: String) -> Self {
         match s.to_lowercase().as_str() {
-            "processed" => ProcessedInviteState::Processed,
-            "failed" => ProcessedInviteState::Failed,
+            "processed" => Self::Processed,
+            "failed" => Self::Failed,
             _ => panic!("Invalid processed invite state: {}", s),
         }
     }
@@ -143,7 +143,7 @@ impl From<ProcessedInviteState> for String {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum InviteState {
     Pending,
     Accepted,
@@ -154,10 +154,10 @@ pub enum InviteState {
 impl From<String> for InviteState {
     fn from(s: String) -> Self {
         match s.to_lowercase().as_str() {
-            "pending" => InviteState::Pending,
-            "accepted" => InviteState::Accepted,
-            "declined" => InviteState::Declined,
-            "ignored" => InviteState::Ignored,
+            "pending" => Self::Pending,
+            "accepted" => Self::Accepted,
+            "declined" => Self::Declined,
+            "ignored" => Self::Ignored,
             _ => panic!("Invalid invite state: {}", s),
         }
     }
@@ -176,7 +176,7 @@ impl From<InviteState> for String {
 
 impl From<InviteRow> for Invite {
     fn from(row: InviteRow) -> Self {
-        Invite {
+        Self {
             event_id: row.event_id,
             account_pubkey: row.account_pubkey,
             event: UnsignedEvent::from_json(&row.event).unwrap(),
@@ -199,7 +199,7 @@ impl Invite {
         account_pubkey: &str,
         invite_event_id: &str,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Invite> {
+    ) -> Result<Self> {
         let invite_row = sqlx::query_as::<_, InviteRow>(
             "SELECT * FROM invites WHERE account_pubkey = ? AND event_id = ?",
         )
@@ -208,7 +208,7 @@ impl Invite {
         .fetch_one(&wn.database.pool)
         .await?;
 
-        Ok(Invite {
+        Ok(Self {
             event_id: invite_row.event_id,
             account_pubkey: invite_row.account_pubkey,
             event: UnsignedEvent::from_json(&invite_row.event)?,
@@ -225,7 +225,7 @@ impl Invite {
         })
     }
 
-    pub async fn pending(wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Invite>> {
+    pub async fn pending(wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Self>> {
         let active_account = Account::get_active(wn.clone()).await?;
         let invites = sqlx::query_as::<_, InviteRow>(
             "SELECT * FROM invites WHERE state = 'pending' AND account_pubkey = ?",
@@ -236,7 +236,7 @@ impl Invite {
         Ok(invites.into_iter().map(|row| row.into()).collect())
     }
 
-    pub async fn save(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Invite> {
+    pub async fn save(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
         let mut txn = wn.database.pool.begin().await?;
         sqlx::query("INSERT OR REPLACE INTO invites (event_id, account_pubkey, event, mls_group_id, nostr_group_id, group_name, group_description, group_admin_pubkeys, group_relays, inviter, member_count, outer_event_id, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&self.event_id)
@@ -271,7 +271,7 @@ impl ProcessedInvite {
     pub async fn find_by_invite_event_id(
         event_id: EventId,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Option<ProcessedInvite>> {
+    ) -> Result<Option<Self>> {
         let active_account = Account::get_active(wn.clone()).await?;
 
         let processed_invite_row = sqlx::query_as::<_, ProcessedInviteRow>(
@@ -310,7 +310,7 @@ impl ProcessedInvite {
         state: ProcessedInviteState,
         reason: String,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<ProcessedInvite> {
+    ) -> Result<Self> {
         let active_account = Account::get_active(wn.clone()).await?;
 
         let mut txn = wn.database.pool.begin().await?;
@@ -326,7 +326,7 @@ impl ProcessedInvite {
             .await?;
         txn.commit().await?;
 
-        Ok(ProcessedInvite {
+        Ok(Self {
             event_id: event_id.to_string(),
             invite_event_id: invite_event_id.to_string(),
             account_pubkey: active_account.pubkey,

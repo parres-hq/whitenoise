@@ -70,8 +70,8 @@ pub enum GroupType {
 impl From<String> for GroupType {
     fn from(s: String) -> Self {
         match s.as_str() {
-            "DirectMessage" => GroupType::DirectMessage,
-            "Group" => GroupType::Group,
+            "DirectMessage" => Self::DirectMessage,
+            "Group" => Self::Group,
             _ => panic!("Invalid group type: {}", s),
         }
     }
@@ -95,8 +95,8 @@ pub enum GroupState {
 impl From<String> for GroupState {
     fn from(s: String) -> Self {
         match s.as_str() {
-            "Active" => GroupState::Active,
-            "Inactive" => GroupState::Inactive,
+            "Active" => Self::Active,
+            "Inactive" => Self::Inactive,
             _ => panic!("Invalid group state: {}", s),
         }
     }
@@ -247,7 +247,7 @@ impl Group {
         group_data: NostrGroupDataExtension,
         wn: tauri::State<'_, Whitenoise>,
         _app_handle: &tauri::AppHandle,
-    ) -> Result<Group> {
+    ) -> Result<Self> {
         tracing::debug!(
             target: "whitenoise::groups::new",
             "Creating group with mls_group_id: {:?}",
@@ -258,7 +258,7 @@ impl Group {
             .await
             .map_err(GroupError::AccountError)?;
 
-        let group = Group {
+        let group = Self {
             mls_group_id,
             account_pubkey: account.pubkey,
             nostr_group_id: group_data.nostr_group_id(),
@@ -311,7 +311,7 @@ impl Group {
     pub async fn find_by_mls_group_id(
         mls_group_id: &Vec<u8>,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Group> {
+    ) -> Result<Self> {
         let account = Account::get_active(wn.clone())
             .await
             .map_err(GroupError::AccountError)?;
@@ -331,7 +331,7 @@ impl Group {
             group_row
         );
 
-        Ok(Group {
+        Ok(Self {
             mls_group_id: group_row.mls_group_id,
             account_pubkey: account.pubkey,
             nostr_group_id: group_row.nostr_group_id,
@@ -349,7 +349,7 @@ impl Group {
     pub async fn get_by_nostr_group_id(
         nostr_group_id: &str,
         wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Group> {
+    ) -> Result<Self> {
         let account = Account::get_active(wn.clone())
             .await
             .map_err(GroupError::AccountError)?;
@@ -363,7 +363,7 @@ impl Group {
         .await?
         .ok_or_else(|| GroupError::GroupNotFound)?;
 
-        Ok(Group {
+        Ok(Self {
             mls_group_id: group_row.mls_group_id,
             account_pubkey: account.pubkey,
             nostr_group_id: group_row.nostr_group_id,
@@ -379,7 +379,7 @@ impl Group {
     }
 
     /// Gets all groups for a given account
-    pub async fn get_all_groups(wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Group>> {
+    pub async fn get_all_groups(wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Self>> {
         // Test database connection
         sqlx::query("SELECT 1").execute(&wn.database.pool).await?;
 
@@ -414,7 +414,7 @@ impl Group {
         group_rows
             .into_iter()
             .map(|row| {
-                Ok(Group {
+                Ok(Self {
                     mls_group_id: row.mls_group_id,
                     account_pubkey: account.pubkey,
                     nostr_group_id: row.nostr_group_id,
@@ -433,7 +433,7 @@ impl Group {
 
     // Save the group to the database
     #[allow(dead_code)]
-    pub async fn save(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Group> {
+    pub async fn save(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
         let mut txn = wn.database.pool.begin().await?;
 
         sqlx::query("INSERT INTO groups (mls_group_id, account_pubkey, nostr_group_id, name, description, admin_pubkeys, last_message_id, last_message_at, group_type, epoch, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
