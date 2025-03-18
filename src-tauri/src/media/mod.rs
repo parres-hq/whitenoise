@@ -6,17 +6,21 @@
 //! - Local caching of media files
 //! - Generation of IMETA tags for Nostr events
 //! - Image processing and metadata extraction
+//! - Media sanitization and security checks
 //!
 //! The module is designed to work with the following workflow:
-//! 1. Files are encrypted before upload
-//! 2. Encrypted files are uploaded to Blossom
-//! 3. Original files are cached locally
-//! 4. IMETA tags are generated for Nostr events
+//! 1. Files are sanitized to remove sensitive metadata
+//! 2. Files are encrypted before upload
+//! 3. Encrypted files are uploaded to Blossom
+//! 4. Original files are cached locally
+//! 5. IMETA tags are generated for Nostr events
 //!
 //! # Security
 //!
 //! All files are encrypted using ChaCha20-Poly1305 before upload to ensure
 //! end-to-end encryption. The encryption key is derived from the exporter secret.
+//! Files are also sanitized to remove potentially sensitive metadata before being
+//! processed or stored.
 //!
 //! # Caching
 //!
@@ -37,9 +41,11 @@ pub mod blossom;
 mod cache;
 mod encryption;
 mod errors;
+mod sanitizer;
 mod types;
 
 pub use errors::MediaError;
+pub use sanitizer::sanitize_media;
 pub use types::*;
 
 use crate::database::Database;
@@ -79,8 +85,11 @@ pub async fn add_media_file(
     let secret_key =
         hex::decode(exporter_secret_hex).map_err(|e| MediaError::ExportSecret(e.to_string()))?;
 
+    // Sanitize the file
+    let sanitized_file = sanitize_media(&uploaded_file)?;
+
     // Encrypt the file
-    let (encrypted_file_data, nonce) = encryption::encrypt_file(&uploaded_file.data, &secret_key)?;
+    let (encrypted_file_data, nonce) = encryption::encrypt_file(&sanitized_file.data, &secret_key)?;
 
     // Upload encrypted file to Blossom
     let (blob_descriptor, keys) = blossom_client
@@ -94,7 +103,7 @@ pub async fn add_media_file(
         mls_group_id,
         Some(blob_descriptor.url.clone()),
         Some(keys.secret_key().to_secret_hex()),
-        None,
+        Some(sanitized_file.metadata),
         data_dir,
         db,
     )

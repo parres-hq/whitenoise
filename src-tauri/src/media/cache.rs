@@ -4,9 +4,12 @@ use crate::database::Database;
 use crate::media::errors::MediaError;
 use crate::media::types::{CachedMediaFile, MediaFile};
 use sha2::{Digest, Sha256};
+use sqlx::types::JsonValue;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::sanitizer::SafeMediaMetadata;
 
 /// Adds a file to the cache, saving it to disk and creating a database entry.
 ///
@@ -15,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// * `mls_group_id` - The MLS group ID
 /// * `blossom_url` - Optional URL of the file on Blossom
 /// * `nostr_key` - Optional nostr key used for upload
-/// * `file_metadata` - Optional JSON string containing file metadata
+/// * `file_metadata` - Optional JSON metadata for the file
 /// * `data_dir` - The directory to save the file to
 /// * `db` - Database connection
 ///
@@ -27,7 +30,7 @@ pub async fn add_to_cache(
     mls_group_id: &Vec<u8>,
     blossom_url: Option<String>,
     nostr_key: Option<String>,
-    file_metadata: Option<String>,
+    file_metadata: Option<SafeMediaMetadata>,
     data_dir: &str,
     db: &Database,
 ) -> Result<MediaFile, MediaError> {
@@ -68,7 +71,7 @@ pub async fn add_to_cache(
     .bind(file_hash)
     .bind(nostr_key)
     .bind(created_at as i64)
-    .bind(file_metadata)
+    .bind(file_metadata.map(|m| serde_json::to_value(m).unwrap()))
     .fetch_one(&db.pool)
     .await?;
 
@@ -151,6 +154,7 @@ pub async fn delete_cached_file(
 mod tests {
     use super::*;
     use crate::database::Database;
+    use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
     use tempfile::tempdir;
 
@@ -180,7 +184,7 @@ mod tests {
                 file_hash TEXT NOT NULL,
                 nostr_key TEXT,
                 created_at INTEGER NOT NULL,
-                file_metadata TEXT
+                file_metadata JSONB
             )",
         )
         .execute(&pool)
@@ -209,13 +213,35 @@ mod tests {
         hasher.update(test_data);
         let expected_hash = format!("{:x}", hasher.finalize());
 
-        // Add file to cache
+        // Add file to cache with metadata
+        let metadata = SafeMediaMetadata {
+            mime_type: "text/plain".to_string(),
+            size_bytes: test_data.len() as u64,
+            format: Some("txt".to_string()),
+            dimensions: None,
+            color_space: None,
+            has_alpha: None,
+            bits_per_pixel: None,
+            duration_seconds: None,
+            frame_rate: None,
+            video_codec: None,
+            audio_codec: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            video_dimensions: None,
+            page_count: None,
+            author: None,
+            title: None,
+            created_at: None,
+            modified_at: None,
+        };
+
         let media_file = add_to_cache(
             test_data,
             &mls_group_id,
             Some("https://example.com/test.txt".to_string()),
             Some("nostr_key".to_string()),
-            Some(r#"{"size": 123}"#.to_string()),
+            Some(metadata),
             data_dir,
             &db,
         )
@@ -230,10 +256,12 @@ mod tests {
             Some("https://example.com/test.txt".to_string())
         );
         assert_eq!(media_file.nostr_key, Some("nostr_key".to_string()));
-        assert_eq!(
-            media_file.file_metadata,
-            Some(r#"{"size": 123}"#.to_string())
-        );
+        assert!(media_file.file_metadata.is_some());
+        if let Some(metadata) = media_file.file_metadata {
+            assert_eq!(metadata.mime_type, "text/plain");
+            assert_eq!(metadata.size_bytes, test_data.len() as u64);
+            assert_eq!(metadata.format, Some("txt".to_string()));
+        }
 
         // Verify file path structure
         let expected_path = format!(

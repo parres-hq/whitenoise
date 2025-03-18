@@ -6,7 +6,7 @@ CREATE TABLE media_files (
     file_hash TEXT NOT NULL,
     nostr_key TEXT,
     created_at INTEGER NOT NULL,
-    file_metadata TEXT,  -- JSON string for file metadata
+    file_metadata JSONB,
     FOREIGN KEY (mls_group_id) REFERENCES groups(mls_group_id) ON DELETE CASCADE
 );
 
