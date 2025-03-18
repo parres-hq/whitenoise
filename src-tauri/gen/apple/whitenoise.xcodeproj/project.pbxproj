@@ -382,7 +382,7 @@
 				CODE_SIGN_ENTITLEMENTS = whitenoise_iOS/whitenoise_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "8Z6Q2LZ77W";
+				DEVELOPMENT_TEAM = QL6TB358UB;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = "arm64-sim x86_64";
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = arm64;
@@ -441,7 +441,7 @@
 				CODE_SIGN_ENTITLEMENTS = whitenoise_iOS/whitenoise_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "8Z6Q2LZ77W";
+				DEVELOPMENT_TEAM = QL6TB358UB;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = "arm64-sim x86_64";
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = arm64;
