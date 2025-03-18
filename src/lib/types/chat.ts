@@ -59,6 +59,16 @@ export type ReactionSummary = {
 }
 
 /**
+ * Represents an emoji reaction in a message
+ * @property {string} emoji - The emoji used in the reaction
+ * @property {string} [name] - Optional name for the reaction
+ */
+export type ReactionEmoji = {
+    emoji: string;
+    name?: string;
+}
+
+/**
  * Represents a Lightning Network invoice in a message
  * @property {string} invoice - The Lightning invoice string (BOLT11 format)
  * @property {number} amount - The amount in satoshis

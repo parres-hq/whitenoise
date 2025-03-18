@@ -38,7 +38,7 @@ import {
 import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
 import type { Message } from "$lib/types/chat";
-
+import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
 
@@ -529,13 +529,11 @@ onDestroy(() => {
     role="menu"
 >
     <div class="flex flex-row gap-3 text-xl">
-        <button onclick={() => clickReaction("❤️", selectedMessageId)} class="p-3">❤️</button>
-        <button onclick={() => clickReaction("👍", selectedMessageId)} class="p-3">👍</button>
-        <button onclick={() => clickReaction("👎", selectedMessageId)} class="p-3">👎</button>
-        <button onclick={() => clickReaction("😂", selectedMessageId)} class="p-3">😂</button>
-        <button onclick={() => clickReaction("🤔", selectedMessageId)} class="p-3">🤔</button>
-        <button onclick={() => clickReaction("🤙", selectedMessageId)} class="p-3">🤙</button>
-        <button onclick={() => clickReaction("😥", selectedMessageId)} class="p-3">😥</button>
+        {#each DEFAULT_REACTION_EMOJIS as reaction (reaction.name)}
+            <button onclick={() => clickReaction(reaction.emoji, selectedMessageId)} class="p-3" title={reaction.name}>
+                {reaction.emoji}
+            </button>
+        {/each}
     </div>
 </div>
 
