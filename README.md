@@ -33,7 +33,7 @@ To build the app in release mode for desktop, run `bun tauri build`.
 
 - To provide a stable and reproducible build environment for Linux, the provided Dockerfile can be used:
 
-```
+```sh
 docker build -t tauri-app -f Dockerfile.linux_build .
 docker run --rm -v $(pwd):/app tauri-app
 ```
