@@ -9,8 +9,8 @@ import { createChatStore } from './chat';
 
 vi.spyOn(tauri, 'invoke').mockImplementation(async () => null);
 
-const testAccount: Account = {
-  pubkey: 'test-pubkey',
+const userAccount: Account = {
+  pubkey: 'user-pubkey',
   metadata: {},
   nostr_relays: [],
   inbox_relays: [],
@@ -38,7 +38,7 @@ const createMessageEvent = (id: string, content: string, createdAt: number, repl
   
   return {
     id,
-    pubkey: 'test-pubkey',
+    pubkey: 'user-pubkey',
     kind: 9,
     content,
     created_at: createdAt,
@@ -54,7 +54,7 @@ const createReactionEvent = (id: string, content: string, createdAt: number, tar
     kind: 7,
     content,
     created_at: createdAt,
-    tags: [['e', targetId], ['p', 'test-pubkey']],
+    tags: [['e', targetId], ['p', 'user-pubkey']],
     sig: 'test-sig'
   };
 };
@@ -62,7 +62,7 @@ const createReactionEvent = (id: string, content: string, createdAt: number, tar
 const createDeletionEvent = (id: string, targetId: string, createdAt: number): NEvent => {
   return {
     id,
-    pubkey: 'test-pubkey',
+    pubkey: 'user-pubkey',
     kind: 5,
     content: '',
     created_at: createdAt,
@@ -77,7 +77,7 @@ const createTestGroup = (): NostrMlsGroup => {
     nostr_group_id: 'test-group-id',
     name: 'Test Group',
     description: 'A test group',
-    admin_pubkeys: ['test-pubkey'],
+    admin_pubkeys: ['user-pubkey'],
     last_message_at: Date.now(),
     last_message_id: 'last-message-id',
     group_type: NostrMlsGroupType.Group
@@ -91,7 +91,7 @@ describe('Chat Store', () => {
 
   beforeEach(() => {
     originalAccount = get(activeAccount);
-    activeAccount.set(testAccount);
+    activeAccount.set(userAccount);
     vi.clearAllMocks();
     vi.spyOn(tauri, 'invoke').mockImplementation(async () => null);
     chatStore = createChatStore();
@@ -99,7 +99,7 @@ describe('Chat Store', () => {
 
   afterEach(() => {
     activeAccount.set(originalAccount);
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('handleEvent', () => {
@@ -112,7 +112,7 @@ describe('Chat Store', () => {
         const state = get(chatStore) as ChatState;
         expect(state.messages).toEqual([{
           id: 'msg-1',
-          pubkey: 'test-pubkey',
+          pubkey: 'user-pubkey',
           replyToId: undefined,
           content: 'Hello world',
           createdAt: 1000,
@@ -133,7 +133,7 @@ describe('Chat Store', () => {
           const state = get(chatStore) as ChatState;
           expect(state.messages).toEqual([{
             id: 'msg-1',
-            pubkey: 'test-pubkey',
+            pubkey: 'user-pubkey',
             replyToId: undefined,
             content: 'Hello world',
             createdAt: 1000,
@@ -166,7 +166,7 @@ describe('Chat Store', () => {
             expect(paymentMessage).toEqual(
               {
                 id: 'msg-2',
-                pubkey: 'test-pubkey',
+                pubkey: 'user-pubkey',
                 replyToId: 'msg-1',
                 content: '',
                 createdAt: 2000,
@@ -193,7 +193,7 @@ describe('Chat Store', () => {
             expect(invoiceMessage).toEqual(
               {
                 id: 'msg-1',
-                pubkey: 'test-pubkey',
+                pubkey: 'user-pubkey',
                 replyToId: undefined,
                 content: 'Hello world',
                 createdAt: 1000,
@@ -220,7 +220,7 @@ describe('Chat Store', () => {
             const state = get(chatStore) as ChatState;
             expect(state.messages).toEqual([{
               id: 'msg-1',
-              pubkey: 'test-pubkey',
+              pubkey: 'user-pubkey',
               replyToId: undefined,
               content: 'Hello world',
               createdAt: 1000,
@@ -252,7 +252,8 @@ describe('Chat Store', () => {
           content: '👍',
           targetId: 'msg-1',
           createdAt: 1000,
-          event: reactionEvent
+          isMine: false,
+          event: reactionEvent,
         }]);
       });
     });
@@ -294,7 +295,7 @@ describe('Chat Store', () => {
       const state = get(chatStore) as ChatState;
       expect(state.messages).toEqual([{
         id: 'msg-1',
-        pubkey: 'test-pubkey',
+        pubkey: 'user-pubkey',
         replyToId: undefined,
         content: 'First message',
         createdAt: 1000,
@@ -305,6 +306,7 @@ describe('Chat Store', () => {
             content: '👍',
             targetId: 'msg-1',
             createdAt: 1500,
+            isMine: false,
             event: reactionEvent
           }
         ],
@@ -315,7 +317,7 @@ describe('Chat Store', () => {
         event: firstMessageEvent
       }, {
         id: 'msg-2',
-        pubkey: 'test-pubkey',
+        pubkey: 'user-pubkey',
         replyToId: undefined,
         content: 'Second message',
         createdAt: 2500,
@@ -373,7 +375,7 @@ describe('Chat Store', () => {
       const message = chatStore.findMessage('msg-1');
       expect(message).toEqual({
         id: 'msg-1',
-        pubkey: 'test-pubkey',
+        pubkey: 'user-pubkey',
         replyToId: undefined,
         content: 'Hello world',
         createdAt: 1000,
@@ -404,7 +406,7 @@ describe('Chat Store', () => {
       
       expect(parentMessage).toEqual({
         id: 'parent-msg',
-        pubkey: 'test-pubkey',
+        pubkey: 'user-pubkey',
         replyToId: undefined,
         content: 'Parent message',
         createdAt: 1000,
@@ -545,38 +547,195 @@ describe('Chat Store', () => {
     });
   });
 
-  describe('sendReaction', () => {
-    it('calls the expected tauri command and handles the response', async () => {
-      const messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
-      chatStore.handleEvent(messageEvent);
-      const reactionResponse: NEvent = {
-        id: 'reaction-1', 
-        pubkey: 'test-pubkey', 
-        kind: 7, 
-        content: '👍', 
-        created_at: 1001, 
-        tags: [['e', 'msg-1'], ['p', 'test-pubkey']],
-        sig: 'test-sig'
-      };
-      
-      vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(reactionResponse);
-      const group = createTestGroup();
-      const result = await chatStore.sendReaction(group, '👍', 'msg-1');
-      expect(tauri.invoke).toHaveBeenCalledWith('send_mls_message', {
-        group,
-        message: '👍',
-        kind: 7,
-        tags: [['e', 'msg-1'], ['p', 'test-pubkey']]
-      });
-      expect(result).toEqual(reactionResponse);
-    });
-
+  describe('clickReaction', () => {
     it('returns null if message is not found', async () => {
       const group = createTestGroup();
-      const result = await chatStore.sendReaction(group, '👍', 'non-existent');
+      const result = await chatStore.clickReaction(group, '👍', 'non-existent');
       
       expect(result).toBeNull();
       expect(tauri.invoke).not.toHaveBeenCalled();
+    });
+
+    describe('without user reaction', () => {
+      beforeEach(() => {
+        const messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
+        chatStore.handleEvent(messageEvent);
+        const reactionResponse: NEvent = {
+          id: 'reaction-1', 
+          pubkey: 'user-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1001, 
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        };
+        
+        vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(reactionResponse);
+      })
+      it('calls the expected tauri command to add reaction', async () => {
+        const group = createTestGroup();
+        await chatStore.clickReaction(group, '👍', 'msg-1');
+        expect(tauri.invoke).toHaveBeenCalledWith('send_mls_message', {
+          group,
+          message: '👍',
+          kind: 7,
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']]
+        });
+      });
+      it('returns the new reaction response', async () => {
+        const group = createTestGroup();
+        const result = await chatStore.clickReaction(group, '👍', 'msg-1');
+        expect(result).toEqual({
+          id: 'reaction-1', 
+          pubkey: 'user-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1001,
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        });
+      });
+    });
+    
+    describe('with different user reaction with same content', () => {
+      let group: NostrMlsGroup;
+      let messageEvent: NEvent;
+      let firstReactionResponse: NEvent;
+      const otherUserAccount: Account = { ...userAccount, pubkey: 'other-pubkey' };
+      let otherUserChatStore: ReturnType<typeof createChatStore>;
+      
+      beforeEach(async () => {
+        group = createTestGroup();
+        messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
+        chatStore.handleEvent(messageEvent);
+        firstReactionResponse = {
+          id: 'reaction-1', 
+          pubkey: 'user-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1001, 
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        };
+        
+        vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(firstReactionResponse);
+        await chatStore.clickReaction(group, '👍', 'msg-1');
+        activeAccount.set(otherUserAccount);
+        otherUserChatStore = createChatStore();
+        otherUserChatStore.handleEvent(messageEvent);
+        otherUserChatStore.handleEvent(firstReactionResponse);
+        
+        const secondReactionResponse: NEvent = {
+          id: 'reaction-2', 
+          pubkey: 'other-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1002, 
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        };
+        vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(secondReactionResponse);
+      });
+      
+      it('calls the expected tauri command to add reaction', async () => {
+        await otherUserChatStore.clickReaction(group, '👍', 'msg-1');
+        expect(tauri.invoke).toHaveBeenCalledWith('send_mls_message', {
+          group,
+          message: '👍',
+          kind: 7,
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']]
+        });
+      });
+      
+      it('returns the new reaction response', async () => {        
+        const result = await otherUserChatStore.clickReaction(group, '👍', 'msg-1');
+        expect(result).toEqual({
+          id: 'reaction-2', 
+          pubkey: 'other-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1002,
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        });
+      });
+    });
+
+    describe('with deleted user reaction with same content', () => {
+      let group: NostrMlsGroup;
+      let messageEvent: NEvent;
+      
+      beforeEach(async () => {
+        group = createTestGroup();
+        messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
+        chatStore.handleEvent(messageEvent);
+        const firstReactionResponse: NEvent = {
+          id: 'reaction-1', 
+          pubkey: 'user-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1001, 
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        };        
+        vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(firstReactionResponse);
+        await chatStore.clickReaction(group, '👍', 'msg-1');
+        const deletionResponse: NEvent = {
+          id: 'deletion-1', 
+          pubkey: 'user-pubkey', 
+          kind: 5, 
+          content: '', 
+          created_at: 1002, 
+          tags: [['e', 'reaction-1']],
+          sig: 'test-sig'
+        };
+        
+        vi.spyOn(tauri, 'invoke').mockImplementation(async () => deletionResponse);
+        await chatStore.clickReaction(group, '👍', 'msg-1');
+        const secondReactionResponse: NEvent = {
+          id: 'reaction-2', 
+          pubkey: 'user-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1003,
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        };
+        vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(secondReactionResponse);
+      });
+      
+      it('calls the expected tauri command to add reaction', async () => {
+        await chatStore.clickReaction(group, '👍', 'msg-1');
+        expect(tauri.invoke).toHaveBeenCalledWith('send_mls_message', {
+          group,
+          message: '👍',
+          kind: 7,
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']]
+        });
+      });
+      
+      it('returns the new reaction response', async () => {        
+        const result = await chatStore.clickReaction(group, '👍', 'msg-1');
+        expect(result).toEqual({
+          id: 'reaction-2', 
+          pubkey: 'user-pubkey', 
+          kind: 7, 
+          content: '👍', 
+          created_at: 1003,
+          tags: [['e', 'msg-1'], ['p', 'user-pubkey']],
+          sig: 'test-sig'
+        });
+      });
+
+      it('keeps old reaction as deleted', async () => {        
+        await chatStore.clickReaction(group, '👍', 'msg-1');
+        expect(chatStore.isDeleted('reaction-1')).toBe(true);
+      });
+
+      it('does not delete new reaction', async () => {        
+        await chatStore.clickReaction(group, '👍', 'msg-1');
+        expect(chatStore.isDeleted('reaction-2')).toBe(false);
+      });
     });
   });
 
@@ -586,15 +745,16 @@ describe('Chat Store', () => {
       chatStore.handleEvent(messageEvent);
       const deletionResponse: NEvent = {
         id: 'deletion-1', 
-        pubkey: 'test-pubkey', 
+        pubkey: 'user-pubkey', 
         kind: 5, 
         content: '', 
         created_at: 1002, 
-        tags: [['e', 'msg-1']],
+        tags: [['e', 'reaction-1']],
         sig: 'test-sig'
       };
       
-      vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(deletionResponse);
+      vi.spyOn(tauri, 'invoke').mockImplementation(async () => deletionResponse);
+      
       const group = createTestGroup();
       const result = await chatStore.deleteMessage(group, 'msg-1');
       expect(tauri.invoke).toHaveBeenCalledWith('delete_message', {
@@ -627,15 +787,15 @@ describe('Chat Store', () => {
       });
       const paymentResponse: NEvent = {
         id: 'payment-1', 
-        pubkey: 'test-pubkey', 
+        pubkey: 'user-pubkey', 
         kind: 9, 
         content: 'Payment sent', 
         created_at: 1002, 
-        tags: [['q', 'msg-1', 'test-relay', 'test-pubkey'], ['preimage', 'test-preimage']],
+        tags: [['q', 'msg-1', 'test-relay', 'user-pubkey'], ['preimage', 'test-preimage']],
         sig: 'test-sig'
       };
       
-      vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(paymentResponse);
+      vi.spyOn(tauri, 'invoke').mockImplementation(async () => paymentResponse);
       
       const groupWithRelays : NostrMlsGroupWithRelays = {
         group: createTestGroup(),
@@ -646,12 +806,13 @@ describe('Chat Store', () => {
       
       expect(tauri.invoke).toHaveBeenCalledWith('pay_invoice', {
         group: groupWithRelays.group,
-        tags: [['q', 'msg-1', 'test-relay', 'test-pubkey']],
+        tags: [['q', 'msg-1', 'test-relay', 'user-pubkey']],
         bolt11: 'lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte',
       });
       
       expect(result).toEqual(paymentResponse);
     });
+
     it('returns null if message has no lightning invoice', async () => {
       const messageEvent = createMessageEvent('msg-1', 'Hello world', 1000);
       chatStore.handleEvent(messageEvent);
@@ -676,15 +837,15 @@ describe('Chat Store', () => {
       
       const paymentResponse: NEvent = {
         id: 'payment-1', 
-        pubkey: 'test-pubkey', 
+        pubkey: 'user-pubkey', 
         kind: 9, 
         content: 'Payment sent', 
         created_at: 1002, 
-        tags: [['q', 'msg-1', 'test-relay', 'test-pubkey'], ['preimage', 'test-preimage']],
+        tags: [['q', 'msg-1', 'test-relay', 'user-pubkey'], ['preimage', 'test-preimage']],
         sig: 'test-sig'
       };
       
-      vi.spyOn(tauri, 'invoke').mockResolvedValueOnce(paymentResponse);
+      vi.spyOn(tauri, 'invoke').mockImplementation(async () => paymentResponse);
       
       const groupWithRelays = {
         group: createTestGroup(),

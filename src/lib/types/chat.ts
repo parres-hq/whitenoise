@@ -1,4 +1,4 @@
-import type { NEvent } from './nostr';
+import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from './nostr';
 
 export type Message = {
     id: string;
@@ -64,9 +64,9 @@ export type ChatState = {
     isDeleted: (eventId: string) => boolean;
     getMessageReactionsSummary: (messageId: string) => ReactionSummary[];
     hasReactions: (message: Message) => boolean;
-    sendReaction: (group: any, reaction: string, messageId: string) => Promise<NEvent | null>;
-    deleteMessage: (group: any, messageId: string) => Promise<NEvent | null>;
-    payLightningInvoice: (groupWithRelays: any, message: Message) => Promise<NEvent | null>;
+    clickReaction: (group: NostrMlsGroup, reaction: string, messageId: string) => Promise<NEvent | null>;
+    deleteMessage: (group: NostrMlsGroup, messageId: string) => Promise<NEvent | null>;
+    payLightningInvoice: (groupWithRelays: NostrMlsGroupWithRelays, message: Message) => Promise<NEvent | null>;
     isMessageDeletable: (messageId: string) => boolean;
     isMessageCopyable: (messageId: string) => boolean;
 };

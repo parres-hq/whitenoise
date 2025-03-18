@@ -3,6 +3,7 @@ import type { NEvent, NostrMlsGroup,  NostrMlsGroupWithRelays } from '$lib/types
 import type {
     ChatState,
     Message,
+    Reaction,
     MessagesMap,
     DeletionsMap,
     ReactionsMap,
@@ -20,7 +21,6 @@ export function createChatStore() {
     const messagesMap = writable<MessagesMap>(new Map());
     const reactionsMap = writable<ReactionsMap>(new Map());
     const deletionsMap = writable<DeletionsMap>(new Map());
-    const paidMessagesSet = writable<Set<string>>(new Set());
     const currentPubkey = get(activeAccount)?.pubkey;
 
     const messages = derived(messagesMap, ($messagesMap) => {
@@ -38,7 +38,7 @@ export function createChatStore() {
         isDeleted,
         getMessageReactionsSummary,
         hasReactions,
-        sendReaction,
+        clickReaction,
         deleteMessage,
         payLightningInvoice,
         isMessageDeletable,
@@ -80,7 +80,7 @@ export function createChatStore() {
             });
         },
         handleReactionEvent: (event: NEvent) => {
-            const reaction = eventToReaction(event);
+            const reaction = eventToReaction(event,currentPubkey);
             if (!reaction) return;
             reactionsMap.update(reactions => {
                 reactions.set(reaction.id, reaction);
@@ -140,6 +140,10 @@ export function createChatStore() {
         return messages.get(id);
     }
 
+    function findMyMessageReaction(message: Message, content: string): Reaction | undefined {
+        return message.reactions.find(reaction => reaction.content === content && reaction.isMine && !isDeleted(reaction.id));
+    }
+
     function findReplyToMessage(message: Message): Message | undefined {
         const replyToId = message.replyToId;
         if (replyToId) return findMessage(replyToId);
@@ -179,19 +183,32 @@ export function createChatStore() {
         return !isDeleted(message.id);
     }
 
-    async function sendReaction(
+    async function clickReaction(
         group: NostrMlsGroup,
-        reaction: string,
+        content: string,
         messageId: string
     ): Promise<NEvent | null> {
         const message = findMessage(messageId);
         if (!message) return null;
 
+        const existingReaction = findMyMessageReaction(message, content);
+
+        if(existingReaction) {
+            return await deleteEvent(group, existingReaction.pubkey, existingReaction.id);
+        } 
+        return await addReaction(group, message, content);
+    }
+
+    async function addReaction(
+        group: NostrMlsGroup,
+        message: Message,
+        content: string
+    ): Promise<NEvent | null> {
         const tags = [["e", message.id], ["p", message.pubkey]]
         try {
             const reactionEvent = await invoke("send_mls_message", {
                 group,
-                message: reaction,
+                message: content,
                 kind: 7,
                 tags
             }) as NEvent;
@@ -261,7 +278,7 @@ export function createChatStore() {
         isDeleted,
         getMessageReactionsSummary,
         hasReactions,
-        sendReaction,
+        clickReaction,
         deleteMessage,
         payLightningInvoice,
         isMessageDeletable,
