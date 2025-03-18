@@ -20,6 +20,7 @@ export type Reaction = {
     content: string;
     createdAt: number;
     targetId: string;
+    isMine: boolean;
     event: NEvent;
 }
 

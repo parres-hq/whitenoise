@@ -20,14 +20,30 @@ describe("eventToReaction", () => {
     };
     
     it('returns a Reaction object', () => {
-      const result = eventToReaction(event);
+      const result = eventToReaction(event, "test-pubkey");
       expect(result).toEqual({
         id: "test-id",
         pubkey: "test-pubkey",
         content: "👍",
         createdAt: 1234567890,
         targetId: "target-event-id",
+        isMine: true,
         event
+      });
+    });
+
+    describe('with a different pubkey', () => {
+      it('isMine of reaction is false', () => {
+        const result = eventToReaction(event, "other-pubkey");
+        expect(result).toEqual({
+          id: "test-id",
+          pubkey: "test-pubkey",
+          content: "👍",
+          createdAt: 1234567890,
+          targetId: "target-event-id",
+          isMine: false,
+          event
+        });
       });
     });
   });
@@ -47,7 +63,7 @@ describe("eventToReaction", () => {
     };
 
     it('returns null', () => {
-      expect(eventToReaction(event)).toBeNull();
+      expect(eventToReaction(event, "test-pubkey")).toBeNull();
     });
   });
 
@@ -67,7 +83,7 @@ describe("eventToReaction", () => {
     };
 
     it('returns null', () => {
-      expect(eventToReaction(event)).toBeNull();
+      expect(eventToReaction(event, "test-pubkey")).toBeNull();
     });
   });
 });
