@@ -104,3 +104,6 @@ jobs:
 
       - name: Run clippy
         run: cd src-tauri && cargo clippy ${{ matrix.args }} -- -D warnings
+
+      - name: Check formatting
+        run: cd src-tauri && cargo fmt -- --check

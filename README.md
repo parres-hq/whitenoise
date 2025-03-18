@@ -7,6 +7,7 @@ A secure, private, and decentralized chat app built on Nostr, using the MLS prot
 White Noise aims to be the most secure private chat app on Nostr, with a focus on privacy and security. Under the hood, it uses the [Messaging Layer Security](https://www.rfc-editor.org/rfc/rfc9420.html) (MLS) protocol to manage group communications in a highly secure way. Nostr is used as the transport protocol and as the framework for the ongoing conversation in each chat.
 
 ## Status
+
 ![CI](https://github.com/erskingardner/whitenoise/actions/workflows/ci.yml/badge.svg?event=push)
 
 ![Linux Build](https://github.com/erskingardner/whitenoise/actions/workflows/build_linux.yml/badge.svg?event=push) ![Android Build](https://github.com/erskingardner/whitenoise/actions/workflows/build_android.yml/badge.svg?event=push)
@@ -31,10 +32,12 @@ To build the app in release mode for desktop, run `bun tauri build`.
 ### Linux
 
 - To provide a stable and reproducible build environment for Linux, the provided Dockerfile can be used:
+
 ```
 docker build -t tauri-app -f Dockerfile.linux_build .
 docker run --rm -v $(pwd):/app tauri-app
 ```
+
 The resulting build artifacts (`.deb`, `.rpm` and `.AppImage` packages) will be created in the `src-tauri/target/release/bundle` directory.
 
 ### Windows
@@ -57,6 +60,22 @@ White Noise is built with [Tauri](https://tauri.app/) & [SvelteKit](https://kit.
 2. Clone the repo: `git clone https://github.com/erskingardner/whitenoise.git` and `cd whitenoise`.
 3. Run `bun install` to install the front-end dependencies.
 4. Run `bun tauri dev` to start the app. If you want to see more comprehensive logging, run `RUST_LOG=debug bun tauri dev`.
+
+### Formatting and Linting
+
+Before submitting code, please run both Clippy and Rustfmt to check for issues:
+
+Clippy (linting):
+
+```sh
+cd src-tauri && cargo clippy --no-deps
+```
+
+Rustfmt
+
+```sh
+cd src-tauri && cargo fmt
+```
 
 ## License
 
