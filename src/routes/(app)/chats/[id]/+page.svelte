@@ -38,7 +38,7 @@ import {
 import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
 import type { Message } from "$lib/types/chat";
-
+import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
 
@@ -224,7 +224,7 @@ function handleOutsideClick() {
     selectedMessageId = undefined;
 }
 
-async function sendReaction(reaction: string, messageId: string | null | undefined) {
+async function clickReaction(reaction: string, messageId: string | null | undefined) {
     if (!group) {
         console.error("no group found");
         return;
@@ -233,7 +233,10 @@ async function sendReaction(reaction: string, messageId: string | null | undefin
         console.error("no message selected");
         return;
     }
-    chatStore.sendReaction(group, reaction, messageId)
+    chatStore.clickReaction(group, reaction, messageId)
+        .catch((err) => {
+            console.error("Failed to apply reaction:", err);
+        })
         .finally(() => {
             showMessageMenu = false;
         });
@@ -493,7 +496,7 @@ onDestroy(() => {
                             </div>
                             <div class="reactions flex flex-row gap-2 absolute -bottom-6 right-0">
                                 {#each chatStore.getMessageReactionsSummary(message.id) as {emoji, count}}
-                                    <button onclick={() => sendReaction(emoji, message.id)} class="py-1 px-2 bg-gray-900 rounded-full flex flex-row gap-1 items-center">
+                                    <button onclick={() => clickReaction(emoji, message.id)} class="py-1 px-2 bg-gray-900 rounded-full flex flex-row gap-1 items-center">
                                         {emoji}
                                         {#if count > 1}
                                             <span class="text-sm opacity-60">{count}</span>
@@ -526,13 +529,11 @@ onDestroy(() => {
     role="menu"
 >
     <div class="flex flex-row gap-3 text-xl">
-        <button onclick={() => sendReaction("❤️", selectedMessageId)} class="p-3">❤️</button>
-        <button onclick={() => sendReaction("👍", selectedMessageId)} class="p-3">👍</button>
-        <button onclick={() => sendReaction("👎", selectedMessageId)} class="p-3">👎</button>
-        <button onclick={() => sendReaction("😂", selectedMessageId)} class="p-3">😂</button>
-        <button onclick={() => sendReaction("🤔", selectedMessageId)} class="p-3">🤔</button>
-        <button onclick={() => sendReaction("🤙", selectedMessageId)} class="p-3">🤙</button>
-        <button onclick={() => sendReaction("😥", selectedMessageId)} class="p-3">😥</button>
+        {#each DEFAULT_REACTION_EMOJIS as reaction (reaction.name)}
+            <button onclick={() => clickReaction(reaction.emoji, selectedMessageId)} class="p-3" title={reaction.name}>
+                {reaction.emoji}
+            </button>
+        {/each}
     </div>
 </div>
 

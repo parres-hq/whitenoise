@@ -3,6 +3,12 @@ import type { Message } from '$lib/types/chat';
 import { findReplyToId } from './tags';
 import { eventToLightningInvoice, eventToLightningPayment } from './lightning';
 
+/**
+ * Determines if a string contains only a single emoji.
+ * 
+ * @param str - The string to check
+ * @returns True if the string contains only a single emoji, false otherwise
+ */
 function isSingleEmoji(str: string) {
     const trimmed = str.trim();
     const emojiRegex =
@@ -10,6 +16,15 @@ function isSingleEmoji(str: string) {
     return emojiRegex.test(trimmed);
 }
 
+/**
+ * Formats message content to hide full lightning invoices for display purposes.
+ * If an invoice is present, it replaces the full invoice with a shortened version
+ * showing only the first and last 15 characters.
+ * 
+ * @param content - The message content
+ * @param invoice - The lightning invoice string, if present
+ * @returns Formatted content with shortened invoice (if applicable)
+ */
 function contentToShow(
     { content, invoice }:
     { content: string, invoice: string | undefined }
@@ -20,6 +35,15 @@ function contentToShow(
     return content.replace(invoice, `${firstPart}...${lastPart}`);
 }
 
+/**
+ * Converts a Nostr event to a Message object.
+ * Processes the event to extract relevant information and format it appropriately,
+ * including handling lightning invoices/payments and emoji detection.
+ * 
+ * @param event - The Nostr event to convert
+ * @param currentPubkey - The current user's public key, used to determine if the message belongs to the current user
+ * @returns A formatted Message object
+ */
 export function eventToMessage(event: NEvent, currentPubkey: string | undefined): Message {
     const replyToId = findReplyToId(event);
     const isMine = currentPubkey === event.pubkey;
