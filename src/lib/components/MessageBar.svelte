@@ -1,13 +1,13 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
+import type { Message } from "$lib/types/chat";
 import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { invoke } from "@tauri-apps/api/core";
 import { PaperPlaneTilt, X } from "phosphor-svelte";
+import { TrashSimple } from "phosphor-svelte";
 import { onMount } from "svelte";
 import Loader from "./Loader.svelte";
-import { TrashSimple } from "phosphor-svelte";
-import type { Message } from "$lib/types/chat";
 
 let {
     group,
@@ -43,12 +43,7 @@ async function sendMessage() {
         let groupWithRelays: NostrMlsGroupWithRelays = await invoke("get_group", {
             groupId: hexMlsGroupId(group.mls_group_id),
         });
-        tags.push([
-            "q",
-            replyToMessage.id,
-            groupWithRelays.relays[0],
-            replyToMessage.pubkey,
-        ]);
+        tags.push(["q", replyToMessage.id, groupWithRelays.relays[0], replyToMessage.pubkey]);
     }
     let tmpMessage = {
         id: "temp",

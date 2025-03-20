@@ -1,16 +1,15 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import GroupAvatar from "$lib/components/GroupAvatar.svelte";
 import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
 import MessageBar from "$lib/components/MessageBar.svelte";
 import RepliedTo from "$lib/components/RepliedTo.svelte";
+import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
+import { activeAccount, hasLightningWallet } from "$lib/stores/accounts";
 import { createChatStore } from "$lib/stores/chat";
-import {
-    activeAccount,
-    hasLightningWallet,
-} from "$lib/stores/accounts";
+import { getToastState } from "$lib/stores/toast-state.svelte";
+import type { Message } from "$lib/types/chat";
 import {
     type EnrichedContact,
     type NEvent,
@@ -18,11 +17,11 @@ import {
     NostrMlsGroupType,
     type NostrMlsGroupWithRelays,
 } from "$lib/types/nostr";
+import { copyToClipboard } from "$lib/utils/clipboard";
 import { hexMlsGroupId } from "$lib/utils/group";
+import { lightningInvoiceToQRCode } from "$lib/utils/lightning";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { formatMessageTime } from "$lib/utils/time";
-import { copyToClipboard } from "$lib/utils/clipboard";
-import { lightningInvoiceToQRCode } from "$lib/utils/lightning";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -37,8 +36,6 @@ import {
 } from "phosphor-svelte";
 import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
-import type { Message } from "$lib/types/chat";
-import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
 
@@ -81,13 +78,13 @@ $effect(() => {
 async function loadGroup() {
     invoke("get_group_and_messages", { groupId: page.params.id }).then(async (groupResponse) => {
         [group, events] = groupResponse as [NostrMlsGroup, NEvent[]];
-        
+
         // Add messages to the chat store
         chatStore.clear();
         for (const event of events) {
             chatStore.handleEvent(event);
         }
-        
+
         if (!counterpartyPubkey) {
             counterpartyPubkey =
                 group.group_type === NostrMlsGroupType.DirectMessage
@@ -233,7 +230,8 @@ async function clickReaction(reaction: string, messageId: string | null | undefi
         console.error("no message selected");
         return;
     }
-    chatStore.clickReaction(group, reaction, messageId)
+    chatStore
+        .clickReaction(group, reaction, messageId)
         .catch((err) => {
             console.error("Failed to apply reaction:", err);
         })
@@ -272,7 +270,7 @@ async function payLightningInvoice(message: Message) {
         console.error("Lightning wallet not connected");
         return;
     }
-    
+
     let groupWithRelays: NostrMlsGroupWithRelays = await invoke("get_group", {
         groupId: hexMlsGroupId(group.mls_group_id),
     });
@@ -281,8 +279,9 @@ async function payLightningInvoice(message: Message) {
         console.error("no group with relays found");
         return;
     }
-    
-    chatStore.payLightningInvoice(groupWithRelays, message)
+
+    chatStore
+        .payLightningInvoice(groupWithRelays, message)
         .then(
             (paymentEvent: NEvent | null) => {
                 console.log("Payment successful", paymentEvent);
@@ -312,7 +311,7 @@ async function copyInvoice(message: Message) {
 }
 
 function reply() {
-    if (selectedMessageId) {;
+    if (selectedMessageId) {
         replyToMessage = chatStore.findMessage(selectedMessageId);
         document.getElementById("newMessageInput")?.focus();
         showMessageMenu = false;
@@ -332,8 +331,9 @@ function deleteMessage() {
         console.error("no group found");
         return;
     }
-    
-    chatStore.deleteMessage(group, selectedMessageId)
+
+    chatStore
+        .deleteMessage(group, selectedMessageId)
         .then(() => {
             showMessageMenu = false;
         })
@@ -345,13 +345,13 @@ function deleteMessage() {
 
 function isSelectedMessageDeletable(): boolean {
     if (!selectedMessageId) return false;
-    
+
     return chatStore.isMessageDeletable(selectedMessageId);
 }
 
 function isSelectedMessageCopyable(): boolean {
     if (!selectedMessageId) return false;
-    
+
     return chatStore.isMessageCopyable(selectedMessageId);
 }
 

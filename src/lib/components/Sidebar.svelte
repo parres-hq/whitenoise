@@ -1,9 +1,9 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
+import { page } from "$app/state";
 import { accounts, activeAccount, setActiveAccount } from "$lib/stores/accounts";
 import { ChatsCircle, Gear, Phone } from "phosphor-svelte";
 import Avatar from "./Avatar.svelte";
-import { page } from "$app/state";
 let { activeTab } = $props();
 
 function handleAccountChange(pubkey: string) {

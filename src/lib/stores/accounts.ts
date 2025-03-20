@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { type Writable, get, writable, derived } from "svelte/store";
+import { type Writable, derived, get, writable } from "svelte/store";
 import type { NMetadata } from "../types/nostr";
 
 export type Account = {
@@ -33,7 +33,6 @@ type RelaysData = Record<string, string>;
 export const accounts: Writable<Account[]> = writable([]);
 export const activeAccount: Writable<Account | null> = writable(null);
 export const relays: Writable<RelaysData> = writable({} as RelaysData);
-
 
 /** Basic matching patterns for hex and nsec keys */
 export const hexPattern = /^[a-fA-F0-9]{64}$/;
@@ -157,15 +156,15 @@ export const hasLightningWallet = derived<Writable<Account | null>, boolean>(
             set(false);
             return;
         }
-        
+
         hasNostrWalletConnectUri()
-            .then(result => set(result))
-            .catch(err => {
+            .then((result) => set(result))
+            .catch((err) => {
                 console.error("Error checking Lightning wallet status:", err);
                 set(false);
             });
     },
-    false 
+    false
 );
 
 /** Validates a Nostr Wallet Connect URI and returns detailed error messages */
@@ -194,7 +193,7 @@ function validateNostrWalletConnectProtocol(uri: string): boolean {
     return uri.startsWith("nostr+walletconnect://");
 }
 
-function relaysValidationError(url: URL): string | null{
+function relaysValidationError(url: URL): string | null {
     const relays = url.searchParams.getAll("relay");
     if (relays.length === 0) {
         return "Missing required 'relay' parameter";
@@ -220,7 +219,6 @@ function relayUrlValidationError(relay: string): string | null {
         return "Invalid relay URL format";
     }
 }
-
 
 export async function setNostrWalletConnectUri(uri: string): Promise<void> {
     const validationError = nostrWalletConnectUriError(uri);

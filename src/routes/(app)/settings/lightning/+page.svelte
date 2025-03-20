@@ -1,78 +1,78 @@
 <script lang="ts">
-    import { goto } from "$app/navigation";
-    import Header from "$lib/components/Header.svelte";
-    import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
-    import { 
-        hasNostrWalletConnectUri,
-        setNostrWalletConnectUri,
-        removeNostrWalletConnectUri,
-        NostrWalletConnectError
-    } from "$lib/stores/accounts";
-    import { CaretLeft, Lightning } from "phosphor-svelte";
-    import { onMount } from "svelte";
+import { goto } from "$app/navigation";
+import Header from "$lib/components/Header.svelte";
+import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
+import {
+    NostrWalletConnectError,
+    hasNostrWalletConnectUri,
+    removeNostrWalletConnectUri,
+    setNostrWalletConnectUri,
+} from "$lib/stores/accounts";
+import { CaretLeft, Lightning } from "phosphor-svelte";
+import { onMount } from "svelte";
 
-    let hasWallet = false;
-    let nwcUri = "";
-    let error = "";
-    let loading = false;
+let hasWallet = false;
+let nwcUri = "";
+let error = "";
+let loading = false;
 
-    async function checkWalletStatus() {
-        try {
-            hasWallet = await hasNostrWalletConnectUri();
-            error = "";
-        } catch (e) {
-            if (e instanceof NostrWalletConnectError) {
-                error = e.message;
-            } else {
-                error = "An unexpected error occurred";
-            }
+async function checkWalletStatus() {
+    try {
+        hasWallet = await hasNostrWalletConnectUri();
+        error = "";
+    } catch (e) {
+        if (e instanceof NostrWalletConnectError) {
+            error = e.message;
+        } else {
+            error = "An unexpected error occurred";
         }
     }
+}
 
-    async function handleSetWallet() {
-        if (!nwcUri) return;
-        
-        loading = true;
-        try {
-            await setNostrWalletConnectUri(nwcUri);
-            await checkWalletStatus();
-            nwcUri = "";
-            error = "";
-        } catch (e) {
-            if (e instanceof NostrWalletConnectError) {
-                error = e.message;
-            } else {
-                error = "An unexpected error occurred";
-            }
-        } finally {
-            loading = false;
+async function handleSetWallet() {
+    if (!nwcUri) return;
+
+    loading = true;
+    try {
+        await setNostrWalletConnectUri(nwcUri);
+        await checkWalletStatus();
+        nwcUri = "";
+        error = "";
+    } catch (e) {
+        if (e instanceof NostrWalletConnectError) {
+            error = e.message;
+        } else {
+            error = "An unexpected error occurred";
         }
+    } finally {
+        loading = false;
     }
+}
 
-    async function handleRemoveWallet() {
-        loading = true;
-        try {
-            await removeNostrWalletConnectUri();
-            await checkWalletStatus();
-            error = "";
-        } catch (e) {
-            if (e instanceof NostrWalletConnectError) {
-                error = e.message;
-            } else {
-                error = "An unexpected error occurred";
-            }
-        } finally {
-            loading = false;
+async function handleRemoveWallet() {
+    loading = true;
+    try {
+        await removeNostrWalletConnectUri();
+        await checkWalletStatus();
+        error = "";
+    } catch (e) {
+        if (e instanceof NostrWalletConnectError) {
+            error = e.message;
+        } else {
+            error = "An unexpected error occurred";
         }
+    } finally {
+        loading = false;
     }
+}
 
-    function goBack() {
-        goto("/settings");
-    }
+function goBack() {
+    goto("/settings");
+}
 
-    onMount(() => {
-        checkWalletStatus();
-    });
+onMount(() => {
+    checkWalletStatus();
+});
 </script>
 
 <HeaderToolbar>
