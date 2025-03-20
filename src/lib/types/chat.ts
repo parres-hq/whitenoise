@@ -1,4 +1,4 @@
-import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from './nostr';
+import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "./nostr";
 
 /**
  * Represents a chat message in the application
@@ -15,7 +15,7 @@ import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from './nostr';
  * @property {NEvent} event - The original Nostr event data
  */
 export type Message = {
-    id: string; 
+    id: string;
     pubkey: string;
     content: string;
     createdAt: number;
@@ -26,7 +26,7 @@ export type Message = {
     isSingleEmoji: boolean;
     isMine: boolean;
     event: NEvent;
-}
+};
 
 /**
  * Represents a reaction to a message
@@ -46,7 +46,7 @@ export type Reaction = {
     targetId: string;
     isMine: boolean;
     event: NEvent;
-}
+};
 
 /**
  * Summary of reactions to a message, grouping by emoji
@@ -56,7 +56,7 @@ export type Reaction = {
 export type ReactionSummary = {
     emoji: string;
     count: number;
-}
+};
 
 /**
  * Represents an emoji reaction in a message
@@ -66,7 +66,7 @@ export type ReactionSummary = {
 export type ReactionEmoji = {
     emoji: string;
     name?: string;
-}
+};
 
 /**
  * Represents a Lightning Network invoice in a message
@@ -90,7 +90,7 @@ export type LightningInvoice = {
 export type LightningPayment = {
     preimage: string;
     isPaid: boolean;
-}
+};
 
 /**
  * Represents a message deletion event
@@ -104,7 +104,7 @@ export type Deletion = {
     pubkey: string;
     targetId: string;
     event: NEvent;
-}
+};
 
 /**
  * Map of message IDs to Message objects for efficient lookup
@@ -150,9 +150,16 @@ export type ChatState = {
     isDeleted: (eventId: string) => boolean;
     getMessageReactionsSummary: (messageId: string) => ReactionSummary[];
     hasReactions: (message: Message) => boolean;
-    clickReaction: (group: NostrMlsGroup, reaction: string, messageId: string) => Promise<NEvent | null>;
+    clickReaction: (
+        group: NostrMlsGroup,
+        reaction: string,
+        messageId: string
+    ) => Promise<NEvent | null>;
     deleteMessage: (group: NostrMlsGroup, messageId: string) => Promise<NEvent | null>;
-    payLightningInvoice: (groupWithRelays: NostrMlsGroupWithRelays, message: Message) => Promise<NEvent | null>;
+    payLightningInvoice: (
+        groupWithRelays: NostrMlsGroupWithRelays,
+        message: Message
+    ) => Promise<NEvent | null>;
     isMessageDeletable: (messageId: string) => boolean;
     isMessageCopyable: (messageId: string) => boolean;
 };

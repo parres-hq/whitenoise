@@ -1,13 +1,13 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
-import Name from "./Name.svelte";
-import { TrashSimple } from "phosphor-svelte";
 import { type Message } from "$lib/types/chat";
+import { TrashSimple } from "phosphor-svelte";
+import Name from "./Name.svelte";
 
-let { 
+let {
     message,
     isDeleted = $bindable(false),
-}: { 
+}: {
     message: Message | undefined;
     isDeleted?: boolean;
 } = $props();
