@@ -7,11 +7,14 @@
         "dev": "vite dev",
         "build": "vite build",
         "preview": "vite preview",
-        "test": "bun test && cd src-tauri && cargo test",
-        "clippy": "cd src-tauri && cargo clippy -- -D warnings",
+        "biome": "biome check .",
+        "test": "svelte-kit sync && bun test --coverage --verbose && cd src-tauri && cargo test",
+        "clippy": "cd src-tauri && cargo clippy --no-deps --workspace --all-features --all-targets -- -D warnings",
+        "rustfmt": "cd src-tauri && cargo fmt -- --check",
         "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
         "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-        "tauri": "tauri"
+        "tauri": "tauri",
+        "check-all": "bun run biome && bun run test && bun run clippy && bun run rustfmt"
     },
     "license": "MIT",
     "dependencies": {

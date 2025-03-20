@@ -148,6 +148,7 @@ pub async fn add_media_file(
 ///
 /// * `Ok(())` - Success
 /// * `Err(MediaError)` - Error if deletion fails or if no Nostr key is found
+#[allow(dead_code)]
 pub async fn delete_media_file(
     mls_group_id: &Vec<u8>,
     file_hash: &str,

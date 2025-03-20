@@ -20,9 +20,8 @@ pub enum MediaError {
     #[error("Sanitization error: {0}")]
     Sanitize(String),
 
-    #[error("Failed to download file: {0}")]
-    Download(String),
-
+    // #[error("Failed to download file: {0}")]
+    // Download(String),
     #[error("Failed to generate IMETA tag: {0}")]
     Encryption(String),
 

@@ -12,6 +12,11 @@ on:
         type: string
         default: 'v0.0.0'
 
+# Add concurrency group to cancel redundant workflow runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   actions: write

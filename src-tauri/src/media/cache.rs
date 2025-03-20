@@ -139,7 +139,7 @@ pub async fn delete_cached_file(
     db: &Database,
 ) -> Result<(), MediaError> {
     // First get the file path
-    let cached_media_file = fetch_cached_file(&mls_group_id, &file_hash, db).await?;
+    let cached_media_file = fetch_cached_file(mls_group_id, file_hash, db).await?;
 
     if let Some(cached_media_file) = cached_media_file {
         // Delete from disk

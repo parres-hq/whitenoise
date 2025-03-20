@@ -18,8 +18,8 @@ import {
 } from "$lib/stores/accounts";
 import { getToastState } from "$lib/stores/toast-state.svelte";
 import { isValidHexPubkey, isValidNsec } from "$lib/types/nostr";
-import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { copyToClipboard } from "$lib/utils/clipboard";
+import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -31,15 +31,15 @@ import {
 import {
     Bell,
     CaretRight,
+    CopySimple,
     HardDrives,
     Key,
+    Lightning,
     PlusCircle,
     SignIn,
     Skull,
     Trash,
     UserPlus,
-    CopySimple,
-    Lightning
 } from "phosphor-svelte";
 import { onDestroy, onMount } from "svelte";
 
@@ -209,11 +209,15 @@ async function copyNsec(account: Account) {
         if (await copyToClipboard(nsec as string, "nsec")) {
             highlightButton(`[id="nsec-copy-${account.pubkey}"]`);
         } else {
-          toastCopyErrorMessage("nsec");
+            toastCopyErrorMessage("nsec");
         }
     } catch (e) {
         console.error(e);
-        toastState.add("Error exporting nsec", "There was an error exporting your nsec, please try again.", "error");
+        toastState.add(
+            "Error exporting nsec",
+            "There was an error exporting your nsec, please try again.",
+            "error"
+        );
     }
 }
 
@@ -240,10 +244,9 @@ function toastCopyErrorMessage(errorMessage: string) {
     toastState.add(
         `Error copying ${errorMessage}`,
         `There was an error copying your ${errorMessage}, please try again.`,
-      "error"
+        "error"
     );
 }
-
 </script>
 
 {#if showDeleteAlert}

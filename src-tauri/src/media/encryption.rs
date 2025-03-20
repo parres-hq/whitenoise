@@ -43,6 +43,7 @@ pub fn encrypt_file(data: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>), Media
 /// # Returns
 /// * `Ok(Vec<u8>)` - The decrypted data
 /// * `Err(MediaError)` - Error if decryption fails
+#[allow(dead_code)]
 pub fn decrypt_file(data: &[u8], key: &[u8], nonce: &[u8]) -> Result<Vec<u8>, MediaError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     cipher

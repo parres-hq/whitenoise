@@ -2,8 +2,8 @@ import type {
     ChatState,
     DeletionsMap,
     Message,
-    MessagesMapMap,
-    Reaction
+    MessagesMap,
+    Reaction,
     ReactionSummary,
     ReactionsMap,
 } from "$lib/types/chat";
@@ -30,7 +30,7 @@ export function createChatStore() {
         return Array.from($messagesMap.values()).sort((a, b) => a.createdAt - b.createdAt);
     });
 
-    const { subscribe, set, update } = writable<ChatState>({
+    const { subscribe, update } = writable<ChatState>({
         messages: get(messages),
         handleEvent,
         handleEvents,
@@ -85,7 +85,7 @@ export function createChatStore() {
             });
         },
         handleReactionEvent: (event: NEvent) => {
-            const reaction = eventToReaction(event,currentPubkey);
+            const reaction = eventToReaction(event, currentPubkey);
             if (!reaction) return;
             reactionsMap.update((reactions) => {
                 reactions.set(reaction.id, reaction);
@@ -176,9 +176,9 @@ export function createChatStore() {
      * @returns {Reaction | undefined} The found reaction or undefined
      */
     function findMyMessageReaction(message: Message, content: string): Reaction | undefined {
-        return message.reactions.find(reaction => (
-            reaction.content === content && reaction.isMine && !isDeleted(reaction.id)
-        ));
+        return message.reactions.find(
+            (reaction) => reaction.content === content && reaction.isMine && !isDeleted(reaction.id)
+        );
     }
 
     /**
@@ -190,6 +190,12 @@ export function createChatStore() {
         const replyToId = message.replyToId;
         if (replyToId) return findMessage(replyToId);
     }
+
+    /**
+     * Checks if an event has been deleted
+     * @param {string} eventId - The ID of the event to check
+     * @returns {boolean} True if the event has been deleted, false otherwise
+     */
     function isDeleted(eventId: string): boolean {
         const deletions = get(deletionsMap);
         return deletions.has(eventId);
@@ -222,6 +228,11 @@ export function createChatStore() {
         return reactionsSummary.length > 0;
     }
 
+    /**
+     * Checks if a message can be deleted by the current user
+     * @param {string} messageId - The ID of the message to check
+     * @returns {boolean} True if the message can be deleted, false otherwise
+     */
     function isMessageDeletable(messageId: string): boolean {
         const message = findMessage(messageId);
         if (!message || message.lightningPayment || isDeleted(messageId)) return false;
@@ -254,6 +265,26 @@ export function createChatStore() {
         const message = findMessage(messageId);
         if (!message) return null;
 
+        const existingReaction = findMyMessageReaction(message, content);
+
+        if (existingReaction) {
+            return await deleteEvent(group, existingReaction.pubkey, existingReaction.id);
+        }
+        return await addReaction(group, message, content);
+    }
+
+    /**
+     * Adds a reaction to a message
+     * @param {NostrMlsGroup} group - The group the message belongs to
+     * @param {Message} message - The message to react to
+     * @param {string} content - The reaction content (emoji)
+     * @returns {Promise<NEvent | null>} The created event or null if operation failed
+     */
+    async function addReaction(
+        group: NostrMlsGroup,
+        message: Message,
+        content: string
+    ): Promise<NEvent | null> {
         const tags = [
             ["e", message.id],
             ["p", message.pubkey],
