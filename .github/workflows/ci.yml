@@ -28,7 +28,48 @@ on:
         - '.github/workflows/ci.yml'
 
 jobs:
-  check:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.1.39
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Run frontend tests
+        run: bun test
+
+      - name: Run Biome checks
+        run: bunx biome ci .
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Run clippy
+        run: cd src-tauri && cargo clippy -- -D warnings
+
+      - name: Check Rust formatting
+        run: cd src-tauri && cargo fmt -- --check
+
+  platform-builds:
+    needs: code-quality
     strategy:
       fail-fast: false
       matrix:
@@ -54,13 +95,10 @@ jobs:
       - name: Add Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          # Specify the working directory for Rust cache
           workspaces: "src-tauri -> target"
-          # Cache cargo registry
           cache-directories: |
             ~/.cargo/registry
             ~/.cargo/git
-          # Add a suffix to distinguish between different platforms and architectures
           key: ${{ matrix.platform }}${{ matrix.arch && '-' }}${{ matrix.arch }}
 
       - name: Install Rust stable
@@ -96,22 +134,5 @@ jobs:
       - name: Build frontend
         run: bun run build
 
-      - name: Run tests
+      - name: Run Tauri tests
         run: cd src-tauri && cargo test ${{ matrix.args }}
-
-      - name: Run frontend tests
-        run: bun test
-
-      - name: Setup Biome
-        uses: biomejs/setup-biome@v2
-        with:
-          version: "latest"
-
-      - name: Run Biome checks
-        run: biome ci .
-
-      - name: Run clippy
-        run: cd src-tauri && cargo clippy ${{ matrix.args }} -- -D warnings
-
-      - name: Check formatting
-        run: cd src-tauri && cargo fmt -- --check
