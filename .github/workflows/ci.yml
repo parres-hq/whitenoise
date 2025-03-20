@@ -27,6 +27,11 @@ on:
         - 'vite.config.js'
         - '.github/workflows/ci.yml'
 
+# Add concurrency group to cancel redundant workflow runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   code-quality:
     runs-on: ubuntu-latest
@@ -55,7 +60,7 @@ jobs:
         env:
           CI: true
           NODE_ENV: test
-        run: svelte-kit sync && bun test --coverage --verbose
+        run: bunx svelte-kit sync && bun test --coverage --verbose
 
       - name: Run Biome checks
         run: bunx biome ci .

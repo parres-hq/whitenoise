@@ -41,6 +41,12 @@ on:
         - 'tailwind.config.js'
         - 'vite.config.js'
         - '.github/workflows/build_ios.yml'
+
+# Add concurrency group to cancel redundant workflow runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-ios:
     #disabled for now
