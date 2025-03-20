@@ -52,7 +52,10 @@ jobs:
         run: bun install
 
       - name: Run frontend tests
-        run: bun test
+        env:
+          CI: true
+          NODE_ENV: test
+        run: bun test --coverage --verbose
 
       - name: Run Biome checks
         run: bunx biome ci .
