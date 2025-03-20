@@ -7,7 +7,7 @@
         "dev": "vite dev",
         "build": "vite build",
         "preview": "vite preview",
-        "test": "bun test && cd src-tauri && cargo test",
+        "test": "svelte-kit sync && bun test --coverage --verbose && cd src-tauri && cargo test",
         "clippy": "cd src-tauri && cargo clippy -- -D warnings",
         "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
         "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",

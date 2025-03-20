@@ -1,4 +1,4 @@
-import type { ChatState, Message, ReactionSummary } from "$lib/types/chat";
+import type { ChatState } from "$lib/types/chat";
 import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { NostrMlsGroupType } from "$lib/types/nostr";
 import * as tauri from "@tauri-apps/api/core";
