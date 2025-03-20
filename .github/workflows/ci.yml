@@ -102,6 +102,14 @@ jobs:
       - name: Run frontend tests
         run: bun test
 
+      - name: Setup Biome
+        uses: biomejs/setup-biome@v2
+        with:
+          version: "latest"
+
+      - name: Run Biome checks
+        run: biome ci .
+
       - name: Run clippy
         run: cd src-tauri && cargo clippy ${{ matrix.args }} -- -D warnings
 
