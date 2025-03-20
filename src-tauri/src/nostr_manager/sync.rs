@@ -288,7 +288,7 @@ impl NostrManager {
     ) -> Result<()> {
         let filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_ids)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
             .since(last_synced)
             .until(Timestamp::now());
 

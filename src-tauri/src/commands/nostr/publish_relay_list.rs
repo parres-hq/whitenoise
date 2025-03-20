@@ -30,7 +30,7 @@ pub async fn publish_relay_list(
 
     wn.nostr
         .client
-        .send_event(event)
+        .send_event(&event)
         .await
         .map_err(|e| e.to_string())?;
 

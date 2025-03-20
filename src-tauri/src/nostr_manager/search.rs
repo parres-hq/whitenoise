@@ -17,14 +17,14 @@ impl NostrManager {
             .nostr
             .client
             .database()
-            .query(vec![filter.clone()])
+            .query(filter.clone())
             .await
             .map_err(NostrManagerError::from)?;
 
         let fetched_events = wn
             .nostr
             .client
-            .fetch_events(vec![filter.clone()], wn.nostr.timeout().await.unwrap())
+            .fetch_events(filter.clone(), wn.nostr.timeout().await.unwrap())
             .await
             .map_err(NostrManagerError::from)?;
 
@@ -39,11 +39,11 @@ impl NostrManager {
             .nostr
             .client
             .fetch_events(
-                vec![Filter::new().authors(pubkeys).kinds(vec![
+                Filter::new().authors(pubkeys).kinds(vec![
                     Kind::MlsKeyPackageRelays,
                     Kind::InboxRelays,
                     Kind::MlsKeyPackage,
-                ])],
+                ]),
                 wn.nostr.timeout().await.unwrap(),
             )
             .await

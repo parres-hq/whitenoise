@@ -150,7 +150,7 @@ pub enum GroupError {
     SerializationError(#[from] serde_json::Error),
 
     #[error("Event ID error: {0}")]
-    EventIdError(#[from] nostr_sdk::event::id::Error),
+    EventIdError(#[from] nostr_sdk::event::Error),
 
     #[error("Notification error: {0}")]
     NotificationError(#[from] tauri_plugin_notification::Error),
@@ -675,7 +675,7 @@ impl Group {
 
         wn.nostr
             .client
-            .send_event_to(self.relays(wn.clone()).await?, commit_message_event)
+            .send_event_to(self.relays(wn.clone()).await?, &commit_message_event)
             .await
             .map_err(GroupError::NostrError)?;
 

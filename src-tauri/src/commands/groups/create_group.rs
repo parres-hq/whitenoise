@@ -135,17 +135,17 @@ pub async fn create_group(
         };
 
         let welcome_rumor =
-            EventBuilder::new(Kind::MlsWelcome, hex::encode(&serialized_welcome_message)).tags(
-                vec![
+            EventBuilder::new(Kind::MlsWelcome, hex::encode(&serialized_welcome_message))
+                .tags(vec![
                     Tag::from_standardized(TagStandard::Relays(
                         relay_urls
                             .iter()
-                            .filter_map(|r| Url::parse(r).ok())
+                            .filter_map(|r| RelayUrl::parse(r).ok())
                             .collect(),
                     )),
                     Tag::event(member.event_id),
-                ],
-            );
+                ])
+                .build(active_account.pubkey);
 
         tracing::debug!(
             target: "whitenoise::groups::create_group",
@@ -187,7 +187,7 @@ pub async fn create_group(
             match wn
                 .nostr
                 .client
-                .send_event_to(relay_urls.clone(), wrapped_event.clone())
+                .send_event_to(relay_urls.clone(), &wrapped_event)
                 .await
             {
                 Ok(result) => {
