@@ -104,7 +104,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Run clippy
-        run: cd src-tauri && cargo clippy -- -D warnings
+        run: cd src-tauri && cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Check Rust formatting
         run: cd src-tauri && cargo fmt -- --check
