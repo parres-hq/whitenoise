@@ -177,7 +177,7 @@ mod tests {
             pubkey: author_pubkey,
             created_at: Timestamp::now(),
             kind: Kind::TextNote,
-            tags: Tags::new(vec![].into_iter().collect()),
+            tags: Tags::new(),
             content: "Test message".to_string(),
         }
     }

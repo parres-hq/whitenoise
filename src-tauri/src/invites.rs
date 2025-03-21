@@ -11,7 +11,7 @@ pub enum InviteError {
     Database(#[from] DatabaseError),
 
     #[error("Event error: {0}")]
-    Event(#[from] nostr_sdk::event::unsigned::Error),
+    Event(#[from] nostr_sdk::event::Error),
 
     #[error("Database error: {0}")]
     Sqlx(#[from] sqlx::Error),

@@ -55,7 +55,7 @@ pub async fn query_enriched_contacts(
         .nostr
         .client
         .database()
-        .query(vec![filter.clone()])
+        .query(filter.clone())
         .await
         .map_err(|e| e.to_string())?;
 

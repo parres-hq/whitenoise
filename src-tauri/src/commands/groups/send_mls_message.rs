@@ -78,7 +78,7 @@ pub async fn send_mls_message(
     let outer_event_id = wn
         .nostr
         .client
-        .send_event_to(relays, published_message_event)
+        .send_event_to(relays, &published_message_event)
         .await
         .map_err(|e| e.to_string())?;
 

@@ -18,35 +18,36 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
-once_cell = "1"
-tokio = { version = "1.40.0", features = ["full"] }
-thiserror = "2"
-chrono = { version = "0.4", features = ["serde"] }
-keyring = { version = "3.2.0", features = [
+async-trait = "0.1.88"
+base64 = "0.22"
+chrono = { version = "0.4.40", features = ["serde"] }
+keyring = { version = "3.6", features = [
     "apple-native",
     "windows-native",
     "linux-native",
 ] }
-uuid = { version = "1.3.0", features = ["v4"] }
-sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "migrate", "macros", "chrono", "derive", "json" ] }
-base64 = "0.22"
-nostr-openmls = { version = "0.1.0", git="https://github.com/erskingardner/nostr-openmls", branch="master" }
-tauri-plugin-clipboard-manager = "2.2.1"
-tauri-plugin-notification = "2.2.1"
-nwc = { version = "0.38" }
 lightning-invoice = "0.33.1"
-async-trait = "0.1.86"
+nostr-openmls = { version = "0.1.0", git="https://github.com/erskingardner/nostr-openmls", branch="master" }
+nwc = { version = "0.40" }
+once_cell = "1.21"
+rand = "0.9"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "migrate", "macros", "chrono", "derive", "json" ] }
+tauri = { version = "2.3", features = [] }
+tauri-plugin-clipboard-manager = "2.2.2"
+tauri-plugin-notification = "2.2.2"
+tauri-plugin-shell = "2.2"
+thiserror = "2.0.12"
+tokio = { version = "1.44", features = ["full"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.16.0", features = ["v4"] }
+
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-nostr-sdk = { version = "0.38", features = [
+nostr-sdk = { version = "0.40", features = [
     "ndb",  # Use NDB for macOS and iOS
     "nip04",
     "nip44",
@@ -55,7 +56,7 @@ nostr-sdk = { version = "0.38", features = [
 ] }
 
 [target.'cfg(not(any(target_os = "ios", target_os = "macos")))'.dependencies]
-nostr-sdk = { version = "0.38", features = [
+nostr-sdk = { version = "0.40", features = [
     "lmdb",  # Use LMDB for all other platforms
     "nip04",
     "nip44",
@@ -64,7 +65,7 @@ nostr-sdk = { version = "0.38", features = [
 ] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = "3.19.1"
 
 [profile.release]
 debug = true

@@ -14,7 +14,7 @@ impl NostrManager {
             .author(pubkey)
             .since(Timestamp::now());
 
-        Ok(self.client.subscribe(vec![contacts_filter], None).await?)
+        Ok(self.client.subscribe(contacts_filter, None).await?)
     }
 
     async fn subscribe_contacts_metadata(&self) -> Result<Output<SubscriptionId>> {
@@ -28,10 +28,7 @@ impl NostrManager {
             .authors(contact_list_pubkeys)
             .since(Timestamp::now());
 
-        Ok(self
-            .client
-            .subscribe(vec![contact_metadata_filter], None)
-            .await?)
+        Ok(self.client.subscribe(contact_metadata_filter, None).await?)
     }
 
     async fn subscribe_metadata(&self, pubkey: PublicKey) -> Result<Output<SubscriptionId>> {
@@ -40,7 +37,7 @@ impl NostrManager {
             .author(pubkey)
             .since(Timestamp::now());
 
-        Ok(self.client.subscribe(vec![metadata_filter], None).await?)
+        Ok(self.client.subscribe(metadata_filter, None).await?)
     }
 
     async fn subscribe_relay_list(&self, pubkey: PublicKey) -> Result<Output<SubscriptionId>> {
@@ -49,7 +46,7 @@ impl NostrManager {
             .author(pubkey)
             .since(Timestamp::now());
 
-        Ok(self.client.subscribe(vec![relay_list_filter], None).await?)
+        Ok(self.client.subscribe(relay_list_filter, None).await?)
     }
 
     async fn subscribe_inbox_relay_list(
@@ -61,10 +58,7 @@ impl NostrManager {
             .author(pubkey)
             .since(Timestamp::now());
 
-        Ok(self
-            .client
-            .subscribe(vec![inbox_relay_list_filter], None)
-            .await?)
+        Ok(self.client.subscribe(inbox_relay_list_filter, None).await?)
     }
 
     async fn subscribe_giftwraps(&self, pubkey: PublicKey) -> Result<Output<SubscriptionId>> {
@@ -72,7 +66,7 @@ impl NostrManager {
         // https://github.com/rust-nostr/nostr/issues/509
         let null_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey).limit(0);
         self.client
-            .fetch_events(vec![null_filter], self.timeout().await?)
+            .fetch_events(null_filter, self.timeout().await?)
             .await?;
 
         let giftwrap_filter = Filter::new()
@@ -80,19 +74,19 @@ impl NostrManager {
             .pubkey(pubkey)
             .since(Timestamp::now());
 
-        Ok(self.client.subscribe(vec![giftwrap_filter], None).await?)
+        Ok(self.client.subscribe(giftwrap_filter, None).await?)
     }
 
     pub async fn subscribe_mls_group_messages(&self, group_ids: Vec<String>) -> Result<Output<()>> {
         let sub_id = SubscriptionId::new(MLS_MESSAGES_SUB);
         let mls_message_filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_ids)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
             .since(Timestamp::now());
 
         Ok(self
             .client
-            .subscribe_with_id(sub_id, vec![mls_message_filter], None)
+            .subscribe_with_id(sub_id, mls_message_filter, None)
             .await?)
     }
 
@@ -127,14 +121,6 @@ impl NostrManager {
                     RelayPoolNotification::Shutdown => {
                         self.handle_shutdown()?;
                         Ok(true)
-                    }
-                    _ => {
-                        tracing::debug!(
-                            target: "whitenoise::nostr_client::handle_notifications",
-                            "Received unknown notification: {:?}",
-                            notification
-                        );
-                        Ok(false)
                     }
                 }
             })
