@@ -2,7 +2,7 @@ use crate::accounts::Account;
 use crate::relays::RelayType;
 use crate::Whitenoise;
 use nostr_sdk::event::EventBuilder;
-
+use nostr_sdk::nips::nip09::EventDeletionRequest;
 #[tauri::command]
 pub async fn delete_all_key_packages(wn: tauri::State<'_, Whitenoise>) -> Result<(), String> {
     let pubkey = wn
@@ -38,9 +38,10 @@ pub async fn delete_all_key_packages(wn: tauri::State<'_, Whitenoise>) -> Result
         .map_err(|e| e.to_string())?;
 
     if !key_package_events.is_empty() {
-        let delete_event = EventBuilder::delete_with_reason(
-            key_package_events.iter().map(|e| e.id),
-            "Delete own key package",
+        let delete_event = EventBuilder::delete(
+            EventDeletionRequest::new()
+                .ids(key_package_events.iter().map(|e| e.id))
+                .reason("Delete own key package"),
         );
         tracing::debug!(target: "whitenoise::commands::key_packages::delete_all_key_packages", "Deleting key packages: {:?}", delete_event);
         wn.nostr

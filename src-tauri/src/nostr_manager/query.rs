@@ -12,7 +12,7 @@ impl NostrManager {
     #[allow(dead_code)]
     pub async fn query_user_relays(&self, pubkey: PublicKey) -> Result<Vec<String>> {
         let filter = Filter::new().author(pubkey).kind(Kind::RelayList).limit(1);
-        let events = self.client.database().query(vec![filter]).await?;
+        let events = self.client.database().query(filter).await?;
         Ok(Self::relay_urls_from_events(events))
     }
 
@@ -21,7 +21,7 @@ impl NostrManager {
             .author(pubkey)
             .kind(Kind::InboxRelays)
             .limit(1);
-        let events = self.client.database().query(vec![filter]).await?;
+        let events = self.client.database().query(filter).await?;
 
         Ok(Self::relay_urls_from_events(events))
     }
@@ -31,14 +31,14 @@ impl NostrManager {
             .author(pubkey)
             .kind(Kind::MlsKeyPackageRelays)
             .limit(1);
-        let events = self.client.database().query(vec![filter]).await?;
+        let events = self.client.database().query(filter).await?;
 
         Ok(Self::relay_urls_from_events(events))
     }
 
     pub async fn query_user_key_packages(&self, pubkey: PublicKey) -> Result<Events> {
         let filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
-        let events = self.client.database().query(vec![filter]).await?;
+        let events = self.client.database().query(filter).await?;
         Ok(events)
     }
 
@@ -49,7 +49,7 @@ impl NostrManager {
             .kind(Kind::ContactList)
             .author(pubkey)
             .limit(1);
-        let events = self.client.database().query(vec![filter]).await?;
+        let events = self.client.database().query(filter).await?;
 
         let contacts_pubkeys = if let Some(event) = events.first() {
             event
@@ -72,7 +72,7 @@ impl NostrManager {
             return Ok(vec![]);
         }
         let filter = Filter::new().kind(Kind::Metadata).authors(contacts_pubkeys);
-        let events = self.client.database().query(vec![filter]).await?;
+        let events = self.client.database().query(filter).await?;
 
         Ok(events.into_iter().collect())
     }
@@ -90,7 +90,7 @@ impl NostrManager {
     #[allow(dead_code)]
     async fn query_user_giftwrapped_events(&self, pubkey: PublicKey) -> Result<Vec<Event>> {
         let filter = Filter::new().kind(Kind::GiftWrap).pubkeys(vec![pubkey]);
-        let events = self.client.database().query(vec![filter]).await?;
+        let events = self.client.database().query(filter).await?;
         Ok(events.into_iter().collect())
     }
 
@@ -98,8 +98,8 @@ impl NostrManager {
     pub async fn query_mls_group_messages(&self, group_ids: Vec<String>) -> Result<Vec<Event>> {
         let filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_ids);
-        let events = self.client.database().query(vec![filter]).await?;
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids);
+        let events = self.client.database().query(filter).await?;
         Ok(events.into_iter().collect())
     }
 }

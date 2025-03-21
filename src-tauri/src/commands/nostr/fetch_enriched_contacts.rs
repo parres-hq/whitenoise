@@ -57,10 +57,10 @@ pub async fn fetch_enriched_contacts(
 
     // Fetch all events in parallel using a single request
     let (stored_events, fetched_events) = tokio::join!(
-        wn.nostr.client.database().query(vec![filter.clone()]),
+        wn.nostr.client.database().query(filter.clone()),
         wn.nostr
             .client
-            .fetch_events(vec![filter.clone()], wn.nostr.timeout().await.unwrap())
+            .fetch_events(filter.clone(), wn.nostr.timeout().await.unwrap())
     );
 
     let all_events = stored_events

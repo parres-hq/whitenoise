@@ -86,7 +86,7 @@ pub async fn fetch_key_package_for_pubkey(
     let key_package_events = wn
         .nostr
         .client
-        .fetch_events(vec![key_package_filter], wn.nostr.timeout().await.unwrap())
+        .fetch_events(key_package_filter, wn.nostr.timeout().await.unwrap())
         .await
         .expect("Error fetching key_package events");
 
@@ -177,16 +177,16 @@ pub async fn delete_key_package_from_relays(
         .get_public_key()
         .await
         .unwrap();
+
+    let key_package_filter = Filter::new()
+        .id(*event_id)
+        .kind(Kind::MlsKeyPackage)
+        .author(current_pubkey);
+
     let key_package_events = wn
         .nostr
         .client
-        .fetch_events(
-            vec![Filter::new()
-                .id(*event_id)
-                .kind(Kind::MlsKeyPackage)
-                .author(current_pubkey)],
-            wn.nostr.timeout().await.unwrap(),
-        )
+        .fetch_events(key_package_filter, wn.nostr.timeout().await.unwrap())
         .await?;
 
     if let Some(event) = key_package_events.first() {
@@ -202,7 +202,7 @@ pub async fn delete_key_package_from_relays(
             nostr_openmls::key_packages::delete_key_package_from_storage(key_package, &nostr_mls)
                 .map_err(KeyPackageError::NostrMlsError)?;
         }
-        let builder = EventBuilder::delete(vec![event.id]);
+        let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
         wn.nostr
             .client
             .send_event_builder_to(key_package_relays, builder)

@@ -31,8 +31,7 @@ impl NostrManager {
             .fetch_metadata(pubkey, self.timeout().await?)
             .await
         {
-            Ok(metadata) => Ok(Some(metadata)),
-            Err(nostr_sdk::client::Error::MetadataNotFound) => Ok(None),
+            Ok(metadata) => Ok(metadata),
             Err(e) => Err(NostrManagerError::from(e)),
         }
     }
@@ -42,7 +41,7 @@ impl NostrManager {
 
         let events = self
             .client
-            .fetch_events(vec![filter], self.timeout().await?)
+            .fetch_events(filter, self.timeout().await?)
             .await
             .map_err(NostrManagerError::from)?;
 
@@ -56,7 +55,7 @@ impl NostrManager {
             .limit(1);
         let events = self
             .client
-            .fetch_events(vec![filter], self.timeout().await?)
+            .fetch_events(filter, self.timeout().await?)
             .await
             .map_err(NostrManagerError::from)?;
 
@@ -70,7 +69,7 @@ impl NostrManager {
             .limit(1);
         let events = self
             .client
-            .fetch_events(vec![filter], self.timeout().await?)
+            .fetch_events(filter, self.timeout().await?)
             .await
             .map_err(NostrManagerError::from)?;
 
@@ -81,7 +80,7 @@ impl NostrManager {
         let filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
         let events = self
             .client
-            .fetch_events(vec![filter], self.timeout().await?)
+            .fetch_events(filter, self.timeout().await?)
             .await
             .map_err(NostrManagerError::from)?;
         Ok(events)
@@ -99,10 +98,10 @@ impl NostrManager {
             .await?;
 
         let filter = Filter::new().kind(Kind::Metadata).authors(contacts_pubkeys);
-        let database_contacts = self.client.database().query(vec![filter.clone()]).await?;
+        let database_contacts = self.client.database().query(filter.clone()).await?;
         let fetched_contacts = self
             .client
-            .fetch_events(vec![filter], self.timeout().await?)
+            .fetch_events(filter, self.timeout().await?)
             .await?;
 
         let contacts = database_contacts.merge(fetched_contacts);
@@ -111,10 +110,10 @@ impl NostrManager {
 
     async fn fetch_user_giftwrapped_events(&self, pubkey: PublicKey) -> Result<Vec<Event>> {
         let filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
-        let stored_events = self.client.database().query(vec![filter.clone()]).await?;
+        let stored_events = self.client.database().query(filter.clone()).await?;
         let fetched_events = self
             .client
-            .fetch_events(vec![filter], self.timeout().await?)
+            .fetch_events(filter, self.timeout().await?)
             .await?;
 
         let events = stored_events.merge(fetched_events);
@@ -135,14 +134,14 @@ impl NostrManager {
     ) -> Result<Vec<Event>> {
         let filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group_ids)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
             .since(last_synced)
             .until(Timestamp::now());
 
-        let stored_events = self.client.database().query(vec![filter.clone()]).await?;
+        let stored_events = self.client.database().query(filter.clone()).await?;
         let fetched_events = self
             .client
-            .fetch_events(vec![filter], self.timeout().await?)
+            .fetch_events(filter, self.timeout().await?)
             .await?;
 
         let events = stored_events.merge(fetched_events);

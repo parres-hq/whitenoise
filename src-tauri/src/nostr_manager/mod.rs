@@ -22,8 +22,6 @@ pub mod sync;
 pub enum NostrManagerError {
     #[error("Client Error: {0}")]
     Client(#[from] nostr_sdk::client::Error),
-    #[error("Metadata Error: {0}")]
-    Metadata(#[from] nostr_sdk::types::metadata::Error),
     #[error("Database Error: {0}")]
     Database(#[from] DatabaseError),
     #[error("Signer Error: {0}")]
@@ -187,7 +185,7 @@ impl NostrManager {
             .map_err(|e| NostrManagerError::FailedToShutdownEventProcessor(e.to_string()))?;
 
         // Reset the client
-        self.client.reset().await.map_err(NostrManagerError::from)?;
+        self.client.reset().await;
 
         // Set the new signer
         self.client.set_signer(keys.clone()).await;
@@ -424,12 +422,8 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::delete_all_data",
             "Deleting Nostr data"
         );
-        self.client.reset().await.map_err(NostrManagerError::from)?;
-        self.client
-            .database()
-            .wipe()
-            .await
-            .map_err(NostrManagerError::from)?;
+        self.client.reset().await;
+        self.client.database().wipe().await?;
         Ok(())
     }
 }
