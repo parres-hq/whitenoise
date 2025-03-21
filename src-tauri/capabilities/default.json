@@ -9,6 +9,8 @@
         "clipboard-manager:allow-write-text",
         "notification:allow-is-permission-granted",
         "notification:allow-request-permission",
-        "notification:allow-notify"
+        "notification:allow-notify",
+        "dialog:default",
+        "fs:default"
     ]
 }

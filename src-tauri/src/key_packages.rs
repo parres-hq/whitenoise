@@ -217,7 +217,10 @@ pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()>
 
     let event: EventBuilder;
     let key_package_relays = if cfg!(dev) {
-        vec!["ws://localhost:8080".to_string()]
+        vec![
+            "ws://localhost:8080".to_string(),
+            "ws://localhost:7777".to_string(),
+        ]
     } else {
         active_account
             .relays(RelayType::KeyPackage, wn.clone())

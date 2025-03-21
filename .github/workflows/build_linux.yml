@@ -61,7 +61,7 @@ jobs:
   build-linux:
     needs: setup
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       VERSION: ${{ needs.setup.outputs.version }}
       CARGO_INCREMENTAL: 0  # Disable incremental compilation for CI

@@ -11,6 +11,10 @@ const MIGRATION_FILES: &[(&str, &[u8])] = &[
         "0001_initial.sql",
         include_bytes!("../db_migrations/0001_initial.sql"),
     ),
+    (
+        "0002_add_media_files.sql",
+        include_bytes!("../db_migrations/0002_add_media_files.sql"),
+    ),
     // Add new migrations here in order, for example:
     // ("0002_something.sql", include_bytes!("../db_migrations/0002_something.sql")),
     // ("0003_another.sql", include_bytes!("../db_migrations/0003_another.sql")),
