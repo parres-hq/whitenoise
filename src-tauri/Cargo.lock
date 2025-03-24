@@ -3153,7 +3153,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -3609,9 +3609,9 @@ dependencies = [
 
 [[package]]
 name = "nostr-relay-pool"
-version = "0.40.0"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90eb4f63f3f28d778f5f22dc1a916ed229f1db12db4ec8bc78ae321497faec5b"
+checksum = "5bde07a729e0a1b306c9a07da81a0d1d55d0487316017090906f3b6660741b8d"
 dependencies = [
  "async-utility",
  "async-wsocket",

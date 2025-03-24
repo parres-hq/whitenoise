@@ -193,24 +193,9 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::set_nostr_identity",
             "Resetting client"
         );
-        // TODO: Remove this once we hear from Yuki about resetting the client
-        let reset_timeout = tokio::time::Duration::from_secs(1);
-        match tokio::time::timeout(reset_timeout, self.client.reset()).await {
-            Ok(_) => {
-                tracing::debug!(
-                    target: "whitenoise::nostr_manager::set_nostr_identity",
-                    "Client reset completed successfully"
-                );
-            }
-            Err(_) => {
-                tracing::error!(
-                    target: "whitenoise::nostr_manager::set_nostr_identity",
-                    "Client reset timed out after {} seconds",
-                    reset_timeout.as_secs()
-                );
-                // Continue anyway since we want to proceed with the new identity
-            }
-        }
+
+        self.client.reset().await;
+
         tracing::debug!(
             target: "whitenoise::nostr_manager::set_nostr_identity",
             "Client reset complete"
