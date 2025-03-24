@@ -122,11 +122,6 @@ export function createChatStore() {
         });
     }
 
-    /**
-     * Handles a single Nostr event, updating the chat store state
-     * @param {NEvent} event - The Nostr event to handle
-     * @param {boolean} deleteTemp - Whether to delete temporary events before handling
-     */
     function handleEvent(event: NEvent, deleteTemp = true) {
         if (deleteTemp) deleteTempEvents();
 

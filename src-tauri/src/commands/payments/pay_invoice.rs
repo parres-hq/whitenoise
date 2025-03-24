@@ -51,6 +51,7 @@ pub async fn pay_invoice(
         message_params.message,
         message_params.kind,
         message_params.tags,
+        None,
         wn,
         app_handle,
     )

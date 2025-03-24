@@ -77,6 +77,7 @@ pub async fn delete_message(
         deletion_reason.to_string(),
         5, // Kind 5 for deletion events as per NIP-09
         Some(deletion_tags),
+        None,
         wn,
         app_handle,
     )

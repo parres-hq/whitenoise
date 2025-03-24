@@ -1,4 +1,5 @@
 use crate::accounts::Account;
+use crate::media::blossom::BlossomClient;
 use crate::nostr_manager::event_processor::EventProcessor;
 use crate::types::NostrEncryptionMethod;
 use crate::Whitenoise;
@@ -39,11 +40,13 @@ pub enum NostrManagerError {
 pub struct NostrManagerSettings {
     pub timeout: Duration,
     pub relays: Vec<String>,
+    pub blossom_server: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct NostrManager {
     pub client: Client,
+    pub blossom: BlossomClient,
     pub settings: Arc<Mutex<NostrManagerSettings>>,
     event_processor: Arc<Mutex<EventProcessor>>,
 }
@@ -53,6 +56,7 @@ impl Default for NostrManagerSettings {
         let mut relays = vec![];
         if cfg!(dev) {
             relays.push("ws://localhost:8080".to_string());
+            relays.push("ws://localhost:7777".to_string());
             relays.push("wss://purplepag.es".to_string());
             // relays.push("wss://nos.lol".to_string());
         } else {
@@ -65,6 +69,11 @@ impl Default for NostrManagerSettings {
         Self {
             timeout: Duration::from_secs(5),
             relays,
+            blossom_server: if cfg!(dev) {
+                "http://localhost:3000".to_string()
+            } else {
+                "https://blossom.primal.net".to_string()
+            },
         }
     }
 }
@@ -94,6 +103,8 @@ impl NostrManager {
 
         let settings = NostrManagerSettings::default();
 
+        let blossom = BlossomClient::new(&settings.blossom_server);
+
         // Add the default relays
         for relay in &settings.relays {
             client.add_relay(relay).await?;
@@ -106,6 +117,7 @@ impl NostrManager {
 
         Ok(Self {
             client,
+            blossom,
             settings: Arc::new(Mutex::new(settings)),
             event_processor,
         })
@@ -165,6 +177,10 @@ impl NostrManager {
             .map_err(|e| NostrManagerError::SecretsStoreError(e.to_string()))?;
 
         // Shutdown existing event processor
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Shutting down existing event processor"
+        );
         self.event_processor
             .lock()
             .await
@@ -173,21 +189,47 @@ impl NostrManager {
             .map_err(|e| NostrManagerError::FailedToShutdownEventProcessor(e.to_string()))?;
 
         // Reset the client
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Resetting client"
+        );
+
         self.client.reset().await;
 
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Client reset complete"
+        );
+
         // Set the new signer
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Setting new signer"
+        );
         self.client.set_signer(keys.clone()).await;
 
         // Add the default relays
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Adding default relays"
+        );
         for relay in self.relays().await? {
             self.client.add_relay(relay).await?;
         }
 
         // Connect to the default relays
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Connecting to default relays"
+        );
         self.client.connect().await;
 
         // We only want to connect to user relays in release mode
         if !cfg!(dev) {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::set_nostr_identity",
+                "Setting up user-specific relays"
+            );
             // Add the new user's relays
             // TODO: We should query first and only fetch if we don't have them
             let relays = self.fetch_user_relays(keys.public_key()).await?;
@@ -241,12 +283,11 @@ impl NostrManager {
                 .collect::<Vec<_>>()
         );
 
+        // Create and store new processor
         tracing::debug!(
             target: "whitenoise::nostr_manager::set_nostr_identity",
-            "Nostr identity updated and connected to relays"
+            "Creating new event processor"
         );
-
-        // Create and store new processor
         let new_processor = EventProcessor::new(app_handle.clone());
         *self.event_processor.lock().await = new_processor;
 
@@ -275,14 +316,14 @@ impl NostrManager {
                 Ok(_) => {
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::set_nostr_identity",
-                        "Subscriptions shutdown triggered"
+                        "Subscriptions setup completed"
                     );
                 }
                 Err(e) => {
                     tracing::error!(
-                    target: "whitenoise::nostr_manager::set_nostr_identity",
-                    "Error subscribing to events: {}",
-                    e
+                        target: "whitenoise::nostr_manager::set_nostr_identity",
+                        "Error subscribing to events: {}",
+                        e
                     );
                 }
             }

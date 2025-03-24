@@ -20,7 +20,10 @@ pub async fn delete_all_key_packages(wn: tauri::State<'_, Whitenoise>) -> Result
         .map_err(|e| e.to_string())?;
 
     let key_package_relays: Vec<String> = if cfg!(dev) {
-        vec!["ws://localhost:8080".to_string()]
+        vec![
+            "ws://localhost:8080".to_string(),
+            "ws://localhost:7777".to_string(),
+        ]
     } else {
         active_account
             .relays(RelayType::KeyPackage, wn.clone())
