@@ -131,9 +131,12 @@ jobs:
       - name: Install Android NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          ${{ steps.android-paths.outputs.android-sdk_root }}/cmdline-tools/tools/bin/sdkmanager --sdk_root=${{ steps.android-paths.outputs.android-sdk_root }} --install "ndk;${{ env.NDK_VERSION }}" || exit 1
-          mkdir -p ${{ steps.android-paths.outputs.android-ndk-home }}
-          cp -r ${{ steps.android-paths.outputs.android-sdk_root }}/ndk/${{ env.NDK_VERSION }}/* ${{ steps.android-paths.outputs.android-ndk-home }}/ || exit 1
+          echo "Installing NDK..."
+          echo "SDK Root: $ANDROID_SDK_ROOT"
+          echo "NDK Home: $ANDROID_NDK_HOME"
+          $ANDROID_SDK_ROOT/cmdline-tools/tools/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT --install "ndk;${{ env.NDK_VERSION }}" || exit 1
+          mkdir -p $ANDROID_NDK_HOME
+          cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* $ANDROID_NDK_HOME/ || exit 1
 
       - name: Configure Gradle
         run: |
