@@ -177,6 +177,10 @@ impl NostrManager {
             .map_err(|e| NostrManagerError::SecretsStoreError(e.to_string()))?;
 
         // Shutdown existing event processor
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Shutting down existing event processor"
+        );
         self.event_processor
             .lock()
             .await
@@ -185,21 +189,62 @@ impl NostrManager {
             .map_err(|e| NostrManagerError::FailedToShutdownEventProcessor(e.to_string()))?;
 
         // Reset the client
-        self.client.reset().await;
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Resetting client"
+        );
+        // TODO: Remove this once we hear from Yuki about resetting the client
+        let reset_timeout = tokio::time::Duration::from_secs(1);
+        match tokio::time::timeout(reset_timeout, self.client.reset()).await {
+            Ok(_) => {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::set_nostr_identity",
+                    "Client reset completed successfully"
+                );
+            }
+            Err(_) => {
+                tracing::error!(
+                    target: "whitenoise::nostr_manager::set_nostr_identity",
+                    "Client reset timed out after {} seconds",
+                    reset_timeout.as_secs()
+                );
+                // Continue anyway since we want to proceed with the new identity
+            }
+        }
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Client reset complete"
+        );
 
         // Set the new signer
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Setting new signer"
+        );
         self.client.set_signer(keys.clone()).await;
 
         // Add the default relays
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Adding default relays"
+        );
         for relay in self.relays().await? {
             self.client.add_relay(relay).await?;
         }
 
         // Connect to the default relays
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::set_nostr_identity",
+            "Connecting to default relays"
+        );
         self.client.connect().await;
 
         // We only want to connect to user relays in release mode
         if !cfg!(dev) {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::set_nostr_identity",
+                "Setting up user-specific relays"
+            );
             // Add the new user's relays
             // TODO: We should query first and only fetch if we don't have them
             let relays = self.fetch_user_relays(keys.public_key()).await?;
@@ -253,12 +298,11 @@ impl NostrManager {
                 .collect::<Vec<_>>()
         );
 
+        // Create and store new processor
         tracing::debug!(
             target: "whitenoise::nostr_manager::set_nostr_identity",
-            "Nostr identity updated and connected to relays"
+            "Creating new event processor"
         );
-
-        // Create and store new processor
         let new_processor = EventProcessor::new(app_handle.clone());
         *self.event_processor.lock().await = new_processor;
 
@@ -287,14 +331,14 @@ impl NostrManager {
                 Ok(_) => {
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::set_nostr_identity",
-                        "Subscriptions shutdown triggered"
+                        "Subscriptions setup completed"
                     );
                 }
                 Err(e) => {
                     tracing::error!(
-                    target: "whitenoise::nostr_manager::set_nostr_identity",
-                    "Error subscribing to events: {}",
-                    e
+                        target: "whitenoise::nostr_manager::set_nostr_identity",
+                        "Error subscribing to events: {}",
+                        e
                     );
                 }
             }

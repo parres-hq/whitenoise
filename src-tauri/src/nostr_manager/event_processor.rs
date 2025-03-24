@@ -67,15 +67,31 @@ pub struct MlsMessageReceivedEvent {
 
 impl EventProcessor {
     pub fn new(app_handle: AppHandle) -> Self {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Creating new event processor"
+        );
         let (sender, receiver) = mpsc::channel(500);
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let app_handle_clone = app_handle;
 
         // Spawn the processing loop
         tokio::spawn(async move {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::event_processor",
+                "Starting event processor loop"
+            );
             Self::process_events(receiver, shutdown_rx, app_handle_clone).await;
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::event_processor",
+                "Event processor loop ended"
+            );
         });
 
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Event processor created successfully"
+        );
         Self {
             sender,
             shutdown: shutdown_tx,
@@ -88,8 +104,23 @@ impl EventProcessor {
             "Queuing event: {:?}",
             event
         );
-        self.sender.send(event).await?;
-        Ok(())
+        match self.sender.send(event).await {
+            Ok(_) => {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::event_processor",
+                    "Event queued successfully"
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "whitenoise::nostr_manager::event_processor",
+                    "Failed to queue event: {}",
+                    e
+                );
+                Err(e.into())
+            }
+        }
     }
 
     async fn process_events(
@@ -97,9 +128,17 @@ impl EventProcessor {
         mut shutdown: Receiver<()>,
         app_handle: AppHandle,
     ) {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Entering process_events loop"
+        );
         loop {
             tokio::select! {
                 Some(event) = receiver.recv() => {
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::event_processor",
+                        "Received event in processing loop"
+                    );
                     match event {
                         ProcessableEvent::GiftWrap(event) => {
                             if let Err(e) = Self::process_giftwrap(&app_handle, event).await {
@@ -124,25 +163,43 @@ impl EventProcessor {
                 Some(_) = shutdown.recv() => {
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::event_processor",
-                        "Shutting down event processor"
+                        "Received shutdown signal"
                     );
                     break;
                 }
-                else => break,
+                else => {
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::event_processor",
+                        "All channels closed, exiting process_events loop"
+                    );
+                    break;
+                }
             }
         }
     }
 
     pub async fn clear_queue(&self) -> Result<()> {
-        // Send shutdown signal
-        if let Err(e) = self.shutdown.send(()).await {
-            tracing::error!(
-                target: "whitenoise::nostr_manager::event_processor",
-                "Failed to send shutdown signal: {}",
-                e
-            );
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Attempting to clear queue"
+        );
+        match self.shutdown.send(()).await {
+            Ok(_) => {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::event_processor",
+                    "Shutdown signal sent successfully"
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "whitenoise::nostr_manager::event_processor",
+                    "Failed to send shutdown signal: {}",
+                    e
+                );
+                Ok(()) // Still return Ok since this is expected in some cases
+            }
         }
-        Ok(())
     }
 
     async fn process_giftwrap(app_handle: &AppHandle, event: Event) -> Result<()> {

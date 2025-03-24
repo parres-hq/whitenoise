@@ -68,12 +68,19 @@ jobs:
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
-          android: false
+          android: true
           dotnet: true
           haskell: true
           large-packages: true
           docker-images: true
           swap-storage: true
+
+      - name: Clean system packages
+        run: |
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /var/cache/apt/*
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v1
@@ -113,6 +120,18 @@ jobs:
           mkdir -p ${{ env.ANDROID_NDK_HOME }}
           cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* ${{ env.ANDROID_NDK_HOME }}/
 
+      - name: Configure Gradle
+        run: |
+          echo "org.gradle.caching=true" >> gradle.properties
+          echo "org.gradle.configureondemand=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m" >> gradle.properties
+          echo "org.gradle.parallel=true" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "org.gradle.workers.max=2" >> gradle.properties
+          echo "android.enableBuildCache=true" >> gradle.properties
+          echo "android.enableR8.fullMode=true" >> gradle.properties
+          echo "android.enableJetifier=false" >> gradle.properties
+
       - name: Cache Bun dependencies
         uses: actions/cache@v4
         with:
@@ -127,7 +146,21 @@ jobs:
         run: bun install
 
       - name: Clean npm cache
-        run: bun clean || true
+        run: |
+          bun clean || true
+          rm -rf ~/.bun/install/cache/*
+          rm -rf node_modules/.cache
+
+      - name: Clean Rust build artifacts
+        run: |
+          rm -rf src-tauri/target/*/debug
+          rm -rf src-tauri/target/*/release
+          rm -rf src-tauri/target/*/build
+          rm -rf src-tauri/target/*/deps
+          rm -rf src-tauri/target/*/examples
+          rm -rf src-tauri/target/*/incremental
+          rm -rf src-tauri/target/*/.rustc_info.json
+          rm -rf src-tauri/target/*/.fingerprint
 
       - name: Setup Android signing
         run: |
@@ -139,6 +172,14 @@ jobs:
 
       - name: Build Android universal binary
         run: bun tauri android build
+
+      - name: Clean Gradle caches
+        run: |
+          rm -rf ~/.gradle/caches/*
+          rm -rf ~/.gradle/wrapper/*
+          rm -rf src-tauri/gen/android/.gradle
+          rm -rf src-tauri/gen/android/app/build/intermediates
+          rm -rf src-tauri/gen/android/app/build/tmp
 
       - name: Prepare universal artifact
         run: |
@@ -160,6 +201,16 @@ jobs:
           path: android-artifacts/*
           if-no-files-found: error
 
+      - name: Clean up after universal build
+        run: |
+          rm -rf src-tauri/gen/android/app/build
+          rm -rf src-tauri/target
+          rm -rf node_modules
+          rm -rf ~/.bun/install/cache/*
+          rm -rf ~/.gradle/caches/*
+          rm -rf ~/.gradle/wrapper/*
+          rm -rf $RUNNER_TEMP/*
+
   build-android-split:
     needs: setup
     runs-on: ubuntu-22.04
@@ -176,12 +227,19 @@ jobs:
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
-          android: false
+          android: true
           dotnet: true
           haskell: true
           large-packages: true
           docker-images: true
           swap-storage: true
+
+      - name: Clean system packages
+        run: |
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /var/cache/apt/*
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v1
@@ -221,6 +279,18 @@ jobs:
           mkdir -p ${{ env.ANDROID_NDK_HOME }}
           cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* ${{ env.ANDROID_NDK_HOME }}/
 
+      - name: Configure Gradle
+        run: |
+          echo "org.gradle.caching=true" >> gradle.properties
+          echo "org.gradle.configureondemand=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m" >> gradle.properties
+          echo "org.gradle.parallel=true" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "org.gradle.workers.max=2" >> gradle.properties
+          echo "android.enableBuildCache=true" >> gradle.properties
+          echo "android.enableR8.fullMode=true" >> gradle.properties
+          echo "android.enableJetifier=false" >> gradle.properties
+
       - name: Cache Bun dependencies
         uses: actions/cache@v4
         with:
@@ -235,7 +305,21 @@ jobs:
         run: bun install
 
       - name: Clean npm cache
-        run: bun clean || true
+        run: |
+          bun clean || true
+          rm -rf ~/.bun/install/cache/*
+          rm -rf node_modules/.cache
+
+      - name: Clean Rust build artifacts
+        run: |
+          rm -rf src-tauri/target/*/debug
+          rm -rf src-tauri/target/*/release
+          rm -rf src-tauri/target/*/build
+          rm -rf src-tauri/target/*/deps
+          rm -rf src-tauri/target/*/examples
+          rm -rf src-tauri/target/*/incremental
+          rm -rf src-tauri/target/*/.rustc_info.json
+          rm -rf src-tauri/target/*/.fingerprint
 
       - name: Setup Android signing
         run: |
@@ -247,6 +331,14 @@ jobs:
 
       - name: Build Android split APKs
         run: bun tauri android build --apk --split-per-abi
+
+      - name: Clean Gradle caches
+        run: |
+          rm -rf ~/.gradle/caches/*
+          rm -rf ~/.gradle/wrapper/*
+          rm -rf src-tauri/gen/android/.gradle
+          rm -rf src-tauri/gen/android/app/build/intermediates
+          rm -rf src-tauri/gen/android/app/build/tmp
 
       - name: Prepare split artifacts
         run: |
@@ -269,6 +361,16 @@ jobs:
           name: android-split
           path: android-artifacts/*
           if-no-files-found: error
+
+      - name: Clean up after split build
+        run: |
+          rm -rf src-tauri/gen/android/app/build
+          rm -rf src-tauri/target
+          rm -rf node_modules
+          rm -rf ~/.bun/install/cache/*
+          rm -rf ~/.gradle/caches/*
+          rm -rf ~/.gradle/wrapper/*
+          rm -rf $RUNNER_TEMP/*
 
   collect-android-artifacts:
     needs: [setup, build-android-universal, build-android-split]

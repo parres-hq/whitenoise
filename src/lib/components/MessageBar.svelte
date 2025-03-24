@@ -48,6 +48,12 @@ function handleInput() {
 async function sendMessage() {
     if (message.length === 0 && media.length === 0) return;
 
+    // Check if any uploads are still in progress
+    if (media.some((item) => item.status === "uploading")) {
+        toastState.add("Uploads in progress", "Please wait for uploads to complete", "info");
+        return;
+    }
+
     let kind = 9;
     let tags = [];
     if (replyToMessage) {
@@ -265,7 +271,7 @@ onMount(() => {
                 <button
                     class="p-2 bg-blue-700 rounded-full text-white ring-1 ring-blue-500 hover:bg-blue-600 disabled:hidden"
                 onclick={sendMessage}
-                disabled={sendingMessage}
+                disabled={sendingMessage || media.some(item => item.status === "uploading")}
             >
                 <PaperPlaneTilt size={24} weight="regular" class="" />
             </button>
