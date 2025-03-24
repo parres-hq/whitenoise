@@ -34,6 +34,11 @@ on:
       - 'vite.config.js'
       - '.github/workflows/build_android.yml'
 
+env:
+  NDK_VERSION: "25.2.9519653"
+  BUN_VERSION: "1.1.39"
+  JAVA_VERSION: "17"
+
 # Add concurrency group to cancel redundant workflow runs
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,8 +49,8 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.get-version.outputs.version }}
-      android_sdk_root: ${{ steps.setup-android.outputs.android-sdk-root }}
-      android_ndk_home: ${{ steps.setup-android.outputs.android-ndk-home }}
+      android_sdk_root: ${{ steps.android-paths.outputs.android-sdk-root }}
+      android_ndk_home: ${{ steps.android-paths.outputs.android-ndk-home }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,7 +81,7 @@ jobs:
       - name: Setup bun
         uses: oven-sh/setup-bun@v1
         with:
-          bun-version: 1.1.39
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -92,7 +97,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: ${{ env.JAVA_VERSION }}
 
       - name: Setup Android SDK
         id: setup-android
@@ -105,23 +110,30 @@ jobs:
         env:
           ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
           ANDROID_HOME: ${{ github.workspace }}/android-sdk
-          NDK_VERSION: "25.2.9519653"
-          ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
-          NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
+          ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk-${{ env.NDK_VERSION }}
+          NDK_HOME: ${{ github.workspace }}/android-ndk-${{ env.NDK_VERSION }}
+
+      - name: Set Android paths
+        id: android-paths
+        run: |
+          echo "android-sdk-root=$ANDROID_SDK_ROOT" >> $GITHUB_OUTPUT
+          echo "android-ndk-home=$ANDROID_NDK_HOME" >> $GITHUB_OUTPUT
 
       - name: Cache Android NDK
         id: cache-ndk
         uses: actions/cache@v4
         with:
-          path: ${{ env.ANDROID_NDK_HOME }}
+          path: ${{ steps.android-paths.outputs.android-ndk-home }}
           key: android-ndk-${{ env.NDK_VERSION }}
+          restore-keys: |
+            android-ndk-
 
       - name: Install Android NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
           sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-          mkdir -p ${{ env.ANDROID_NDK_HOME }}
-          cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* ${{ env.ANDROID_NDK_HOME }}/
+          mkdir -p ${{ steps.android-paths.outputs.android-ndk-home }}
+          cp -r ${{ steps.android-paths.outputs.android-sdk-root }}/ndk/${{ env.NDK_VERSION }}/* ${{ steps.android-paths.outputs.android-ndk-home }}/
 
       - name: Configure Gradle
         run: |
@@ -174,9 +186,33 @@ jobs:
       ANDROID_HOME: ${{ needs.setup.outputs.android_sdk_root }}
       ANDROID_NDK_HOME: ${{ needs.setup.outputs.android_ndk_home }}
       NDK_HOME: ${{ needs.setup.outputs.android_ndk_home }}
-      NDK_VERSION: "25.2.9519653"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Configure Gradle
+        run: |
+          echo "org.gradle.caching=true" >> gradle.properties
+          echo "org.gradle.configureondemand=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m" >> gradle.properties
+          echo "org.gradle.parallel=true" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "org.gradle.workers.max=2" >> gradle.properties
+          echo "android.enableBuildCache=true" >> gradle.properties
+          echo "android.enableR8.fullMode=true" >> gradle.properties
+          echo "android.enableJetifier=false" >> gradle.properties
 
       - name: Setup Android signing
         run: |
@@ -188,6 +224,7 @@ jobs:
 
       - name: Build Android universal binary
         run: bun tauri android build
+        continue-on-error: false
 
       - name: Clean Gradle caches
         run: |
@@ -236,9 +273,33 @@ jobs:
       ANDROID_HOME: ${{ needs.setup.outputs.android_sdk_root }}
       ANDROID_NDK_HOME: ${{ needs.setup.outputs.android_ndk_home }}
       NDK_HOME: ${{ needs.setup.outputs.android_ndk_home }}
-      NDK_VERSION: "25.2.9519653"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Configure Gradle
+        run: |
+          echo "org.gradle.caching=true" >> gradle.properties
+          echo "org.gradle.configureondemand=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m" >> gradle.properties
+          echo "org.gradle.parallel=true" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "org.gradle.workers.max=2" >> gradle.properties
+          echo "android.enableBuildCache=true" >> gradle.properties
+          echo "android.enableR8.fullMode=true" >> gradle.properties
+          echo "android.enableJetifier=false" >> gradle.properties
 
       - name: Setup Android signing
         run: |
@@ -250,6 +311,7 @@ jobs:
 
       - name: Build Android split APKs
         run: bun tauri android build --apk --split-per-abi
+        continue-on-error: false
 
       - name: Clean Gradle caches
         run: |
