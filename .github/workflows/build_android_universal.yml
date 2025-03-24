@@ -42,6 +42,11 @@ env:
 jobs:
   build-android-universal:
     runs-on: ubuntu-22.04
+    env:
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
+      ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk-${{ github.env.NDK_VERSION }}
+      NDK_HOME: ${{ github.workspace }}/android-ndk-${{ github.env.NDK_VERSION }}
     steps:
       - uses: actions/checkout@v4
 
@@ -97,11 +102,6 @@ jobs:
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: true
           packages: "tools platform-tools ndk;${{ env.NDK_VERSION }}"
-        env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-          ANDROID_HOME: ${{ github.workspace }}/android-sdk
-          ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk-${{ env.NDK_VERSION }}
-          NDK_HOME: ${{ github.workspace }}/android-ndk-${{ env.NDK_VERSION }}
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
