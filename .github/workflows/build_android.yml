@@ -106,7 +106,7 @@ jobs:
           cmdline-tools-version: "12266719"
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: true
-          packages: "tools platform-tools"
+          packages: "tools platform-tools ndk;${{ env.NDK_VERSION }}"
         env:
           ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
           ANDROID_HOME: ${{ github.workspace }}/android-sdk
@@ -131,9 +131,9 @@ jobs:
       - name: Install Android NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+          ${{ steps.android-paths.outputs.android-sdk-root }}/cmdline-tools/latest/bin/sdkmanager --sdk_root=${{ steps.android-paths.outputs.android-sdk-root }} --install "ndk;${{ env.NDK_VERSION }}" || exit 1
           mkdir -p ${{ steps.android-paths.outputs.android-ndk-home }}
-          cp -r ${{ steps.android-paths.outputs.android-sdk-root }}/ndk/${{ env.NDK_VERSION }}/* ${{ steps.android-paths.outputs.android-ndk-home }}/
+          cp -r ${{ steps.android-paths.outputs.android-sdk-root }}/ndk/${{ env.NDK_VERSION }}/* ${{ steps.android-paths.outputs.android-ndk-home }}/ || exit 1
 
       - name: Configure Gradle
         run: |
