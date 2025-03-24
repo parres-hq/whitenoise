@@ -61,6 +61,8 @@ jobs:
       NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
       VERSION: ${{ needs.setup.outputs.version }}
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -105,6 +107,11 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: "12266719"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: true
+          packages: "tools platform-tools"
 
       - name: Cache Android NDK
         id: cache-ndk
@@ -220,6 +227,8 @@ jobs:
       NDK_HOME: ${{ github.workspace }}/android-ndk-25.2.9519653
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
       VERSION: ${{ needs.setup.outputs.version }}
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -264,6 +273,11 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: "12266719"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: true
+          packages: "tools platform-tools"
 
       - name: Cache Android NDK
         id: cache-ndk
