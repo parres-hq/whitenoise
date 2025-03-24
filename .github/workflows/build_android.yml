@@ -119,25 +119,6 @@ jobs:
           echo "android-sdk-root=$ANDROID_SDK_ROOT" >> $GITHUB_OUTPUT
           echo "android-ndk-home=$ANDROID_NDK_HOME" >> $GITHUB_OUTPUT
 
-      - name: Cache Android NDK
-        id: cache-ndk
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.android-paths.outputs.android-ndk-home }}
-          key: android-ndk-${{ env.NDK_VERSION }}
-          restore-keys: |
-            android-ndk-
-
-      - name: Install Android NDK
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: |
-          echo "Installing NDK..."
-          echo "SDK Root: $ANDROID_SDK_ROOT"
-          echo "NDK Home: $ANDROID_NDK_HOME"
-          $ANDROID_SDK_ROOT/cmdline-tools/tools/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT --install "ndk;${{ env.NDK_VERSION }}" || exit 1
-          mkdir -p $ANDROID_NDK_HOME
-          cp -r $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/* $ANDROID_NDK_HOME/ || exit 1
-
       - name: Configure Gradle
         run: |
           echo "org.gradle.caching=true" >> gradle.properties
