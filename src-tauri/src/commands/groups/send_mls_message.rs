@@ -1,6 +1,7 @@
 use crate::accounts::Account;
 use crate::groups::Group;
 use crate::media::{add_media_file, FileUpload};
+use crate::messages::Message;
 use crate::secrets_store;
 use crate::whitenoise::Whitenoise;
 use lightning_invoice::SignedRawBolt11Invoice;
@@ -19,7 +20,7 @@ pub async fn send_mls_message(
     uploaded_files: Option<Vec<FileUpload>>,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<UnsignedEvent, String> {
+) -> Result<Message, String> {
     let nostr_keys = wn.nostr.client.signer().await.map_err(|e| e.to_string())?;
     let mut final_tags = tags.unwrap_or_default();
     let mut final_content = message;
@@ -153,7 +154,7 @@ pub async fn send_mls_message(
         .await
         .map_err(|e| e.to_string())?;
 
-    group
+    let message = group
         .add_message(
             outer_event_id.id().to_string(),
             inner_event.clone(),
@@ -164,10 +165,10 @@ pub async fn send_mls_message(
         .map_err(|e| e.to_string())?;
 
     app_handle
-        .emit("mls_message_sent", (group.clone(), inner_event.clone()))
+        .emit("mls_message_sent", (group.clone(), message.clone()))
         .expect("Couldn't emit event");
 
-    Ok(inner_event)
+    Ok(message)
 }
 
 /// Creates an unsigned nostr event with the given parameters

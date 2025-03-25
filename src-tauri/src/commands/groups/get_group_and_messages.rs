@@ -1,6 +1,14 @@
 use crate::groups::Group;
+use crate::messages::Message;
 use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupAndMessages {
+    group: Group,
+    messages: Vec<Message>,
+}
 
 /// Gets a single MLS group and its messages by group ID
 ///
@@ -24,7 +32,7 @@ use nostr_sdk::prelude::*;
 pub async fn get_group_and_messages(
     group_id: &str,
     wn: tauri::State<'_, Whitenoise>,
-) -> Result<(Group, Vec<UnsignedEvent>), String> {
+) -> Result<GroupAndMessages, String> {
     let mls_group_id =
         hex::decode(group_id).map_err(|e| format!("Error decoding group id: {}", e))?;
     tracing::debug!(
@@ -44,10 +52,11 @@ pub async fn get_group_and_messages(
         .messages(wn.clone())
         .await
         .map_err(|e| format!("Error fetching messages: {}", e))?;
+
     tracing::debug!(
         target: "whitenoise::commands::groups::get_group_and_messages",
         "Messages: {:?}",
         messages
     );
-    Ok((group, messages))
+    Ok(GroupAndMessages { group, messages })
 }

@@ -523,7 +523,7 @@ impl EventProcessor {
                     return Ok(());
                 }
 
-                group
+                let message = group
                     .add_message(
                         event.id.to_string(),
                         json_event.clone(),
@@ -533,7 +533,7 @@ impl EventProcessor {
                     .await?;
 
                 app_handle
-                    .emit("mls_message_processed", (group.clone(), json_event.clone()))
+                    .emit("mls_message_processed", (group.clone(), message.clone()))
                     .expect("Couldn't emit event");
             }
             Err(e) => {

@@ -1,6 +1,7 @@
 use crate::accounts::{Account, AccountError};
 use crate::database::DatabaseError;
 use crate::messages::{Message, MessageRow};
+use crate::nostr_manager::parser::{parse, SerializableToken};
 use crate::secrets_store;
 use crate::utils::is_valid_hex_pubkey;
 use crate::Whitenoise;
@@ -470,10 +471,11 @@ impl Group {
 
         let event_json = serde_json::to_string(&message)?;
         let tags_json = serde_json::to_string(&message.tags)?;
+        let tokens: Vec<SerializableToken> = parse(&message.content);
 
         tracing::debug!(
             target: "whitenoise::groups::add_message",
-            "Inserting message into database; event_id: {:?}, account_pubkey: {:?}, author_pubkey: {:?}, mls_group_id: {:?}, created_at: {:?}, content: {:?}, tags: {:?}, event: {:?}, outer_event_id: {:?}",
+            "Inserting message into database; event_id: {:?}, account_pubkey: {:?}, author_pubkey: {:?}, mls_group_id: {:?}, created_at: {:?}, content: {:?}, tags: {:?}, event: {:?}, outer_event_id: {:?}, tokens: {:?}",
             message.id.unwrap().to_string(),
             account.pubkey.to_hex(),
             message.pubkey.to_hex(),
@@ -483,6 +485,7 @@ impl Group {
             tags_json,
             event_json,
             outer_event_id.to_string(),
+            tokens
         );
 
         // First insert the message
@@ -490,9 +493,9 @@ impl Group {
             r#"
             INSERT INTO messages (
                 event_id, account_pubkey, author_pubkey, mls_group_id,
-                created_at, content, tags, event, outer_event_id
+                created_at, content, tags, event, outer_event_id, tokens
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             "#,
         )
@@ -505,6 +508,7 @@ impl Group {
         .bind(&tags_json)
         .bind(&event_json)
         .bind(&outer_event_id)
+        .bind(serde_json::to_value(&tokens)?)
         .execute(&mut *txn)
         .await?;
 
@@ -565,15 +569,17 @@ impl Group {
             account_pubkey: account.pubkey,
             author_pubkey: message.pubkey,
             mls_group_id: self.mls_group_id.clone(),
+            event_kind: message.kind.into(),
             created_at: message.created_at,
             content: message.content.clone(),
             tags: message.tags.clone(),
             event: message,
             outer_event_id: EventId::from_hex(&message_row.outer_event_id)?,
+            tokens: serde_json::from_value(message_row.tokens).unwrap(),
         })
     }
 
-    pub async fn messages(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<UnsignedEvent>> {
+    pub async fn messages(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Message>> {
         let pubkey = Account::get_active_pubkey(wn.clone())
             .await
             .map_err(GroupError::AccountError)?;
@@ -588,7 +594,7 @@ impl Group {
 
         message_rows
             .into_iter()
-            .map(|row| serde_json::from_str(&row.event).map_err(GroupError::SerializationError))
+            .map(|row| Ok(Message::from(row)))
             .collect::<Result<Vec<_>>>()
     }
 

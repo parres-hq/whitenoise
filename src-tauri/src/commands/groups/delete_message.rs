@@ -1,5 +1,6 @@
 use crate::accounts::Account;
 use crate::groups::Group;
+use crate::messages::Message;
 use crate::send_mls_message;
 use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
@@ -16,7 +17,7 @@ use nostr_sdk::prelude::*;
 /// * `app_handle` - Tauri app handle
 ///
 /// # Returns
-/// * `Ok(UnsignedEvent)` - The deletion event if successful
+/// * `Ok(Message)` - The deletion event if successful
 /// * `Err(String)` - Error message if deletion fails
 ///
 /// # Errors
@@ -32,7 +33,7 @@ pub async fn delete_message(
     message_id: String,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<UnsignedEvent, String> {
+) -> Result<Message, String> {
     tracing::debug!(
         target: "whitenoise::commands::groups::delete_message",
         "Attempting to delete message with ID: {} from group: {}",
@@ -85,8 +86,8 @@ pub async fn delete_message(
     .map_err(|e| format!("Failed to send deletion event: {}", e));
 
     match &result {
-        Ok(event) => {
-            let id_str = match &event.id {
+        Ok(message) => {
+            let id_str = match &message.event.id {
                 Some(id) => id.to_hex(),
                 None => "unknown".to_string(),
             };
@@ -118,7 +119,7 @@ pub async fn delete_message(
 /// * `Err(String)` - Error message if validation fails
 async fn validate_deletion_request(
     message_id: &str,
-    group_messages: &[UnsignedEvent],
+    group_messages: &[Message],
     active_account: &Account,
 ) -> Result<EventId, String> {
     // Parse and validate message ID
@@ -128,17 +129,17 @@ async fn validate_deletion_request(
     // Find the target message
     let message = group_messages
         .iter()
-        .find(|m| m.id == Some(message_event_id))
+        .find(|m| m.event_id == message_event_id)
         .ok_or_else(|| format!("Message with ID {} not found in this group", message_id))?;
 
     // Verify ownership
-    if message.pubkey != active_account.pubkey {
+    if message.author_pubkey != active_account.pubkey {
         tracing::warn!(
             target: "whitenoise::commands::groups::validate_deletion_request",
             "Permission denied: User {} attempted to delete message {} created by {}",
             active_account.pubkey.to_hex(),
             message_id,
-            message.pubkey.to_hex()
+            message.author_pubkey.to_hex()
         );
         return Err(format!(
             "Permission denied: Cannot delete message {}. Only the message creator can delete it.",
@@ -171,15 +172,31 @@ mod tests {
         }
     }
 
-    fn create_test_message(event_id_str: &str, author_pubkey: PublicKey) -> UnsignedEvent {
+    fn create_test_message(event_id_str: &str, author_pubkey: PublicKey) -> Message {
         let message_id = EventId::from_hex(event_id_str).unwrap();
-        UnsignedEvent {
+        let event = UnsignedEvent {
             id: Some(message_id),
             pubkey: author_pubkey,
             created_at: Timestamp::now(),
             kind: Kind::TextNote,
             tags: Tags::new(),
             content: "Test message".to_string(),
+        };
+        Message {
+            event_id: message_id,
+            account_pubkey: author_pubkey,
+            author_pubkey,
+            mls_group_id: vec![],
+            event_kind: event.kind.into(),
+            created_at: Timestamp::now(),
+            content: "Test message".to_string(),
+            tags: Tags::new(),
+            event,
+            outer_event_id: EventId::from_hex(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            )
+            .unwrap(),
+            tokens: vec![],
         }
     }
 
