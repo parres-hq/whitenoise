@@ -1,7 +1,39 @@
-import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "./nostr";
+import type {
+    NEvent,
+    NostrMlsGroup,
+    NostrMlsGroupWithRelays,
+    SerializableToken,
+} from "$lib/types/nostr";
 
 /**
- * Represents a chat message in the application
+ * Represents a cached message from the local databaes
+ * We get these back from invoke calls and events emitted from the backend.
+ * @property {string} event_id - The ID of the Nostr event
+ * @property {string} account_pubkey - The public key of the account that sent the message
+ * @property {string} author_pubkey - The public key of the author of the message
+ * @property {string} mls_group_id - The ID of the MLS group the message belongs to
+ * @property {number} event_kind - The kind of the Nostr event
+ * @property {number} created_at - The timestamp when the message was created
+ * @property {string} content - The content of the message
+ * @property {NEvent} event - The original Nostr unsigned event data
+ * @property {SerializableToken[]} tokens - The tokenized message content
+ * @property {string} outer_event_id - The ID of the outer event, if applicable
+ */
+export type CachedMessage = {
+    event_id: string;
+    account_pubkey: string;
+    author_pubkey: string;
+    mls_group_id: string;
+    event_kind: number;
+    created_at: number;
+    content: string;
+    event: NEvent;
+    tokens: SerializableToken[];
+    outer_event_id: string;
+};
+
+/**
+ * Represents a chat message in the front-end application
  * @property {string} id - Unique identifier for the message
  * @property {string} pubkey - Public key of the message sender
  * @property {string} content - Text content of the message
@@ -13,6 +45,7 @@ import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "./nostr";
  * @property {boolean} isSingleEmoji - Whether the message consists of only a single emoji
  * @property {boolean} isMine - Whether the current user is the author of this message
  * @property {NEvent} event - The original Nostr event data
+ * @property {SerializableToken[]} tokens - The tokenized message content
  */
 export type Message = {
     id: string;
@@ -26,6 +59,7 @@ export type Message = {
     isSingleEmoji: boolean;
     isMine: boolean;
     event: NEvent;
+    tokens: SerializableToken[];
 };
 
 /**
@@ -141,8 +175,8 @@ export type DeletionsMap = Map<string, Deletion>;
  */
 export type ChatState = {
     messages: Message[];
-    handleEvent: (event: NEvent) => void;
-    handleEvents: (events: NEvent[]) => void;
+    handleCachedMessage: (cachedMessage: CachedMessage) => void;
+    handleCachedMessages: (cachedMessages: CachedMessage[]) => void;
     clear: () => void;
     findMessage: (id: string) => Message | undefined;
     findReaction: (id: string) => Reaction | undefined;
@@ -154,12 +188,12 @@ export type ChatState = {
         group: NostrMlsGroup,
         reaction: string,
         messageId: string
-    ) => Promise<NEvent | null>;
-    deleteMessage: (group: NostrMlsGroup, messageId: string) => Promise<NEvent | null>;
+    ) => Promise<CachedMessage | null>;
+    deleteMessage: (group: NostrMlsGroup, messageId: string) => Promise<CachedMessage | null>;
     payLightningInvoice: (
         groupWithRelays: NostrMlsGroupWithRelays,
         message: Message
-    ) => Promise<NEvent | null>;
+    ) => Promise<CachedMessage | null>;
     isMessageDeletable: (messageId: string) => boolean;
     isMessageCopyable: (messageId: string) => boolean;
 };

@@ -1,8 +1,8 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
 import { getToastState } from "$lib/stores/toast-state.svelte";
-import type { Message } from "$lib/types/chat";
-import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
+import type { CachedMessage, Message } from "$lib/types/chat";
+import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -19,7 +19,7 @@ let {
 }: {
     group: NostrMlsGroup;
     replyToMessage?: Message;
-    handleNewMessage: (message: NEvent) => void;
+    handleNewMessage: (message: CachedMessage) => void;
     isReplyToMessageDeleted?: boolean;
 } = $props();
 
@@ -72,7 +72,7 @@ async function sendMessage() {
         tags,
     };
 
-    handleNewMessage(tmpMessage as NEvent);
+    handleNewMessage(tmpMessage as unknown as CachedMessage);
     sendingMessage = true;
 
     await invoke("send_mls_message", {
@@ -93,8 +93,8 @@ async function sendMessage() {
                 })
         ),
     })
-        .then((messageEvent) => {
-            handleNewMessage(messageEvent as NEvent);
+        .then((cachedMessage) => {
+            handleNewMessage(cachedMessage as CachedMessage);
             message = "";
             media = []; // Clear media after successful send
             setTimeout(adjustTextareaHeight, 0);

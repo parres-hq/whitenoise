@@ -133,3 +133,11 @@ export enum NostrMlsGroupType {
     DirectMessage = "DirectMessage",
     Group = "Group",
 }
+
+export type SerializableToken =
+    | { Nostr: string }
+    | { Url: string }
+    | { Hashtag: string }
+    | { Text: string }
+    | { LineBreak: null }
+    | { Whitespace: null };

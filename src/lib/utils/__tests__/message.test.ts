@@ -1,6 +1,8 @@
+import type { CachedMessage } from "$lib/types/chat";
 import type { NEvent } from "$lib/types/nostr";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { eventToMessage } from "../message";
+import { describe, expect, it } from "vitest";
+import { cachedMessageToMessage, eventToMessage } from "../message";
+
 describe("eventToMessage", () => {
     const defaultEvent: NEvent = {
         id: "event123",
@@ -26,6 +28,7 @@ describe("eventToMessage", () => {
             isSingleEmoji: false,
             isMine: false,
             event: defaultEvent,
+            tokens: [],
         });
     });
 
@@ -132,6 +135,49 @@ describe("eventToMessage", () => {
                 preimage: "preimage123",
                 isPaid: false,
             });
+        });
+    });
+});
+
+describe("cachedMessageToMessage", () => {
+    const defaultEvent: NEvent = {
+        id: "event123",
+        pubkey: "pubkey456",
+        created_at: 1622548800,
+        kind: 9,
+        tags: [],
+        content: "Hello world",
+        sig: "signature",
+    };
+
+    it("converts cached message to message", () => {
+        const cachedMessage: CachedMessage = {
+            event: defaultEvent,
+            event_id: defaultEvent.id,
+            account_pubkey: defaultEvent.pubkey,
+            author_pubkey: defaultEvent.pubkey,
+            mls_group_id: "mls_group_id",
+            created_at: defaultEvent.created_at,
+            event_kind: defaultEvent.kind,
+            content: defaultEvent.content,
+            outer_event_id: "outer_event_id",
+            tokens: [{ Text: "Hello world" }],
+        };
+        const message = cachedMessageToMessage(cachedMessage, "some-pubkey");
+
+        expect(message).toEqual({
+            id: "event123",
+            pubkey: "pubkey456",
+            content: "Hello world",
+            createdAt: 1622548800,
+            replyToId: undefined,
+            reactions: [],
+            lightningInvoice: undefined,
+            lightningPayment: undefined,
+            isSingleEmoji: false,
+            isMine: false,
+            event: defaultEvent,
+            tokens: [{ Text: "Hello world" }],
         });
     });
 });

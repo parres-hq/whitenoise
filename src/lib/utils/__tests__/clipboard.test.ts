@@ -1,5 +1,5 @@
 import * as ClipboardManager from "@tauri-apps/plugin-clipboard-manager";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { copyToClipboard } from "../clipboard";
 
 vi.spyOn(ClipboardManager, "writeText").mockImplementation(async () => {

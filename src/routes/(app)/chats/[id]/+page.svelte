@@ -9,7 +9,7 @@ import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 import { activeAccount, hasLightningWallet } from "$lib/stores/accounts";
 import { createChatStore } from "$lib/stores/chat";
 import { getToastState } from "$lib/stores/toast-state.svelte";
-import type { Message } from "$lib/types/chat";
+import type { CachedMessage, Message } from "$lib/types/chat";
 import {
     type EnrichedContact,
     type NEvent,
@@ -45,7 +45,7 @@ let group: NostrMlsGroup | undefined = $state(undefined);
 let counterpartyPubkey: string | undefined = $state(undefined);
 let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
 let groupName = $state("");
-let events: NEvent[] = $state([]);
+let cachedMessages: CachedMessage[] | undefined = $state(undefined);
 let showMessageMenu = $state(false);
 let selectedMessageId: string | null | undefined = $state(undefined);
 let messageMenuPosition = $state({ x: 0, y: 0 });
@@ -53,6 +53,9 @@ let messageMenuExtendedPosition = $state({ x: 0, y: 0 });
 let replyToMessage: Message | undefined = $state(undefined);
 let toastState = getToastState();
 let isReplyToMessageDeleted = $state(false);
+
+$inspect("group", group);
+$inspect("cachedMessages", cachedMessages);
 
 $effect(() => {
     if (replyToMessage?.id) {
@@ -77,12 +80,19 @@ $effect(() => {
 
 async function loadGroup() {
     invoke("get_group_and_messages", { groupId: page.params.id }).then(async (groupResponse) => {
-        [group, events] = groupResponse as [NostrMlsGroup, NEvent[]];
+        const groupData: NostrMlsGroup = (
+            groupResponse as { group: NostrMlsGroup; messages: CachedMessage[] }
+        ).group;
+        const cachedMessagesData: CachedMessage[] = (
+            groupResponse as { group: NostrMlsGroup; messages: CachedMessage[] }
+        ).messages;
 
+        group = groupData;
+        cachedMessages = cachedMessagesData;
         // Add messages to the chat store
         chatStore.clear();
-        for (const event of events) {
-            chatStore.handleEvent(event);
+        for (const cachedMessage of cachedMessages) {
+            chatStore.handleCachedMessage(cachedMessage);
         }
 
         if (!counterpartyPubkey) {
@@ -118,14 +128,14 @@ async function scrollToBottom() {
 
 onMount(async () => {
     if (!unlistenMlsMessageProcessed) {
-        unlistenMlsMessageProcessed = await listen<[NostrMlsGroup, NEvent]>(
+        unlistenMlsMessageProcessed = await listen<[NostrMlsGroup, CachedMessage]>(
             "mls_message_processed",
-            ({ payload: [_updatedGroup, event] }) => {
-                console.log("mls_message_processed event received", event.content);
-                const message = chatStore.findMessage(event.id);
+            ({ payload: [_updatedGroup, cachedMessage] }) => {
+                console.log("mls_message_processed event received", cachedMessage.event.content);
+                const message = chatStore.findMessage(cachedMessage.event_id);
                 if (!message) {
                     console.log("pushing message to transcript");
-                    chatStore.handleEvent(event);
+                    chatStore.handleCachedMessage(cachedMessage);
                 }
                 scrollToBottom();
             }
@@ -145,8 +155,8 @@ onMount(async () => {
     await loadGroup();
 });
 
-function handleNewEvent(event: NEvent) {
-    chatStore.handleEvent(event);
+function handleNewEvent(cachedMessage: CachedMessage) {
+    chatStore.handleCachedMessage(cachedMessage);
 }
 
 function handlePress(event: PressCustomEvent | MouseEvent) {
@@ -415,7 +425,7 @@ onDestroy(() => {
                         class={`relative max-w-[70%] ${message.lightningPayment ? "bg-opacity-10" : ""} ${!message.isSingleEmoji ? `rounded-lg ${message.isMine ? `bg-chat-bg-me text-gray-50 rounded-br` : `bg-chat-bg-other text-gray-50 rounded-bl`} p-3` : ''} ${showMessageMenu && message.id === selectedMessageId ? 'relative z-20' : ''}`}
                     >
                         {#if message.replyToId }
-                            <RepliedTo 
+                            <RepliedTo
                                 message={chatStore.findReplyToMessage(message)}
                                 isDeleted={chatStore.isDeleted(message.replyToId)}
                             />
@@ -453,7 +463,7 @@ onDestroy(() => {
                                                 <CheckCircle
                                                     size={48}
                                                     weight="fill"
-                                                    class="text-green-500 bg-white rounded-full opacity-80 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" 
+                                                    class="text-green-500 bg-white rounded-full opacity-80 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
                                                 />
                                             {/if}
                                         </div>
