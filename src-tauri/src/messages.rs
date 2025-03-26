@@ -232,7 +232,13 @@ impl From<MessageRow> for Message {
             tags: serde_json::from_str(&row.tags).unwrap(),
             event: serde_json::from_str(&row.event).unwrap(),
             outer_event_id: EventId::parse(&row.outer_event_id).unwrap(),
-            tokens: serde_json::from_value(row.tokens).unwrap(),
+            tokens: match serde_json::from_value(row.tokens) {
+                Ok(val) => val,
+                Err(e) => {
+                    tracing::error!("Failed to parse tokens: {}", e);
+                    vec![] // or handle according to your error strategy
+                }
+            },
         }
     }
 }
