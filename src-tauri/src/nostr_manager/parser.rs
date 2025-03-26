@@ -83,15 +83,13 @@ impl From<TokenObject> for SerializableToken {
 impl<'a> From<Token<'a>> for SerializableToken {
     fn from(value: Token<'a>) -> Self {
         match value {
-            Token::Nostr(n) => SerializableToken::Nostr(
-                match n.to_nostr_uri() {
-                    Ok(uri) => uri,
-                    Err(e) => {
-                        // handle or return a default/fallback
-                        format!("invalid_nostr_uri:{}", e)
-                    }
+            Token::Nostr(n) => SerializableToken::Nostr(match n.to_nostr_uri() {
+                Ok(uri) => uri,
+                Err(e) => {
+                    // handle or return a default/fallback
+                    format!("invalid_nostr_uri:{}", e)
                 }
-            ),
+            }),
             Token::Url(u) => SerializableToken::Url(u.to_string()),
             Token::Hashtag(h) => SerializableToken::Hashtag(h.to_string()),
             Token::Text(t) => SerializableToken::Text(t.to_string()),
@@ -99,7 +97,6 @@ impl<'a> From<Token<'a>> for SerializableToken {
             Token::Whitespace => SerializableToken::Whitespace,
         }
     }
-}
 }
 
 /// Parses a string into a vector of serializable tokens.
