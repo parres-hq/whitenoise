@@ -6,7 +6,7 @@ import type {
 } from "$lib/types/nostr";
 
 /**
- * Represents a cached message from the local databaes
+ * Represents a cached message from the local database.
  * We get these back from invoke calls and events emitted from the backend.
  * @property {string} event_id - The ID of the Nostr event
  * @property {string} account_pubkey - The public key of the account that sent the message

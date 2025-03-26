@@ -533,7 +533,7 @@ impl EventProcessor {
                 );
 
                 // Reconstruct the content from tokens to ensure consistent formatting
-                let mut reconstructed_content = String::new();
+                let mut reconstructed_content = String::with_capacity(json_event.content.len());
                 for token in &tokens {
                     match token {
                         SerializableToken::Text(s) => reconstructed_content.push_str(s),

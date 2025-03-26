@@ -17,14 +17,13 @@ pub struct GroupAndMessages {
 /// * `wn` - Whitenoise state
 ///
 /// # Returns
-/// * `Ok((Group, Vec<UnsignedEvent>))` - Tuple containing:
+/// * `Ok(GroupAndMessages)` - Struct containing:
 ///   - The requested group if found
-///   - Vector of unsigned message events for the group
+///   - Vector of messages for the group
 /// * `Err(String)` - Error message if operation fails
 ///
 /// # Errors
 /// Returns error if:
-/// - No active account found
 /// - Group ID is not valid hex
 /// - Group not found in database
 /// - Error fetching messages

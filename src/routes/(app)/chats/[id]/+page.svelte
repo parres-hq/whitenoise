@@ -55,9 +55,6 @@ let replyToMessage: Message | undefined = $state(undefined);
 let toastState = getToastState();
 let isReplyToMessageDeleted = $state(false);
 
-$inspect("group", group);
-$inspect("cachedMessages", cachedMessages);
-$inspect("chatStore.messages", $chatStore.messages);
 $effect(() => {
     if (replyToMessage?.id) {
         isReplyToMessageDeleted = chatStore.isDeleted(replyToMessage.id);
@@ -132,7 +129,6 @@ onMount(async () => {
         unlistenMlsMessageProcessed = await listen<[NostrMlsGroup, CachedMessage]>(
             "mls_message_processed",
             ({ payload: [_updatedGroup, cachedMessage] }) => {
-                console.log("mls_message_processed event received", cachedMessage.event.content);
                 const message = chatStore.findMessage(cachedMessage.event_id);
                 if (!message) {
                     console.log("pushing message to transcript");
@@ -294,8 +290,7 @@ async function payLightningInvoice(message: Message) {
     chatStore
         .payLightningInvoice(groupWithRelays, message)
         .then(
-            (paymentEvent: CachedMessage | null) => {
-                console.log("Payment successful", paymentEvent);
+            (_paymentEvent: CachedMessage | null) => {
                 toastState.add(
                     "Payment success",
                     "Successfully sent payment to invoice",

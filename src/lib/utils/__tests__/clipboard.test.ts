@@ -13,4 +13,11 @@ describe("copyToClipboard", () => {
         await copyToClipboard("test", "Failed to copy");
         expect(mockWriteText).toHaveBeenCalledWith("test");
     });
+
+    it("should handle errors when copying fails", async () => {
+        mockWriteText.mockRejectedValue(new Error("Copy failed"));
+        const result = await copyToClipboard("test", "Failed to copy");
+        expect(result).toBe(false);
+        expect(mockWriteText).toHaveBeenCalledWith("test");
+    });
 });
