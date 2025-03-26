@@ -193,7 +193,7 @@ onMount(() => {
 
 <div class="messagebar sticky bottom-0 left-0 right-0 bg-gray-900 drop-shadow-message-bar">
     {#if replyToMessage}
-        <div class="w-full py-4 px-6 pl-8 bg-blue-700/50 text-white backdrop-blur-sm border-t border-gray-700 border-l-4 border-l-blue-500 flex flex-row gap-2 items-start justify-between rounded-t-xl">
+        <div class="w-full py-4 px-6 pl-8 bg-blue-700/50 text-white backdrop-blur-xs border-t border-gray-700 border-l-4 border-l-blue-500 flex flex-row gap-2 items-start justify-between rounded-t-xl">
             {#if isReplyToMessageDeleted}
                 <div class="inline-flex flex-row items-center gap-2 bg-gray-200 rounded-full px-3 py-1 w-fit text-black">
                     <TrashSimple size={20} /><span class="italic opacity-60">Message deleted</span>
@@ -207,7 +207,7 @@ onMount(() => {
         </div>
     {/if}
     {#if media.length > 0}
-        <div class="w-full py-2 px-6 pl-8 bg-gray-800/50 backdrop-blur-sm border-t border-gray-700 flex flex-row gap-2 items-center overflow-x-auto">
+        <div class="w-full py-2 px-6 pl-8 bg-gray-800/50 backdrop-blur-xs border-t border-gray-700 flex flex-row gap-2 items-center overflow-x-auto">
             {#each media as item, index}
                 <div class="relative group">
                     {#if item.file.type.startsWith('image/')}

@@ -193,7 +193,7 @@ async function searchRelays(): Promise<void> {
         <Loader size={40} fullscreen={false} />
     {:else}
         <h2 class="section-title">Your contacts</h2>
-        <div class="section !p-0 divide-y divide-gray-700">
+        <div class="section p-0! divide-y divide-gray-700">
             {#if filteredContacts && Object.keys(filteredContacts).length > 0}
                 {#each Object.entries(filteredContacts) as [pubkey, contact] (pubkey)}
                     <button
@@ -216,7 +216,7 @@ async function searchRelays(): Promise<void> {
             {/if}
         </div>
         <h2 class="section-title">Other people</h2>
-        <div class="section !p-0 divide-y divide-gray-700">
+        <div class="section p-0! divide-y divide-gray-700">
             {#if isSearching }
                 <div class="my-4">
                     <Loader size={40} fullscreen={false} />

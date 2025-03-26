@@ -359,7 +359,7 @@ function toastCopyErrorMessage(errorMessage: string) {
                 </button>
             </div>
         {/each}
-        <div class="section-list-item !mt-6">
+        <div class="section-list-item mt-6!">
             <button onclick={() => (showLogin = !showLogin)} class="button-primary">
                 <UserPlus size={24} />
                 Add another account
@@ -384,12 +384,12 @@ function toastCopyErrorMessage(errorMessage: string) {
                         {loginError}
                     </span>
                 {/if}
-                <button type="submit" onclick={handleLogin} class="button-primary w-full !justify-start">
+                <button type="submit" onclick={handleLogin} class="button-primary w-full justify-start!">
                     <SignIn size="20" />
                     Log In
                 </button>
             </div>
-            <button onclick={handleCreateAccount} class="button-outline w-full !justify-start">
+            <button onclick={handleCreateAccount} class="button-outline w-full justify-start!">
                 <PlusCircle size="20" />
                 Create New Nostr Identity
             </button>
