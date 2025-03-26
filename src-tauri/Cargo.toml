@@ -31,6 +31,7 @@ keyring = { version = "3.6", features = [
     "linux-native",
 ] }
 lightning-invoice = "0.33.1"
+nostr = { version = "0.40", features = [ "parser" ] }
 nostr-openmls = { version = "0.1.0", git="https://github.com/erskingardner/nostr-openmls", branch="master" }
 nwc = { version = "0.40" }
 once_cell = "1.21"

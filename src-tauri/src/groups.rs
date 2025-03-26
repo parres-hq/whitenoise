@@ -1,6 +1,7 @@
 use crate::accounts::{Account, AccountError};
 use crate::database::DatabaseError;
 use crate::messages::{Message, MessageRow};
+use crate::nostr_manager::parser::{parse, SerializableToken};
 use crate::secrets_store;
 use crate::utils::is_valid_hex_pubkey;
 use crate::Whitenoise;
@@ -455,12 +456,39 @@ impl Group {
         Ok(self.clone())
     }
 
+    /// Adds a new message to the group and updates the group's last message information
+    ///
+    /// # Arguments
+    /// * `outer_event_id` - The ID of the outer event containing this message
+    /// * `message` - The unsigned Nostr event containing the message content
+    /// * `wn` - The Whitenoise application state
+    /// * `app_handle` - The Tauri application handle for notifications
+    /// * `pre_parsed_tokens` - Optional pre-parsed tokens from the message content
+    ///
+    /// # Returns
+    /// * `Ok(Message)` - The created message if successful
+    /// * `Err(GroupError)` - If there's an error during message creation
+    ///
+    /// # Details
+    /// This method:
+    /// 1. Inserts the message into the database
+    /// 2. Updates the group's last message ID and timestamp
+    /// 3. Sends a notification if the message is from another user
+    /// 4. Returns the created message
+    ///
+    /// # Errors
+    /// Returns `GroupError` if:
+    /// - Database operations fail
+    /// - Message parsing fails
+    /// - Notification sending fails
+    /// - Any other operation during message creation fails
     pub async fn add_message(
         &self,
         outer_event_id: String,
         message: UnsignedEvent,
         wn: tauri::State<'_, Whitenoise>,
         app_handle: tauri::AppHandle,
+        pre_parsed_tokens: Option<Vec<SerializableToken>>,
     ) -> Result<Message> {
         let account = Account::get_active(wn.clone())
             .await
@@ -470,10 +498,11 @@ impl Group {
 
         let event_json = serde_json::to_string(&message)?;
         let tags_json = serde_json::to_string(&message.tags)?;
+        let tokens = pre_parsed_tokens.unwrap_or_else(|| parse(&message.content));
 
         tracing::debug!(
             target: "whitenoise::groups::add_message",
-            "Inserting message into database; event_id: {:?}, account_pubkey: {:?}, author_pubkey: {:?}, mls_group_id: {:?}, created_at: {:?}, content: {:?}, tags: {:?}, event: {:?}, outer_event_id: {:?}",
+            "Inserting message into database; event_id: {:?}, account_pubkey: {:?}, author_pubkey: {:?}, mls_group_id: {:?}, created_at: {:?}, content: {:?}, tags: {:?}, event: {:?}, outer_event_id: {:?}, tokens: {:?}, event_kind: {:?}",
             message.id.unwrap().to_string(),
             account.pubkey.to_hex(),
             message.pubkey.to_hex(),
@@ -483,6 +512,8 @@ impl Group {
             tags_json,
             event_json,
             outer_event_id.to_string(),
+            tokens,
+            message.kind
         );
 
         // First insert the message
@@ -490,9 +521,9 @@ impl Group {
             r#"
             INSERT INTO messages (
                 event_id, account_pubkey, author_pubkey, mls_group_id,
-                created_at, content, tags, event, outer_event_id
+                created_at, content, tags, event, outer_event_id, tokens, event_kind
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             "#,
         )
@@ -505,6 +536,8 @@ impl Group {
         .bind(&tags_json)
         .bind(&event_json)
         .bind(&outer_event_id)
+        .bind(serde_json::to_value(&tokens)?)
+        .bind(i64::from(message.kind.as_u16()))
         .execute(&mut *txn)
         .await?;
 
@@ -565,15 +598,35 @@ impl Group {
             account_pubkey: account.pubkey,
             author_pubkey: message.pubkey,
             mls_group_id: self.mls_group_id.clone(),
+            event_kind: message.kind.into(),
             created_at: message.created_at,
             content: message.content.clone(),
             tags: message.tags.clone(),
             event: message,
             outer_event_id: EventId::from_hex(&message_row.outer_event_id)?,
+            tokens: serde_json::from_value(message_row.tokens).unwrap(),
         })
     }
 
-    pub async fn messages(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<UnsignedEvent>> {
+    /// Retrieves all messages for this group
+    ///
+    /// # Arguments
+    /// * `wn` - The Whitenoise application state
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Message>)` - A vector of all messages in the group if successful
+    /// * `Err(GroupError)` - If there's an error retrieving messages
+    ///
+    /// # Details
+    /// This method fetches all messages associated with this group from the database,
+    /// ordered by their creation timestamp.
+    ///
+    /// # Errors
+    /// Returns `GroupError` if:
+    /// - Database query fails
+    /// - Message parsing fails
+    /// - Any other operation during message retrieval fails
+    pub async fn messages(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Message>> {
         let pubkey = Account::get_active_pubkey(wn.clone())
             .await
             .map_err(GroupError::AccountError)?;
@@ -586,12 +639,36 @@ impl Group {
         .fetch_all(&wn.database.pool)
         .await?;
 
+        tracing::debug!(
+            target: "whitenoise::groups::messages",
+            "Messages: {:?}",
+            message_rows
+        );
+
         message_rows
             .into_iter()
-            .map(|row| serde_json::from_str(&row.event).map_err(GroupError::SerializationError))
+            .map(|row| Ok(Message::from(row)))
             .collect::<Result<Vec<_>>>()
     }
 
+    /// Retrieves all members of this group
+    ///
+    /// # Arguments
+    /// * `wn` - The Whitenoise application state
+    ///
+    /// # Returns
+    /// * `Ok(Vec<PublicKey>)` - A vector of all member public keys if successful
+    /// * `Err(GroupError)` - If there's an error retrieving members
+    ///
+    /// # Details
+    /// This method fetches all member public keys from the MLS group and converts them
+    /// to Nostr public keys.
+    ///
+    /// # Errors
+    /// Returns `GroupError` if:
+    /// - MLS group operations fail
+    /// - Public key parsing fails
+    /// - Any other operation during member retrieval fails
     pub async fn members(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<PublicKey>> {
         let nostr_mls = wn.nostr_mls.lock().await;
         let member_pubkeys = nostr_mls
@@ -605,6 +682,18 @@ impl Group {
             })
     }
 
+    /// Retrieves all admin members of this group
+    ///
+    /// # Returns
+    /// * `Ok(Vec<PublicKey>)` - A vector of all admin public keys if successful
+    /// * `Err(GroupError)` - If there's an error retrieving admins
+    ///
+    /// # Details
+    /// This method converts the stored admin public key strings into Nostr public keys.
+    ///
+    /// # Errors
+    /// Returns `GroupError` if:
+    /// - Public key parsing fails
     pub fn admins(&self) -> Result<Vec<PublicKey>> {
         self.admin_pubkeys.iter().try_fold(
             Vec::with_capacity(self.admin_pubkeys.len()),
@@ -615,6 +704,22 @@ impl Group {
         )
     }
 
+    /// Retrieves all relays associated with this group
+    ///
+    /// # Arguments
+    /// * `wn` - The Whitenoise application state
+    ///
+    /// # Returns
+    /// * `Ok(Vec<String>)` - A vector of relay URLs if successful
+    /// * `Err(GroupError)` - If there's an error retrieving relays
+    ///
+    /// # Details
+    /// This method fetches all relay URLs associated with this group from the database.
+    ///
+    /// # Errors
+    /// Returns `GroupError` if:
+    /// - Database query fails
+    /// - Any other operation during relay retrieval fails
     pub async fn relays(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<String>> {
         let account = Account::get_active(wn.clone())
             .await
@@ -629,6 +734,31 @@ impl Group {
         .await?)
     }
 
+    /// Updates the group's keys for the current user
+    ///
+    /// # Arguments
+    /// * `wn` - The Whitenoise application state
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the key update is successful
+    /// * `Err(GroupError)` - If there's an error during key update
+    ///
+    /// # Details
+    /// This method:
+    /// 1. Generates new MLS keys for the current user
+    /// 2. Creates a commit message with the new keys
+    /// 3. Encrypts the commit message with the previous epoch's key
+    /// 4. Publishes the commit message to group relays
+    /// 5. Stores the new epoch secret in the secrets store
+    ///
+    /// # Errors
+    /// Returns `GroupError` if:
+    /// - MLS operations fail
+    /// - Key generation fails
+    /// - Encryption fails
+    /// - Event publishing fails
+    /// - Secret storage fails
+    /// - Any other operation during key update fails
     pub async fn self_update_keys(&self, wn: tauri::State<'_, Whitenoise>) -> Result<()> {
         let serialized_commit_message: Vec<u8>;
         let current_exporter_secret_hex: String;

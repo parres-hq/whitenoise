@@ -3,6 +3,7 @@ use crate::groups::{Group, GroupError};
 use crate::invites::{Invite, InviteError, InviteState, ProcessedInvite, ProcessedInviteState};
 use crate::key_packages;
 use crate::messages::{MessageError, ProcessedMessage, ProcessedMessageState};
+use crate::nostr_manager::parser::{parse, SerializableToken};
 use crate::nostr_manager::NostrManagerError;
 use crate::relays::RelayType;
 use crate::secrets_store;
@@ -491,7 +492,7 @@ impl EventProcessor {
         }
 
         // This processes an application message into JSON.
-        let json_event;
+        let mut json_event;
         match serde_json::from_slice::<serde_json::Value>(&message_vec) {
             Ok(json_value) => {
                 tracing::debug!(
@@ -523,17 +524,42 @@ impl EventProcessor {
                     return Ok(());
                 }
 
-                group
+                // Parse the content into tokens and ensure it's properly formatted
+                let tokens = parse(&json_event.content);
+                tracing::debug!(
+                    target: "whitenoise::commands::groups::fetch_mls_messages",
+                    "Parsed tokens from content: {:?}",
+                    tokens
+                );
+
+                // Reconstruct the content from tokens to ensure consistent formatting
+                let mut reconstructed_content = String::with_capacity(json_event.content.len());
+                for token in &tokens {
+                    match token {
+                        SerializableToken::Text(s) => reconstructed_content.push_str(s),
+                        SerializableToken::Url(s) => reconstructed_content.push_str(s),
+                        SerializableToken::Hashtag(s) => {
+                            reconstructed_content.push_str(&format!("#{}", s))
+                        }
+                        SerializableToken::Nostr(s) => reconstructed_content.push_str(s),
+                        SerializableToken::LineBreak => reconstructed_content.push('\n'),
+                        SerializableToken::Whitespace => reconstructed_content.push(' '),
+                    }
+                }
+                json_event.content = reconstructed_content;
+
+                let message = group
                     .add_message(
                         event.id.to_string(),
                         json_event.clone(),
                         wn.clone(),
                         app_handle.clone(),
+                        Some(tokens),
                     )
                     .await?;
 
                 app_handle
-                    .emit("mls_message_processed", (group.clone(), json_event.clone()))
+                    .emit("mls_message_processed", (group.clone(), message.clone()))
                     .expect("Couldn't emit event");
             }
             Err(e) => {

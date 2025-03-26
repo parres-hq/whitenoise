@@ -13,6 +13,7 @@ use tokio::{spawn, sync::Mutex};
 
 pub mod event_processor;
 pub mod fetch;
+pub mod parser;
 pub mod query;
 pub mod search;
 pub mod subscriptions;

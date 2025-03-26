@@ -1,7 +1,9 @@
 use crate::accounts::Account;
+use crate::nostr_manager::parser::SerializableToken;
 use crate::Whitenoise;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -22,12 +24,14 @@ pub struct MessageRow {
     pub event_id: String,
     pub account_pubkey: String,
     pub author_pubkey: String,
+    pub event_kind: u16,
     pub mls_group_id: Vec<u8>,
     pub created_at: u64,
     pub content: String,
     pub tags: String,  // JSON string for Vec<Vec<String>>
     pub event: String, // JSON string for UnsignedEvent
     pub outer_event_id: String,
+    pub tokens: JsonValue, // Vec<SerializableToken>
 }
 
 /// This is the processed rumor message that represents a private chat message
@@ -38,12 +42,14 @@ pub struct Message {
     pub event_id: EventId,
     pub account_pubkey: PublicKey,
     pub author_pubkey: PublicKey,
+    pub event_kind: u16,
     pub mls_group_id: Vec<u8>,
     pub created_at: Timestamp,
     pub content: String,
     pub tags: Tags,
     pub event: UnsignedEvent,
     pub outer_event_id: EventId,
+    pub tokens: Vec<SerializableToken>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -219,12 +225,20 @@ impl From<MessageRow> for Message {
             event_id: EventId::parse(&row.event_id).unwrap(),
             account_pubkey: PublicKey::from_hex(&row.account_pubkey).unwrap(),
             author_pubkey: PublicKey::from_hex(&row.author_pubkey).unwrap(),
+            event_kind: row.event_kind,
             mls_group_id: row.mls_group_id,
             created_at: Timestamp::from(row.created_at),
             content: row.content,
             tags: serde_json::from_str(&row.tags).unwrap(),
             event: serde_json::from_str(&row.event).unwrap(),
             outer_event_id: EventId::parse(&row.outer_event_id).unwrap(),
+            tokens: match serde_json::from_value(row.tokens) {
+                Ok(val) => val,
+                Err(e) => {
+                    tracing::error!("Failed to parse tokens: {}", e);
+                    vec![] // or handle according to your error strategy
+                }
+            },
         }
     }
 }

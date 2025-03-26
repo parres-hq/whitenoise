@@ -9,6 +9,7 @@
             "./build/**",
             "./.svelte-kit/**",
             "./package/**",
+            "./coverage/**",
             "**/.env",
             "**/.env.*",
             "**/bun.lockb",

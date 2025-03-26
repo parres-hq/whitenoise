@@ -16,7 +16,8 @@ export function eventToLightningInvoice(event: NEvent): LightningInvoice | undef
 export function eventToLightningPayment(event: NEvent): LightningPayment | undefined {
     const preimage = findPreimage(event);
     if (!preimage) return;
-    return { preimage, isPaid: false };
+    const isPaid = event.tags.some((t) => t[0] === "q" && t[1] === event.id);
+    return { preimage, isPaid };
 }
 
 export async function lightningInvoiceToQRCode(invoice: string): Promise<string> {

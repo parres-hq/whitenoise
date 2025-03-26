@@ -1,6 +1,7 @@
 use crate::accounts::Account;
 use crate::commands::groups::send_mls_message;
 use crate::groups::Group;
+use crate::messages::Message;
 use crate::payments::{self, PaymentError};
 use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
@@ -31,7 +32,7 @@ pub async fn pay_invoice(
     bolt11: String,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<UnsignedEvent, CommandError> {
+) -> Result<Message, CommandError> {
     let active_account = Account::get_active(wn.clone())
         .await
         .map_err(|_| CommandError::NoActiveAccount)?;
@@ -46,7 +47,7 @@ pub async fn pay_invoice(
         .await
         .map_err(|_| CommandError::MessageError)?;
 
-    let unsigned_message = send_mls_message(
+    let message = send_mls_message(
         group,
         message_params.message,
         message_params.kind,
@@ -58,7 +59,7 @@ pub async fn pay_invoice(
     .await
     .map_err(|_| CommandError::MessageError)?;
 
-    Ok(unsigned_message)
+    Ok(message)
 }
 
 struct MlsMessageParams {
