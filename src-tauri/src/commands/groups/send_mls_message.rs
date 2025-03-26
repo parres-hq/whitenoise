@@ -160,6 +160,7 @@ pub async fn send_mls_message(
             inner_event.clone(),
             wn.clone(),
             app_handle.clone(),
+            None,
         )
         .await
         .map_err(|e| e.to_string())?;

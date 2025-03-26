@@ -4,6 +4,7 @@ import { page } from "$app/state";
 import GroupAvatar from "$lib/components/GroupAvatar.svelte";
 import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
 import MessageBar from "$lib/components/MessageBar.svelte";
+import MessageTokens from "$lib/components/MessageTokens.svelte";
 import RepliedTo from "$lib/components/RepliedTo.svelte";
 import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 import { activeAccount, hasLightningWallet } from "$lib/stores/accounts";
@@ -56,7 +57,7 @@ let isReplyToMessageDeleted = $state(false);
 
 $inspect("group", group);
 $inspect("cachedMessages", cachedMessages);
-
+$inspect("chatStore.messages", $chatStore.messages);
 $effect(() => {
     if (replyToMessage?.id) {
         isReplyToMessageDeleted = chatStore.isDeleted(replyToMessage.id);
@@ -293,7 +294,7 @@ async function payLightningInvoice(message: Message) {
     chatStore
         .payLightningInvoice(groupWithRelays, message)
         .then(
-            (paymentEvent: NEvent | null) => {
+            (paymentEvent: CachedMessage | null) => {
                 console.log("Payment successful", paymentEvent);
                 toastState.add(
                     "Payment success",
@@ -437,8 +438,8 @@ onDestroy(() => {
                                         <TrashSimple size={20} /><span class="italic opacity-60">Message deleted</span>
                                     </div>
                                 {:else if message.content.trim().length > 0}
-                                    {message.content}
-                                    {#if message.lightningInvoice  }
+                                    <MessageTokens tokens={message.tokens} />
+                                    {#if message.lightningInvoice }
                                     <div class="flex flex-col items-start mt-4 gap-4">
                                         <div class="relative bg-slate-200 p-1 rounded-lg">
                                             {#await lightningInvoiceToQRCode(message.lightningInvoice.invoice)}

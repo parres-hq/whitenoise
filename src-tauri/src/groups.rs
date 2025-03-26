@@ -462,6 +462,7 @@ impl Group {
         message: UnsignedEvent,
         wn: tauri::State<'_, Whitenoise>,
         app_handle: tauri::AppHandle,
+        pre_parsed_tokens: Option<Vec<SerializableToken>>,
     ) -> Result<Message> {
         let account = Account::get_active(wn.clone())
             .await
@@ -471,11 +472,11 @@ impl Group {
 
         let event_json = serde_json::to_string(&message)?;
         let tags_json = serde_json::to_string(&message.tags)?;
-        let tokens: Vec<SerializableToken> = parse(&message.content);
+        let tokens = pre_parsed_tokens.unwrap_or_else(|| parse(&message.content));
 
         tracing::debug!(
             target: "whitenoise::groups::add_message",
-            "Inserting message into database; event_id: {:?}, account_pubkey: {:?}, author_pubkey: {:?}, mls_group_id: {:?}, created_at: {:?}, content: {:?}, tags: {:?}, event: {:?}, outer_event_id: {:?}, tokens: {:?}",
+            "Inserting message into database; event_id: {:?}, account_pubkey: {:?}, author_pubkey: {:?}, mls_group_id: {:?}, created_at: {:?}, content: {:?}, tags: {:?}, event: {:?}, outer_event_id: {:?}, tokens: {:?}, event_kind: {:?}",
             message.id.unwrap().to_string(),
             account.pubkey.to_hex(),
             message.pubkey.to_hex(),
@@ -485,7 +486,8 @@ impl Group {
             tags_json,
             event_json,
             outer_event_id.to_string(),
-            tokens
+            tokens,
+            message.kind
         );
 
         // First insert the message
@@ -493,9 +495,9 @@ impl Group {
             r#"
             INSERT INTO messages (
                 event_id, account_pubkey, author_pubkey, mls_group_id,
-                created_at, content, tags, event, outer_event_id, tokens
+                created_at, content, tags, event, outer_event_id, tokens, event_kind
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             "#,
         )
@@ -509,6 +511,7 @@ impl Group {
         .bind(&event_json)
         .bind(&outer_event_id)
         .bind(serde_json::to_value(&tokens)?)
+        .bind(i64::from(message.kind.as_u16()))
         .execute(&mut *txn)
         .await?;
 
@@ -591,6 +594,12 @@ impl Group {
         .bind(pubkey.to_hex())
         .fetch_all(&wn.database.pool)
         .await?;
+
+        tracing::debug!(
+            target: "whitenoise::groups::messages",
+            "Messages: {:?}",
+            message_rows
+        );
 
         message_rows
             .into_iter()

@@ -1,0 +1,10 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+
+.env
+.env.*
+!.env.example
+coverage/
+build/
+.svelte-kit/
+node_modules/
+

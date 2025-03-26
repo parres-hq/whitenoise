@@ -4,10 +4,14 @@ import { NostrMlsGroupType } from "$lib/types/nostr";
 import * as tauri from "@tauri-apps/api/core";
 import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Account, activeAccount } from "./accounts";
-import { createChatStore } from "./chat";
+import { type Account, activeAccount } from "../accounts";
+import { createChatStore } from "../chat";
 
-vi.spyOn(tauri, "invoke").mockImplementation(async () => null);
+// Mock Tauri API
+const mockInvoke = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({
+    invoke: mockInvoke,
+}));
 
 const userAccount: Account = {
     pubkey: "user-pubkey",

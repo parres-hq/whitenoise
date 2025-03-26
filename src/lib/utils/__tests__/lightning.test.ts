@@ -7,15 +7,19 @@ import {
     lightningInvoiceToQRCode,
 } from "../lightning";
 
-const mockToDataURL = vi.fn().mockImplementation(async (text) => {
-    return `mocked-qrcode-for-${text}`;
-});
+// Mock QRCode
+const mockToDataURL = vi.hoisted(() => vi.fn());
+vi.mock("qrcode", () => ({
+    toDataURL: mockToDataURL,
+}));
 
-vi.spyOn(qrcode, "toDataURL").mockImplementation(mockToDataURL);
-vi.spyOn(console, "error").mockImplementation(() => {});
+// Mock console.error
+const mockConsoleError = vi.hoisted(() => vi.fn());
+vi.spyOn(console, "error").mockImplementation(mockConsoleError);
 
 beforeEach(() => {
     mockToDataURL.mockClear();
+    mockConsoleError.mockClear();
 });
 
 describe("eventToLightningInvoice", () => {
@@ -202,12 +206,15 @@ describe("eventToLightningPayment", () => {
 
 describe("lightningInvoiceToQRCode", () => {
     it("converts a lightning invoice to a QR code data URL", async () => {
+        const mockDataUrl = "data:image/png;base64,test";
+        mockToDataURL.mockResolvedValue(mockDataUrl);
+
         const invoice = "lnbc10m1invoice";
         const result = await lightningInvoiceToQRCode(invoice);
 
         // Check if toDataURL was called with the correct lightning: prefix
         expect(qrcode.toDataURL).toHaveBeenCalledWith(`lightning:${invoice}`);
-        expect(result).toBe(`mocked-qrcode-for-lightning:${invoice}`);
+        expect(result).toBe(mockDataUrl);
     });
 
     it("handles errors by returning an empty string", async () => {
@@ -218,6 +225,9 @@ describe("lightningInvoiceToQRCode", () => {
         const result = await lightningInvoiceToQRCode(invoice);
 
         expect(result).toBe("");
-        expect(console.error).toHaveBeenCalled();
+        expect(mockConsoleError).toHaveBeenCalledWith(
+            "Error generating QR code:",
+            expect.any(Error)
+        );
     });
 });
