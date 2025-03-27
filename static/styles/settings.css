@@ -14,7 +14,8 @@
     @apply p-0 m-0 leading-none text-2xl text-glitch-600 dark:text-muted-foreground-light;
 }
 
-.section-list-item > button, .section-list-item > a {
+.section-list-item > button,
+.section-list-item > a {
     @apply flex flex-row justify-between items-center py-4 w-full;
 }
 

@@ -1,11 +1,10 @@
-@import 'tailwindcss';
-@import '../static/styles/fonts.css';
-@import '../static/styles/colors.css';
-@import '../static/styles/settings.css';
-
+@import "tailwindcss";
+@import "../static/styles/fonts.css";
+@import "../static/styles/colors.css";
+@import "../static/styles/settings.css";
 
 :root {
-    font-family: 'OverusedGrotesk', Helvetica, Arial, sans-serif;
+    font-family: "OverusedGrotesk", Helvetica, Arial, sans-serif;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;

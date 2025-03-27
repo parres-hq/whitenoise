@@ -1,6 +1,6 @@
 @theme {
     /* Glitch */
-    --color-glitch-50: oklch(98.2% 0.002 95.7);  /* #f9f9f9 */
+    --color-glitch-50: oklch(98.2% 0.002 95.7); /* #f9f9f9 */
     --color-glitch-100: oklch(95.9% 0.003 95.7); /* #f2f2f2 */
     --color-glitch-200: oklch(91.8% 0.005 95.7); /* #e2e2e2 */
     --color-glitch-300: oklch(86.6% 0.008 95.7); /* #cdcecd */
