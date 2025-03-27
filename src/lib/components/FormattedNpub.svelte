@@ -10,7 +10,6 @@ let highlightButton = $state(false);
 
 async function copyNpub() {
     if (await copyToClipboard(npub, "npub")) {
-        console.log("copied npub");
         highlightButton = true;
         setTimeout(() => {
             highlightButton = false;

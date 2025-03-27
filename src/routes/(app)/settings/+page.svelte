@@ -323,7 +323,7 @@ function toggleDeveloperSection() {
     </div>
     {#if showProfileSection}
         <div class="overflow-hidden p-0 m-0" transition:slide={slideParams}>
-            <div class="flex flex-row gap-3 items-center min-w-0 w-full">
+            <div class="flex flex-row gap-3 items-center min-w-0 w-full mb-4">
                 <button
                     onclick={() => setActiveAccount($activeAccount!.pubkey)}
                 >
