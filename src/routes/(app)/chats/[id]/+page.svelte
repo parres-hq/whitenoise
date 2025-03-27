@@ -446,7 +446,7 @@ onDestroy(() => {
                                                     <img
                                                         src={qrCodeUrl}
                                                         alt="QR Code"
-                                                        class="w-64 h-64 rounded-lg shadow-lg {message.lightningInvoice.isPaid ? 'blur-xs' : ''}"
+                                                        class="w-64 h-64 rounded-lg shadow-lg {message.lightningInvoice.isPaid ? 'blur-sm' : ''}"
                                                     />
                                                 {/if}
                                             {:catch}
@@ -473,7 +473,7 @@ onDestroy(() => {
                                             {#if $hasLightningWallet && !message.lightningInvoice.isPaid}
                                                 <button
                                                     onclick={() => payLightningInvoice(message)}
-                                                    class="transition-all bg-linear-to-bl from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-500  hover:shadow-xl duration-300 rounded-md px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow"
+                                                    class="transition-all bg-gradient-to-bl from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-500  hover:shadow-xl duration-300 rounded-md px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow"
                                                 >
                                                     Pay {message.lightningInvoice.amount} sats
                                                 </button>
@@ -521,7 +521,7 @@ onDestroy(() => {
 {#if showMessageMenu}
     <button
         type="button"
-        class="fixed inset-0 backdrop-blur-xs z-10"
+        class="fixed inset-0 backdrop-blur-sm z-10"
         onclick={handleOutsideClick}
         onkeydown={(e) => e.key === 'Escape' && handleOutsideClick()}
         aria-label="Close message menu"
@@ -530,7 +530,7 @@ onDestroy(() => {
 
 <div
     id="messageMenu"
-    class="{showMessageMenu ? 'visible' : 'invisible'} fixed bg-gray-900/90 backdrop-blur-xs drop-shadow-md drop-shadow-black py-1 px-2 rounded-full ring-1 ring-gray-700 z-30 translate-x-0"
+    class="{showMessageMenu ? 'visible' : 'invisible'} fixed bg-gray-900/90 backdrop-blur-sm drop-shadow-md drop-shadow-black py-1 px-2 rounded-full ring-1 ring-gray-700 z-30 translate-x-0"
     style="left: {messageMenuPosition.x}px; top: {messageMenuPosition.y}px;"
     role="menu"
 >
@@ -545,7 +545,7 @@ onDestroy(() => {
 
 <div
     id="messageMenuExtended"
-    class="{showMessageMenu ? 'opacity-100 visible' : 'opacity-0 invisible'} fixed bg-gray-900/90 backdrop-blur-xs drop-shadow-md drop-shadow-black rounded-md ring-1 ring-gray-700 z-30 translate-x-0 transition-opacity duration-200"
+    class="{showMessageMenu ? 'opacity-100 visible' : 'opacity-0 invisible'} fixed bg-gray-900/90 backdrop-blur-sm drop-shadow-md drop-shadow-black rounded-md ring-1 ring-gray-700 z-30 translate-x-0 transition-opacity duration-200"
     style="left: {messageMenuExtendedPosition.x}px; top: {messageMenuExtendedPosition.y}px;"
     role="menu"
 >

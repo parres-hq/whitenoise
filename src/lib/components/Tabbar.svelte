@@ -5,9 +5,9 @@ let { activeTab = $bindable("chats") }: { activeTab: string } = $props();
 </script>
 
 <nav
-    class="fixed inset-x-0 bottom-0 border-t border-gray-700 py-4 min-w-96 overflow-hidden md:hidden bg-gray-950/80 backdrop-blur-xs z-10 pb-safe-bottom"
+    class="fixed inset-x-0 bottom-0 border-t border-gray-700 py-4 min-w-96 overflow-hidden md:hidden bg-gray-950/80 backdrop-blur-sm z-10 pb-safe-bottom"
 >
-    <div class="max-w-(--breakpoint-xl) mx-auto px-4 flex justify-around items-center">
+    <div class="max-w-screen-xl mx-auto px-4 flex justify-around items-center">
         <a href="/chats">
             <span class="tabbar-link {activeTab === 'chats' ? 'active' : ''}">
                 <ChatCircle size={30} weight={activeTab === "chats" ? "fill" : "light"} />

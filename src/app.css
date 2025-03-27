@@ -1,8 +1,7 @@
-@import "tailwindcss";
-@import "../static/styles/colors.css";
-@import "../static/styles/fonts.css";
-@import "../static/styles/forms.css";
-@import "../static/styles/settings.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
     font-family: "OverusedGrotesk", Helvetica, Arial, sans-serif;
     font-synthesis: none;
@@ -16,13 +15,91 @@
     --sar: env(safe-area-inset-right);
 }
 
-@theme {
-    /* Padding for safe areas on iOS */
-    /* TODO: Verify these are needed still */
-    --padding-safe-top: calc(env(safe-area-inset-top) + 16px);
-    --padding-safe-bottom: env(safe-area-inset-bottom);
-    --padding-safe-left: env(safe-area-inset-left);
-    --padding-safe-right: env(safe-area-inset-right);
+:root,
+html,
+body {
+    @apply text-gray-50 bg-gray-900 text-[16px] md:text-[14px];
+}
+
+@supports (font-variation-settings: normal) {
+    :root {
+        font-family: InterVariable, sans-serif;
+    }
+}
+
+/* Always dark mode */
+@media (prefers-color-scheme: dark) {
+    :root,
+    html,
+    body {
+        @apply text-gray-50 bg-gray-900 text-[16px] md:text-[14px];
+    }
+}
+
+html {
+    -moz-text-size-adjust: none;
+    -webkit-text-size-adjust: none;
+    text-size-adjust: none;
+    overscroll-behavior: none;
+}
+
+.field-error {
+    @apply text-red-500 font-medium text-sm;
+}
+
+.button-primary {
+    @apply px-3 py-1.5 text-center flex flex-row shrink items-center justify-center gap-2 bg-blue-700 hover:bg-blue-600 rounded-md ring-1 ring-blue-500;
+}
+
+.button-warning {
+    @apply px-3 py-1.5 text-center flex flex-row shrink items-center justify-center gap-2 bg-red-700 hover:bg-red-600 rounded-md ring-1 ring-red-500;
+}
+
+.button-outline {
+    @apply px-3 py-1.5 text-center flex flex-row items-center justify-center gap-2 rounded-md bg-gray-700 hover:bg-gray-600 ring-1 ring-gray-500;
+}
+
+.section {
+    @apply ring-1 ring-gray-700 rounded-md bg-gray-800/50 px-4 py-2 mb-8;
+}
+
+.section-title {
+    @apply text-xl font-semibold mb-4;
+}
+
+.section-list-item {
+    @apply my-2;
+}
+
+:first-child.section-list-item {
+    @apply mt-0;
+}
+
+:last-child.section-list-item {
+    @apply mb-0;
+}
+
+:not(:last-child).section-list-item > .row-button {
+    @apply border-b border-gray-700;
+}
+
+.section-list-item > .row-button {
+    @apply flex flex-row gap-2 items-center font-medium text-lg p-2 w-full hover:bg-gray-600/30;
+}
+
+@supports not (-webkit-touch-callout: none) {
+    /* Android specific styles */
+    .pt-safe-top {
+        padding-top: max(16px, var(--sat, 16px));
+        margin-top: max(8px, var(--sat, 8px));
+    }
+    .pb-safe-bottom {
+        padding-bottom: max(8px, var(--sab, 8px));
+    }
+}
+
+.break-words-smart {
+    word-break: break-word;
 }
 
 a {
