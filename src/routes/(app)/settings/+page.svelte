@@ -2,8 +2,8 @@
 import { goto } from "$app/navigation";
 import Alert from "$lib/components/Alert.svelte";
 import Avatar from "$lib/components/Avatar.svelte";
+import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import Header from "$lib/components/Header.svelte";
-import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
 import {
     type Account,
     LogoutError,
@@ -28,19 +28,20 @@ import {
     requestPermission,
     sendNotification,
 } from "@tauri-apps/plugin-notification";
-import {
-    Bell,
-    CaretRight,
-    CopySimple,
-    HardDrives,
-    Key,
-    Lightning,
-    PlusCircle,
-    SignIn,
-    Skull,
-    Trash,
-    UserPlus,
-} from "phosphor-svelte";
+import { ChevronRight } from "carbon-icons-svelte";
+import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
+import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
+import Logout from "carbon-icons-svelte/lib/Logout.svelte";
+import Notification from "carbon-icons-svelte/lib/Notification.svelte";
+import Password from "carbon-icons-svelte/lib/Password.svelte";
+import Satellite from "carbon-icons-svelte/lib/Satellite.svelte";
+import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
+import User from "carbon-icons-svelte/lib/User.svelte";
+import Wallet from "carbon-icons-svelte/lib/Wallet.svelte";
+
+import { cubicInOut } from "svelte/easing";
+import { slide } from "svelte/transition";
+
 import { onDestroy, onMount } from "svelte";
 
 let showDeleteAlert = $state(false);
@@ -50,6 +51,12 @@ let showLogin = $state(false);
 let nsecOrHex = $state("");
 let showLoginError = $state(false);
 let loginError = $state("");
+
+let showProfileSection = $state(true);
+let showPrivacySection = $state(false);
+let showDeveloperSection = $state(false);
+
+let slideParams = { duration: 300, easing: cubicInOut };
 
 let unlisten: UnlistenFn;
 
@@ -203,49 +210,37 @@ async function toggleInspectInvites() {
     }
 }
 
-async function copyNsec(account: Account) {
-    try {
-        const nsec = await invoke("export_nsec", { pubkey: account.pubkey });
-        if (await copyToClipboard(nsec as string, "nsec")) {
-            highlightButton(`[id="nsec-copy-${account.pubkey}"]`);
-        } else {
-            toastCopyErrorMessage("nsec");
-        }
-    } catch (e) {
-        console.error(e);
-        toastState.add(
-            "Error exporting nsec",
-            "There was an error exporting your nsec, please try again.",
-            "error"
-        );
+function toggleProfileSection() {
+    if (showProfileSection) {
+        return;
+    }
+    showProfileSection = !showProfileSection;
+    if (showProfileSection) {
+        showPrivacySection = false;
+        showDeveloperSection = false;
     }
 }
 
-async function copyNpub(account: Account) {
-    const npub = npubFromPubkey(account.pubkey);
-    if (await copyToClipboard(npub, "npub")) {
-        highlightButton(`[id="npub-copy-${account.pubkey}"]`);
-    } else {
-        toastCopyErrorMessage("npub");
+function togglePrivacySection() {
+    if (showPrivacySection) {
+        return;
+    }
+    showPrivacySection = !showPrivacySection;
+    if (showPrivacySection) {
+        showProfileSection = false;
+        showDeveloperSection = false;
     }
 }
 
-function highlightButton(selector: string) {
-    const button = document.querySelector(selector);
-    if (!button) return;
-
-    button.classList.add("text-green-500");
-    setTimeout(() => {
-        button.classList.remove("text-green-500");
-    }, 1000);
-}
-
-function toastCopyErrorMessage(errorMessage: string) {
-    toastState.add(
-        `Error copying ${errorMessage}`,
-        `There was an error copying your ${errorMessage}, please try again.`,
-        "error"
-    );
+function toggleDeveloperSection() {
+    if (showDeveloperSection) {
+        return;
+    }
+    showDeveloperSection = !showDeveloperSection;
+    if (showDeveloperSection) {
+        showProfileSection = false;
+        showPrivacySection = false;
+    }
 }
 </script>
 
@@ -306,199 +301,152 @@ function toastCopyErrorMessage(errorMessage: string) {
     />
 {/if}
 
-<HeaderToolbar>
-    {#snippet center()}
-        <h1>Settings</h1>
-    {/snippet}
-</HeaderToolbar>
+<Header>
+    <div class="flex flex-row gap-4 items-center">
+        <button class="header-back-button" onclick={() => goto("/chats")} aria-label="Back to chats">
+            <ChevronLeft size={24} />
+        </button>
+        <h1 class="header-title">Settings</h1>
+    </div>
+</Header>
 
-<Header title="Settings" />
-<main class="px-4 flex flex-col pb-32">
-    <h2 class="section-title">Accounts</h2>
-    <div class="section w-full">
-        {#each $accounts as account (account.pubkey)}
-            <div class="flex flex-row gap-4 items-center border-b border-gray-700 py-3 min-w-0 w-full">
-                <div class="flex flex-row items-center flex-1 min-w-0">
-                    <button
-                      onclick={() => setActiveAccount(account.pubkey)}
-                    >
-                      <Avatar
-                          pubkey={account.pubkey}
-                          picture={account.metadata?.picture}
-                          pxSize={40}
-                          showRing={$activeAccount?.pubkey === account.pubkey}
-                      />
-                    </button>
-                    <div class="flex flex-col gap-1 min-w-0 justify-start text-left pl-4 truncate">
-                        <div class="truncate">
-                            {nameFromMetadata(account.metadata, account.pubkey)}
-                        </div>
-                        <div class="flex gap-2 items-center">
-                          <p class="font-mono truncate">
-                            {npubFromPubkey(account.pubkey)}
-                          </p>
-                          <button
-                            class="transition-colors duration-200"
-                            id={`npub-copy-${account.pubkey}`}
-                            onclick={() => copyNpub(account)}
-                          >
-                            <CopySimple size={24} />
-                          </button>
-                        </div>
+<main class="px-4 py-6 flex flex-col gap-4">
+    <div onclick={toggleProfileSection} onkeydown={(e) => {
+        if (e.key === "Enter") toggleProfileSection()
+    }} tabindex="0" role="button" class="section-title-button">
+        <h2 class="section-title">Profile</h2>
+        {#if showProfileSection}
+            <button class="text-muted-foreground-light dark:text-muted-foreground-dark" onclick={() => console.log("open new profile sheet")} aria-label="Add a profile">
+                <AddLarge size={24} />
+            </button>
+        {/if}
+    </div>
+    {#if showProfileSection}
+        <div class="overflow-hidden p-0 m-0" transition:slide={slideParams}>
+            <div class="flex flex-row gap-3 items-center min-w-0 w-full">
+                <button
+                    onclick={() => setActiveAccount($activeAccount!.pubkey)}
+                >
+                    <Avatar
+                        pubkey={$activeAccount!.pubkey}
+                        picture={$activeAccount!.metadata?.picture}
+                        pxSize={56}
+                    />
+                </button>
+                <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate">
+                    <div class="truncate text-lg font-medium">
+                        {nameFromMetadata($activeAccount!.metadata, $activeAccount!.pubkey)}
+                    </div>
+                    <div class="flex gap-4 items-center">
+                        <FormattedNpub npub={npubFromPubkey($activeAccount!.pubkey)} showCopy={true} />
                     </div>
                 </div>
-                <button
-                  class="export-nsec-butto min-w-fit text-sm button-outline shrink-0 transition-colors duration-200"
-                  id={`nsec-copy-${account.pubkey}`}
-                  onclick={() => copyNsec(account)}
-                >
-                  Copy nsec
-                </button>
-                <button class="min-w-fit text-sm button-outline shrink-0" onclick={() => handleLogout(account.pubkey)}>
-                    Log out
-                </button>
             </div>
-        {/each}
-        <div class="section-list-item mt-6!">
-            <button onclick={() => (showLogin = !showLogin)} class="button-primary">
-                <UserPlus size={24} />
-                Add another account
-            </button>
+
+            <ul class="section-list">
+                <li class="section-list-item">
+                    <a href="/settings/profile/" class="row-button">
+                        <div class="row-button-content">
+                            <User size={24} class="shrink-0"/>
+                            <span>Edit profile</span>
+                        </div>
+                        <ChevronRight size={24} class="icon-right"/>
+                    </a>
+                </li>
+                <li class="section-list-item">
+                    <a href="/settings/nostr-keys/" class="row-button">
+                        <div class="row-button-content">
+                            <Password size={24} class="shrink-0"/>
+                            <span>Nostr keys</span>
+                        </div>
+                        <ChevronRight size={24} class="icon-right"/>
+                    </a>
+                </li>
+                <li class="section-list-item">
+                    <a href="/settings/network/" class="row-button">
+                        <div class="row-button-content">
+                            <Satellite size={24} class="shrink-0"/>
+                            <span>Network</span>
+                        </div>
+                        <ChevronRight size={24} class="icon-right"/>
+                    </a>
+                </li>
+                <li class="section-list-item">
+                    <a href="/settings/wallet/" class="row-button">
+                        <div class="row-button-content">
+                            <Wallet size={24} class="shrink-0"/>
+                            <span>Wallet</span>
+                        </div>
+                        <ChevronRight size={24} class="icon-right"/>
+                    </a>
+                </li>
+                <li class="section-list-item">
+                    <button onclick={() => handleLogout($activeAccount!.pubkey)} class="row-button">
+                        <div class="row-button-content">
+                            <Logout size={24} class="shrink-0"/>
+                            <span>Sign out</span>
+                        </div>
+                    </button>
+                </li>
+            </ul>
         </div>
-        <div class="{showLogin ? 'flex' : 'hidden'} flex-col gap-8 items-start w-full mt-4 py-4">
-            <div class="flex flex-col gap-4 items-start w-full">
-                <label for="nsec" class="flex flex-col gap-2 text-lg items-start font-medium w-full">
-                    Add another account?
-                    <input
-                        type="password"
-                        id="nsec"
-                        bind:value={nsecOrHex}
-                        placeholder="nsec1&hellip;"
-                        autocapitalize="off"
-                        autocorrect="off"
-                        class="w-full px-3 py-2 bg-transparent ring-1 ring-gray-700 rounded-md"
-                    />
-                </label>
-                {#if showLoginError}
-                    <span class="text-red-500 text-sm">
-                        {loginError}
-                    </span>
-                {/if}
-                <button type="submit" onclick={handleLogin} class="button-primary w-full justify-start!">
-                    <SignIn size="20" />
-                    Log In
-                </button>
-            </div>
-            <button onclick={handleCreateAccount} class="button-outline w-full justify-start!">
-                <PlusCircle size="20" />
-                Create New Nostr Identity
-            </button>
-        </div>
-    </div>
-    <h2 class="section-title">Privacy & Security</h2>
-    <div class="section">
-        <ul class="section-list">
-            <!-- <li class="section-list-item">
-                <button onclick={() => goto("/settings/lockdown/")} class="row-button">
-                    <Lock size={24} />
-                    <span>Lockdown Mode</span>
-                    <CaretRight size={24} class="ml-auto mr-0" />
-                </button>
-            </li> -->
-            <li class="section-list-item">
-                <button onclick={deleteAll} class="row-button">
-                    <Skull size={24} />
-                    <span>Delete all data</span>
-                </button>
-            </li>
-        </ul>
+    {/if}
+
+    <div onclick={togglePrivacySection} onkeydown={(e) => {
+        if (e.key === "Enter") togglePrivacySection()
+    }} tabindex="0" role="button" class="section-title-button">
+        <h2 class="section-title">Privacy & Security</h2>
     </div>
 
-    <h2 class="section-title">Developer Settings</h2>
-    <div class="section">
-        <ul class="section-list">
-            <li class="section-list-item">
-                <button onclick={() => goto("/settings/network/")} class="row-button">
-                    <HardDrives size={24} class="shrink-0" />
-                    <span>Network</span>
-                    <CaretRight size={24} class="ml-auto mr-0 shrink-0" />
-                </button>
-            </li>
-            <li class="section-list-item">
-                <button onclick={() => goto("/settings/lightning/")} class="row-button">
-                    <Lightning size={24} class="shrink-0" />
-                    <span>Lightning</span>
-                    <CaretRight size={24} class="ml-auto mr-0 shrink-0" />
-                </button>
-            </li>
-            <li class="section-list-item">
-                <button onclick={launchKeyPackage} class="row-button">
-                    <Key size={24} />
-                    <span>Publish a Key Package</span>
+    {#if showPrivacySection}
+        <div class="overflow-hidden p-0 m-0" transition:slide={slideParams}>
+            <ul class="section-list">
+                <li class="section-list-item">
+                    <button onclick={deleteAll} class="row-button">
+                    <div class="row-button-content">
+                        <TrashCan size={24} class="shrink-0"/>
+                        <span>Delete all data</span>
+                    </div>
+                    </button>
+                </li>
+            </ul>
+        </div>
+    {/if}
+
+    <div onclick={toggleDeveloperSection} onkeydown={(e) => {
+        if (e.key === "Enter") toggleDeveloperSection()
+    }} tabindex="0" role="button" class="section-title-button">
+        <h2 class="section-title">Developer Settings</h2>
+    </div>
+
+    {#if showDeveloperSection}
+        <div class="overflow-hidden p-0 m-0" transition:slide={slideParams}>
+            <ul class="section-list">
+                <li class="section-list-item">
+                    <button onclick={launchKeyPackage} class="row-button">
+                    <div class="row-button-content">
+                        <Password size={24} class="shrink-0"/>
+                        <span>Publish a key package</span>
+                    </div>
                 </button>
             </li>
             <li class="section-list-item">
                 <button onclick={deleteAllKeyPackages} class="row-button">
-                    <Trash size={24} class="shrink-0" />
-                    <span class="truncate">Send delete requests for all key packages</span>
+                    <div class="row-button-content">
+                        <TrashCan size={24} class="shrink-0"/>
+                        <span>Delete all key packages</span>
+                    </div>
                 </button>
             </li>
-
             <li class="section-list-item">
                 <button onclick={testNotification} class="row-button">
-                    <Bell size={24} class="shrink-0" />
-                    <span class="truncate">Test Notification</span>
-                </button>
-            </li>
-
-            <!-- <li class="section-list-item">
-                <button onclick={toggleInspectAccounts} class="row-button">
-                    <UserFocus size={24} />
-                    <span>Inspect Accounts</span>
-                    {#if showAccountsState}
-                        <CaretDown size={24} class="ml-auto mr-0" />
-                    {:else}
-                        <CaretRight size={24} class="ml-auto mr-0" />
-                    {/if}
-                </button>
-                {#if showAccountsState}
-                    <div class="flex flex-col gap-4 items-start w-full mt-4 p-4">
-                        <pre class="whitespace-pre overflow-x-auto w-full">{accountsState}</pre>
+                    <div class="row-button-content">
+                        <Notification size={24} class="shrink-0"/>
+                        <span>Test notifications</span>
                     </div>
-                {/if}
-            </li>
-            <li class="section-list-item">
-                <button onclick={toggleInspectInvites} class="row-button">
-                    <Envelope size={24} />
-                    <span>Inspect Invites</span>
-                    {#if showInvitesState}
-                        <CaretDown size={24} class="ml-auto mr-0" />
-                    {:else}
-                        <CaretRight size={24} class="ml-auto mr-0" />
-                    {/if}
                 </button>
-                {#if showInvitesState}
-                    <div class="flex flex-col gap-4 items-start w-full mt-4 p-4">
-                        <pre class="whitespace-pre overflow-x-auto w-full">{invitesState}</pre>
-                    </div>
-                {/if}
-            </li>
-            <li class="section-list-item">
-                <button onclick={toggleInspectGroups} class="row-button">
-                    <Users size={24} />
-                    <span>Inspect Groups</span>
-                    {#if showGroupsState}
-                        <CaretDown size={24} class="ml-auto mr-0" />
-                    {:else}
-                        <CaretRight size={24} class="ml-auto mr-0" />
-                    {/if}
-                </button>
-                {#if showGroupsState}
-                    <div class="flex flex-col gap-4 items-start w-full mt-4 p-4">
-                        <pre class="whitespace-pre overflow-x-auto w-full">{groupsState}</pre>
-                    </div>
-                {/if}
-            </li> -->
-        </ul>
-    </div>
+                </li>
+            </ul>
+        </div>
+    {/if}
 </main>

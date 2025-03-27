@@ -7,9 +7,8 @@ interface Props {
     picture?: string;
     pubkey: string;
     pxSize?: number;
-    showRing?: boolean;
 }
-let { pubkey, picture, pxSize = 32, showRing = false }: Props = $props();
+let { pubkey, picture, pxSize = 32 }: Props = $props();
 
 let user: EnrichedContact | undefined = $state(undefined);
 let avatarImage: string | undefined = $state(picture);
@@ -32,10 +31,7 @@ $effect(() => {
 </script>
 
 <div
-    class="flex flex-col items-center justify-center rounded-full bg-gray-900 {$activeAccount?.pubkey === pubkey &&
-    showRing
-        ? 'ring-4 ring-blue-600 ring-offset-2 ring-offset-gray-900'
-        : ''}"
+    class="flex flex-col items-center justify-center rounded-full bg-gray-900"
     style="width: {pxSize}px; height: {pxSize}px; min-width: {pxSize}px; min-height: {pxSize}px;"
 >
     {#if avatarImage}

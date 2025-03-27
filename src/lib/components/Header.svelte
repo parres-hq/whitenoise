@@ -1,10 +1,8 @@
 <script lang="ts">
-interface Props {
-    title: string;
-}
-let { title }: Props = $props();
+import type { Snippet } from "svelte";
+let { children }: { children?: Snippet } = $props();
 </script>
 
-<div class="flex flex-row justify-between items-center px-4">
-    <h1 class="text-4xl font-extrabold pb-6">{title}</h1>
+<div class="sticky top-0 left-0 right-0 flex flex-row items-center gap-2 justify-between p-4 pt-16 bg-primary-light dark:bg-primary-dark">
+    {@render children?.()}
 </div>

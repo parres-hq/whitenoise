@@ -51,12 +51,3 @@ function handleAccountChange(pubkey: string) {
         </div>
     </div>
 </div>
-
-<style lang="postcss">
-    .sidebar-link {
-        @apply flex flex-row items-center font-medium text-lg gap-2;
-    }
-    .sidebar-link.active {
-        @apply text-blue-500;
-    }
-</style>

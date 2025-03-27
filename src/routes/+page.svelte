@@ -21,12 +21,16 @@ onMount(async () => {
 });
 </script>
 
-<div class="flex flex-col items-center justify-center w-screen h-dvh bg-gray-800">
-    <div class="bg-gray-800 w-full md:w-1/2 h-2/3 flex flex-col items-center justify-center gap-6 py-12 px-6">
-        <img src="whitenoise-login-logo2.png" alt="logo" class="w-32 lg:w-40" />
-        <h2 class="text-xl lg:text-2xl font-medium text-center">Secure. Distributed. Uncensorable.</h2>
-        <div class="h-[40px]">
-            <Loader size={40} fullscreen={false} />
+<div class="flex flex-col items-center w-screen h-dvh">
+    <div class="w-full h-2/3 flex flex-col items-center bg-background-light dark:bg-background-dark">
+        <div class="relative w-full h-full">
+            <img src="images/login-splash.webp" alt="login splash" class="w-full h-full object-cover animate-pulse" />
+            <div class="absolute inset-0 bg-gradient-to-t from-background-light dark:from-background-dark via-transparent from-10% to-transparent"></div>
+        </div>
+        <div class="flex flex-col self-start mx-4 text-foreground-light dark:text-foreground-dark">
+            <h2 class="text-5xl font-normal">Welcome to</h2>
+            <h1 class="text-5xl font-semibold">White Noise</h1>
+            <p class="text-xl mt-4 font-normal text-muted-foreground-light dark:text-muted-foreground-dark">Secure. Distributed. Uncensorable.</p>
         </div>
     </div>
 </div>

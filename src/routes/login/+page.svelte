@@ -1,6 +1,6 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
-import Loader from "$lib/components/Loader.svelte";
+import Button from "$lib/components/Button.svelte";
 import {
     LoginError,
     activeAccount,
@@ -54,11 +54,12 @@ onDestroy(() => {
     unlistenNostrReady?.();
 });
 
-async function handleLogin(e: Event) {
-    e.preventDefault();
+async function handleLogin() {
+    console.log("clicked login");
     if (loading) return;
     loading = true;
     login(nsecOrHex).catch((error) => {
+        console.log("login error", error);
         loginError = error;
         loading = false;
     });
@@ -74,43 +75,24 @@ async function handleCreateAccount() {
 }
 </script>
 
-<div class="flex flex-col items-center justify-center w-screen h-dvh bg-gray-800" transition:fly={flyParams}>
-    <div class="bg-gray-800 w-full h-2/3 flex flex-col items-center justify-center gap-6 py-12 px-6">
-        <img src="whitenoise-login-logo2.png" alt="logo" class="w-32 lg:w-40" />
-        <h2 class="text-xl lg:text-2xl font-medium text-center">Secure. Distributed. Uncensorable.</h2>
-        <div class="h-[40px]">
-            {#if loading}
-                <Loader size={40} fullscreen={false} />
-            {/if}
+<div class="flex flex-col items-center w-screen h-dvh bg-background-light dark:bg-background-dark" transition:fly={flyParams}>
+    <div class="w-full h-2/3 flex flex-col items-center bg-background-light dark:bg-background-dark">
+        <div class="relative w-full h-full">
+            <img src="images/login-splash.webp" alt="login splash" class="w-full h-full object-cover {loading ? 'animate-pulse' : ''}" />
+            <div class="absolute inset-0 bg-gradient-to-t from-background-light dark:from-background-dark via-transparent from-10% to-transparent"></div>
         </div>
-        <form onsubmit={handleLogin} class="w-full md:w-4/5 flex flex-col gap-4">
-            <input
-                bind:value={nsecOrHex}
-                type="password"
-                placeholder="nsec1&hellip;"
-                autocorrect="off"
-                autocapitalize="off"
-                class="text-lg px-3 py-2 bg-transparent ring-1 ring-gray-700 rounded-md"
-            />
-            {#if loginError}
-                <p class="text-red-500">{loginError.message}</p>
-            {/if}
-            <button
-                type="submit"
-                disabled={loading}
-                class="p-3 font-semibold bg-blue-700 hover:bg-blue-600 rounded-md ring-1 ring-blue-500"
-            >
-                Log In
-            </button>
-        </form>
-
-        <h3 class="font-semibold text-gray-400">OR</h3>
-        <button
-            disabled={loading}
-            class="p-3 w-full md:w-4/5 font-semibold bg-indigo-700 hover:bg-indigo-600 rounded-md ring-1 ring-indigo-500"
-            onclick={handleCreateAccount}
-        >
-            Create a new Nostr identity
-        </button>
+        <div class="flex flex-col self-start mx-4 text-foreground-light dark:text-foreground-dark">
+            <h2 class="text-5xl font-normal">Welcome to</h2>
+            <h1 class="text-5xl font-semibold">White Noise</h1>
+            <p class="text-xl mt-4 font-normal text-muted-foreground-light dark:text-muted-foreground-dark">Secure. Distributed. Uncensorable.</p>
+        </div>
+        <div class="flex flex-col gap-4 w-full px-4 mt-18">
+            <Button size="lg" handleClick={handleLogin} disabled={loading} >
+                Sign in with Nostr key
+            </Button>
+            <Button size="lg" variant="ghost" handleClick={handleCreateAccount} disabled={loading}>
+                Create a new Nostr key
+            </Button>
+        </div>
     </div>
 </div>

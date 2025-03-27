@@ -28,12 +28,3 @@ let { activeTab = $bindable("chats") }: { activeTab: string } = $props();
         </a>
     </div>
 </nav>
-
-<style lang="postcss">
-    .tabbar-link {
-        @apply flex flex-col items-center font-medium  gap-2 text-sm;
-    }
-    .tabbar-link.active {
-        @apply text-blue-500;
-    }
-</style>
