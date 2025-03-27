@@ -2,7 +2,6 @@
 import { goto } from "$app/navigation";
 import Button from "$lib/components/Button.svelte";
 import Header from "$lib/components/Header.svelte";
-import Loader from "$lib/components/Loader.svelte";
 import {
     NostrWalletConnectError,
     getNostrWalletConnectBalance,
@@ -23,6 +22,7 @@ let error = $state("");
 let loading = $state(false);
 let balanceLoading = $state(false);
 
+// TODO: Show errors to the user if something goes wrong loading things
 async function checkWalletStatus() {
     try {
         hasWallet = await hasNostrWalletConnectUri();
@@ -137,54 +137,6 @@ onMount(() => {
             <Button size="lg" handleClick={handleSetWallet} disabled={!nwcUri || loading}>Connect Wallet</Button>
         </div>
     {/if}
-
-    <!-- <section class="flex flex-col gap-4">
-        <h2 class="section-title flex items-center gap-2">
-            <Lightning size={24} weight="bold" />
-            Nostr Wallet Connect
-        </h2>
-
-        {#if error}
-            <div class="text-red-500 text-sm">{error}</div>
-        {/if}
-
-        {#if hasWallet}
-            <div class="flex flex-col gap-4">
-                <p class="text-green-500">
-                    You have already configured your Nostr Wallet Connect
-                </p>
-                <button
-                    class="flex flex-row gap-2 items-center px-2 py-3 hover:bg-gray-700 w-full"
-                    onclick={handleRemoveWallet}
-                    disabled={loading}
-                >
-                    {loading ? 'Removing...' : 'Remove Wallet Connection'}
-                </button>
-            </div>
-        {:else}
-            <div class="flex flex-col gap-4">
-                <div class="form-control w-full">
-                    <label class="label" for="nwc-uri">
-                        <span class="label-text">Nostr Wallet Connect URI</span>
-                    </label>
-                    <input
-                        type="text"
-                        id="nwc-uri"
-                        class="w-full bg-transparent border-gray-700 rounded-md"
-                        placeholder="nostr+walletconnect://"
-                        bind:value={nwcUri}
-                    />
-                </div>
-                <button
-                    class="flex flex-row gap-2 items-center px-2 py-3 hover:bg-gray-700 w-full"
-                    onclick={handleSetWallet}
-                    disabled={!nwcUri || loading}
-                >
-                    {loading ? 'Saving...' : 'Save Wallet Connection'}
-                </button>
-            </div>
-        {/if}
-    </section> -->
 </main>
 
 
