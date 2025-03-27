@@ -30,7 +30,7 @@ const variantStyles = {
     destructive:
         "bg-destructive-light dark:bg-destructive-dark hover:bg-destructive-light/90 dark:hover:bg-destructive-dark/90 text-destructive-foreground-light dark:text-destructive-foreground-dark",
     outline:
-        "border border-input bg-background-light dark:bg-background-dark hover:bg-accent-light dark:hover:bg-accent-dark text-primary-foreground-light dark:text-primary-foreground-dark",
+        "border border-input bg-transparent hover:bg-accent-light dark:hover:bg-accent-dark text-primary-background-light dark:text-primary-background-dark",
     ghost: "bg-transparent hover:bg-accent-light dark:hover:bg-accent-dark text-primary-light dark:text-primary-dark",
     link: "bg-transparent hover:bg-accent-light dark:hover:bg-accent-dark text-primary-light dark:text-primary-dark",
 };
@@ -46,7 +46,7 @@ const classes = $derived(`
     transition-colors flex flex-row items-center justify-center gap-2 font-medium
     ${variantStyles[variant]}
     ${sizeStyles[size]}
-    ${disabled ? "opacity-90 cursor-not-allowed" : ""}
+    ${disabled ? "opacity-80 cursor-not-allowed!" : ""}
 `);
 </script>
 

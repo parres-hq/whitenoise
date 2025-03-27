@@ -146,7 +146,7 @@ onDestroy(() => {
 </script>
 
 <Header>
-    <a href="/settings">
+    <a href="/settings" class="no-underline">
         <Avatar pubkey={$activeAccount!.pubkey} />
     </a>
     <div class="flex flex-row items-center gap-6">

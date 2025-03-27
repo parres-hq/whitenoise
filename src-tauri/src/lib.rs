@@ -107,6 +107,7 @@ pub fn run() {
             has_nostr_wallet_connect_uri,
             set_nostr_wallet_connect_uri,
             remove_nostr_wallet_connect_uri,
+            get_nostr_wallet_connect_balance,
             get_group,
             get_group_and_messages,
             get_group_members,

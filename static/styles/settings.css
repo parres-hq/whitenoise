@@ -16,7 +16,7 @@
 
 .section-list-item > button,
 .section-list-item > a {
-    @apply flex flex-row justify-between items-center py-4 w-full;
+    @apply flex flex-row justify-between items-center py-4 w-full no-underline;
 }
 
 .row-button-content {

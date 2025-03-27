@@ -1,29 +1,19 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
 import Header from "$lib/components/Header.svelte";
-import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
 import { colorForRelayStatus, relays } from "$lib/stores/accounts";
-import { CaretLeft } from "phosphor-svelte";
+import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
 import { HardDrives } from "phosphor-svelte";
-
-function goBack() {
-    goto("/settings");
-}
 </script>
 
-<HeaderToolbar>
-    {#snippet left()}
-        <button class="flex flex-row gap-0.5 items-center" onclick={goBack}>
-            <CaretLeft size={24} weight="bold" />
-            <span class="font-medium text-lg">Back</span>
+<Header>
+    <div class="flex flex-row gap-4 items-center">
+        <button class="header-back-button" onclick={() => goto("/settings")} aria-label="Back to settings">
+            <ChevronLeft size={24} />
         </button>
-    {/snippet}
-    {#snippet center()}
-        <h1>Network Settings</h1>
-    {/snippet}
-</HeaderToolbar>
-
-<Header title="Network Settings" />
+        <h1 class="header-title">Network</h1>
+    </div>
+</Header>
 <main class="px-4 flex flex-col">
     <h2 class="section-title">Relays</h2>
     <div class="section">

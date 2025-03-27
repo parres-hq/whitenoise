@@ -333,11 +333,11 @@ function toggleDeveloperSection() {
                         pxSize={56}
                     />
                 </button>
-                <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate">
+                <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate w-full">
                     <div class="truncate text-lg font-medium">
                         {nameFromMetadata($activeAccount!.metadata, $activeAccount!.pubkey)}
                     </div>
-                    <div class="flex gap-4 items-center">
+                    <div class="flex gap-4 items-center w-[90%]">
                         <FormattedNpub npub={npubFromPubkey($activeAccount!.pubkey)} showCopy={true} />
                     </div>
                 </div>
