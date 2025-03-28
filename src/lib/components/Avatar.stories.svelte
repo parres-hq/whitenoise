@@ -26,29 +26,23 @@ const { Story } = defineMeta({
             control: "number",
             description: "Size of the avatar in pixels",
         },
-        showRing: {
-            control: "boolean",
-            description: "Whether to show a ring around the active account's avatar",
-        },
     },
 });
 </script>
 
-<Story 
-  name="Default" 
+<Story
+  name="Default"
   args={{
     pubkey: "7f5c2b32e5f23a",
     pxSize: 64,
-    showRing: false
-  }} 
+  }}
 />
 
-<Story 
-  name="Picture" 
+<Story
+  name="Picture"
   args={{
     pubkey: "7f5c2b32e5f23a",
     picture: "https://api.dicebear.com/7.x/avataaars/svg?seed=John&backgroundColor=ffffff",
     pxSize: 64,
-    showRing: true
-  }} 
+  }}
 />
