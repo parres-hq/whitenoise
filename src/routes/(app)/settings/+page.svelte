@@ -462,8 +462,4 @@ function toggleDeveloperSection() {
     .row-button-content {
         @apply flex flex-row gap-3 items-center;
     }
-
-    .icon-right {
-        @apply text-muted-foreground;
-    }
 </style>
