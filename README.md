@@ -78,6 +78,16 @@ Before submitting PRs, please run the commad to check formatting and linting and
 bun run check-all
 ```
 
+### Storybook
+
+To run Storybook locally to see component documentation:
+
+```sh
+bun run storybook
+```
+
+This will start Storybook on http://localhost:6006
+
 ## License
 
 White Noise is free and open source software, released under the Gnu AGPL v3 license. See the [LICENSE](LICENSE) file for details.
