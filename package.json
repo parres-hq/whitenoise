@@ -48,6 +48,7 @@
         "phosphor-svelte": "^3.0.1",
         "postcss": "^8.5.1",
         "@storybook/addon-essentials": "8.6.7",
+        "@storybook/addon-themes": "8.6.7",
         "@storybook/addon-svelte-csf": "^5.0.0-next.28",
         "@storybook/blocks": "8.6.7",
         "@storybook/svelte": "8.6.7",

@@ -21,6 +21,7 @@
         "@biomejs/biome": "1.9.4",
         "@storybook/addon-essentials": "8.6.7",
         "@storybook/addon-svelte-csf": "^5.0.0-next.28",
+        "@storybook/addon-themes": "8.6.7",
         "@storybook/blocks": "8.6.7",
         "@storybook/svelte": "8.6.7",
         "@storybook/sveltekit": "8.6.7",
@@ -261,6 +262,8 @@
     "@storybook/addon-outline": ["@storybook/addon-outline@8.6.7", "", { "dependencies": { "@storybook/global": "^5.0.0", "ts-dedent": "^2.0.0" }, "peerDependencies": { "storybook": "^8.6.7" } }, "sha512-atCpCi2CqAWQwL1nu1l5VpIA4fRMnbD4RZMsEiib1suUfNyJv0RdsSgZhp/f+e9sUS0TtMdwhzWT36eEA7VxhQ=="],
 
     "@storybook/addon-svelte-csf": ["@storybook/addon-svelte-csf@5.0.0-next.28", "", { "dependencies": { "@storybook/csf": "^0.1.11", "dedent": "^1.5.3", "es-toolkit": "^1.26.1", "esrap": "^1.2.2", "magic-string": "^0.30.12", "svelte-ast-print": "^0.4.0", "zimmerframe": "^1.1.2" }, "peerDependencies": { "@storybook/svelte": "^0.0.0-0 || ^8.2.0 || ^9.0.0-0", "@sveltejs/vite-plugin-svelte": "^4.0.0 || ^5.0.0", "storybook": "^0.0.0-0 || ^8.2.0 || ^9.0.0-0", "svelte": "^5.0.0", "vite": "^5.0.0 || ^6.0.0" } }, "sha512-Ojj6m8xEd3rlVP7PkNYv/0st4M0NZdSYWwnCowhsw3ItBasmyB8jmP5Ht2WmwH+EIUYq0mMfsRI7Rb6Yl63QbQ=="],
+
+    "@storybook/addon-themes": ["@storybook/addon-themes@8.6.7", "", { "dependencies": { "ts-dedent": "^2.0.0" }, "peerDependencies": { "storybook": "^8.6.7" } }, "sha512-8yKmeg4kdK6Jr0c5EsnlR0QJCzg/oQVe5FxC9BeRBqVWujkA17kr11f5jRwlprt+nfn/V0JPIa75kNV9bCFmeg=="],
 
     "@storybook/addon-toolbars": ["@storybook/addon-toolbars@8.6.7", "", { "peerDependencies": { "storybook": "^8.6.7" } }, "sha512-gR+mRs+Cc5GINZdKgE7afJLFCSMHkz40+zzdrPu6yY2P4B3UOvuQpt+zC/Er5YQ31EEjIvM6/XMQTM0i2db8AA=="],
 
