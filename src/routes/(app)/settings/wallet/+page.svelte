@@ -9,6 +9,7 @@ import {
     setNostrWalletConnectUri,
 } from "$lib/stores/accounts";
 import { readFromClipboard } from "$lib/utils/clipboard";
+import { invoke } from "@tauri-apps/api/core";
 import Information from "carbon-icons-svelte/lib/Information.svelte";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import ScanAlt from "carbon-icons-svelte/lib/ScanAlt.svelte";
@@ -93,7 +94,7 @@ async function handlePaste() {
 
 onMount(async () => {
     checkWalletStatus();
-    showScanButton = await isMobile();
+    showScanButton = await invoke("is_mobile");
 });
 </script>
 
@@ -125,6 +126,7 @@ onMount(async () => {
                         <ScanAlt size={16}  />
                     </button>
                 {/if}
+                <!-- TODO: Move this into a component (and use a shadcn button) so we can use it elsewhere -->
                 <button class="border border-input p-2 w-10 h-10 flex items-center justify-center" onclick={handlePaste}>
                     <Paste size={16} />
                 </button>

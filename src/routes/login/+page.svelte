@@ -1,6 +1,8 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
 import Button from "$lib/components/ui/button/button.svelte";
+import Input from "$lib/components/ui/input/input.svelte";
+import * as Sheet from "$lib/components/ui/sheet/index.js";
 import {
     LoginError,
     activeAccount,
@@ -84,9 +86,39 @@ async function handleCreateAccount() {
             <p class="text-xl mt-4 font-normal text-muted-foreground">Secure. Distributed. Uncensorable.</p>
         </div>
         <div class="flex flex-col gap-4 w-full px-4 mt-18">
-            <Button size="lg" variant="default" onclick={handleLogin} disabled={loading} >
-                Sign in with Nostr key
-            </Button>
+            <Sheet.Root onOpenChange={(open) => {
+                if (!open) {
+                    loginError = null;
+                    nsecOrHex = "";
+                }
+            }}>
+                <Sheet.Trigger>
+                    <Button variant="default">Sign in with Nostr key</Button>
+                </Sheet.Trigger>
+                <Sheet.Content side="bottom">
+                    <Sheet.Header class="text-left mb-8">
+                        <Sheet.Title>Sign in with your Nostr key</Sheet.Title>
+                        <Sheet.Description>
+                            Your key is encrypted and stored only on your device.
+                        </Sheet.Description>
+                    </Sheet.Header>
+                    <div class="flex flex-col gap-4">
+                        <Input
+                            bind:value={nsecOrHex}
+                            type="password"
+                            placeholder="nsec1..."
+                            autocomplete="off"
+                            autocapitalize="off"
+                            autofocus
+                            autocorrect="off"
+                        />
+                        <div class="h-8 text-sm text-destructive">
+                            {loginError?.message}
+                        </div>
+                        <Button size="lg" variant="default" onclick={handleLogin} disabled={loading}>Sign in</Button>
+                    </div>
+                </Sheet.Content>
+            </Sheet.Root>
             <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading}>
                 Create a new Nostr key
             </Button>
