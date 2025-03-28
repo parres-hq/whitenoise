@@ -8,6 +8,8 @@ import type { EnrichedContact, NEvent, NMetadata } from "../types/nostr";
  * Retrieves the display name from the given NMetadata object.
  *
  * @param metadata - The NMetadata object containing user information.
+ * @param pubkey - Optional public key to use as fallback for display name.
+ * @param truncate - Whether to truncate the npub if used as fallback (default: true).
  * @returns The display name in the following priority order:
  *          1. display_name
  *          2. name
@@ -57,6 +59,18 @@ export function isInsecure(event: NEvent): boolean {
     return insecureKinds.includes(event.kind);
 }
 
+/**
+ * Validates if a given URL is a valid WebSocket URL.
+ *
+ * @param url - The URL string to validate
+ * @returns True if the URL is a valid WebSocket URL (ws: or wss: protocol), false otherwise
+ *
+ * @remarks
+ * This function checks if the URL:
+ * - Is a valid URL format
+ * - Uses either the 'ws:' or 'wss:' protocol
+ * Returns false for any invalid URL format or non-WebSocket protocols
+ */
 export function isValidWebSocketURL(url: string): boolean {
     try {
         const wsURL = new URL(url);
@@ -66,6 +80,23 @@ export function isValidWebSocketURL(url: string): boolean {
     }
 }
 
+/**
+ * Generates a preview of the latest message in a chat conversation.
+ *
+ * @param messageId - The ID of the message to preview. If undefined, returns "New chat"
+ * @returns A formatted string containing the message preview in the format:
+ *         - "New chat" if no messageId is provided
+ *         - "You: [content]" if the message is from the current user
+ *         - "[sender name]: [content]" if the message is from another user
+ *         - Empty string if no message is found
+ *
+ * @remarks
+ * This function:
+ * - Queries the message using the provided messageId
+ * - Fetches the sender's metadata if the message is from another user
+ * - Uses the nameFromMetadata function to format the sender's name
+ * - Handles cases where the message or sender information is not available
+ */
 export async function latestMessagePreview(messageId: number | undefined): Promise<string> {
     if (!messageId) {
         return "New chat";

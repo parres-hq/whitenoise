@@ -3,18 +3,6 @@ export type HexPubkey = string & { readonly __brand: unique symbol };
 export type Npub = string & { readonly __brand: unique symbol };
 export type Nsec = string & { readonly __brand: unique symbol };
 
-export function isValidHexPubkey(value: string): value is HexPubkey {
-    return /^[a-fA-F0-9]{64}$/.test(value);
-}
-
-export function isValidNpub(value: string): value is Npub {
-    return /^npub1[a-zA-Z0-9]{59}$/.test(value);
-}
-
-export function isValidNsec(value: string): value is Nsec {
-    return /^nsec1[a-zA-Z0-9]{58}$/.test(value);
-}
-
 export type EnrichedContact = {
     metadata: NMetadata;
     nip17: boolean;

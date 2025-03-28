@@ -45,18 +45,6 @@ pub fn is_mobile() -> bool {
 /// - `"android"` when running on Android
 /// - `"ios"` when running on iOS
 /// - `"desktop"` when running on any other platform (Windows, macOS, Linux)
-///
-/// # Examples
-///
-/// ```rust
-/// let platform = is_platform();
-/// match platform.as_str() {
-///     "android" => println!("Running on Android"),
-///     "ios" => println!("Running on iOS"),
-///     "desktop" => println!("Running on desktop"),
-///     _ => unreachable!(),
-/// }
-/// ```
 #[tauri::command]
 pub fn is_platform() -> String {
     #[cfg(target_os = "android")]
