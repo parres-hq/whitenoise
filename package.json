@@ -29,7 +29,6 @@
         "@tauri-apps/plugin-shell": "^2.2.0",
         "@types/qrcode": "^1.5.5",
         "carbon-icons-svelte": "^13.3.0",
-        "lucide-svelte": "^0.485.0",
         "nostr-tools": "^2.11.0",
         "qrcode": "^1.5.4",
         "svelte-gestures": "^5.1.3"
