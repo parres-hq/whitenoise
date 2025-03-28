@@ -58,7 +58,7 @@ html {
         --secondary-foreground: var(--glitch-900);
         --accent: var(--glitch-100);
         --accent-foreground: var(--glitch-900);
-        --destructive: 0 72.2% 50.6%; /* red-50 */
+        --destructive: 0 72.2% 50.6%; /* red-600 */
         --destructive-foreground: 0 85.7% 97.3%; /* red-50 */
         --ring: var(--glitch-900);
         --radius: 0.5rem;
@@ -89,7 +89,7 @@ html {
         --secondary-foreground: var(--glitch-50);
         --accent: var(--glitch-800);
         --accent-foreground: var(--glitch-50);
-        --destructive: 0 84.2% 17.6%; /* red-900 */
+        --destructive: 0 72.2% 50.6%; /* red-600 */
         --destructive-foreground: 0 85.7% 97.3%; /* red-50 */
         --ring: var(--glitch-300);
         --sidebar-background: 240 5.9% 10%;

@@ -93,7 +93,7 @@ async function handleCreateAccount() {
                 }
             }}>
                 <Sheet.Trigger>
-                    <Button variant="default">Sign in with Nostr key</Button>
+                    <Button variant="outline" class="w-full">Sign in with Nostr key</Button>
                 </Sheet.Trigger>
                 <Sheet.Content side="bottom">
                     <Sheet.Header class="text-left mb-8">
@@ -119,7 +119,7 @@ async function handleCreateAccount() {
                     </div>
                 </Sheet.Content>
             </Sheet.Root>
-            <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading}>
+            <Button size="lg" variant="default" onclick={handleCreateAccount} disabled={loading}>
                 Create a new Nostr key
             </Button>
         </div>
