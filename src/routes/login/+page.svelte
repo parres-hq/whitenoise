@@ -1,6 +1,6 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
-import Button from "$lib/components/Button.svelte";
+import Button from "$lib/components/ui/button/button.svelte";
 import {
     LoginError,
     activeAccount,
@@ -75,22 +75,22 @@ async function handleCreateAccount() {
 }
 </script>
 
-<div class="flex flex-col items-center w-screen h-dvh bg-background-light dark:bg-background-dark" transition:fly={flyParams}>
-    <div class="w-full h-2/3 flex flex-col items-center bg-background-light dark:bg-background-dark">
+<div class="flex flex-col items-center w-screen h-dvh bg-background">
+    <div class="w-full h-2/3 flex flex-col items-center bg-background">
         <div class="relative w-full h-full">
             <img src="images/login-splash.webp" alt="login splash" class="w-full h-full object-cover {loading ? 'animate-pulse' : ''}" />
-            <div class="absolute inset-0 bg-gradient-to-t from-background-light dark:from-background-dark via-transparent from-10% to-transparent"></div>
+            <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent from-10% to-transparent"></div>
         </div>
-        <div class="flex flex-col self-start mx-4 text-foreground-light dark:text-foreground-dark">
+        <div class="flex flex-col self-start mx-4 text-foreground mb-16">
             <h2 class="text-5xl font-normal">Welcome to</h2>
             <h1 class="text-5xl font-semibold">White Noise</h1>
-            <p class="text-xl mt-4 font-normal text-muted-foreground-light dark:text-muted-foreground-dark">Secure. Distributed. Uncensorable.</p>
+            <p class="text-xl mt-4 font-normal text-muted-foreground">Secure. Distributed. Uncensorable.</p>
         </div>
         <div class="flex flex-col gap-4 w-full px-4 mt-18">
-            <Button size="lg" handleClick={handleLogin} disabled={loading} >
+            <Button size="lg" variant="default" onclick={handleLogin} disabled={loading} >
                 Sign in with Nostr key
             </Button>
-            <Button size="lg" variant="ghost" handleClick={handleCreateAccount} disabled={loading}>
+            <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading}>
                 Create a new Nostr key
             </Button>
         </div>

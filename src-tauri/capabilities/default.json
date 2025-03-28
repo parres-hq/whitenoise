@@ -7,6 +7,7 @@
         "core:default",
         "shell:allow-open",
         "clipboard-manager:allow-write-text",
+        "clipboard-manager:allow-read-text",
         "notification:allow-is-permission-granted",
         "notification:allow-request-permission",
         "notification:allow-notify",

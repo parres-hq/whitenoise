@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="bg-background-light dark:bg-background-dark">
+<html lang="en" class="">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.ico" />
@@ -7,6 +7,21 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>White Noise</title>
     %sveltekit.head%
+    <script>
+      // Check if dark mode is preferred
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.classList.add('dark');
+      }
+
+      // Listen for changes in dark mode preference
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+        if (e.matches) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      });
+    </script>
   </head>
 
   <body data-sveltekit-preload-data="hover">

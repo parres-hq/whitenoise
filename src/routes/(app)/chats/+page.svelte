@@ -146,12 +146,14 @@ onDestroy(() => {
 </script>
 
 <Header>
-    <a href="/settings" class="no-underline!">
-        <Avatar pubkey={$activeAccount!.pubkey} />
-    </a>
-    <div class="flex flex-row items-center gap-6">
-        <Search size={24} class="text-primary-dark dark:text-primary-light" />
-        <AddLarge size={24} class="text-primary-dark dark:text-primary-light" />
+    <div class="flex flex-row items-center justify-between w-full">
+        <a href="/settings" class="no-underline!">
+            <Avatar pubkey={$activeAccount!.pubkey} />
+        </a>
+        <div class="flex flex-row items-center gap-6">
+            <Search size={24} />
+            <AddLarge size={24} />
+        </div>
     </div>
 </Header>
 <main class="">
@@ -167,8 +169,8 @@ onDestroy(() => {
     {:else}
         <div class="flex flex-col gap-0">
             {#if invites.length === 0 && groups.length === 0}
-                <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground-light dark:text-muted-foreground-dark">
-                    <Chat size={32} class="text-muted-dark dark:text-muted-light" />
+                <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground">
+                    <Chat size={32} />
                     <span>No chats found</span>
                     <span>Click the "+" button to start a new chat</span>
                 </div>

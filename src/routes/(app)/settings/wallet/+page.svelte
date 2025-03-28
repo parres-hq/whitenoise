@@ -1,7 +1,6 @@
 <script lang="ts">
-import { goto } from "$app/navigation";
-import Button from "$lib/components/Button.svelte";
 import Header from "$lib/components/Header.svelte";
+import Button from "$lib/components/ui/button/button.svelte";
 import {
     NostrWalletConnectError,
     getNostrWalletConnectBalance,
@@ -9,7 +8,7 @@ import {
     removeNostrWalletConnectUri,
     setNostrWalletConnectUri,
 } from "$lib/stores/accounts";
-import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
+import { readFromClipboard } from "$lib/utils/clipboard";
 import Information from "carbon-icons-svelte/lib/Information.svelte";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import ScanAlt from "carbon-icons-svelte/lib/ScanAlt.svelte";
@@ -21,6 +20,7 @@ let nwcUri = $state("");
 let error = $state("");
 let loading = $state(false);
 let balanceLoading = $state(false);
+let showScanButton = $state(false);
 
 // TODO: Show errors to the user if something goes wrong loading things
 async function checkWalletStatus() {
@@ -78,63 +78,73 @@ async function handleRemoveWallet() {
     }
 }
 
-onMount(() => {
+async function handlePaste() {
+    try {
+        const text = await readFromClipboard();
+        if (text) {
+            nwcUri = text;
+        } else {
+            error = "No text found in clipboard";
+        }
+    } catch (e) {
+        error = "Failed to read from clipboard";
+    }
+}
+
+onMount(async () => {
     checkWalletStatus();
+    showScanButton = await isMobile();
 });
 </script>
 
-<Header>
-    <div class="flex flex-row gap-4 items-center">
-        <button class="header-back-button" onclick={() => goto("/settings")} aria-label="Back to settings">
-            <ChevronLeft size={24} />
-        </button>
-        <h1 class="header-title">Wallet</h1>
-    </div>
-</Header>
+<Header backLocation="/settings" title="Wallet" />
+
 <main class="px-4 py-6 flex flex-col gap-4 min-h-[calc(100vh-128px)] relative">
     {#if hasWallet}
         <h2 class="text-xl/7">Lightning Wallet Connected</h2>
         <div class="flex flex-row items-center justify-between">
-            <span class="text-lg text-muted-foreground-light dark:text-muted-foreground-dark">Balance:</span>
+            <span class="text-lg text-muted-foreground">Balance:</span>
             <span class="text-lg">
                 {#if balanceLoading}
-                    <span class="text-lg text-muted-foreground-light dark:text-muted-foreground-dark animate-pulse">Loading...</span>
+                    <span class="text-lg text-muted-foreground animate-pulse">Loading...</span>
                 {:else}
                     {balance.toLocaleString()} sats
                 {/if}
             </span>
         </div>
 
-        <Button size="lg" variant="outline" handleClick={handleRemoveWallet} disabled={loading}>{loading ? 'Removing...' : 'Remove Wallet Connection'}</Button>
+        <Button size="lg" variant="outline" onclick={handleRemoveWallet} disabled={loading}>{loading ? 'Removing...' : 'Disconnect Wallet'}</Button>
     {:else}
         <h2 class="text-xl/7">Connect your bitcoin lightning wallet to send and receive payments in White Noise.</h2>
         <div class="flex flex-col gap-0">
             <label for="nwc-uri">Connection String</label>
             <div class="flex flex-row gap-2">
                 <input bind:value={nwcUri} type="text" id="nwc-uri" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="nostr+walletconnect://..." class="grow"/>
-                <button class="border border-input-light dark:border-input-dark p-2 w-10 h-10 flex items-center justify-center" onclick={() => console.log("scan")}>
-                    <ScanAlt size={16}  />
-                </button>
-                <button class="border border-input-light dark:border-input-dark p-2 w-10 h-10 flex items-center justify-center" onclick={() => console.log("paste")}>
+                {#if showScanButton}
+                    <button class="border border-input p-2 w-10 h-10 flex items-center justify-center" onclick={() => console.log("scan")}>
+                        <ScanAlt size={16}  />
+                    </button>
+                {/if}
+                <button class="border border-input p-2 w-10 h-10 flex items-center justify-center" onclick={handlePaste}>
                     <Paste size={16} />
                 </button>
             </div>
-            <div class="text-destructive-light dark:text-destructive-dark text-sm mt-2 min-h-[1.25rem]">
+            <div class="text-destructive text-sm mt-2 min-h-[1.25rem]">
                 {error}
             </div>
         </div>
-        <div class="flex flex-row gap-3 items-start bg-accent-light dark:bg-accent-dark p-4 text-accent-foreground-light dark:text-accent-foreground-dark mt-12">
+        <div class="flex flex-row gap-3 items-start bg-accent p-4 text-accent-foreground mt-12">
             <Information size={24} class="shrink-0" />
             <div class="flex flex-col gap-2">
                 <h3 class="text-lg/6 font-medium">Which wallets can I connect?</h3>
                 <p>
-                    You can connect any wallet that supports Nostr Wallet Connect. See a full list <a href="https://github.com/getAlby/awesome-nwc/blob/master/README.md#nwc-wallets" target="_blank">here</a>.
+                    You can connect any wallet that supports Nostr Wallet Connect. See a full list <a href="https://github.com/getAlby/awesome-nwc/blob/master/README.md#nwc-wallets" target="_blank" class="underline">here</a>.
                 </p>
             </div>
         </div>
 
         <div class="mt-auto pt-6">
-            <Button size="lg" handleClick={handleSetWallet} disabled={!nwcUri || loading}>Connect Wallet</Button>
+            <Button size="lg" onclick={handleSetWallet} disabled={!nwcUri || loading} class="w-full">Connect Wallet</Button>
         </div>
     {/if}
 </main>

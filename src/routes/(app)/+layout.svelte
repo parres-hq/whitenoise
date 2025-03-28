@@ -76,7 +76,7 @@ onDestroy(() => {
 </script>
 
 <main class="flex flex-col md:flex-row min-h-screen">
-    <div class="flex flex-col grow md:w-4/5 bg-background-light dark:bg-background-dark">
+    <div class="flex flex-col grow md:w-4/5 bg-background">
         {@render children()}
     </div>
 </main>

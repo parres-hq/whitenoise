@@ -5,9 +5,7 @@ import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import Header from "$lib/components/Header.svelte";
 import {
-    type Account,
     LogoutError,
-    accounts,
     activeAccount,
     createAccount,
     fetchRelays,
@@ -18,11 +16,9 @@ import {
 } from "$lib/stores/accounts";
 import { getToastState } from "$lib/stores/toast-state.svelte";
 import { isValidHexPubkey, isValidNsec } from "$lib/types/nostr";
-import { copyToClipboard } from "$lib/utils/clipboard";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
     isPermissionGranted,
     requestPermission,
@@ -30,7 +26,6 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { ChevronRight } from "carbon-icons-svelte";
 import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
-import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
 import Logout from "carbon-icons-svelte/lib/Logout.svelte";
 import Notification from "carbon-icons-svelte/lib/Notification.svelte";
 import Password from "carbon-icons-svelte/lib/Password.svelte";
@@ -47,7 +42,6 @@ import { onDestroy, onMount } from "svelte";
 let showDeleteAlert = $state(false);
 let showKeyPackageAlert = $state(false);
 let showDeleteKeyPackagesAlert = $state(false);
-let showLogin = $state(false);
 let nsecOrHex = $state("");
 let showLoginError = $state(false);
 let loginError = $state("");
@@ -301,14 +295,7 @@ function toggleDeveloperSection() {
     />
 {/if}
 
-<Header>
-    <div class="flex flex-row gap-4 items-center">
-        <button class="header-back-button" onclick={() => goto("/chats")} aria-label="Back to chats">
-            <ChevronLeft size={24} />
-        </button>
-        <h1 class="header-title">Settings</h1>
-    </div>
-</Header>
+<Header backLocation="/chats" title="Settings" />
 
 <main class="px-4 py-6 flex flex-col gap-4">
     <div onclick={toggleProfileSection} onkeydown={(e) => {
@@ -450,3 +437,34 @@ function toggleDeveloperSection() {
         </div>
     {/if}
 </main>
+
+<style lang="postcss">
+    .section-title-button {
+        @apply flex flex-row justify-between items-center mb-2 cursor-pointer;
+    }
+
+    .section-title {
+        @apply text-3xl font-normal text-primary leading-none;
+    }
+
+    .section-list {
+        @apply list-none p-0 m-0 overflow-hidden;
+    }
+
+    .section-list-item {
+        @apply p-0 m-0 leading-none text-2xl text-muted-foreground;
+    }
+
+    .section-list-item > button,
+    .section-list-item > a {
+        @apply flex flex-row justify-between items-center py-4 w-full no-underline;
+    }
+
+    .row-button-content {
+        @apply flex flex-row gap-3 items-center;
+    }
+
+    .icon-right {
+        @apply text-muted-foreground;
+    }
+</style>
