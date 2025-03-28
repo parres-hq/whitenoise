@@ -8,17 +8,14 @@ import {
     login,
     updateAccountsStore,
 } from "$lib/stores/accounts";
-import { isValidHexPubkey } from "$lib/types/nostr";
+import { isValidHexKey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { onDestroy, onMount } from "svelte";
-import { expoInOut } from "svelte/easing";
-import { type FlyParams, fly } from "svelte/transition";
 
 let nsecOrHex = $state("");
 let loading = $state(true);
 let loginError = $state<LoginError | null>(null);
-let flyParams: FlyParams = { duration: 150, easing: expoInOut, y: window.innerHeight };
 
 let unlistenAccountChanged: UnlistenFn;
 let unlistenNostrReady: UnlistenFn;
@@ -42,7 +39,7 @@ onMount(async () => {
 
     updateAccountsStore().then(async () => {
         loading = false;
-        if ($activeAccount?.pubkey && isValidHexPubkey($activeAccount?.pubkey)) {
+        if ($activeAccount?.pubkey && isValidHexKey($activeAccount?.pubkey)) {
             await invoke("init_nostr_for_current_user");
             console.log("Initialized Nostr for current user");
         }
