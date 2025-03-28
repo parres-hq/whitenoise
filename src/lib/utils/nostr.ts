@@ -125,22 +125,26 @@ export async function latestMessagePreview(messageId: number | undefined): Promi
  * @returns True if the string is a valid npub, false otherwise.
  */
 export function isValidNpub(str: string): boolean {
-    try {
-        const decoded = nip19Decode(str);
-        return decoded.type === "npub";
-    } catch {
-        return false;
-    }
+    return /^npub1[a-z\d]{58}$/.test(str || "");
 }
 
 /**
- * Checks if a string is a valid hex public key.
+ * Checks if a string is a valid hex key. (public or private)
  * @param str - The string to check.
- * @returns True if the string is a valid hex public key, false otherwise.
+ * @returns True if the string is a valid hex key, false otherwise.
  */
 export function isValidHexKey(str: string): boolean {
-    // Hex public key should be 64 characters long and contain only hex characters
+    // Hex key should be 64 characters long and contain only hex characters
     return /^[0-9a-f]{64}$/i.test(str);
+}
+
+/**
+ * Checks if a string is a valid nsec (Nostr secret key in bech32 format).
+ * @param str - The string to check.
+ * @returns True if the string is a valid nsec, false otherwise.
+ */
+export function isValidNsec(str: string): boolean {
+    return /^nsec1[a-z\d]{58}$/.test(str || "");
 }
 
 /**
@@ -151,7 +155,7 @@ export function isValidHexKey(str: string): boolean {
  */
 export function hexKeyFromNpub(npub: string): string {
     const decoded = nip19Decode(npub);
-    if (decoded.type !== "npub") {
+    if (!decoded || decoded.type !== "npub") {
         throw new Error("Invalid npub");
     }
     return decoded.data;

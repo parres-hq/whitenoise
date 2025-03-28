@@ -1,13 +1,13 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
 import { activeAccount, updateAccountsStore } from "$lib/stores/accounts";
-import { isValidHexPubkey } from "$lib/types/nostr";
+import { isValidHexKey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { onMount } from "svelte";
 
 onMount(async () => {
     updateAccountsStore().then(async () => {
-        if ($activeAccount?.pubkey && isValidHexPubkey($activeAccount?.pubkey)) {
+        if ($activeAccount?.pubkey && isValidHexKey($activeAccount?.pubkey)) {
             await invoke("init_nostr_for_current_user");
             console.log("Initialized Nostr for current user");
             setTimeout(() => {

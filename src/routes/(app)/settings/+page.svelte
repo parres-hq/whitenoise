@@ -15,8 +15,7 @@ import {
     updateAccountsStore,
 } from "$lib/stores/accounts";
 import { getToastState } from "$lib/stores/toast-state.svelte";
-import { isValidHexPubkey, isValidNsec } from "$lib/types/nostr";
-import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
+import { isValidHexKey, isValidNsec, nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import {
@@ -75,7 +74,7 @@ onDestroy(() => {
 });
 
 async function handleLogin() {
-    if (isValidNsec(nsecOrHex) || isValidHexPubkey(nsecOrHex)) {
+    if (isValidNsec(nsecOrHex) || isValidHexKey(nsecOrHex)) {
         showLoginError = false;
         login(nsecOrHex)
             .then(() => {
