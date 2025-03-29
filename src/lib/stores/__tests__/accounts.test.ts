@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -129,6 +130,20 @@ describe("accounts store", () => {
         it("should remove NWC URI", async () => {
             mockInvoke.mockResolvedValue(undefined);
             await expect(removeNostrWalletConnectUri()).resolves.not.toThrow();
+        });
+
+        it("should fetch NWC balance", async () => {
+            const mockBalance = 1000; // 1000 sats
+            mockInvoke.mockResolvedValue(mockBalance);
+            const balance = await invoke("get_nostr_wallet_connect_balance");
+            expect(balance).toBe(mockBalance);
+        });
+
+        it("should throw NostrWalletConnectError when fetching balance fails", async () => {
+            mockInvoke.mockRejectedValue("Failed to get balance");
+            await expect(invoke("get_nostr_wallet_connect_balance")).rejects.toThrow(
+                "Failed to get balance"
+            );
         });
     });
 

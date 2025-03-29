@@ -1,7 +1,7 @@
 <script lang="ts">
+import Avatar from "$lib/components/Avatar.svelte";
 import GroupListItem from "$lib/components/GroupListItem.svelte";
 import Header from "$lib/components/Header.svelte";
-import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
 import InviteListItem from "$lib/components/InviteListItem.svelte";
 import Loader from "$lib/components/Loader.svelte";
 import ContactsList from "$lib/components/Modals/Contacts/ContactsList.svelte";
@@ -11,6 +11,9 @@ import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { Invite, InvitesWithFailures, NostrMlsGroup, ProcessedInvite } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
+import Chat from "carbon-icons-svelte/lib/Chat.svelte";
+import Search from "carbon-icons-svelte/lib/Search.svelte";
 import { PlusCircle, Warning } from "phosphor-svelte";
 import { onDestroy, onMount } from "svelte";
 
@@ -142,20 +145,17 @@ onDestroy(() => {
 });
 </script>
 
-<HeaderToolbar>
-    {#snippet right()}
-        <div>
-            <button onclick={() => (showModal = !showModal)} class="p-2 -mr-2">
-                <PlusCircle size={30} />
-            </button>
+<Header>
+    <div class="flex flex-row items-center justify-between w-full">
+        <a href="/settings" class="no-underline!">
+            <Avatar pubkey={$activeAccount!.pubkey} />
+        </a>
+        <div class="flex flex-row items-center gap-6">
+            <Search size={24} />
+            <AddLarge size={24} />
         </div>
-    {/snippet}
-    {#snippet center()}
-        <h1>Chats</h1>
-    {/snippet}
-</HeaderToolbar>
-
-<Header title="Chats" />
+    </div>
+</Header>
 <main class="">
     {#if isLoading}
         <div class="flex justify-center items-center mt-20 w-full">
@@ -169,9 +169,10 @@ onDestroy(() => {
     {:else}
         <div class="flex flex-col gap-0">
             {#if invites.length === 0 && groups.length === 0}
-                <div class="flex flex-col gap-2 items-center justify-center h-full">
-                    <span class="text-gray-400">No chats found</span>
-                    <span class="text-gray-400">Click the plus button to start a new chat</span>
+                <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground">
+                    <Chat size={32} />
+                    <span>No chats found</span>
+                    <span>Click the "+" button to start a new chat</span>
                 </div>
             {/if}
             {#each invites as invite}

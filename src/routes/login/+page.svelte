@@ -1,6 +1,8 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
-import Loader from "$lib/components/Loader.svelte";
+import Button from "$lib/components/ui/button/button.svelte";
+import Input from "$lib/components/ui/input/input.svelte";
+import * as Sheet from "$lib/components/ui/sheet/index.js";
 import {
     LoginError,
     activeAccount,
@@ -8,17 +10,14 @@ import {
     login,
     updateAccountsStore,
 } from "$lib/stores/accounts";
-import { isValidHexPubkey } from "$lib/types/nostr";
+import { isValidHexKey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { onDestroy, onMount } from "svelte";
-import { expoInOut } from "svelte/easing";
-import { type FlyParams, fly } from "svelte/transition";
 
 let nsecOrHex = $state("");
 let loading = $state(true);
 let loginError = $state<LoginError | null>(null);
-let flyParams: FlyParams = { duration: 150, easing: expoInOut, y: window.innerHeight };
 
 let unlistenAccountChanged: UnlistenFn;
 let unlistenNostrReady: UnlistenFn;
@@ -42,7 +41,7 @@ onMount(async () => {
 
     updateAccountsStore().then(async () => {
         loading = false;
-        if ($activeAccount?.pubkey && isValidHexPubkey($activeAccount?.pubkey)) {
+        if ($activeAccount?.pubkey && isValidHexKey($activeAccount?.pubkey)) {
             await invoke("init_nostr_for_current_user");
             console.log("Initialized Nostr for current user");
         }
@@ -54,11 +53,12 @@ onDestroy(() => {
     unlistenNostrReady?.();
 });
 
-async function handleLogin(e: Event) {
-    e.preventDefault();
+async function handleLogin() {
+    console.log("clicked login");
     if (loading) return;
     loading = true;
     login(nsecOrHex).catch((error) => {
+        console.log("login error", error);
         loginError = error;
         loading = false;
     });
@@ -74,43 +74,54 @@ async function handleCreateAccount() {
 }
 </script>
 
-<div class="flex flex-col items-center justify-center w-screen h-dvh bg-gray-800" transition:fly={flyParams}>
-    <div class="bg-gray-800 w-full h-2/3 flex flex-col items-center justify-center gap-6 py-12 px-6">
-        <img src="whitenoise-login-logo2.png" alt="logo" class="w-32 lg:w-40" />
-        <h2 class="text-xl lg:text-2xl font-medium text-center">Secure. Distributed. Uncensorable.</h2>
-        <div class="h-[40px]">
-            {#if loading}
-                <Loader size={40} fullscreen={false} />
-            {/if}
+<div class="flex flex-col items-center w-screen h-dvh bg-background">
+    <div class="w-full h-2/3 flex flex-col items-center bg-background">
+        <div class="relative w-full h-full">
+            <img src="images/login-splash.webp" alt="login splash" class="w-full h-full object-cover {loading ? 'animate-pulse' : ''}" />
+            <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent from-10% to-transparent"></div>
         </div>
-        <form onsubmit={handleLogin} class="w-full md:w-4/5 flex flex-col gap-4">
-            <input
-                bind:value={nsecOrHex}
-                type="password"
-                placeholder="nsec1&hellip;"
-                autocorrect="off"
-                autocapitalize="off"
-                class="text-lg px-3 py-2 bg-transparent ring-1 ring-gray-700 rounded-md"
-            />
-            {#if loginError}
-                <p class="text-red-500">{loginError.message}</p>
-            {/if}
-            <button
-                type="submit"
-                disabled={loading}
-                class="p-3 font-semibold bg-blue-700 hover:bg-blue-600 rounded-md ring-1 ring-blue-500"
-            >
-                Log In
-            </button>
-        </form>
-
-        <h3 class="font-semibold text-gray-400">OR</h3>
-        <button
-            disabled={loading}
-            class="p-3 w-full md:w-4/5 font-semibold bg-indigo-700 hover:bg-indigo-600 rounded-md ring-1 ring-indigo-500"
-            onclick={handleCreateAccount}
-        >
-            Create a new Nostr identity
-        </button>
+        <div class="flex flex-col self-start mx-4 text-foreground mb-16">
+            <h2 class="text-5xl font-normal">Welcome to</h2>
+            <h1 class="text-5xl font-semibold">White Noise</h1>
+            <p class="text-xl mt-4 font-normal text-muted-foreground">Secure. Distributed. Uncensorable.</p>
+        </div>
+        <div class="flex flex-col gap-4 w-full px-4 mt-18">
+            <Sheet.Root onOpenChange={(open) => {
+                if (!open) {
+                    loginError = null;
+                    nsecOrHex = "";
+                }
+            }}>
+                <Sheet.Trigger>
+                    <Button variant="outline" class="w-full">Sign in with Nostr key</Button>
+                </Sheet.Trigger>
+                <Sheet.Content side="bottom">
+                    <Sheet.Header class="text-left mb-8">
+                        <Sheet.Title>Sign in with your Nostr key</Sheet.Title>
+                        <Sheet.Description>
+                            Your key is encrypted and stored only on your device.
+                        </Sheet.Description>
+                    </Sheet.Header>
+                    <div class="flex flex-col gap-4">
+                        <Input
+                            bind:value={nsecOrHex}
+                            type="password"
+                            placeholder="nsec1..."
+                            autocomplete="off"
+                            autocapitalize="off"
+                            autofocus
+                            autocorrect="off"
+                        />
+                        <div class="h-8 text-sm text-destructive">
+                            {loginError?.message}
+                        </div>
+                        <Button size="lg" variant="default" onclick={handleLogin} disabled={loading}>Sign in</Button>
+                    </div>
+                </Sheet.Content>
+            </Sheet.Root>
+            <Button size="lg" variant="default" onclick={handleCreateAccount} disabled={loading}>
+                Create a new Nostr key
+            </Button>
+        </div>
     </div>
 </div>

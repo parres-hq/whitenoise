@@ -15,7 +15,6 @@ mod utils;
 mod whitenoise;
 
 use crate::commands::accounts::*;
-use crate::commands::delete_all_data;
 use crate::commands::groups::*;
 use crate::commands::invites::*;
 use crate::commands::key_packages::*;
@@ -23,6 +22,7 @@ use crate::commands::media::*;
 use crate::commands::messages::*;
 use crate::commands::nostr::*;
 use crate::commands::payments::*;
+use crate::commands::{delete_all_data, is_mobile, is_platform};
 use crate::whitenoise::Whitenoise;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
@@ -47,6 +47,10 @@ pub fn run() {
                 .expect("Failed to get data dir");
 
             let logs_dir = app.handle().path().app_log_dir().unwrap();
+
+            // Initialize the barcode scanner plugin if the platform is mobile
+            #[cfg(mobile)]
+            app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
 
             let formatted_data_dir = if cfg!(dev) {
                 PathBuf::from(format!("{}/dev", data_dir.to_string_lossy()))
@@ -107,6 +111,7 @@ pub fn run() {
             has_nostr_wallet_connect_uri,
             set_nostr_wallet_connect_uri,
             remove_nostr_wallet_connect_uri,
+            get_nostr_wallet_connect_balance,
             get_group,
             get_group_and_messages,
             get_group_members,
@@ -124,6 +129,8 @@ pub fn run() {
             query_message,
             export_nsec,
             upload_file,
+            is_mobile,
+            is_platform,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

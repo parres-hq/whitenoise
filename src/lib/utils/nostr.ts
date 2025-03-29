@@ -8,6 +8,8 @@ import type { EnrichedContact, NEvent, NMetadata } from "../types/nostr";
  * Retrieves the display name from the given NMetadata object.
  *
  * @param metadata - The NMetadata object containing user information.
+ * @param pubkey - Optional public key to use as fallback for display name.
+ * @param truncate - Whether to truncate the npub if used as fallback (default: true).
  * @returns The display name in the following priority order:
  *          1. display_name
  *          2. name
@@ -57,6 +59,18 @@ export function isInsecure(event: NEvent): boolean {
     return insecureKinds.includes(event.kind);
 }
 
+/**
+ * Validates if a given URL is a valid WebSocket URL.
+ *
+ * @param url - The URL string to validate
+ * @returns True if the URL is a valid WebSocket URL (ws: or wss: protocol), false otherwise
+ *
+ * @remarks
+ * This function checks if the URL:
+ * - Is a valid URL format
+ * - Uses either the 'ws:' or 'wss:' protocol
+ * Returns false for any invalid URL format or non-WebSocket protocols
+ */
 export function isValidWebSocketURL(url: string): boolean {
     try {
         const wsURL = new URL(url);
@@ -66,6 +80,23 @@ export function isValidWebSocketURL(url: string): boolean {
     }
 }
 
+/**
+ * Generates a preview of the latest message in a chat conversation.
+ *
+ * @param messageId - The ID of the message to preview. If undefined, returns "New chat"
+ * @returns A formatted string containing the message preview in the format:
+ *         - "New chat" if no messageId is provided
+ *         - "You: [content]" if the message is from the current user
+ *         - "[sender name]: [content]" if the message is from another user
+ *         - Empty string if no message is found
+ *
+ * @remarks
+ * This function:
+ * - Queries the message using the provided messageId
+ * - Fetches the sender's metadata if the message is from another user
+ * - Uses the nameFromMetadata function to format the sender's name
+ * - Handles cases where the message or sender information is not available
+ */
 export async function latestMessagePreview(messageId: number | undefined): Promise<string> {
     if (!messageId) {
         return "New chat";
@@ -94,22 +125,26 @@ export async function latestMessagePreview(messageId: number | undefined): Promi
  * @returns True if the string is a valid npub, false otherwise.
  */
 export function isValidNpub(str: string): boolean {
-    try {
-        const decoded = nip19Decode(str);
-        return decoded.type === "npub";
-    } catch {
-        return false;
-    }
+    return /^npub1[a-z\d]{58}$/.test(str || "");
 }
 
 /**
- * Checks if a string is a valid hex public key.
+ * Checks if a string is a valid hex key. (public or private)
  * @param str - The string to check.
- * @returns True if the string is a valid hex public key, false otherwise.
+ * @returns True if the string is a valid hex key, false otherwise.
  */
 export function isValidHexKey(str: string): boolean {
-    // Hex public key should be 64 characters long and contain only hex characters
+    // Hex key should be 64 characters long and contain only hex characters
     return /^[0-9a-f]{64}$/i.test(str);
+}
+
+/**
+ * Checks if a string is a valid nsec (Nostr secret key in bech32 format).
+ * @param str - The string to check.
+ * @returns True if the string is a valid nsec, false otherwise.
+ */
+export function isValidNsec(str: string): boolean {
+    return /^nsec1[a-z\d]{58}$/.test(str || "");
 }
 
 /**
@@ -120,7 +155,7 @@ export function isValidHexKey(str: string): boolean {
  */
 export function hexKeyFromNpub(npub: string): string {
     const decoded = nip19Decode(npub);
-    if (decoded.type !== "npub") {
+    if (!decoded || decoded.type !== "npub") {
         throw new Error("Invalid npub");
     }
     return decoded.data;

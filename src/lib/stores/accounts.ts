@@ -149,6 +149,15 @@ export async function hasNostrWalletConnectUri(): Promise<boolean> {
     }
 }
 
+export async function getNostrWalletConnectBalance(): Promise<number> {
+    try {
+        const msats: number = await invoke("get_nostr_wallet_connect_balance");
+        return msats / 1000;
+    } catch (error) {
+        throw new NostrWalletConnectError(`Failed to get NWC balance: ${error}`);
+    }
+}
+
 export const hasLightningWallet = derived<Writable<Account | null>, boolean>(
     activeAccount,
     ($activeAccount, set) => {

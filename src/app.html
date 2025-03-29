@@ -1,20 +1,30 @@
 <!doctype html>
-<html lang="en" style="background-color: #111827;">
+<html lang="en" class="">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.ico" />
-    <link rel="preconnect" href="https://rsms.me/" />
-    <link rel="preconnect" href="https://fonts.bunny.net" />
-    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
-    <link href="https://fonts.bunny.net/css?family=inconsolata:300,400" rel="stylesheet" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>White Noise</title>
     %sveltekit.head%
+    <script>
+      // Check if dark mode is preferred
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.classList.add('dark');
+      }
+
+      // Listen for changes in dark mode preference
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+        if (e.matches) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      });
+    </script>
   </head>
 
-  <body data-sveltekit-preload-data="hover" style="background-color: #1F2937;">
+  <body data-sveltekit-preload-data="hover">
     <div style="display: contents">%sveltekit.body%</div>
   </body>
 </html>

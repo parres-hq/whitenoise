@@ -51,8 +51,8 @@ const { Story } = defineMeta({
 });
 </script>
 
-<Story 
-  name="Default" 
+<Story
+  name="Default"
   args={{
     title: 'Confirm Action',
     body: 'Are you sure you want to proceed with this action?',
@@ -60,5 +60,5 @@ const { Story } = defineMeta({
     acceptStyle: 'primary',
     cancelText: 'Cancel',
     showAlert: true
-  }} 
+  }}
 />

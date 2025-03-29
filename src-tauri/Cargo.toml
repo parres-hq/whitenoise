@@ -72,6 +72,9 @@ nostr-sdk = { version = "0.40", features = [
     "nip59",
 ] }
 
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
+
 [dev-dependencies]
 mockito = "1.2"
 tempfile = "3.19.1"

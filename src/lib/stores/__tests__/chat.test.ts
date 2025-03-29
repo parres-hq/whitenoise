@@ -290,6 +290,36 @@ describe("Chat Store", () => {
                             tokens: [{ Text: "Hello world" }],
                         });
                     });
+
+                    it("handles payment when reply-to message doesn't exist", () => {
+                        const paymentMessageEvent = createMessageEvent(
+                            "msg-2",
+                            "",
+                            2000,
+                            "non-existent"
+                        );
+                        paymentMessageEvent.event.tags.push(["preimage", "preimage-1"]);
+                        chatStore.handleCachedMessage(paymentMessageEvent);
+                        const paymentMessage = chatStore.findMessage("msg-2");
+
+                        expect(paymentMessage).toEqual({
+                            id: "msg-2",
+                            pubkey: "user-pubkey",
+                            replyToId: "non-existent",
+                            content: "",
+                            createdAt: 2000,
+                            reactions: [],
+                            isMine: true,
+                            isSingleEmoji: false,
+                            lightningInvoice: undefined,
+                            lightningPayment: {
+                                preimage: "preimage-1",
+                                isPaid: false,
+                            },
+                            event: paymentMessageEvent.event,
+                            tokens: [{ Text: "" }],
+                        });
+                    });
                 });
                 describe("without reply to lightning invoice", () => {
                     it("saves message with lightning payment but not paid", () => {
@@ -1090,6 +1120,36 @@ describe("Chat Store", () => {
         it("returns null if message is not found", async () => {
             const group = createTestGroup();
             const result = await chatStore.deleteMessage(group, "non-existent");
+
+            expect(result).toBeNull();
+            expect(tauri.invoke).not.toHaveBeenCalled();
+        });
+
+        it("returns null if message is not mine", async () => {
+            const messageEvent: CachedMessage = {
+                event_id: "msg-1",
+                account_pubkey: "other-pubkey",
+                event_kind: 9,
+                content: "Hello world",
+                created_at: 1000,
+                outer_event_id: "random-outer-event-id",
+                tokens: [],
+                author_pubkey: "other-pubkey",
+                mls_group_id: "test-group-id",
+                event: {
+                    id: "msg-1",
+                    kind: 9,
+                    pubkey: "other-pubkey",
+                    content: "Hello world",
+                    created_at: 1000,
+                    tags: [],
+                    sig: "test-sig",
+                },
+            };
+            chatStore.handleCachedMessage(messageEvent);
+
+            const group = createTestGroup();
+            const result = await chatStore.deleteMessage(group, "msg-1");
 
             expect(result).toBeNull();
             expect(tauri.invoke).not.toHaveBeenCalled();
