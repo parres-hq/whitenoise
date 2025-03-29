@@ -29,9 +29,6 @@ html {
         --sal: env(safe-area-inset-left);
         --sar: env(safe-area-inset-right);
 
-        --sheet-transition-duration: 500ms;
-        --sheet-overlay-transition-duration: 500ms;
-
         /* Glitch */
         --glitch-50: 0 0% 98%; /* #f9f9f9 */
         --glitch-100: 0 0% 95%; /* #f2f2f2 */
