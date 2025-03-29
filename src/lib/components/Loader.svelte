@@ -3,7 +3,7 @@ export let size = 80;
 export let fullscreen = true;
 </script>
 
-<div class={fullscreen ? "w-screen h-dvh" : "flex flex-col items-center justify-center"}>
+<div class={fullscreen ? "w-screen h-svh" : "flex flex-col items-center justify-center"}>
     <div class="lds-ripple" style="--size:{size}px;">
         <div></div>
         <div></div>

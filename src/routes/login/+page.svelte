@@ -10,9 +10,11 @@ import {
     login,
     updateAccountsStore,
 } from "$lib/stores/accounts";
+import { readFromClipboard } from "$lib/utils/clipboard";
 import { isValidHexKey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import { onDestroy, onMount } from "svelte";
 
 let nsecOrHex = $state("");
@@ -72,9 +74,22 @@ async function handleCreateAccount() {
         loading = false;
     });
 }
+
+async function handlePaste() {
+    try {
+        const text = await readFromClipboard();
+        if (text) {
+            nsecOrHex = text;
+        } else {
+            loginError = { name: "ClipboardError", message: "No text found in clipboard" };
+        }
+    } catch (e) {
+        loginError = { name: "ClipboardError", message: "Failed to read from clipboard" };
+    }
+}
 </script>
 
-<div class="flex flex-col items-center w-screen h-dvh bg-background">
+<div class="flex flex-col items-center w-screen bg-background">
     <div class="w-full h-2/3 flex flex-col items-center bg-background">
         <div class="relative w-full h-full">
             <img src="images/login-splash.webp" alt="login splash" class="w-full h-full object-cover {loading ? 'animate-pulse' : ''}" />
@@ -95,27 +110,35 @@ async function handleCreateAccount() {
                 <Sheet.Trigger>
                     <Button variant="outline" class="w-full">Sign in with Nostr key</Button>
                 </Sheet.Trigger>
-                <Sheet.Content side="bottom">
-                    <Sheet.Header class="text-left mb-8">
-                        <Sheet.Title>Sign in with your Nostr key</Sheet.Title>
-                        <Sheet.Description>
-                            Your key is encrypted and stored only on your device.
-                        </Sheet.Description>
-                    </Sheet.Header>
-                    <div class="flex flex-col gap-4">
-                        <Input
-                            bind:value={nsecOrHex}
-                            type="password"
-                            placeholder="nsec1..."
-                            autocomplete="off"
-                            autocapitalize="off"
-                            autofocus
-                            autocorrect="off"
-                        />
-                        <div class="h-8 text-sm text-destructive">
-                            {loginError?.message}
+                <Sheet.Content side="bottom" class="pb-safe-bottom">
+                    <div class="max-h-[80vh] overflow-y-auto pb-8 px-1">
+                        <Sheet.Header class="text-left mb-8">
+                            <Sheet.Title>Sign in with your Nostr key</Sheet.Title>
+                            <Sheet.Description>
+                                Your key is encrypted and stored only on your device.
+                            </Sheet.Description>
+                        </Sheet.Header>
+                        <div class="flex flex-col gap-x-4">
+                            <div class="flex flex-row gap-2">
+                                <Input
+                                    bind:value={nsecOrHex}
+                                    type="password"
+                                    autofocus={false}
+                                    placeholder="nsec1..."
+                                    autocomplete="off"
+                                    autocapitalize="off"
+                                    autocorrect="off"
+                                    class="mb-1"
+                                />
+                                <Button variant="outline" size="icon" onclick={handlePaste} class="shrink-0">
+                                    <Paste size={16}/>
+                                </Button>
+                            </div>
+                            <div class="h-8 text-sm text-destructive ml-1">
+                                {loginError?.message}
+                            </div>
+                            <Button size="lg" variant="default" onclick={handleLogin} disabled={loading}>Sign in</Button>
                         </div>
-                        <Button size="lg" variant="default" onclick={handleLogin} disabled={loading}>Sign in</Button>
                     </div>
                 </Sheet.Content>
             </Sheet.Root>

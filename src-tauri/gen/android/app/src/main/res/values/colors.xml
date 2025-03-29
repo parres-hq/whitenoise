@@ -8,4 +8,18 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="ic_launcher_background">#FFFFFF</color>
+
+    <!-- Custom colors -->
+    <color name="glitch_50">#f9f9f9</color>
+    <color name="glitch_100">#f2f2f2</color>
+    <color name="glitch_200">#e2e2e2</color>
+    <color name="glitch_300">#cdcecd</color>
+    <color name="glitch_400">#afb1af</color>
+    <color name="glitch_500">#8c908c</color>
+    <color name="glitch_600">#727772</color>
+    <color name="glitch_700">#5a605a</color>
+    <color name="glitch_800">#474c47</color>
+    <color name="glitch_900">#2d312d</color>
+    <color name="glitch_950">#202320</color>
+
 </resources>
