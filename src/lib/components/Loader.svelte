@@ -10,7 +10,7 @@ export let fullscreen = true;
     </div>
 </div>
 
-<style lang="postcss">
+<style>
     .lds-ripple,
     .lds-ripple div {
         box-sizing: border-box;
