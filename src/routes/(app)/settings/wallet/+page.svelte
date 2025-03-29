@@ -100,7 +100,7 @@ onMount(async () => {
 
 <Header backLocation="/settings" title="Wallet" />
 
-<main class="px-4 py-6 flex flex-col gap-4 min-h-[calc(100vh-128px)] relative">
+<main class="px-4 py-6 flex flex-col gap-4 relative">
     {#if hasWallet}
         <h2 class="text-xl/7">Lightning Wallet Connected</h2>
         <div class="flex flex-row items-center justify-between">
@@ -126,10 +126,9 @@ onMount(async () => {
                         <ScanAlt size={16}  />
                     </button>
                 {/if}
-                <!-- TODO: Move this into a component (and use a shadcn button) so we can use it elsewhere -->
-                <button class="border border-input p-2 w-10 h-10 flex items-center justify-center" onclick={handlePaste}>
+                <Button variant="outline" size="icon" onclick={handlePaste}>
                     <Paste size={16} />
-                </button>
+                </Button>
             </div>
             <div class="text-destructive text-sm mt-2 min-h-[1.25rem]">
                 {error}

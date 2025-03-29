@@ -394,7 +394,7 @@ onDestroy(() => {
         {/snippet}
     </HeaderToolbar>
 
-    <main id="mainContainer" class="flex flex-col relative min-h-dvh">
+    <main id="mainContainer" class="flex flex-col relative min-h-svh">
         <div
             id="messagesContainer"
             class="flex-1 px-8 flex flex-col gap-2 pt-10 pb-40 overflow-y-auto opacity-100 transition-opacity ease-in-out duration-50"

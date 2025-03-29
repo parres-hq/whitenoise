@@ -170,39 +170,6 @@ function publishKeyPackage() {
         });
 }
 
-let showAccountsState = $state(false);
-let accountsState = $state("");
-async function toggleInspectAccounts() {
-    showAccountsState = !showAccountsState;
-    if (showAccountsState) {
-        invoke("get_accounts_state").then((accounts) => {
-            accountsState = JSON.stringify(accounts, null, 2);
-        });
-    }
-}
-
-let showGroupsState = $state(false);
-let groupsState = $state("");
-async function toggleInspectGroups() {
-    showGroupsState = !showGroupsState;
-    if (showGroupsState) {
-        invoke("get_groups").then((groups) => {
-            groupsState = JSON.stringify(groups, null, 2);
-        });
-    }
-}
-
-let showInvitesState = $state(false);
-let invitesState = $state("");
-async function toggleInspectInvites() {
-    showInvitesState = !showInvitesState;
-    if (showInvitesState) {
-        invoke("get_invites").then((invites) => {
-            invitesState = JSON.stringify(invites, null, 2);
-        });
-    }
-}
-
 function toggleProfileSection() {
     if (showProfileSection) {
         return;

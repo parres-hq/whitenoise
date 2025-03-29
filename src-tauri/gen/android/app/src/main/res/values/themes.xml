@@ -1,6 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.whitenoise" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <item name="android:navigationBarColor">@color/glitch_950</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowBackground">@color/glitch_950</item>
+        <item name="android:statusBarColor">@color/glitch_950</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

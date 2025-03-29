@@ -68,7 +68,7 @@ export const sheetTransitions = {
     bottom: {
         in: {
             y: "100%",
-            duration: 500,
+            duration: 200,
             opacity: 1,
         },
         out: {
