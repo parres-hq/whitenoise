@@ -41,7 +41,7 @@ pub async fn publish_metadata_event(
     tracing::debug!("Published metadata event to relays: {:?}", event);
 
     app_handle
-        .emit("account_updated", {})
+        .emit("account_updated", ())
         .map_err(|e| e.to_string())?;
 
     Ok(())
