@@ -36,9 +36,6 @@ pub enum AccountError {
 
     #[error("SQLx error: {0}")]
     SqlxError(#[from] sqlx::Error),
-
-    #[error("Failed to publish metadata event: {0}")]
-    PublishError(#[from] nostr_sdk::client::Error),
 }
 
 pub type Result<T> = std::result::Result<T, AccountError>;
