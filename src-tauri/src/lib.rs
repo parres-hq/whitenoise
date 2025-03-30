@@ -129,6 +129,8 @@ pub fn run() {
             query_message,
             export_nsec,
             upload_file,
+            upload_media,
+            publish_metadata_event,
             is_mobile,
             is_platform,
         ])

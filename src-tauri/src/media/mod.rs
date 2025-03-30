@@ -164,9 +164,12 @@ pub async fn delete_media_file(
                 "No Nostr key found for deletion".to_string(),
             ));
         }
+        // Parse the nostr key
+        let nostr_key = nostr_sdk::Keys::parse(&cached_media_file.media_file.nostr_key.unwrap())
+            .map_err(|e| MediaError::Delete(e.to_string()))?;
         // Delete the file from Blossom first
         blossom_client
-            .delete(file_hash, &cached_media_file.media_file.nostr_key.unwrap())
+            .delete(file_hash, &nostr_key)
             .await
             .map_err(|e| MediaError::Delete(e.to_string()))?;
         // Delete the file from the cache
