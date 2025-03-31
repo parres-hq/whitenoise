@@ -39,21 +39,29 @@ async function handlePaste() {
 async function handleLogin() {
     if (loading) return;
     loading = true;
-    login(nsecOrHex).catch((error) => {
-        console.error("Error logging in: ", error);
-        loginError = error;
-        loading = false;
-    });
+    login(nsecOrHex)
+        .catch((error) => {
+            console.error("Error logging in: ", error);
+            loginError = error;
+            loading = false;
+        })
+        .finally(() => {
+            loading = false;
+        });
 }
 
 async function handleCreateAccount() {
     if (loading) return;
     loading = true;
-    createAccount().catch((error) => {
-        console.error("Error creating account: ", error);
-        loginError = error;
-        loading = false;
-    });
+    createAccount()
+        .catch((error) => {
+            console.error("Error creating account: ", error);
+            loginError = error;
+            loading = false;
+        })
+        .finally(() => {
+            loading = false;
+        });
 }
 </script>
 
