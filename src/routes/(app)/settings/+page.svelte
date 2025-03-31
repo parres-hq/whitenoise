@@ -290,13 +290,13 @@ function toggleDeveloperSection() {
                                 <ChevronSort size={24} class="text-muted-foreground shrink-0 !w-6 !h-6" />
                             </Button>
                         </Sheet.Trigger>
-                        <Sheet.Content side="bottom" class="pb-safe-bottom px-0">
-                            <div class="overflow-y-auto pb-12 relative">
-                                <Sheet.Header class="text-left mb-4 px-6">
+                        <Sheet.Content side="bottom" class="pb-safe-bottom px-0 max-h-[90%]">
+                            <div class="flex flex-col h-full relative">
+                                <Sheet.Header class="text-left mb-4 px-6 sticky top-0">
                                     <Sheet.Title>Switch profile</Sheet.Title>
                                 </Sheet.Header>
-                                <div class="flex flex-col gap-0.5">
-                                    {#each $accounts.filter((account) => account.pubkey !== $activeAccount!.pubkey) as account}
+                                <div class="max-h-[500px] flex flex-col gap-0.5 overflow-y-auto pb-6">
+                                    {#each $accounts as account (account.pubkey)}
                                         <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap-3 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => setActiveAccount(account.pubkey)}>
                                             <Avatar
                                                 pubkey={account.pubkey}
