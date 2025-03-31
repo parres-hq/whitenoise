@@ -208,28 +208,6 @@ impl BlossomClient {
         Ok(blob_descriptor)
     }
 
-    /// Downloads a file from a given URL
-    ///
-    /// # Arguments
-    /// * `url` - The URL to download the file from
-    ///
-    /// # Returns
-    /// A Result containing the file contents as a byte vector or an error
-    #[allow(dead_code)]
-    pub async fn download(
-        &self,
-        url: &str,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
-        let response = client.get(url).send().await?;
-
-        if !response.status().is_success() {
-            return Err(format!("Download failed with status: {}", response.status()).into());
-        }
-
-        Ok(response.bytes().await?.to_vec())
-    }
-
     /// Uploads and optimizes media to the Blossom server
     ///
     /// # Arguments
@@ -281,65 +259,6 @@ impl BlossomClient {
 
         let blob_descriptor: BlobDescriptor = response.json().await?;
         Ok(blob_descriptor)
-    }
-
-    /// Checks if a media file can be uploaded to Blossom
-    ///
-    /// # Arguments
-    /// * `sha256` - The SHA-256 hash of the file to check
-    /// * `keys` - The Nostr keys to use for authentication
-    ///
-    /// # Returns
-    /// A Result containing whether the file exists and its metadata if it does, or an error
-    #[allow(dead_code)]
-    pub async fn head_media(
-        &self,
-        sha256: &str,
-        keys: &Keys,
-    ) -> Result<Option<BlobDescriptor>, Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
-        tracing::info!(
-            target: "whitenoise::nostr_manager::blossom",
-            "Checking media existence on Blossom server: {}",
-            self.url
-        );
-
-        // Create the authorization header
-        let auth_header = self.create_auth_event(sha256, "media", keys).await?;
-
-        // Check if the file exists with the auth header
-        let response = client
-            .head(format!("{}/media/{}", self.url, sha256))
-            .header("Authorization", auth_header.clone())
-            .send()
-            .await?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-
-        if !response.status().is_success() {
-            tracing::error!(
-                target: "whitenoise::nostr_manager::blossom",
-                "Media head request failed: {:?}",
-                response
-            );
-            return Err(format!(
-                "Media head request failed with status: {}",
-                response.status()
-            )
-            .into());
-        }
-
-        // If the file exists, get its metadata
-        let response = client
-            .head(format!("{}/media/{}", self.url, sha256))
-            .header("Authorization", auth_header)
-            .send()
-            .await?;
-
-        let blob_descriptor: BlobDescriptor = response.json().await?;
-        Ok(Some(blob_descriptor))
     }
 
     /// Checks if a file can be uploaded to the Blossom server
@@ -592,68 +511,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_delete() {
-        let (mut server, client) = setup_mock_server().await;
-        let sha256 = "test_sha256";
-        let keys = Keys::generate();
-
-        // Create mock response
-        let mock_response = BlobDescriptor {
-            url: format!("{}/{}", server.url(), sha256),
-            sha256: sha256.to_string(),
-            size: 1000,
-            r#type: Some("application/octet-stream".to_string()),
-            uploaded: chrono::Utc::now().timestamp() as u64,
-            compressed: None,
-        };
-
-        // Setup mock
-        let _m = server
-            .mock("DELETE", format!("/{}", sha256).as_str())
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&mock_response).unwrap())
-            .create();
-
-        let deleted_descriptor = client
-            .delete(sha256, &keys)
-            .await
-            .expect("Failed to delete file");
-
-        assert_eq!(deleted_descriptor.sha256, sha256);
-        assert_eq!(deleted_descriptor.size, 1000);
-    }
-
-    #[tokio::test]
-    async fn test_delete_nonexistent_file() {
-        let (mut server, client) = setup_mock_server().await;
-        let sha256 = "nonexistent_sha256";
-        let keys = Keys::generate();
-
-        // Setup mock for 404 response
-        let _m = server
-            .mock("DELETE", format!("/{}", sha256).as_str())
-            .with_status(404)
-            .create();
-
-        let result = client.delete(sha256, &keys).await;
-        assert!(result.is_err(), "Deleting nonexistent file should fail");
-    }
-
-    #[tokio::test]
-    async fn test_download_nonexistent_file() {
-        let (mut server, client) = setup_mock_server().await;
-
-        // Setup mock for 404 response
-        let _m = server.mock("GET", "/nonexistent").with_status(404).create();
-
-        let result = client
-            .download(&format!("{}/nonexistent", server.url()))
-            .await;
-        assert!(result.is_err(), "Downloading nonexistent file should fail");
-    }
-
-    #[tokio::test]
     async fn test_blob_descriptor_serialization() {
         let descriptor = BlobDescriptor {
             url: "http://example.com/blob".to_string(),
@@ -742,77 +599,6 @@ mod tests {
         assert_eq!(blob_descriptor.size, random_bytes.len() as u64);
         assert_eq!(blob_descriptor.r#type, Some(content_type.to_string()));
         assert!(blob_descriptor.compressed.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_head_media() {
-        let (mut server, client) = setup_mock_server().await;
-        let sha256 = "test_sha256";
-        let keys = Keys::generate();
-
-        // Create mock response
-        let mock_response = BlobDescriptor {
-            url: format!("{}/media/{}", server.url(), sha256),
-            sha256: sha256.to_string(),
-            size: 1000,
-            r#type: Some("image/jpeg".to_string()),
-            uploaded: chrono::Utc::now().timestamp() as u64,
-            compressed: Some(CompressedInfo {
-                sha256: "compressed_sha256".to_string(),
-                size: 500,
-                library: "mozjpeg".to_string(),
-                version: "4.0.0".to_string(),
-                parameters: CompressionParams {
-                    quality: 85,
-                    mode: "baseline".to_string(),
-                },
-            }),
-        };
-
-        // Setup mock for HEAD request
-        let _m = server
-            .mock("HEAD", format!("/media/{}", sha256).as_str())
-            .with_status(200)
-            .create();
-
-        // Setup mock for GET request
-        let _m = server
-            .mock("GET", format!("/media/{}", sha256).as_str())
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::to_string(&mock_response).unwrap())
-            .create();
-
-        let result = client
-            .head_media(sha256, &keys)
-            .await
-            .expect("Failed to check media existence");
-
-        assert!(result.is_some());
-        let descriptor = result.unwrap();
-        assert_eq!(descriptor.sha256, sha256);
-        assert_eq!(descriptor.size, 1000);
-        assert!(descriptor.compressed.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_head_media_nonexistent() {
-        let (mut server, client) = setup_mock_server().await;
-        let sha256 = "nonexistent_sha256";
-        let keys = Keys::generate();
-
-        // Setup mock for 404 response
-        let _m = server
-            .mock("HEAD", format!("/media/{}", sha256).as_str())
-            .with_status(404)
-            .create();
-
-        let result = client
-            .head_media(sha256, &keys)
-            .await
-            .expect("Failed to check media existence");
-
-        assert!(result.is_none());
     }
 
     #[tokio::test]
