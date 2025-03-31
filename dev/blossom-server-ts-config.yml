@@ -81,7 +81,7 @@ upload:
 # Config for the /media endpoint
 media:
   # /media endpoint enabled (default false)
-  enabled: false
+  enabled: true
   # require auth to upload to /media
   requireAuth: true
   # only check rules that include "pubkeys"

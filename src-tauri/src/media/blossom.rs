@@ -333,7 +333,7 @@ impl BlossomClient {
 
         // If the file exists, get its metadata
         let response = client
-            .get(format!("{}/media/{}", self.url, sha256))
+            .head(format!("{}/media/{}", self.url, sha256))
             .header("Authorization", auth_header)
             .send()
             .await?;

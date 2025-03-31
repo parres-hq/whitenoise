@@ -28,6 +28,12 @@ $effect(() => {
             .catch((e) => console.error(e));
     }
 });
+
+$effect(() => {
+    if (picture) {
+        avatarImage = picture;
+    }
+});
 </script>
 
 <div
