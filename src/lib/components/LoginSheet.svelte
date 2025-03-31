@@ -10,8 +10,9 @@ import type { Snippet } from "svelte";
 let {
     title,
     loading = $bindable(false),
+    sheetVisible = $bindable(false),
     children,
-}: { title?: string; loading?: boolean; children: Snippet } = $props();
+}: { title?: string; loading?: boolean; sheetVisible?: boolean; children: Snippet } = $props();
 let nsecOrHex = $state("");
 let loginError: LoginError | null = $state(null);
 
@@ -39,12 +40,15 @@ async function handleLogin() {
 }
 </script>
 
-<Sheet.Root onOpenChange={(open) => {
-    if (!open) {
-        loginError = null;
-        nsecOrHex = "";
-    }
-}}>
+<Sheet.Root
+    bind:open={sheetVisible}
+    onOpenChange={(open) => {
+        if (!open) {
+            loginError = null;
+            nsecOrHex = "";
+        }
+    }}
+>
     <Sheet.Trigger>
         {@render children()}
     </Sheet.Trigger>
