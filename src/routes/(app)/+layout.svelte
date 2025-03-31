@@ -16,6 +16,7 @@ let activeTab = $derived(page.url.pathname.split("/")[1] || "chats");
 let isLoadingAccounts = $state(true);
 
 let unlistenNostrReady: UnlistenFn;
+let unlistenAccountUpdated: UnlistenFn;
 
 // Start with true so we don't show until the preflight checks are done
 let keyPackagePublished = $state(true);
@@ -54,6 +55,13 @@ onMount(async () => {
         unlistenNostrReady = await listen<string>("nostr_ready", async (_event) => {
             console.log("Event received on layout page: nostr_ready");
             checkPreflight();
+        });
+    }
+
+    if (!unlistenAccountUpdated) {
+        unlistenAccountUpdated = await listen<string>("account_updated", async (_event) => {
+            console.log("Event received on layout page: account_updated");
+            await updateAccountsStore();
         });
     }
 

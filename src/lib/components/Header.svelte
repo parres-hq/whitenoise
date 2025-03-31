@@ -14,7 +14,7 @@ let {
 } = $props();
 </script>
 
-<div class="sticky top-0 left-0 right-0 flex flex-row items-center gap-4 p-4 pt-16 {variant === 'reverse' ? 'bg-secondary text-secondary-foreground' : 'bg-primary text-primary-foreground'} ">
+<div class="sticky top-0 left-0 right-0 z-40 flex flex-row items-center gap-4 p-4 pt-16 {variant === 'reverse' ? 'bg-secondary text-secondary-foreground' : 'bg-primary text-primary-foreground'} ">
     {#if backLocation}
         <a href={backLocation}>
             <ChevronLeft size={24} />
