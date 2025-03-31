@@ -2,7 +2,7 @@
 import Button from "$lib/components/ui/button/button.svelte";
 import Input from "$lib/components/ui/input/input.svelte";
 import * as Sheet from "$lib/components/ui/sheet/index.js";
-import { LoginError, login } from "$lib/stores/accounts";
+import { LoginError, createAccount, login } from "$lib/stores/accounts";
 import { readFromClipboard } from "$lib/utils/clipboard";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import type { Snippet } from "svelte";
@@ -11,8 +11,15 @@ let {
     title,
     loading = $bindable(false),
     sheetVisible = $bindable(false),
+    showCreateAccount = false,
     children,
-}: { title?: string; loading?: boolean; sheetVisible?: boolean; children: Snippet } = $props();
+}: {
+    title?: string;
+    loading?: boolean;
+    sheetVisible?: boolean;
+    showCreateAccount?: boolean;
+    children: Snippet;
+} = $props();
 let nsecOrHex = $state("");
 let loginError: LoginError | null = $state(null);
 
@@ -38,6 +45,16 @@ async function handleLogin() {
         loading = false;
     });
 }
+
+async function handleCreateAccount() {
+    if (loading) return;
+    loading = true;
+    createAccount().catch((error) => {
+        console.error("Error creating account: ", error);
+        loginError = error;
+        loading = false;
+    });
+}
 </script>
 
 <Sheet.Root
@@ -53,7 +70,7 @@ async function handleLogin() {
         {@render children()}
     </Sheet.Trigger>
     <Sheet.Content side="bottom" class="pb-safe-bottom">
-        <div class="overflow-y-auto pb-12 px-1 relative">
+        <div class="overflow-y-auto {showCreateAccount ? 'pb-24' : 'pb-12'} px-1 relative">
             <Sheet.Header class="text-left mb-8">
                 <Sheet.Title>{title ?? "Sign in with your Nostr key"}</Sheet.Title>
                 <Sheet.Description class="text-lg font-normal">
@@ -81,12 +98,19 @@ async function handleLogin() {
                 </div>
             </div>
         </div>
+        <div class="flex flex-col gap-0 w-full px-0 absolute bottom-0 left-0 right-0">
+            {#if showCreateAccount}
+                <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium py-4 px-0">
+                    Create a new Nostr key
+                </Button>
+            {/if}
             <Button
                 size="lg"
                 variant="default"
                 onclick={handleLogin}
                 disabled={loading || nsecOrHex.length === 0}
-                class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))]"
+                class="text-base font-medium w-full h-fit mx-0 pt-4 pb-[calc(1rem+var(--sab))]"
             >Log in</Button>
+        </div>
     </Sheet.Content>
 </Sheet.Root>

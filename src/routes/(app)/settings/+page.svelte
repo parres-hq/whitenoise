@@ -258,7 +258,7 @@ function toggleDeveloperSection() {
     }} tabindex="0" role="button" class="section-title-button">
         <h2 class="section-title">Profile</h2>
         {#if showProfileSection}
-            <LoginSheet title="Add new profile" loading={addProfileLoading} bind:sheetVisible={showLoginSheet}>
+            <LoginSheet title="Add new profile" loading={addProfileLoading} bind:sheetVisible={showLoginSheet} showCreateAccount={true}>
                 <div class="flex items-center justify-center shrink-0 overflow-visible">
                     <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2">
                         <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
