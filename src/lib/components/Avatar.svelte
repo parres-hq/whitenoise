@@ -13,8 +13,17 @@ let { pubkey, picture, pxSize = 32 }: Props = $props();
 let user: EnrichedContact | undefined = $state(undefined);
 let avatarImage: string | undefined = $state(picture);
 let userFetched: boolean = $state(false);
+let previousPubkey: string | undefined = $state(undefined);
 
 $effect(() => {
+    // Only reset state if the pubkey actually changed
+    if (previousPubkey !== pubkey) {
+        previousPubkey = pubkey;
+        user = undefined;
+        avatarImage = picture;
+        userFetched = false;
+    }
+
     if (!avatarImage && !userFetched) {
         invoke("query_enriched_contact", {
             pubkey,
@@ -26,12 +35,6 @@ $effect(() => {
                 userFetched = true;
             })
             .catch((e) => console.error(e));
-    }
-});
-
-$effect(() => {
-    if (picture) {
-        avatarImage = picture;
     }
 });
 </script>

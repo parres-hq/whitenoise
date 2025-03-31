@@ -24,7 +24,7 @@ async function copyNpub() {
 }
 </script>
 
-    <span class="flex flex-row flex-wrap gap-x-1.5 text-accent-dark dark:text-accent-light text-xs font-mono">
+    <span class="flex flex-row flex-wrap gap-x-2 text-accent-dark dark:text-accent-light text-xs font-mono">
         {#each (npub.match(/.{1,5}/g) || []) as block, idx}
             {#if idx % 2 === 1}
                 <span class="opacity-60">{block}</span>
