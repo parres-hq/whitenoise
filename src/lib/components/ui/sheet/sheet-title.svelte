@@ -9,7 +9,7 @@ export { className as class };
 </script>
 
 <SheetPrimitive.Title
-	class={cn("text-foreground text-2xl", className)}
+	class={cn("text-foreground text-2xl font-normal", className)}
 	{...$$restProps}
 >
 	<slot />

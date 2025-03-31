@@ -4,8 +4,11 @@ import Alert from "$lib/components/Alert.svelte";
 import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import Header from "$lib/components/Header.svelte";
+import LoginSheet from "$lib/components/LoginSheet.svelte";
+import Button from "$lib/components/ui/button/button.svelte";
 import {
     LogoutError,
+    accounts,
     activeAccount,
     createAccount,
     fetchRelays,
@@ -23,8 +26,9 @@ import {
     requestPermission,
     sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { ChevronRight } from "carbon-icons-svelte";
 import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
+import ChevronRight from "carbon-icons-svelte/lib/ChevronRight.svelte";
+import ChevronSort from "carbon-icons-svelte/lib/ChevronSort.svelte";
 import Logout from "carbon-icons-svelte/lib/Logout.svelte";
 import Notification from "carbon-icons-svelte/lib/Notification.svelte";
 import Password from "carbon-icons-svelte/lib/Password.svelte";
@@ -36,14 +40,14 @@ import Wallet from "carbon-icons-svelte/lib/Wallet.svelte";
 import { cubicInOut } from "svelte/easing";
 import { slide } from "svelte/transition";
 
+import { applyAction } from "$app/forms";
 import { onDestroy, onMount } from "svelte";
 
 let showDeleteAlert = $state(false);
 let showKeyPackageAlert = $state(false);
 let showDeleteKeyPackagesAlert = $state(false);
-let nsecOrHex = $state("");
-let showLoginError = $state(false);
-let loginError = $state("");
+
+let addProfileLoading = $state(false);
 
 let showProfileSection = $state(true);
 let showPrivacySection = $state(false);
@@ -73,27 +77,7 @@ onDestroy(() => {
     toastState.cleanup();
 });
 
-async function handleLogin() {
-    if (isValidNsec(nsecOrHex) || isValidHexKey(nsecOrHex)) {
-        showLoginError = false;
-        login(nsecOrHex)
-            .then(() => {
-                toastState.add("Logged in", "Successfully logged in", "success");
-                nsecOrHex = "";
-            })
-            .catch((e) => {
-                console.error(e);
-                showLoginError = true;
-                loginError = "Failed to log in";
-            });
-    } else {
-        showLoginError = true;
-        loginError = "Invalid nsec or private key";
-    }
-}
-
 async function handleCreateAccount() {
-    showLoginError = false;
     createAccount()
         .then(() => {
             toastState.add("Created new account", "Successfully created new account", "success");
@@ -109,7 +93,6 @@ async function handleCreateAccount() {
 }
 
 async function handleLogout(pubkey: string): Promise<void> {
-    showLoginError = false;
     logout(pubkey)
         .then(() => {
             toastState.add("Logged out", "Successfully logged out", "success");
@@ -269,23 +252,23 @@ function toggleDeveloperSection() {
     }} tabindex="0" role="button" class="section-title-button">
         <h2 class="section-title">Profile</h2>
         {#if showProfileSection}
-            <button class="text-muted-foreground-light dark:text-muted-foreground-dark" onclick={() => console.log("open new profile sheet")} aria-label="Add a profile">
-                <AddLarge size={24} />
-            </button>
+            <LoginSheet title="Add new profile" loading={addProfileLoading}>
+                <div class="flex items-center justify-center shrink-0 overflow-visible">
+                    <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2">
+                        <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
+                    </Button>
+                </div>
+            </LoginSheet>
         {/if}
     </div>
     {#if showProfileSection}
-        <div class="overflow-hidden p-0 m-0" transition:slide={slideParams}>
-            <div class="flex flex-row gap-3 items-center min-w-0 w-full mb-4">
-                <button
-                    onclick={() => setActiveAccount($activeAccount!.pubkey)}
-                >
-                    <Avatar
-                        pubkey={$activeAccount!.pubkey}
-                        picture={$activeAccount!.metadata?.picture}
-                        pxSize={56}
-                    />
-                </button>
+        <div class="overflow-visible p-0 m-0" transition:slide={slideParams}>
+            <div class="flex flex-row gap-3 items-center min-w-0 w-full mb-4 overflow-visible">
+                <Avatar
+                    pubkey={$activeAccount!.pubkey}
+                    picture={$activeAccount!.metadata?.picture}
+                    pxSize={56}
+                />
                 <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate w-full">
                     <div class="truncate text-lg font-medium">
                         {nameFromMetadata($activeAccount!.metadata, $activeAccount!.pubkey)}
@@ -294,6 +277,12 @@ function toggleDeveloperSection() {
                         <FormattedNpub npub={npubFromPubkey($activeAccount!.pubkey)} showCopy={true} />
                     </div>
                 </div>
+                {#if $accounts.length > 1}
+                    <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2">
+                        <ChevronSort size={24} class="text-muted-foreground shrink-0 !w-6 !h-6" />
+                    </Button>
+                {/if}
+
             </div>
 
             <ul class="section-list">
