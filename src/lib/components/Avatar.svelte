@@ -24,6 +24,11 @@ $effect(() => {
         userFetched = false;
     }
 
+    // Update avatar image when picture prop changes
+    if (picture) {
+        avatarImage = picture;
+    }
+
     if (!avatarImage && !userFetched) {
         invoke("query_enriched_contact", {
             pubkey,

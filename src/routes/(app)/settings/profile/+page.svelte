@@ -4,6 +4,7 @@ import Header from "$lib/components/Header.svelte";
 import { Button } from "$lib/components/ui/button";
 import { Input } from "$lib/components/ui/input";
 import { Label } from "$lib/components/ui/label";
+import { Textarea } from "$lib/components/ui/textarea";
 import { activeAccount } from "$lib/stores/accounts";
 import type { NMetadata } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
@@ -64,7 +65,7 @@ async function handleSave() {
 
 <Header backLocation="/settings" title="Profile" />
 
-<main class="flex flex-col max-w-2xl mx-auto w-full pb-safe-bottom">
+<main class="pb-6 flex flex-col gap-4 relative h-[calc(100svh-7rem)]">
     <div class="relative">
         {#if bannerImage}
             <img src={bannerImage} alt="Cover" class="w-full h-48 object-cover" />
@@ -112,43 +113,41 @@ async function handleSave() {
         </label>
     </div>
 
-    <div class="px-4 mt-20 pb-10">
-        <form class="flex flex-col gap-6">
-            <div class="flex flex-col gap-2">
-                <Label for="displayName">Display Name</Label>
-                <Input type="text" id="displayName" bind:value={displayName} />
-            </div>
+    <div class="flex flex-col gap-6 mt-20 relative">
+        <div class="flex flex-col gap-2 px-4">
+            <Label for="displayName">Display Name</Label>
+            <Input type="text" id="displayName" bind:value={displayName} />
+        </div>
 
-            <div class="flex flex-col gap-2">
-                <Label for="name">Name</Label>
-                <Input type="text" id="name" bind:value={name} />
-            </div>
+        <div class="flex flex-col gap-2 px-4">
+            <Label for="name">Name</Label>
+            <Input type="text" id="name" bind:value={name} />
+        </div>
 
-            <div class="flex flex-col gap-2">
-                <Label for="about">About</Label>
-                <textarea
-                    id="about"
-                    bind:value={about}
-                    class="min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                ></textarea>
-            </div>
+        <div class="flex flex-col gap-2 px-4">
+            <Label for="about">About</Label>
+            <Textarea
+                id="about"
+                bind:value={about}
+            ></Textarea>
+        </div>
 
-            <div class="flex flex-col gap-2">
-                <Label for="website">Website</Label>
-                <Input type="url" id="website" bind:value={website} />
-            </div>
+        <div class="flex flex-col gap-2 px-4">
+            <Label for="website">Website</Label>
+            <Input type="url" id="website" bind:value={website} />
+        </div>
 
-            <div class="flex flex-col gap-2">
-                <Label for="nostrAddress">Nostr Address (NIP-05)</Label>
-                <Input type="text" id="nostrAddress" bind:value={nostrAddress} />
-            </div>
+        <div class="flex flex-col gap-2 px-4">
+            <Label for="nostrAddress">Nostr Address (NIP-05)</Label>
+            <Input type="text" id="nostrAddress" bind:value={nostrAddress} />
+        </div>
 
-            <div class="flex flex-col gap-2">
-                <Label for="lightningAddress">Lightning Address</Label>
-                <Input type="text" id="lightningAddress" bind:value={lightningAddress} />
-            </div>
-
-            <Button type="submit" class="mt-4" onclick={handleSave}>Save Changes</Button>
-        </form>
+        <div class="flex flex-col gap-2 px-4">
+            <Label for="lightningAddress">Lightning Address</Label>
+            <Input type="text" id="lightningAddress" bind:value={lightningAddress} />
+        </div>
+    </div>
+    <div class="md:px-4">
+        <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6">Save Changes</Button>
     </div>
 </main>

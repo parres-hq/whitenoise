@@ -100,7 +100,7 @@ onMount(async () => {
 
 <Header backLocation="/settings" title="Wallet" />
 
-<main class="px-4 py-6 flex flex-col gap-4 relative h-[calc(100vh-7rem)]">
+<main class="px-4 py-6 flex flex-col gap-4 relative h-[calc(100svh-7rem)]">
     {#if hasWallet}
         <h2 class="text-xl/7">Lightning Wallet Connected</h2>
         <div class="flex flex-row items-center justify-between">
