@@ -13,6 +13,7 @@ import View from "carbon-icons-svelte/lib/View.svelte";
 import ViewOff from "carbon-icons-svelte/lib/ViewOff.svelte";
 import Warning from "carbon-icons-svelte/lib/Warning.svelte";
 import { onMount } from "svelte";
+
 const toastState = getToastState();
 let showPrivateKey = $state(false);
 let nsec = $state("");
@@ -21,9 +22,13 @@ onMount(async () => {
     if (!$activeAccount) return;
     await invoke<string>("export_nsec", {
         pubkey: $activeAccount.pubkey,
-    }).then((value: string) => {
-        nsec = value;
-    });
+    })
+        .then((value: string) => {
+            nsec = value;
+        })
+        .catch((error) => {
+            console.error(error);
+        });
 });
 
 async function copyPublicKey() {
