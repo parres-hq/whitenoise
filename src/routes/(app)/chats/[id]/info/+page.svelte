@@ -15,7 +15,9 @@ import {
 import type { EnrichedContact, NEvent } from "$lib/types/nostr";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
-import { CaretLeft, HardDrives, Key, LockKey, SignOut, WarningOctagon } from "phosphor-svelte";
+import CaretLeft from "phosphor-svelte/lib/CaretLeft";
+import HardDrives from "phosphor-svelte/lib/HardDrives";
+import LockKey from "phosphor-svelte/lib/LockKey";
 import { onDestroy, onMount } from "svelte";
 
 let toastState = getToastState();
@@ -174,4 +176,3 @@ onDestroy(() => {
     </div> -->
 </div>
 {/if}
-

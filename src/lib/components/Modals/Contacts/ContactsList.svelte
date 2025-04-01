@@ -6,7 +6,7 @@ import { npubFromPubkey } from "$lib/utils/nostr";
 import { hexKeyFromNpub, isValidHexKey, isValidNpub } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import { CaretRight } from "phosphor-svelte";
+import CaretRight from "phosphor-svelte/lib/CaretRight";
 import { onDestroy, onMount } from "svelte";
 import Avatar from "../../Avatar.svelte";
 import Loader from "../../Loader.svelte";

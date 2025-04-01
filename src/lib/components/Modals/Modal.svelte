@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { ModalView } from "$lib/types/modal";
-import { CaretLeft, X } from "phosphor-svelte";
+import CaretLeft from "phosphor-svelte/lib/CaretLeft";
+import X from "phosphor-svelte/lib/X";
 import { onDestroy } from "svelte";
 import type { Component } from "svelte";
 import { fade, fly } from "svelte/transition";

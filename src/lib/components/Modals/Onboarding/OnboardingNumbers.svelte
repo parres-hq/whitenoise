@@ -1,5 +1,7 @@
 <script lang="ts">
-import { NumberCircleOne, NumberCircleThree, NumberCircleTwo } from "phosphor-svelte";
+import NumberCircleOne from "phosphor-svelte/lib/NumberCircleOne";
+import NumberCircleThree from "phosphor-svelte/lib/NumberCircleThree";
+import NumberCircleTwo from "phosphor-svelte/lib/NumberCircleTwo";
 
 let {
     currentStep = $bindable(),

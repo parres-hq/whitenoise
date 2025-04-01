@@ -1,7 +1,7 @@
 <script lang="ts">
 import Header from "$lib/components/Header.svelte";
 import { colorForRelayStatus, relays } from "$lib/stores/accounts";
-import { HardDrives } from "phosphor-svelte";
+import HardDrives from "phosphor-svelte/lib/HardDrives";
 </script>
 
 <Header backLocation="/settings" title="Network" />

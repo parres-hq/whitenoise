@@ -26,15 +26,13 @@ import { formatMessageTime } from "$lib/utils/time";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import {
-    ArrowBendUpLeft,
-    CaretLeft,
-    CheckCircle,
-    CircleDashed,
-    CopySimple,
-    DotsThree,
-    TrashSimple,
-} from "phosphor-svelte";
+import ArrowBendUpLeft from "phosphor-svelte/lib/ArrowBendUpLeft";
+import CaretLeft from "phosphor-svelte/lib/CaretLeft";
+import CheckCircle from "phosphor-svelte/lib/CheckCircle";
+import CircleDashed from "phosphor-svelte/lib/CircleDashed";
+import CopySimple from "phosphor-svelte/lib/CopySimple";
+import DotsThree from "phosphor-svelte/lib/DotsThree";
+import TrashSimple from "phosphor-svelte/lib/TrashSimple";
 import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
 let unlistenMlsMessageReceived: UnlistenFn;

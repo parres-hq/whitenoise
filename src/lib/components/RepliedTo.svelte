@@ -1,7 +1,7 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
 import { type Message } from "$lib/types/chat";
-import { TrashSimple } from "phosphor-svelte";
+import TrashSimple from "phosphor-svelte/lib/TrashSimple";
 import Name from "./Name.svelte";
 
 let {
