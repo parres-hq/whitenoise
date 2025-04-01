@@ -46,7 +46,8 @@ let showDeleteAlert = $state(false);
 let showKeyPackageAlert = $state(false);
 let showDeleteKeyPackagesAlert = $state(false);
 let addProfileLoading = $state(false);
-let showProfileSection = $state(true);
+
+let accordionOpenSection = $state("profile");
 
 let unlisten: UnlistenFn;
 
@@ -194,21 +195,17 @@ function publishKeyPackage() {
 <Header backLocation="/chats" title="Settings" />
 
 <main class="px-4 py-6 flex flex-col gap-4">
-    <Accordion.Root value="profile">
+    <Accordion.Root bind:value={accordionOpenSection} class="px-2">
         <Accordion.Item value="profile">
-            <Accordion.Trigger>
+            <Accordion.Trigger class="overflow-visible">
                 <h2 class="section-title">Profile</h2>
-                {#if showProfileSection}
-                    <LoginSheet title="Add new profile" loading={addProfileLoading} bind:sheetVisible={showLoginSheet} showCreateAccount={true}>
-                        <div class="flex items-center justify-center shrink-0 overflow-visible">
-                            <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2">
-                                <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
-                            </Button>
-                        </div>
-                    </LoginSheet>
-                {/if}
+                <LoginSheet title="Add new profile" loading={addProfileLoading} bind:sheetVisible={showLoginSheet} showCreateAccount={true}>
+                    <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2">
+                        <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
+                    </Button>
+                </LoginSheet>
             </Accordion.Trigger>
-            <Accordion.Content>
+            <Accordion.Content class="overflow-visible">
                 <div class="overflow-visible p-0 m-0">
                     <div class="flex flex-row gap-3 items-center min-w-0 w-full mb-4 overflow-visible">
                         <Avatar
