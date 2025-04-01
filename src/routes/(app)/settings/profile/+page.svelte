@@ -39,7 +39,6 @@ async function handleFileUpload(file: File, type: "banner" | "profile") {
             } else {
                 profilePicture = url as string;
             }
-            handleSave();
         } catch (error) {
             console.error("Failed to upload file:", error);
         }
