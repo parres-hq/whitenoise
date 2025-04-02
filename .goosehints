@@ -1,0 +1,42 @@
+# White Noise
+
+This project is called White Noise, a secure messenger app written in Rust and TypeScript. It implements secure direct and group messaging using [Messaging Layer Security protocol](https://www.rfc-editor.org/rfc/rfc9420.txt) via the [OpenMLS implementation library](https://www.github.com/openmls/openmls) and using the [Nostr Protocol](https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master/README.md) as the delivery/transport mechanism. White Noise uses several of the [rust-nostr](https://github.com/rust-nostr/nostr) rust crates to implement Nostr functionality in the app.
+
+## Project Structure
+
+White Noise is a [Tauri 2](https://tauri.app/) app that uses Rust on the backend and [SvelteKit](https://svelte.dev/) (with TypeScript) for the front-end. The project is organanized like a standard Tauri app, with `/src` being for the front-end code and `/src-tauri` being the backend code. The app is set up to build for Android, iOS, Linux desktop, & Macos desktop. You can find all the code for the mobile apps in the `/src-tauri/gen/apple` and `/src-tauri/gen/android` directories.
+
+## Tauri, Svelte, Bun, Biome
+
+White Noise uses Tauri 2.x and Svelte 5.x (always use Svelte's new runes mode).
+
+Dependencies on the backend are managed with Cargo. We use clippy and rustfmt to ensure standardized formatting and linting in Rust.
+Dependencies on the front-end are managed with [Bun](https://bun.sh). You can use the `bun add` command to add any `npm` dependency. Most of the Bun commands are analogous or exactly the same as the `npm` commands of the same name. We use [biome.js](https://biomejs.dev/) to manage formatting and linting in JS/TS.
+
+You'll find useful scripts for running tests, formatting, linting, and other things in the `/package.json` file.
+
+## Nostr
+
+Nostr is a decentralized social media protocol involving clients, relays, keys, and a unified Nostr event format.
+
+Specifications on Nostr are called "NIPs". NIP stands for "Nostr Implementation Possibilities". NIPs are numbered like `NIP-XX` where `XX` are two capitalized hexadecimal digits, eg `NIP-01` and `NIP-C7`.
+
+To learn about Nostr, use the fetch tool to read [NIP-01](https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master/01.md).
+
+To read a specific NIP, construct the NIP URL following this template: `https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master/{nip}.md` (replace `{nip}` in the URL template with the relevant NIP name, eg `07` for NIP-07, or `C7` for NIP-C7). Then use the fetch tool to read the URL.
+
+To read the definition of a specific kind, construct a URL following this template: `https://nostrbook.dev/kinds/{kind}.md` (replace `{kind}` in the template with the kind number, eg `https://nostrbook.dev/kinds/0.md` for kind 0).
+
+To discover the full list of NIPs, use the fetch tool to read the [NIPs README](https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master/README.md).
+
+It's important that White Noise conforms to Nostr standards. Please read as much of the NIPs as you need to have a full understanding before adding or modifying Nostr events and filters. It is possible to add new ideas to Nostr that don't exist yet in the NIPs, but only after other options have been explored. Care must be taken when adding new Nostr ideas, to ensure they fit seamlessly within the existing Nostr ecosystem.
+
+## How White Noise uses Nostr
+
+White Noise is implementing a new NIP ([NIP-EE](https://raw.githubusercontent.com/nostr-protocol/nips/001c516f7294308143515a494a35213fc45978df/EE.md)) that specifies how to use MLS (Messaging Layer Security) with Nostr. This NIP is still in development but mostly complete. If you run into anything that doesn't seem correct in White Noise, you should bring it up before making any changes.
+
+The goal of White Noise is to provide a secure messenger that allows groups (from just 2 people to many thousadnds of people) to chat. White Noise doesn't require any centralized third party servers for identity or delivery management which makes it a better more freedom-focused messenger. You should take great care to follow security best practices (making sure to highlight potential threat vectors) and work to ensure use privacy in everything you build. We want to minimize metadata that is sent in plaintext to Nostr relays at all costs.
+
+## Testing Changes
+
+After making changes, please run `bun run check-all` to check for formatting & linting errors and run tests. If there are any errors, please try to fix them.
