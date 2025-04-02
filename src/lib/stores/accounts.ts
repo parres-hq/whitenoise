@@ -72,6 +72,7 @@ export async function setActiveAccount(pubkey: string): Promise<void> {
         return;
     emit("account_changing", pubkey);
     return invoke("set_active_account", { hexPubkey: pubkey }).then(async (account) => {
+        console.log("setActiveAccount", account);
         activeAccount.set(account as Account);
         await fetchRelays();
     });
@@ -130,12 +131,12 @@ export function colorForRelayStatus(status: string): string {
         case "Pending":
         case "Initialized":
         case "Connecting":
-            return "text-yellow-500";
+            return "bg-yellow-500";
         case "Connected":
-            return "text-green-500";
+            return "bg-lime-500";
         case "Disconnected":
         case "Terminated":
-            return "text-red-500";
+            return "bg-red-500";
         default:
             return "";
     }

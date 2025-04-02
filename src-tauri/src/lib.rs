@@ -98,6 +98,7 @@ pub fn run() {
             fetch_enriched_contacts,
             query_enriched_contacts,
             fetch_relays,
+            fetch_relays_list,
             encrypt_content,
             decrypt_content,
             create_group,
