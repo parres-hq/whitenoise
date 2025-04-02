@@ -7,7 +7,11 @@ import { hexMlsGroupId } from "$lib/utils/group";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { Check, PaperPlaneTilt, Plus, TrashSimple, X } from "phosphor-svelte";
+import Check from "phosphor-svelte/lib/Check";
+import PaperPlaneTilt from "phosphor-svelte/lib/PaperPlaneTilt";
+import Plus from "phosphor-svelte/lib/Plus";
+import TrashSimple from "phosphor-svelte/lib/TrashSimple";
+import X from "phosphor-svelte/lib/X";
 import { onMount } from "svelte";
 import Loader from "./Loader.svelte";
 

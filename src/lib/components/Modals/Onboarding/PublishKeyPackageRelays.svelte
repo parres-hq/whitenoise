@@ -4,7 +4,8 @@ import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { PushView } from "$lib/types/modal";
 import { isValidWebSocketURL } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
-import { Plus, Trash } from "phosphor-svelte";
+import Plus from "phosphor-svelte/lib/Plus";
+import Trash from "phosphor-svelte/lib/Trash";
 import OnboardingNumbers from "./OnboardingNumbers.svelte";
 import PublishKeyPackage from "./PublishKeyPackage.svelte";
 

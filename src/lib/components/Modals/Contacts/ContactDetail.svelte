@@ -6,7 +6,7 @@ import type { CloseModal } from "$lib/types/modal";
 import type { EnrichedContact } from "$lib/types/nostr";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
-import { Warning } from "phosphor-svelte";
+import Warning from "phosphor-svelte/lib/Warning";
 import Alert from "../../Alert.svelte";
 import Avatar from "../../Avatar.svelte";
 import Name from "../../Name.svelte";

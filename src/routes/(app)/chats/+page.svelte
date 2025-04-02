@@ -14,7 +14,8 @@ import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
 import Chat from "carbon-icons-svelte/lib/Chat.svelte";
 import Search from "carbon-icons-svelte/lib/Search.svelte";
-import { PlusCircle, Warning } from "phosphor-svelte";
+import PlusCircle from "phosphor-svelte/lib/PlusCircle";
+import Warning from "phosphor-svelte/lib/Warning";
 import { onDestroy, onMount } from "svelte";
 
 let unlistenAccountChanging: UnlistenFn;
