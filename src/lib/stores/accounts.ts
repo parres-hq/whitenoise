@@ -72,7 +72,6 @@ export async function setActiveAccount(pubkey: string): Promise<void> {
         return;
     emit("account_changing", pubkey);
     return invoke("set_active_account", { hexPubkey: pubkey }).then(async (account) => {
-        console.log("setActiveAccount", account);
         activeAccount.set(account as Account);
         await fetchRelays();
     });
