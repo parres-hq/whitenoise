@@ -108,9 +108,9 @@ describe("accounts store", () => {
         });
 
         it("should return correct color for relay status", () => {
-            expect(colorForRelayStatus("Connected")).toBe("text-green-500");
-            expect(colorForRelayStatus("Connecting")).toBe("text-yellow-500");
-            expect(colorForRelayStatus("Disconnected")).toBe("text-red-500");
+            expect(colorForRelayStatus("Connected")).toBe("bg-lime-500");
+            expect(colorForRelayStatus("Connecting")).toBe("bg-yellow-500");
+            expect(colorForRelayStatus("Disconnected")).toBe("bg-red-500");
             expect(colorForRelayStatus("Unknown")).toBe("");
         });
     });
