@@ -1,6 +1,7 @@
 <script lang="ts" module>
 import { defineMeta } from "@storybook/addon-svelte-csf";
-import { CaretLeft, PlusCircle } from "phosphor-svelte";
+import CaretLeft from "phosphor-svelte/lib/CaretLeft";
+import PlusCircle from "phosphor-svelte/lib/PlusCircle";
 import HeaderToolbar from "./HeaderToolbar.svelte";
 
 const { Story } = defineMeta({

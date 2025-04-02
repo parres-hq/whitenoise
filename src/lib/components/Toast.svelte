@@ -1,7 +1,10 @@
 <script lang="ts">
 import type { Toast } from "$lib/stores/toast-state.svelte";
 import { getToastState } from "$lib/stores/toast-state.svelte";
-import { CheckCircle, Info, Warning, X } from "phosphor-svelte";
+import CheckCircle from "phosphor-svelte/lib/CheckCircle";
+import Info from "phosphor-svelte/lib/Info";
+import Warning from "phosphor-svelte/lib/Warning";
+import X from "phosphor-svelte/lib/X";
 import { fly } from "svelte/transition";
 
 let toastState = getToastState();
