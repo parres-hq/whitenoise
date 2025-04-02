@@ -130,12 +130,12 @@ export function colorForRelayStatus(status: string): string {
         case "Pending":
         case "Initialized":
         case "Connecting":
-            return "text-yellow-500";
+            return "bg-yellow-500";
         case "Connected":
-            return "text-green-500";
+            return "bg-lime-500";
         case "Disconnected":
         case "Terminated":
-            return "text-red-500";
+            return "bg-red-500";
         default:
             return "";
     }
