@@ -210,8 +210,7 @@ pub fn get_nostr_keys_for_pubkey(pubkey: &str, data_dir: &Path) -> Result<Keys> 
 ///
 /// # Returns
 ///
-/// * `Result<()>` - Ok(()) if the operation was successful or if the key didn't exist,
-///                  or an error if the Entry creation fails.
+/// * `Result<()>` - Ok(()) if the operation was successful or if the key didn't exist, or an error if the Entry creation fails.
 ///
 /// # Errors
 ///
