@@ -33,12 +33,12 @@ description = "Whitenoise dev nostr relay"
 [database]
 # Database engine (sqlite/postgres).  Defaults to sqlite.
 # Support for postgres is currently experimental.
-#engine = "sqlite"
+engine = "sqlite"
 
 # Directory for SQLite files.  Defaults to the current directory.  Can
 # also be specified (and overriden) with the "--db dirname" command
 # line option.
-#data_directory = "."
+data_directory = "/usr/src/app/db"
 
 # Use an in-memory database instead of 'nostr.db'.
 # Requires sqlite engine.

@@ -5,11 +5,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
 import InviteDetail from "./Modals/Invites/InviteDetail.svelte";
-import Modal from "./Modals/Modal.svelte";
+import Button from "./ui/button/button.svelte";
+import * as Sheet from "./ui/sheet";
 
-let { invite }: { invite: Invite } = $props<{
-    invite: Invite;
-}>();
+let { invite }: { invite: Invite } = $props();
 
 let showModal = $state(false);
 let enrichedInviter: EnrichedContact | undefined = $state(undefined);
@@ -21,6 +20,8 @@ let groupType = $state(
 let inviteDescription = $derived(
     invite.member_count === 2 ? "private chat" : `group with ${invite.member_count} members`
 );
+
+let showSheet = $state(false);
 
 $effect(() => {
     if (invite.inviter && !enrichedInviter) {
@@ -36,29 +37,32 @@ $effect(() => {
         groupName = invite.group_name;
     }
 });
-
-function closeInviteModal() {
-    showModal = false;
-}
 </script>
 
-<button
-    onclick={() => (showModal = !showModal)}
-    class="flex flex-row gap-2 items-center px-4 py-3 border-b border-gray-700 hover:bg-gray-700"
->
-    <GroupAvatar
-        bind:groupType
-        bind:groupName
-        bind:counterpartyPubkey={invite.inviter}
-        bind:enrichedCounterparty={enrichedInviter}
-        pxSize={40}
-    />
-    <div class="flex flex-col gap-1 items-start">
-        <span class="text-lg font-semibold">{groupName}</span>
-        <span class="text-sm text-gray-400">You're invited to join a {inviteDescription}</span>
-    </div>
-</button>
+<Sheet.Root>
+    <Sheet.Trigger>
+        <Button
+            size="lg"
+            variant="ghost"
+            onclick={() => (showModal = !showModal)}
+            class="flex flex-row gap-2 items-center justify-start py-10 px-4 w-full"
+        >
+            <GroupAvatar
+                bind:groupType
+                bind:groupName
+                bind:counterpartyPubkey={invite.inviter}
+                bind:enrichedCounterparty={enrichedInviter}
+                pxSize={40}
+            />
+            <div class="flex flex-col gap-0 items-start">
+                <span class="text-lg font-medium">{groupName}</span>
+                <span class="text-sm text-muted-foreground">You're invited to join a {inviteDescription}</span>
+            </div>
+        </Button>
+    </Sheet.Trigger>
+    <Sheet.Content side="bottom" class="pb-0 px-0 h-[90%]">
+        <InviteDetail {invite} bind:enrichedInviter bind:showSheet />
+    </Sheet.Content>
+</Sheet.Root>
 
-{#if showModal}
-    <Modal initialComponent={InviteDetail} modalProps={{ invite, enrichedInviter }} bind:showModal />
-{/if}
+

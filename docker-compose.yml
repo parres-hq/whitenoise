@@ -4,7 +4,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./dev/data/nostr-rs-relay:/usr/src/app/data
+      - ./dev/data/nostr-rs-relay:/usr/src/app/db
       - ./dev/nostr-rs-relay-config.toml:/usr/src/app/config.toml
     environment:
       - RUST_LOG=debug

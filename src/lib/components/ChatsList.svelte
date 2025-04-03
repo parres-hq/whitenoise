@@ -9,7 +9,7 @@ import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
 import Chat from "carbon-icons-svelte/lib/Chat.svelte";
 import Search from "carbon-icons-svelte/lib/Search.svelte";
-import CaretRight from "phosphor-svelte/lib/CaretRight";
+import WarningAlt from "carbon-icons-svelte/lib/WarningAlt.svelte";
 import { onDestroy, onMount } from "svelte";
 import Avatar from "./Avatar.svelte";
 import FormattedNpub from "./FormattedNpub.svelte";
@@ -18,7 +18,6 @@ import Header from "./Header.svelte";
 import InviteListItem from "./InviteListItem.svelte";
 import Loader from "./Loader.svelte";
 import StartSecureChat from "./Modals/StartSecureChat.svelte";
-import Name from "./Name.svelte";
 import Button from "./ui/button/button.svelte";
 import Input from "./ui/input/input.svelte";
 import * as Sheet from "./ui/sheet";
@@ -219,6 +218,8 @@ $effect(() => {
         );
     }
 });
+
+$inspect(invites);
 </script>
 
 <Header>
@@ -360,12 +361,13 @@ $effect(() => {
         <Loader size={40} fullscreen={false} />
     </div>
 {:else if loadingError}
-    <div class="text-red-500 px-4 font-medium flex flex-col gap-2">
-        <span>Sorry, we couldn't load your chats because of an error.</span>
-        <pre class="font-mono p-2 rounded-md ring-1 ring-red-500/30">{loadingError}</pre>
+    <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-destructive">
+        <WarningAlt size={32} />
+        <span>Error loading chats</span>
+        <span>{loadingError}</span>
     </div>
 {:else}
-    <div class="flex flex-col gap-0">
+    <div class="flex flex-col gap-2 pt-3">
         {#if invites.length === 0 && groups.length === 0}
             <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground">
                 <Chat size={32} />

@@ -1,5 +1,4 @@
 <script lang="ts">
-import { activeAccount } from "$lib/stores/accounts";
 import type { EnrichedContact } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 

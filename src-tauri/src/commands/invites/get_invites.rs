@@ -20,6 +20,9 @@ pub async fn get_invites(wn: tauri::State<'_, Whitenoise>) -> Result<InvitesWith
         .await
         .map_err(|e| e.to_string())?;
 
+    tracing::debug!(target: "whitenoise::commands::invites::get_invites", "Pending invites: {:?}", pending_invites);
+    tracing::debug!(target: "whitenoise::commands::invites::get_invites", "Failed invites: {:?}", failed_invites);
+
     Ok(InvitesWithFailures {
         invites: pending_invites,
         failures: failed_invites,
