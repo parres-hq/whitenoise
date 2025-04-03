@@ -121,7 +121,7 @@ onDestroy(() => {
             <Button
                 variant="secondary"
                 size="lg"
-                tabindex="0"
+                tabindex="1"
                 class="text-base font-medium w-full py-6"
                 disabled={isDecliningInvite}
                 onclick={declineInvite}>
@@ -130,7 +130,7 @@ onDestroy(() => {
             <Button
                 variant="default"
                 size="lg"
-                tabindex="-1"
+                tabindex="0"
                 class="text-base font-medium w-full pb-[calc(1.5rem+var(--sab))] pt-6"
                 disabled={isAcceptingInvite}
                 onclick={acceptInvite}>
