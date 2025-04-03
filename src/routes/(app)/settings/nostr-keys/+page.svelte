@@ -5,7 +5,6 @@ import Header from "$lib/components/Header.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
 import Input from "$lib/components/ui/input/input.svelte";
 import { activeAccount } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import { npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import Copy from "carbon-icons-svelte/lib/Copy.svelte";
@@ -13,8 +12,8 @@ import View from "carbon-icons-svelte/lib/View.svelte";
 import ViewOff from "carbon-icons-svelte/lib/ViewOff.svelte";
 import Warning from "carbon-icons-svelte/lib/Warning.svelte";
 import { onMount } from "svelte";
+import { toast } from "svelte-sonner";
 
-const toastState = getToastState();
 let showPrivateKey = $state(false);
 let nsec = $state("");
 
@@ -35,12 +34,12 @@ async function copyPublicKey() {
     if (!$activeAccount) return;
     const npub = npubFromPubkey($activeAccount.pubkey);
     await navigator.clipboard.writeText(npub);
-    toastState.add("Success", "Public key copied to clipboard", "success");
+    toast.success("Public key copied to clipboard");
 }
 
 async function copyPrivateKey() {
     await navigator.clipboard.writeText(nsec);
-    toastState.add("Success", "Private key copied to clipboard", "success");
+    toast.success("Private key copied to clipboard");
 }
 </script>
 

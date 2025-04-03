@@ -3,11 +3,10 @@ import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
 import * as Sheet from "$lib/components/ui/sheet";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { EnrichedContact, Invite } from "$lib/types/nostr";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
-import { onDestroy } from "svelte";
+import { toast } from "svelte-sonner";
 
 type InviteDetailProps = {
     invite: Invite;
@@ -20,8 +19,6 @@ let {
     enrichedInviter = $bindable(),
     showSheet = $bindable(),
 }: InviteDetailProps = $props();
-
-let toastState = getToastState();
 
 let isAcceptingInvite = $state(false);
 let isDecliningInvite = $state(false);
@@ -41,14 +38,12 @@ async function acceptInvite() {
         .then(() => {
             const event = new CustomEvent("inviteAccepted", { detail: invite.mls_group_id });
             window.dispatchEvent(event);
-            toastState.add(
-                "Accepted Invite",
-                `You've accepted an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`,
-                "success"
+            toast.success(
+                `You've accepted an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`
             );
         })
         .catch((e) => {
-            toastState.add("Error accepting invite", e.split(": ")[2], "error");
+            toast.error("Error accepting invite");
             console.error(e);
             isAcceptingInvite = false;
         })
@@ -65,14 +60,12 @@ async function declineInvite() {
     isDecliningInvite = true;
     invoke("decline_invite", { invite })
         .then(() => {
-            toastState.add(
-                "Invite declined",
-                `You've declined an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`,
-                "info"
+            toast.info(
+                `You've declined an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`
             );
         })
         .catch((e) => {
-            toastState.add("Error declining invite", e.split(": ")[2], "error");
+            toast.error("Error declining invite");
             console.error(e);
             isDecliningInvite = false;
         })
@@ -81,10 +74,6 @@ async function declineInvite() {
             showSheet = false;
         });
 }
-
-onDestroy(() => {
-    toastState.cleanup();
-});
 </script>
 
 {#if enrichedInviter}

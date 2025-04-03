@@ -9,6 +9,7 @@ import * as Accordion from "$lib/components/ui/accordion";
 import Button from "$lib/components/ui/button/button.svelte";
 import * as Sheet from "$lib/components/ui/sheet";
 
+import * as AlertDialog from "$lib/components/ui/alert-dialog";
 import {
     LogoutError,
     accounts,
@@ -18,7 +19,6 @@ import {
     setActiveAccount,
     updateAccountsStore,
 } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
@@ -37,8 +37,8 @@ import Satellite from "carbon-icons-svelte/lib/Satellite.svelte";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import User from "carbon-icons-svelte/lib/User.svelte";
 import Wallet from "carbon-icons-svelte/lib/Wallet.svelte";
-
 import { onDestroy, onMount } from "svelte";
+import { toast } from "svelte-sonner";
 
 let showLoginSheet = $state(false);
 let showSwitchAccountSheet = $state(false);
@@ -50,8 +50,6 @@ let addProfileLoading = $state(false);
 let accordionOpenSection = $state("profile");
 
 let unlisten: UnlistenFn;
-
-let toastState = getToastState();
 
 onMount(async () => {
     if (!unlisten) {
@@ -70,19 +68,18 @@ onMount(async () => {
 
 onDestroy(() => {
     unlisten?.();
-    toastState.cleanup();
 });
 
 async function handleLogout(pubkey: string): Promise<void> {
     logout(pubkey)
         .then(() => {
-            toastState.add("Logged out", "Successfully logged out", "success");
+            toast.success("Successfully logged out");
         })
         .catch((e) => {
             if (e instanceof LogoutError) {
                 goto("/");
             } else {
-                toastState.add("Logout Error", `Failed to log out: ${e.message}`, "error");
+                toast.error("Failed to log out");
                 console.error(e);
             }
         });
@@ -117,19 +114,11 @@ function deleteAllKeyPackages() {
 function publishKeyPackage() {
     invoke("publish_new_key_package", {})
         .then(() => {
-            toastState.add(
-                "Key Package Published",
-                "Key Package published successfully",
-                "success"
-            );
+            toast.success("Key Package Published");
             showKeyPackageAlert = false;
         })
         .catch((e) => {
-            toastState.add(
-                "Error Publishing Key Package",
-                `Failed to publish key package: ${e.toString()}`,
-                "error"
-            );
+            toast.error("Error Publishing Key Package");
             console.error(e);
         });
 }
@@ -142,12 +131,12 @@ function publishKeyPackage() {
         acceptFn={async () => {
             invoke("delete_all_data")
                 .then(() => {
-                    toastState.add("Data deleted", "All accounts, groups, and messages have been deleted.", "info");
+                    toast.info("All accounts, groups, and messages have been deleted");
                     showDeleteAlert = false;
                     goto("/login");
                 })
                 .catch((e) => {
-                    toastState.add("Error deleting data", `Failed to delete data: ${e.toString()}`, "error");
+                    toast.error("Error deleting data");
                     console.error(e);
                 });
         }}
@@ -177,11 +166,11 @@ function publishKeyPackage() {
         acceptFn={async () => {
             invoke("delete_all_key_packages")
                 .then(() => {
-                    toastState.add("Key Packages Deleted", "All key packages have been deleted.", "success");
+                    toast.success("Key Packages Deleted");
                     showDeleteKeyPackagesAlert = false;
                 })
                 .catch((e) => {
-                    toastState.add("Error Deleting Key Packages", `Failed to delete key packages: ${e.toString()}`, "error");
+                    toast.error("Error Deleting Key Packages");
                     console.error(e);
                 });
         }}
@@ -335,27 +324,60 @@ function publishKeyPackage() {
                     <ul class="section-list">
                         <li class="section-list-item">
                             <button onclick={launchKeyPackage} class="row-button">
-                            <div class="row-button-content">
-                                <Password size={24} class="shrink-0"/>
-                                <span>Publish a key package</span>
-                            </div>
-                        </button>
-                    </li>
-                    <li class="section-list-item">
-                        <button onclick={deleteAllKeyPackages} class="row-button">
-                            <div class="row-button-content">
-                                <TrashCan size={24} class="shrink-0"/>
-                                <span>Delete all key packages</span>
-                            </div>
-                        </button>
-                    </li>
-                    <li class="section-list-item">
-                        <button onclick={testNotification} class="row-button">
-                            <div class="row-button-content">
-                                <Notification size={24} class="shrink-0"/>
-                                <span>Test notifications</span>
-                            </div>
-                        </button>
+                                <div class="row-button-content">
+                                    <Password size={24} class="shrink-0"/>
+                                    <span>Publish a key package</span>
+                                </div>
+                            </button>
+                        </li>
+                        <li class="section-list-item">
+                            <AlertDialog.Root>
+                                <AlertDialog.Trigger>
+                                    <Button variant="ghost" size="lg" class="row-button">
+                                        <div class="row-button-content">
+                                            <TrashCan size={24} class="shrink-0"/>
+                                            <span>Delete all key packages</span>
+                                        </div>
+                                    </Button>
+                                </AlertDialog.Trigger>
+                                <AlertDialog.Content>
+                                  <AlertDialog.Header>
+                                    <AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
+                                    <AlertDialog.Description>
+                                      Well send delete requests to all relays where your key packages are found.
+                                    </AlertDialog.Description>
+                                  </AlertDialog.Header>
+                                  <AlertDialog.Footer>
+                                    <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+                                    <AlertDialog.Action>Continue</AlertDialog.Action>
+                                  </AlertDialog.Footer>
+                                </AlertDialog.Content>
+                              </AlertDialog.Root>
+
+                        </li>
+                        <li class="section-list-item">
+                            <button onclick={testNotification} class="row-button">
+                                <div class="row-button-content">
+                                    <Notification size={24} class="shrink-0"/>
+                                    <span>Test notifications</span>
+                                </div>
+                            </button>
+                        </li>
+                        <li class="section-list-item">
+                            <button onclick={() => toast.success("Toast success")} class="row-button">
+                                <div class="row-button-content">
+                                    <Notification size={24} class="shrink-0"/>
+                                    <span>Test toast success</span>
+                                </div>
+                            </button>
+                        </li>
+                        <li class="section-list-item">
+                            <button onclick={() => toast.error("Toast error")} class="row-button">
+                                <div class="row-button-content">
+                                    <Notification size={24} class="shrink-0"/>
+                                    <span>Test toast error</span>
+                                </div>
+                            </button>
                         </li>
                     </ul>
                 </div>
@@ -365,10 +387,6 @@ function publishKeyPackage() {
 </main>
 
 <style lang="postcss">
-    .section-title-button {
-        @apply flex flex-row justify-between items-center mb-2 cursor-pointer;
-    }
-
     .section-title {
         @apply text-3xl font-normal text-primary leading-none;
     }

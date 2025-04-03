@@ -3,7 +3,6 @@ import { page } from "$app/stores";
 import ChatsList from "$lib/components/ChatsList.svelte";
 import * as Resizable from "$lib/components/ui/resizable";
 import { activeAccount } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { Invite, InvitesWithFailures, NostrMlsGroup, ProcessedInvite } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
@@ -19,8 +18,6 @@ let unlistenInviteAccepted: UnlistenFn;
 let unlistenInviteDeclined: UnlistenFn;
 let unlistenInviteProcessed: UnlistenFn;
 let unlistenInviteFailedToProcess: UnlistenFn;
-
-let toastState = getToastState();
 
 let selectedChatId = $state<string | null>(null);
 
@@ -134,7 +131,6 @@ onDestroy(() => {
     unlistenInviteDeclined?.();
     unlistenInviteProcessed?.();
     unlistenInviteFailedToProcess?.();
-    toastState.cleanup();
 });
 </script>
 

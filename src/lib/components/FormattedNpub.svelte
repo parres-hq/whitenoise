@@ -1,9 +1,8 @@
 <script lang="ts">
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import { copyToClipboard } from "$lib/utils/clipboard";
 import Copy from "carbon-icons-svelte/lib/Copy.svelte";
+import { toast } from "svelte-sonner";
 
-let toastState = getToastState();
 let {
     npub,
     showCopy = false,
@@ -19,11 +18,7 @@ async function copyNpub() {
             highlightButton = false;
         }, 2000);
     } else {
-        toastState.add(
-            "Error copying npub",
-            "There was an error copying your npub, please try again.",
-            "error"
-        );
+        toast.error("Error copying npub");
     }
 }
 </script>

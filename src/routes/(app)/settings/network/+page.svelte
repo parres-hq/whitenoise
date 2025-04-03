@@ -4,15 +4,13 @@ import Button from "$lib/components/ui/button/button.svelte";
 import Input from "$lib/components/ui/input/input.svelte";
 import * as Sheet from "$lib/components/ui/sheet";
 import { activeAccount, colorForRelayStatus } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import { readFromClipboard } from "$lib/utils/clipboard";
 import { invoke } from "@tauri-apps/api/core";
 import Add from "carbon-icons-svelte/lib/Add.svelte";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { onMount } from "svelte";
-
-const toastState = getToastState();
+import { toast } from "svelte-sonner";
 
 // Inbox relay list
 let inboxRelays: string[] | undefined = $derived($activeAccount?.inbox_relays);
@@ -44,8 +42,8 @@ async function loadRelays() {
         inboxRelays = inboxRelaysResult;
         keyPackageRelays = keyPackageRelaysResult;
     } catch (error) {
-        console.error("Error fetching relay data:", error);
-        toastState.add("Error", "Failed to fetch relay data", "error");
+        toast.error("Error fetching relay data");
+        console.error(error);
     } finally {
         isLoading = false;
     }
@@ -82,7 +80,7 @@ async function addRelay() {
     }
 
     if (!$activeAccount) {
-        toastState.add("Error", "No active account found", "error");
+        toast.error("No active account found");
         return;
     }
 
@@ -98,8 +96,8 @@ async function addRelay() {
         closeAddRelaySheet();
         await loadRelays();
     } catch (error) {
-        console.error("Error adding relay:", error);
-        toastState.add("Error", "Failed to add relay", "error");
+        toast.error("Failed to add relay");
+        console.error(error);
     } finally {
         isLoading = false;
     }

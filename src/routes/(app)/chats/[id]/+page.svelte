@@ -9,7 +9,6 @@ import RepliedTo from "$lib/components/RepliedTo.svelte";
 import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 import { activeAccount, hasLightningWallet } from "$lib/stores/accounts";
 import { createChatStore } from "$lib/stores/chat";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { CachedMessage, Message } from "$lib/types/chat";
 import {
     type EnrichedContact,
@@ -35,6 +34,7 @@ import DotsThree from "phosphor-svelte/lib/DotsThree";
 import TrashSimple from "phosphor-svelte/lib/TrashSimple";
 import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
+import { toast } from "svelte-sonner";
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
 
@@ -50,7 +50,6 @@ let selectedMessageId: string | null | undefined = $state(undefined);
 let messageMenuPosition = $state({ x: 0, y: 0 });
 let messageMenuExtendedPosition = $state({ x: 0, y: 0 });
 let replyToMessage: Message | undefined = $state(undefined);
-let toastState = getToastState();
 let isReplyToMessageDeleted = $state(false);
 
 $effect(() => {
@@ -289,19 +288,13 @@ async function payLightningInvoice(message: Message) {
         .payLightningInvoice(groupWithRelays, message)
         .then(
             (_paymentEvent: CachedMessage | null) => {
-                toastState.add(
-                    "Payment success",
-                    "Successfully sent payment to invoice",
-                    "success"
-                );
+                toast.success("Payment success", {
+                    description: "Successfully sent payment to invoice",
+                });
             },
             (e) => {
-                toastState.add(
-                    "Error sending payment",
-                    `Failed to send payment: ${e.message}`,
-                    "error"
-                );
-                console.error("Error sending payment", e);
+                toast.error("Error sending payment");
+                console.error(e);
             }
         )
         .finally(() => {
@@ -332,7 +325,7 @@ function deleteMessage() {
         return;
     }
     if (!group) {
-        console.error("no group found");
+        console.error("No group found");
         return;
     }
 
@@ -342,8 +335,8 @@ function deleteMessage() {
             showMessageMenu = false;
         })
         .catch((e) => {
-            console.error("Error deleting message", e);
-            toastState.add("Error Deleting Message", `Failed to delete message: ${e}`, "error");
+            toast.error("Error Deleting Message");
+            console.error(e);
         });
 }
 
@@ -367,7 +360,6 @@ onDestroy(() => {
     unlistenMlsMessageProcessed();
     unlistenMlsMessageReceived();
     chatStore.clear();
-    toastState.cleanup();
 });
 </script>
 

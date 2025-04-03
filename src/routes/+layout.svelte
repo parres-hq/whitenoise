@@ -1,13 +1,10 @@
 <script lang="ts">
-import Toaster from "$lib/components/Toaster.svelte";
-import { setToastState } from "$lib/stores/toast-state.svelte";
+import { Toaster } from "$lib/components/ui/sonner";
 import type { Snippet } from "svelte";
 import "../app.css";
 
 let { children }: { children: Snippet } = $props();
-
-setToastState();
 </script>
 
-<Toaster />
+<Toaster position="top-center" richColors />
 {@render children()}
