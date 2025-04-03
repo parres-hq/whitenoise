@@ -82,9 +82,6 @@ async function inviteToWhiteNoise() {
         <div class="text-4xl font-bold mt-6 w-full truncate text-center">
             <Name {pubkey} metadata={contact.metadata} unstyled={false} extraClasses="text-[2rem] text-center" />
         </div>
-        <p class="text-gray-500 text-center">
-            {contact.metadata.about}
-        </p>
     </div>
 
     <div class="flex flex-col gap-10 mt-10 items-center w-full md:w-2/3 lg:w-1/2 mx-auto">

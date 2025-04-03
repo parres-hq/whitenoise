@@ -97,7 +97,7 @@ export function isValidWebSocketURL(url: string): boolean {
  * - Uses the nameFromMetadata function to format the sender's name
  * - Handles cases where the message or sender information is not available
  */
-export async function latestMessagePreview(messageId: number | undefined): Promise<string> {
+export async function latestMessagePreview(messageId: string | undefined): Promise<string> {
     if (!messageId) {
         return "New chat";
     }

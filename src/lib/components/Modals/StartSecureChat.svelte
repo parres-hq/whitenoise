@@ -3,7 +3,8 @@ import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import { activeAccount } from "$lib/stores/accounts";
 import { getToastState } from "$lib/stores/toast-state.svelte";
-import type { EnrichedContact } from "$lib/types/nostr";
+import type { EnrichedContact, NostrMlsGroup } from "$lib/types/nostr";
+import { hexMlsGroupId } from "$lib/utils/group";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
@@ -30,7 +31,7 @@ async function startChat() {
 
     try {
         // Create a DM group with just this contact
-        const newGroup = await invoke("create_group", {
+        const group: NostrMlsGroup = await invoke("create_group", {
             creatorPubkey: $activeAccount?.pubkey,
             memberPubkeys: [pubkey],
             adminPubkeys: [$activeAccount?.pubkey, pubkey],
@@ -45,9 +46,7 @@ async function startChat() {
         );
 
         // Navigate to the new chat
-        // Safely extract the ID using type assertion to a record with string keys
-        const group = newGroup as Record<string, string>;
-        window.location.href = `/chat/${group.nostr_mls_group_id}`;
+        window.location.href = `/chats/${hexMlsGroupId(group.mls_group_id)}`;
     } catch (error) {
         console.error("Failed to create chat:", error);
         toastState.add(
@@ -141,7 +140,4 @@ onDestroy(() => {
             {isCreatingChat ? "Creating chat..." : "Start Chat & Send Invite"}
         </Button>
     {/if}
-
-
-
 </div>

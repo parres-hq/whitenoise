@@ -139,7 +139,7 @@ onDestroy(() => {
 </script>
 
 
-<!-- On desktop, we can show the chats list and the chat page side by side -->
+<!-- On desktop, we show the chats list and the chat page side by side -->
 <div class="hidden md:block h-full">
     <Resizable.PaneGroup direction="horizontal">
         <Resizable.Pane defaultSize={35} minSize={20}>

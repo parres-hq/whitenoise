@@ -7,10 +7,9 @@ import { formatMessageTime } from "$lib/utils/time";
 import { invoke } from "@tauri-apps/api/core";
 import { latestMessagePreview, nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
+import Button from "./ui/button/button.svelte";
 
-let { group } = $props<{
-    group: NostrMlsGroup;
-}>();
+let { group }: { group: NostrMlsGroup } = $props();
 
 let counterpartyPubkey: string | undefined = $state(undefined);
 let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
@@ -78,16 +77,18 @@ $effect(() => {
 });
 </script>
 
-<a
+<Button
+    size="lg"
+    variant="ghost"
     href={`/chats/${hexMlsGroupId(group.mls_group_id)}/`}
-    class="flex flex-row gap-2 items-center justify-between px-4 py-3 border-b border-gray-700 hover:bg-gray-700"
+    class="flex flex-row gap-2 items-center justify-between py-10 px-4"
 >
     <div class="flex flex-row gap-2 items-center">
-        <GroupAvatar bind:groupType={group.group_type} bind:groupName bind:counterpartyPubkey bind:enrichedCounterparty pxSize={40} />
+        <GroupAvatar bind:groupType={group.group_type} bind:groupName bind:counterpartyPubkey bind:enrichedCounterparty pxSize={56} />
         <div class="flex flex-col gap-0">
-            <span class="text-lg font-semibold">{groupName}</span>
-            <span class="text-sm text-gray-400 {group.last_message_id ? "" : "text-gray-500"} line-clamp-2">{group.last_message_id ? messagePreview : "New chat"}</span>
+            <span class="text-lg font-medium">{groupName}</span>
+            <span class="text-sm text-muted-foreground line-clamp-2">{group.last_message_id ? messagePreview : "New chat"}</span>
         </div>
     </div>
-    <span class="whitespace-nowrap">{group.last_message_at ? formatMessageTime(group.last_message_at) : ""}</span>
-</a>
+    <span class="whitespace-nowrap text-sm text-muted-foreground">{group.last_message_at ? formatMessageTime(group.last_message_at) : ""}</span>
+</Button>
