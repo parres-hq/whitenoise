@@ -4,7 +4,11 @@ import { copyToClipboard } from "$lib/utils/clipboard";
 import Copy from "carbon-icons-svelte/lib/Copy.svelte";
 
 let toastState = getToastState();
-let { npub, showCopy = false }: { npub: string; showCopy?: boolean } = $props();
+let {
+    npub,
+    showCopy = false,
+    centered = false,
+}: { npub: string; showCopy?: boolean; centered?: boolean } = $props();
 
 let highlightButton = $state(false);
 
@@ -24,7 +28,7 @@ async function copyNpub() {
 }
 </script>
 
-    <span class="flex flex-row flex-wrap gap-x-2 text-accent-dark dark:text-accent-light text-xs font-mono">
+    <span class="flex flex-row flex-wrap gap-x-2 text-accent-dark dark:text-accent-light text-xs font-mono {centered ? 'justify-center text-center' : ''}">
         {#each (npub.match(/.{1,5}/g) || []) as block, idx}
             {#if idx % 2 === 1}
                 <span class="opacity-60">{block}</span>
