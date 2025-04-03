@@ -43,7 +43,7 @@ async function acceptInvite() {
             window.dispatchEvent(event);
             toastState.add(
                 "Accepted Invite",
-                `You've accpeted an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`,
+                `You've accepted an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`,
                 "success"
             );
         })
@@ -89,10 +89,11 @@ onDestroy(() => {
 {#if enrichedInviter}
     <div class="flex flex-col h-full relative">
         <Sheet.Header class="text-left flex flex-row items-start gap-x-1 px-6">
-            <Sheet.Title>Invitation to join a secure chat</Sheet.Title>
+            <Sheet.Title>Invitation</Sheet.Title>
         </Sheet.Header>
 
-        <div class="flex flex-col justify-start items-center pt-40 flex-1 gap-4">
+        <div class="flex flex-col justify-start items-center pt-24 flex-1 gap-4">
+            <h2 class="text-lg font-normal px-6 mb-10">{nameFromMetadata(enrichedInviter?.metadata)} {subhead}</h2>
             <Avatar
                 pubkey={invite.inviter}
                 picture={enrichedInviter?.metadata?.picture}

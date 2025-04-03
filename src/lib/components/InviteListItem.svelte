@@ -49,7 +49,7 @@ $effect(() => {
                 bind:groupName
                 bind:counterpartyPubkey={invite.inviter}
                 bind:enrichedCounterparty={enrichedInviter}
-                pxSize={40}
+                pxSize={56}
             />
             <div class="flex flex-col gap-0 items-start">
                 <span class="text-lg font-medium">{groupName}</span>
