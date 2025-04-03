@@ -1,15 +1,12 @@
 <script lang="ts">
 import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
-import Name from "$lib/components/Name.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
 import * as Sheet from "$lib/components/ui/sheet";
 import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { EnrichedContact, Invite } from "$lib/types/nostr";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
-import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
-import Information from "carbon-icons-svelte/lib/Information.svelte";
 import { onDestroy } from "svelte";
 
 type InviteDetailProps = {

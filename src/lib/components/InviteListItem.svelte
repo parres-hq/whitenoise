@@ -10,7 +10,7 @@ import * as Sheet from "./ui/sheet";
 
 let { invite }: { invite: Invite } = $props();
 
-let showModal = $state(false);
+let showSheet = $state(false);
 let enrichedInviter: EnrichedContact | undefined = $state(undefined);
 let groupName = $state("");
 let groupType = $state(
@@ -20,8 +20,6 @@ let groupType = $state(
 let inviteDescription = $derived(
     invite.member_count === 2 ? "private chat" : `group with ${invite.member_count} members`
 );
-
-let showSheet = $state(false);
 
 $effect(() => {
     if (invite.inviter && !enrichedInviter) {
@@ -39,12 +37,11 @@ $effect(() => {
 });
 </script>
 
-<Sheet.Root>
+<Sheet.Root bind:open={showSheet}>
     <Sheet.Trigger>
         <Button
             size="lg"
             variant="ghost"
-            onclick={() => (showModal = !showModal)}
             class="flex flex-row gap-2 items-center justify-start py-10 px-4 w-full"
         >
             <GroupAvatar

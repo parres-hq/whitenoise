@@ -218,8 +218,6 @@ $effect(() => {
         );
     }
 });
-
-$inspect(invites);
 </script>
 
 <Header>
