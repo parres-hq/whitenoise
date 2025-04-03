@@ -50,6 +50,7 @@ async function acceptInvite() {
         .catch((e) => {
             toastState.add("Error accepting invite", e.split(": ")[2], "error");
             console.error(e);
+            isAcceptingInvite = false;
         })
         .finally(() => {
             isAcceptingInvite = false;
