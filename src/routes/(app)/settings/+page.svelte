@@ -8,8 +8,6 @@ import LoginSheet from "$lib/components/LoginSheet.svelte";
 import * as Accordion from "$lib/components/ui/accordion";
 import Button from "$lib/components/ui/button/button.svelte";
 import * as Sheet from "$lib/components/ui/sheet";
-
-import * as AlertDialog from "$lib/components/ui/alert-dialog";
 import {
     LogoutError,
     accounts,
@@ -331,29 +329,12 @@ function publishKeyPackage() {
                             </button>
                         </li>
                         <li class="section-list-item">
-                            <AlertDialog.Root>
-                                <AlertDialog.Trigger>
-                                    <Button variant="ghost" size="lg" class="row-button">
-                                        <div class="row-button-content">
-                                            <TrashCan size={24} class="shrink-0"/>
-                                            <span>Delete all key packages</span>
-                                        </div>
-                                    </Button>
-                                </AlertDialog.Trigger>
-                                <AlertDialog.Content>
-                                  <AlertDialog.Header>
-                                    <AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
-                                    <AlertDialog.Description>
-                                      Well send delete requests to all relays where your key packages are found.
-                                    </AlertDialog.Description>
-                                  </AlertDialog.Header>
-                                  <AlertDialog.Footer>
-                                    <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-                                    <AlertDialog.Action>Continue</AlertDialog.Action>
-                                  </AlertDialog.Footer>
-                                </AlertDialog.Content>
-                              </AlertDialog.Root>
-
+                            <button onclick={deleteAllKeyPackages} class="row-button">
+                                <div class="row-button-content">
+                                    <TrashCan size={24} class="shrink-0"/>
+                                    <span>Delete all key packages</span>
+                                </div>
+                            </button>
                         </li>
                         <li class="section-list-item">
                             <button onclick={testNotification} class="row-button">
