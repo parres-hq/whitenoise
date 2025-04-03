@@ -8,7 +8,7 @@ pub async fn invite_to_white_noise(
     wn: tauri::State<'_, Whitenoise>,
 ) -> Result<(), String> {
     let public_key = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
-    let content = "Hi, I'm using White Noise to chat securely on Nostr. Join me! https://github.com/erskingardner/whitenoise/releases".to_string();
+    let content = "Hi, I'm using White Noise to chat securely on Nostr. Join me! https://github.com/parres-hq/whitenoise/releases".to_string();
     let encrypted_content = wn
         .nostr
         .encrypt_content(content, pubkey, NostrEncryptionMethod::Nip04)

@@ -1,22 +1,15 @@
 <script lang="ts">
-import Avatar from "$lib/components/Avatar.svelte";
-import GroupListItem from "$lib/components/GroupListItem.svelte";
-import Header from "$lib/components/Header.svelte";
-import InviteListItem from "$lib/components/InviteListItem.svelte";
-import Loader from "$lib/components/Loader.svelte";
-import ContactsList from "$lib/components/Modals/Contacts/ContactsList.svelte";
-import Modal from "$lib/components/Modals/Modal.svelte";
+import { page } from "$app/stores";
+import ChatsList from "$lib/components/ChatsList.svelte";
+import * as Resizable from "$lib/components/ui/resizable";
 import { activeAccount } from "$lib/stores/accounts";
 import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { Invite, InvitesWithFailures, NostrMlsGroup, ProcessedInvite } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
-import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
-import Chat from "carbon-icons-svelte/lib/Chat.svelte";
-import Search from "carbon-icons-svelte/lib/Search.svelte";
-import PlusCircle from "phosphor-svelte/lib/PlusCircle";
-import Warning from "phosphor-svelte/lib/Warning";
+import Tree from "carbon-icons-svelte/lib/Tree.svelte";
 import { onDestroy, onMount } from "svelte";
+import ChatPage from "./[id]/+page.svelte";
 
 let unlistenAccountChanging: UnlistenFn;
 let unlistenAccountChanged: UnlistenFn;
@@ -29,7 +22,7 @@ let unlistenInviteFailedToProcess: UnlistenFn;
 
 let toastState = getToastState();
 
-let showModal = $state(false);
+let selectedChatId = $state<string | null>(null);
 
 let isLoading = $state(true);
 let loadingError = $state<string | null>(null);
@@ -37,7 +30,6 @@ let loadingError = $state<string | null>(null);
 let groups = $state<NostrMlsGroup[]>([]);
 let invites = $state<Invite[]>([]);
 let failures = $state<[string, string | undefined][]>([]);
-let failuresExpanded = $state(false);
 
 async function loadEvents() {
     isLoading = true;
@@ -146,66 +138,30 @@ onDestroy(() => {
 });
 </script>
 
-<Header>
-    <div class="flex flex-row items-center justify-between w-full">
-        <a href="/settings" class="no-underline!">
-            <Avatar pubkey={$activeAccount!.pubkey} />
-        </a>
-        <div class="flex flex-row items-center gap-6">
-            <Search size={24} />
-            <AddLarge size={24} />
-        </div>
-    </div>
-</Header>
-<main class="">
-    {#if isLoading}
-        <div class="flex justify-center items-center mt-20 w-full">
-            <Loader size={40} fullscreen={false} />
-        </div>
-    {:else if loadingError}
-        <div class="text-red-500 px-4 font-medium flex flex-col gap-2">
-            <span>Sorry, we couldn't load your chats because of an error.</span>
-            <pre class="font-mono p-2 rounded-md ring-1 ring-red-500/30">{loadingError}</pre>
-        </div>
-    {:else}
-        <div class="flex flex-col gap-0">
-            {#if invites.length === 0 && groups.length === 0}
-                <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground">
-                    <Chat size={32} />
-                    <span>No chats found</span>
-                    <span>Click the "+" button to start a new chat</span>
+
+<!-- On desktop, we can show the chats list and the chat page side by side -->
+<div class="hidden md:block h-full">
+    <Resizable.PaneGroup direction="horizontal">
+        <Resizable.Pane defaultSize={35} minSize={20}>
+            <ChatsList bind:invites bind:groups />
+        </Resizable.Pane>
+        <Resizable.Handle class="bg-muted-foreground" />
+        <Resizable.Pane defaultSize={65} minSize={50}>
+            {#if selectedChatId}
+              <ChatPage />
+            {:else}
+                <div class="sticky top-0 left-0 right-0 z-40 flex flex-row items-center gap-4 p-4 pt-14 bg-primary text-primary-foreground"></div>
+                <div class="flex flex-row gap-2 items-center justify-center h-full">
+                    <Tree size={32} class="text-muted-foreground mb-4" />
+                    <h1 class="text-base font-normal text-muted-foreground">Have you touched grass today?</h1>
                 </div>
             {/if}
-            {#each invites as invite}
-                <InviteListItem {invite} />
-            {/each}
-            {#each groups as group}
-                <GroupListItem {group} />
-            {/each}
-            {#if failures.length > 0}
-                <div class="flex flex-col fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-0 w-full bg-gray-900 border-t border-gray-700">
-                    <button
-                        class="flex flex-row gap-2 items-center px-4 py-3 border-b border-gray-700 hover:bg-gray-700"
-                        onclick={() => failuresExpanded = !failuresExpanded}
-                    >
-                        <Warning size={20} class="text-yellow-500" />
-                        <span>{failures.length} unprocessable {failures.length === 1 ? 'invite' : 'invites'}</span>
-                        <span class="ml-auto text-sm text-gray-400">{failuresExpanded ? 'Hide' : 'Show'}</span>
-                    </button>
 
-                    {#if failuresExpanded}
-                        {#each failures as failure}
-                            <div class="flex flex-row gap-2 items-center px-4 py-3 border-b border-gray-700 hover:bg-gray-700 pl-8 bg-gray-800/50 truncate">
-                                <span>{failure[1]}</span>
-                            </div>
-                        {/each}
-                    {/if}
-                </div>
-            {/if}
-        </div>
-    {/if}
-</main>
+        </Resizable.Pane>
+    </Resizable.PaneGroup>
+</div>
 
-{#if showModal}
-    <Modal initialComponent={ContactsList} modalProps={{}} bind:showModal />
-{/if}
+<!-- On mobile, show just the chats list -->
+<div class="md:hidden">
+    <ChatsList bind:invites bind:groups />
+</div>
