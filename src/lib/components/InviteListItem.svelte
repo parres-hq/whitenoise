@@ -4,7 +4,7 @@ import { NostrMlsGroupType } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
-import InviteDetail from "./Modals/Invites/InviteDetail.svelte";
+import InviteDetail from "./InviteDetail.svelte";
 import Button from "./ui/button/button.svelte";
 import * as Sheet from "./ui/sheet";
 

@@ -6,7 +6,6 @@ import GroupAvatar from "$lib/components/GroupAvatar.svelte";
 import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
 import Name from "$lib/components/Name.svelte";
 import { activeAccount, colorForRelayStatus, fetchRelays, relays } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import {
     type NostrMlsGroup,
     NostrMlsGroupType,
@@ -18,9 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 import CaretLeft from "phosphor-svelte/lib/CaretLeft";
 import HardDrives from "phosphor-svelte/lib/HardDrives";
 import LockKey from "phosphor-svelte/lib/LockKey";
-import { onDestroy, onMount } from "svelte";
-
-let toastState = getToastState();
+import { onMount } from "svelte";
 
 let groupWithRelays: NostrMlsGroupWithRelays | undefined = $state(undefined);
 let group: NostrMlsGroup | undefined = $state(undefined);
@@ -107,7 +104,7 @@ async function rotateKey() {
     //     })
     //     .catch((e) => {
     //         console.error(e);
-    //         toastState.add("Error rotating key", e.split(": ")[2], "error");
+    //         toast.error("Error rotating key");
     //         rotatingKey = false;
     //         document.getElementById("rotate-key-icon")?.style.setProperty("color", "red");
     //     })
@@ -115,10 +112,6 @@ async function rotateKey() {
     //         rotatingKey = false;
     //     });
 }
-
-onDestroy(() => {
-    toastState.cleanup();
-});
 </script>
 
 {#if group}

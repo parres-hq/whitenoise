@@ -1,9 +1,6 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
-import Header from "$lib/components/Header.svelte";
-import Modal from "$lib/components/Modals/Modal.svelte";
-import PreOnboard from "$lib/components/Modals/Onboarding/PreOnboard.svelte";
 import { activeAccount, updateAccountsStore } from "$lib/stores/accounts";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
@@ -12,7 +9,6 @@ import { onDestroy, onMount } from "svelte";
 
 let { children } = $props();
 
-let activeTab = $derived(page.url.pathname.split("/")[1] || "chats");
 let isLoadingAccounts = $state(true);
 
 let unlistenNostrReady: UnlistenFn;

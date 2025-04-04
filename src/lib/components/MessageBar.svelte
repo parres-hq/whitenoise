@@ -1,6 +1,5 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { CachedMessage, Message } from "$lib/types/chat";
 import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
@@ -13,6 +12,7 @@ import Plus from "phosphor-svelte/lib/Plus";
 import TrashSimple from "phosphor-svelte/lib/TrashSimple";
 import X from "phosphor-svelte/lib/X";
 import { onMount } from "svelte";
+import { toast } from "svelte-sonner";
 import Loader from "./Loader.svelte";
 
 let {
@@ -36,7 +36,6 @@ let media = $state<
 >([]);
 let textarea: HTMLTextAreaElement;
 let sendingMessage: boolean = $state(false);
-let toastState = getToastState();
 
 $inspect(media);
 
@@ -54,7 +53,7 @@ async function sendMessage() {
 
     // Check if any uploads are still in progress
     if (media.some((item) => item.status === "uploading")) {
-        toastState.add("Uploads in progress", "Please wait for uploads to complete", "info");
+        toast.info("Please wait for uploads to complete");
         return;
     }
 
@@ -135,7 +134,7 @@ async function handleFileUpload() {
         await uploadFile(file);
     } catch (error) {
         console.error("Error reading file:", error);
-        toastState.add("Error", "Failed to read file", "error");
+        toast.error("Failed to read file");
     }
 }
 
@@ -162,7 +161,7 @@ async function uploadFile(file: File) {
         media = media.map((item) =>
             item.file.name === file.name ? { ...item, status: "error" } : item
         );
-        toastState.add("Error", `Failed to upload ${file.name}`, "error");
+        toast.error(`Failed to upload ${file.name}`);
     }
 }
 

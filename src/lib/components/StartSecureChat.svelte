@@ -2,16 +2,15 @@
 import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import { activeAccount } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { EnrichedContact, NostrMlsGroup } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
 import Information from "carbon-icons-svelte/lib/Information.svelte";
-import { onDestroy } from "svelte";
-import Button from "../ui/button/button.svelte";
-import * as Sheet from "../ui/sheet";
+import { toast } from "svelte-sonner";
+import Button from "./ui/button/button.svelte";
+import * as Sheet from "./ui/sheet";
 
 let { contact, pubkey, onBack, onClose } = $props<{
     contact: EnrichedContact | null;
@@ -22,7 +21,6 @@ let { contact, pubkey, onBack, onClose } = $props<{
 
 let isCreatingChat = $state(false);
 let isInviting = $state(false);
-let toastState = getToastState();
 
 async function startChat() {
     if (!pubkey || isCreatingChat) return;
@@ -39,21 +37,13 @@ async function startChat() {
             description: "",
         });
 
-        toastState.add(
-            "Chat created",
-            `Started a secure chat with ${nameFromMetadata(contact?.metadata, pubkey)}`,
-            "success"
-        );
+        toast.success(`Started a secure chat with ${nameFromMetadata(contact?.metadata, pubkey)}`);
 
         // Navigate to the new chat
         window.location.href = `/chats/${hexMlsGroupId(group.mls_group_id)}`;
     } catch (error) {
-        console.error("Failed to create chat:", error);
-        toastState.add(
-            "Failed to create chat",
-            typeof error === "string" ? error : "An unexpected error occurred",
-            "error"
-        );
+        toast.error("Failed to create chat");
+        console.error(error);
     } finally {
         isCreatingChat = false;
         onClose();
@@ -68,15 +58,12 @@ async function inviteContact() {
     try {
         await invoke("invite_to_white_noise", { pubkey });
     } catch (error) {
-        console.error("Failed to invite contact:", error);
+        toast.error("Failed to invite contact");
+        console.error(error);
     } finally {
         isInviting = false;
     }
 }
-
-onDestroy(() => {
-    toastState.cleanup();
-});
 </script>
 
 <div class="flex flex-col h-full relative">

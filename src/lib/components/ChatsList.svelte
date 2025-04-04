@@ -1,6 +1,5 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
-import { getToastState } from "$lib/stores/toast-state.svelte";
 import type { EnrichedContact, EnrichedContactsMap, Invite, NostrMlsGroup } from "$lib/types/nostr";
 import { hexKeyFromNpub, isValidHexKey, isValidNpub, npubFromPubkey } from "$lib/utils/nostr";
 import { nameFromMetadata } from "$lib/utils/nostr";
@@ -17,7 +16,7 @@ import GroupListItem from "./GroupListItem.svelte";
 import Header from "./Header.svelte";
 import InviteListItem from "./InviteListItem.svelte";
 import Loader from "./Loader.svelte";
-import StartSecureChat from "./Modals/StartSecureChat.svelte";
+import StartSecureChat from "./StartSecureChat.svelte";
 import Button from "./ui/button/button.svelte";
 import Input from "./ui/input/input.svelte";
 import * as Sheet from "./ui/sheet";
@@ -35,9 +34,6 @@ let {
     invites = $bindable([]),
     groups = $bindable([]),
 }: ChatsListProps = $props();
-
-// Contact list state
-let toastState = getToastState();
 
 let unlistenAccountChanging: UnlistenFn;
 let unlistenAccountChanged: UnlistenFn;
@@ -164,7 +160,6 @@ onDestroy(() => {
     unlistenAccountChanging?.();
     unlistenAccountChanged?.();
     unlistenNostrReady?.();
-    toastState.cleanup();
 });
 
 $effect(() => {

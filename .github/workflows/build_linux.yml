@@ -89,7 +89,9 @@ jobs:
 
       - name: Install frontend dependencies
         if: steps.cache-frontend-deps.outputs.cache-hit != 'true'
-        run: bun install
+        run: |
+          bun install
+          bun run svelte-kit sync
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
