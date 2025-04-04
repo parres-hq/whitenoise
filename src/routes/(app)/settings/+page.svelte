@@ -192,7 +192,7 @@ function publishKeyPackage() {
                     <ul class="list-none p-0 m-0 overflow-hidden">
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <a href="/settings/profile/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                <div class="row-button-content">
+                                <div class="flex flex-row gap-3 items-center">
                                     <User size={24} class="shrink-0"/>
                                     <span>Edit profile</span>
                                 </div>
@@ -201,7 +201,7 @@ function publishKeyPackage() {
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <a href="/settings/nostr-keys/" class="flex flex-row justify-between items-center py-4 w-full no-underlinerow-button">
-                                <div class="row-button-content">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Password size={24} class="shrink-0"/>
                                     <span>Nostr keys</span>
                                 </div>
@@ -210,7 +210,7 @@ function publishKeyPackage() {
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <a href="/settings/network/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                <div class="row-button-content">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Satellite size={24} class="shrink-0"/>
                                     <span>Network</span>
                                 </div>
@@ -219,7 +219,7 @@ function publishKeyPackage() {
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <a href="/settings/wallet/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                <div class="row-button-content">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Wallet size={24} class="shrink-0"/>
                                     <span>Wallet</span>
                                 </div>
@@ -229,7 +229,7 @@ function publishKeyPackage() {
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <ConfirmSheet title="Sign out?" description="Are you sure you want to sign out of this account? If you haven't backed up your keys, you won't be able to recover them." acceptText="Sign out" cancelText="Cancel" acceptFn={() => handleLogout($activeAccount!.pubkey)}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                    <div class="row-button-content">
+                                    <div class="flex flex-row gap-3 items-center">
                                         <Logout size={24} class="shrink-0"/>
                                     <span>Sign out</span>
                                     </div>
@@ -250,7 +250,7 @@ function publishKeyPackage() {
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <ConfirmSheet title="Delete everything?" description="This will delete all group and message data, and sign you out of all accounts but will not delete your nostr keys or any other events you've published to relays.<br><br>Are you sure you want to delete all data from White Noise? This cannot be undone." acceptText="Delete all data" cancelText="Cancel" acceptFn={deleteAll}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                    <div class="row-button-content">
+                                    <div class="flex flex-row gap-3 items-center">
                                 <TrashCan size={24} class="shrink-0"/>
                                 <span>Delete all data</span>
                                     </div>
@@ -271,7 +271,7 @@ function publishKeyPackage() {
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <ConfirmSheet title="Publish a key package" description="Are you sure you want to publish a new Key Package event to relays?" acceptText="Publish key package" cancelText="Cancel" acceptFn={publishKeyPackage}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                    <div class="row-button-content">
+                                    <div class="flex flex-row gap-3 items-center">
                                         <Password size={24} class="shrink-0"/>
                                         <span>Publish a key package</span>
                                     </div>
@@ -281,7 +281,7 @@ function publishKeyPackage() {
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <ConfirmSheet title="Delete all key packages" description="Are you sure you want to delete all key packages?" acceptText="Delete all key packages" cancelText="Cancel" acceptFn={deleteAllKeyPackages}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                    <div class="row-button-content">
+                                    <div class="flex flex-row gap-3 items-center">
                                         <TrashCan size={24} class="shrink-0"/>
                                         <span>Delete all key packages</span>
                                     </div>
@@ -290,7 +290,7 @@ function publishKeyPackage() {
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <button onclick={testNotification} class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                <div class="row-button-content">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
                                     <span>Test notifications</span>
                                 </div>
@@ -298,7 +298,7 @@ function publishKeyPackage() {
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <button onclick={() => toast.success("Toast success")} class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                <div class="row-button-content">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
                                     <span>Test toast success</span>
                                 </div>
@@ -306,7 +306,7 @@ function publishKeyPackage() {
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
                             <button onclick={() => toast.error("Toast error")} class="flex flex-row justify-between items-center py-4 w-full no-underline">
-                                <div class="row-button-content">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
                                     <span>Test toast error</span>
                                 </div>
@@ -318,9 +318,3 @@ function publishKeyPackage() {
         </Accordion.Item>
     </Accordion.Root>
 </main>
-
-<style lang="postcss">
-    .row-button-content {
-        @apply flex flex-row gap-3 items-center;
-    }
-</style>
