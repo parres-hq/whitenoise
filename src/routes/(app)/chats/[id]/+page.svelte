@@ -36,6 +36,8 @@ import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
 import { toast } from "svelte-sonner";
 
+let { selectedChatId = $bindable() }: { selectedChatId?: string } = $props();
+
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
 
@@ -74,8 +76,15 @@ $effect(() => {
     }
 });
 
+$effect(() => {
+    if (selectedChatId && group && hexMlsGroupId(group.mls_group_id) !== selectedChatId) {
+        loadGroup();
+    }
+});
+
 async function loadGroup() {
-    invoke("get_group_and_messages", { groupId: page.params.id }).then(async (groupResponse) => {
+    const groupId = selectedChatId || page.params.id;
+    invoke("get_group_and_messages", { groupId }).then(async (groupResponse) => {
         const groupData: NostrMlsGroup = (
             groupResponse as { group: NostrMlsGroup; messages: CachedMessage[] }
         ).group;
@@ -365,7 +374,7 @@ onDestroy(() => {
 </script>
 
 {#if group}
-    <Header backLocation="/chats">
+    <Header backLocation={selectedMessageId ? undefined : "/chats"}>
         <div class="flex flex-row items-center justify-between w-full">
             <a href={`/chats/${page.params.id}/info`} class="flex flex-row items-center gap-3">
                 <GroupAvatar

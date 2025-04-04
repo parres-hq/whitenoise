@@ -1,4 +1,5 @@
 <script lang="ts">
+import { pushState } from "$app/navigation";
 import { page } from "$app/stores";
 import ChatsList from "$lib/components/ChatsList.svelte";
 import * as Resizable from "$lib/components/ui/resizable";
@@ -19,14 +20,12 @@ let unlistenInviteDeclined: UnlistenFn;
 let unlistenInviteProcessed: UnlistenFn;
 let unlistenInviteFailedToProcess: UnlistenFn;
 
-let selectedChatId = $state<string | null>(null);
-
+let selectedChatId: string | null = $state(null);
 let isLoading = $state(true);
-let loadingError = $state<string | null>(null);
-
-let groups = $state<NostrMlsGroup[]>([]);
-let invites = $state<Invite[]>([]);
-let failures = $state<[string, string | undefined][]>([]);
+let loadingError: string | null = $state(null);
+let groups: NostrMlsGroup[] = $state([]);
+let invites: Invite[] = $state([]);
+let failures: [string, string | undefined][] = $state([]);
 
 async function loadEvents() {
     isLoading = true;
@@ -132,27 +131,47 @@ onDestroy(() => {
     unlistenInviteProcessed?.();
     unlistenInviteFailedToProcess?.();
 });
+
+$effect(() => {
+    if (selectedChatId && $page.state.selectedChatId !== selectedChatId) {
+        // Update URL without navigation on desktop
+        if (window.innerWidth >= 768) {
+            // md breakpoint
+            const href = `/chats/${selectedChatId}`;
+            pushState(href, { selectedChatId });
+        }
+    }
+});
+
+$inspect("chat_id", selectedChatId);
 </script>
 
 
 <!-- On desktop, we show the chats list and the chat page side by side -->
-<div class="hidden md:block h-full">
+<div class="hidden md:block">
     <Resizable.PaneGroup direction="horizontal">
         <Resizable.Pane defaultSize={35} minSize={20}>
-            <ChatsList bind:invites bind:groups />
+            <div class="flex w-full h-svh">
+                <div class="w-full overflow-y-auto overscroll-none">
+                    <ChatsList bind:invites bind:groups bind:selectedChatId />
+                </div>
+            </div>
         </Resizable.Pane>
         <Resizable.Handle class="bg-muted-foreground" />
         <Resizable.Pane defaultSize={65} minSize={50}>
-            {#if selectedChatId}
-              <ChatPage />
-            {:else}
-                <div class="sticky top-0 left-0 right-0 z-40 flex flex-row items-center gap-4 p-4 pt-14 bg-primary text-primary-foreground"></div>
-                <div class="flex flex-row gap-2 items-center justify-center h-full">
-                    <Tree size={32} class="text-muted-foreground mb-4" />
-                    <h1 class="text-base font-normal text-muted-foreground">Have you touched grass today?</h1>
+            <div class="flex w-full h-svh">
+                <div class="w-full overflow-y-auto overscroll-none">
+                    {#if selectedChatId}
+                        <ChatPage bind:selectedChatId />
+                    {:else}
+                        <div class="sticky top-0 left-0 right-0 z-40 flex flex-row items-center gap-4 p-4 pt-14 bg-primary text-primary-foreground"></div>
+                        <div class="flex flex-row gap-2 items-center justify-center h-full">
+                            <Tree size={32} class="text-muted-foreground mb-4" />
+                            <h1 class="text-base font-normal text-muted-foreground">Have you touched grass today?</h1>
+                        </div>
+                    {/if}
                 </div>
-            {/if}
-
+            </div>
         </Resizable.Pane>
     </Resizable.PaneGroup>
 </div>

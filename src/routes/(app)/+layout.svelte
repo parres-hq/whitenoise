@@ -25,6 +25,8 @@ $effect(() => {
         !keyPackageRelaysPublished || !inboxRelaysPublished || !keyPackagePublished;
 });
 
+$inspect("url", page.url.pathname);
+
 async function checkPreflight() {
     await updateAccountsStore();
     isLoadingAccounts = false;
