@@ -1,7 +1,7 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
 import { type Message } from "$lib/types/chat";
-import TrashSimple from "phosphor-svelte/lib/TrashSimple";
+import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import Name from "./Name.svelte";
 
 let {
@@ -24,7 +24,7 @@ let {
             {/if}
         {#if isDeleted}
             <div class="inline-flex flex-row items-center gap-2 bg-gray-200 rounded-full px-3 py-1 w-fit text-black">
-                <TrashSimple size={20} /><span class="italic opacity-60">Message deleted</span>
+                <TrashCan size={20} /><span class="italic opacity-60">Message deleted</span>
             </div>
         {:else}
             <span class="break-words-smart">{message.content}</span>

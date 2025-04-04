@@ -13,8 +13,7 @@ import {
 import type { EnrichedContact, NEvent } from "$lib/types/nostr";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
-import HardDrives from "phosphor-svelte/lib/HardDrives";
-import LockKey from "phosphor-svelte/lib/LockKey";
+import Security from "carbon-icons-svelte/lib/Security.svelte";
 import { onMount } from "svelte";
 
 let groupWithRelays: NostrMlsGroupWithRelays | undefined = $state(undefined);
@@ -92,23 +91,6 @@ function reportSpam() {
 
 async function rotateKey() {
     console.log("rotateKey not implemented");
-    // rotatingKey = true;
-    // await invoke("rotate_key_in_group", { groupId: page.params.id })
-    //     .then(() => {
-    //         document.getElementById("rotate-key-icon")?.style.setProperty("color", "green");
-    //         setTimeout(() => {
-    //             document.getElementById("rotate-key-icon")?.style.setProperty("color", "white");
-    //         }, 2000);
-    //     })
-    //     .catch((e) => {
-    //         console.error(e);
-    //         toast.error("Error rotating key");
-    //         rotatingKey = false;
-    //         document.getElementById("rotate-key-icon")?.style.setProperty("color", "red");
-    //     })
-    //     .finally(() => {
-    //         rotatingKey = false;
-    //     });
 }
 </script>
 
@@ -118,7 +100,7 @@ async function rotateKey() {
         <GroupAvatar groupType={group.group_type} {groupName} {counterpartyPubkey} {enrichedCounterparty} pxSize={80} />
         <h1 class="text-2xl font-bold">{groupName}</h1>
         <p class="text-gray-500 flex flex-row items-center gap-2">
-            <LockKey size={20} />
+            <Security size={20} />
             {group.description || "A secure chat"}
         </p>
     </div>
