@@ -1,9 +1,8 @@
 <script lang="ts">
-import { goto } from "$app/navigation";
 import { page } from "$app/state";
 import Avatar from "$lib/components/Avatar.svelte";
 import GroupAvatar from "$lib/components/GroupAvatar.svelte";
-import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
+import Header from "$lib/components/Header.svelte";
 import Name from "$lib/components/Name.svelte";
 import { activeAccount, colorForRelayStatus, fetchRelays, relays } from "$lib/stores/accounts";
 import {
@@ -14,7 +13,6 @@ import {
 import type { EnrichedContact, NEvent } from "$lib/types/nostr";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
-import CaretLeft from "phosphor-svelte/lib/CaretLeft";
 import HardDrives from "phosphor-svelte/lib/HardDrives";
 import LockKey from "phosphor-svelte/lib/LockKey";
 import { onMount } from "svelte";
@@ -115,14 +113,8 @@ async function rotateKey() {
 </script>
 
 {#if group}
-    <HeaderToolbar>
-        {#snippet left()}
-            <button onclick={() => goto(`/chats/${page.params.id}`)} class="p-2 -mr-2">
-                <CaretLeft size={30} />
-            </button>
-        {/snippet}
-    </HeaderToolbar>
-    <div class="flex flex-col items-center justify-center gap-2 p-4 mb-8">
+    <Header backLocation={`/chats/${page.params.id}`} title="Chat details" />
+    <div class="flex flex-col items-center justify-center gap-2 p-4 mb-8 mt-12">
         <GroupAvatar groupType={group.group_type} {groupName} {counterpartyPubkey} {enrichedCounterparty} pxSize={80} />
         <h1 class="text-2xl font-bold">{groupName}</h1>
         <p class="text-gray-500 flex flex-row items-center gap-2">
@@ -130,42 +122,42 @@ async function rotateKey() {
             {group.description || "A secure chat"}
         </p>
     </div>
-    <div class="mx-4">
-    <h2 class="section-title">{members.length} Members</h2>
-    <div class="section">
-        <ul class="flex flex-col">
-            {#each members as member}
-                <li class="flex flex-row items-center gap-4 border-b border-gray-700 py-2 last:border-b-0">
-                    <Avatar pubkey={member} />
-                    <span class="text-base font-medium"><Name pubkey={member} unstyled={true} /></span>
-                    {#if admins.includes(member)}
-                        <span class="text-xs font-medium text-white bg-purple-600 outline outline-1 outline-purple-300/50 px-2 pt-0.5 rounded-full">Admin</span>
-                    {/if}
-                </li>
-            {/each}
-        </ul>
-    </div>
-    <h2 class="section-title">Group Relays</h2>
-    <div class="section">
-        <ul class="flex flex-col items-center gap-0">
-            {#each Object.entries(groupRelaysWithStatus) as [url, status]}
-                <li class="flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0">
-                    <HardDrives size={24} class={colorForRelayStatus(status)} />
-                    <span>
-                        {url} -
-                        <span class="text-sm font-light">{status}</span>
-                    </span>
-                </li>
-            {/each}
-        </ul>
-    </div>
-    <!-- <h2 class="section-title">Actions</h2>
-    <div class="section">
-        <div class="flex flex-col items-center gap-0">
-            <button class="flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={rotateKey}><Key size={24} class="transition-all duration-300 ease-in-out {rotatingKey ? 'animate-spin': ''}" id="rotate-key-icon" />Rotate Your Key</button>
-            <button class="text-red-500 flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={leaveGroup}><SignOut size={24} />Leave Group</button>
-            <button class="text-red-500 flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={reportSpam}><WarningOctagon size={24} />Report Spam</button>
+    <div class="mx-6">
+        <h2 class="text-2xl font-normal mb-4">{members.length} Members</h2>
+        <div class="mb-12">
+            <ul class="flex flex-col">
+                {#each members as member}
+                    <li class="flex flex-row items-center gap-4 border-b border-gray-700 py-2 last:border-b-0">
+                        <Avatar pubkey={member} pxSize={40} />
+                        <span class="text-base font-medium"><Name pubkey={member} unstyled={true} /></span>
+                        {#if admins.includes(member)}
+                            <span class="text-xs text-violet-50 bg-violet-600 border border-violet-400 px-2 pt-0.5 rounded-full">admin</span>
+                        {/if}
+                    </li>
+                {/each}
+            </ul>
         </div>
-    </div> -->
-</div>
+        <h2 class="text-2xl font-normal mb-4">Group Relays</h2>
+        <div class="mb-12">
+            <ul class="flex flex-col gap-1">
+                {#each Object.entries(groupRelaysWithStatus) as [relay_url, relay_status]}
+                <li class="flex items-center justify-between py-2">
+                    <span class="text-lg">{relay_url}</span>
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 rounded-full {colorForRelayStatus(relay_status)}"></div>
+                            <span class="text-xs text-muted-foreground">{relay_status}</span>
+                        </div>
+                </li>
+                {/each}
+            </ul>
+        </div>
+        <!-- <h2 class="section-title">Actions</h2>
+        <div class="section">
+            <div class="flex flex-col items-center gap-0">
+                <button class="flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={rotateKey}><Key size={24} class="transition-all duration-300 ease-in-out {rotatingKey ? 'animate-spin': ''}" id="rotate-key-icon" />Rotate Your Key</button>
+                <button class="text-red-500 flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={leaveGroup}><SignOut size={24} />Leave Group</button>
+                <button class="text-red-500 flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={reportSpam}><WarningOctagon size={24} />Report Spam</button>
+            </div>
+        </div> -->
+    </div>
 {/if}

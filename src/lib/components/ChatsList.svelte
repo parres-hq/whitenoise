@@ -26,6 +26,7 @@ type ChatsListProps = {
     loadingError?: string | null;
     invites?: Invite[];
     groups?: NostrMlsGroup[];
+    selectedChatId?: string | null;
 };
 
 let {
@@ -33,6 +34,7 @@ let {
     loadingError = $bindable(null),
     invites = $bindable([]),
     groups = $bindable([]),
+    selectedChatId = $bindable(null),
 }: ChatsListProps = $props();
 
 let unlistenAccountChanging: UnlistenFn;
@@ -372,7 +374,7 @@ $effect(() => {
             <InviteListItem {invite} />
         {/each}
         {#each groups as group}
-            <GroupListItem {group} />
+            <GroupListItem {group} bind:selectedChatId />
         {/each}
     </div>
 {/if}

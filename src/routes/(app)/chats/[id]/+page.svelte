@@ -1,11 +1,11 @@
 <script lang="ts">
-import { goto } from "$app/navigation";
 import { page } from "$app/state";
 import GroupAvatar from "$lib/components/GroupAvatar.svelte";
-import HeaderToolbar from "$lib/components/HeaderToolbar.svelte";
+import Header from "$lib/components/Header.svelte";
 import MessageBar from "$lib/components/MessageBar.svelte";
 import MessageTokens from "$lib/components/MessageTokens.svelte";
 import RepliedTo from "$lib/components/RepliedTo.svelte";
+import Button from "$lib/components/ui/button/button.svelte";
 import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 import { activeAccount, hasLightningWallet } from "$lib/stores/accounts";
 import { createChatStore } from "$lib/stores/chat";
@@ -25,16 +25,19 @@ import { formatMessageTime } from "$lib/utils/time";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import ArrowBendUpLeft from "phosphor-svelte/lib/ArrowBendUpLeft";
-import CaretLeft from "phosphor-svelte/lib/CaretLeft";
-import CheckCircle from "phosphor-svelte/lib/CheckCircle";
-import CircleDashed from "phosphor-svelte/lib/CircleDashed";
-import CopySimple from "phosphor-svelte/lib/CopySimple";
-import DotsThree from "phosphor-svelte/lib/DotsThree";
-import TrashSimple from "phosphor-svelte/lib/TrashSimple";
+import CheckmarkOutline from "carbon-icons-svelte/lib/CheckmarkOutline.svelte";
+import CircleDash from "carbon-icons-svelte/lib/CircleDash.svelte";
+import Copy from "carbon-icons-svelte/lib/Copy.svelte";
+import OverflowMenuHorizontal from "carbon-icons-svelte/lib/OverflowMenuHorizontal.svelte";
+import Reply from "carbon-icons-svelte/lib/Reply.svelte";
+import Search from "carbon-icons-svelte/lib/Search.svelte";
+import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
 import { toast } from "svelte-sonner";
+
+let { selectedChatId = $bindable() }: { selectedChatId?: string } = $props();
+
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
 
@@ -73,8 +76,15 @@ $effect(() => {
     }
 });
 
+$effect(() => {
+    if (selectedChatId && group && hexMlsGroupId(group.mls_group_id) !== selectedChatId) {
+        loadGroup();
+    }
+});
+
 async function loadGroup() {
-    invoke("get_group_and_messages", { groupId: page.params.id }).then(async (groupResponse) => {
+    const groupId = selectedChatId || page.params.id;
+    invoke("get_group_and_messages", { groupId }).then(async (groupResponse) => {
         const groupData: NostrMlsGroup = (
             groupResponse as { group: NostrMlsGroup; messages: CachedMessage[] }
         ).group;
@@ -203,7 +213,7 @@ function handlePress(event: PressCustomEvent | MouseEvent) {
         if (messageBubble instanceof HTMLElement) {
             messageBubble.style.transform = "scale(1.10)";
             messageBubble.style.transformOrigin = isCurrentUser ? "right" : "left";
-            messageBubble.style.transition = "transform 0.10s ease-out";
+            messageBubble.style.transition = "transform 0.06s ease-out";
 
             setTimeout(() => {
                 messageBubble.style.transform = "scale(1)";
@@ -266,12 +276,12 @@ async function payLightningInvoice(message: Message) {
     }
 
     if (!message.lightningInvoice) {
-        console.error("message does not have a lightning invoice");
+        toast.error("Message does not have a lightning invoice");
         return;
     }
 
     if (!$hasLightningWallet) {
-        console.error("Lightning wallet not connected");
+        toast.error("Lightning wallet not connected");
         return;
     }
 
@@ -364,30 +374,26 @@ onDestroy(() => {
 </script>
 
 {#if group}
-    <HeaderToolbar alwaysShowCenter={true}>
-        {#snippet center()}
-            <a href={`/chats/${hexMlsGroupId(group!.mls_group_id)}/info`} class="flex flex-row items-center gap-2">
+    <Header backLocation={selectedMessageId ? undefined : "/chats"}>
+        <div class="flex flex-row items-center justify-between w-full">
+            <a href={`/chats/${page.params.id}/info`} class="flex flex-row items-center gap-3">
                 <GroupAvatar
                     groupType={group!.group_type}
                     {groupName}
                     {counterpartyPubkey}
                     {enrichedCounterparty}
-                    pxSize={30}
+                pxSize={40}
                 />
-                {groupName}
+                <span class="text-2xl font-medium">{groupName}</span>
             </a>
-        {/snippet}
-        {#snippet left()}
-            <button onclick={() => goto(`/chats`)} class="p-2 -mr-2">
-                <CaretLeft size={30} />
-            </button>
-        {/snippet}
-    </HeaderToolbar>
+            <Search size={24} class="text-muted-foreground shrink-0 !w-6 !h-6"/>
+        </div>
+    </Header>
 
     <main id="mainContainer" class="flex flex-col relative min-h-svh">
         <div
             id="messagesContainer"
-            class="flex-1 px-8 flex flex-col gap-2 pt-10 pb-40 overflow-y-auto opacity-100 transition-opacity ease-in-out duration-50"
+            class="flex-1 px-8 flex flex-col gap-2 pt-10 pb-24 overflow-y-auto opacity-100 transition-opacity ease-in-out duration-50"
         >
             {#each $chatStore.messages as message (message.id)}
                 <div
@@ -400,15 +406,15 @@ onDestroy(() => {
                         data-is-current-user={message.isMine}
                         class="p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                     >
-                        <DotsThree size="24" weight="bold" />
+                        <OverflowMenuHorizontal size={24} />
                     </button>
                     <div
-                        use:press={()=>({ triggerBeforeFinished: true, timeframe: 300 })}
+                        use:press={()=>({ triggerBeforeFinished: true, timeframe: 100 })}
                         onpress={handlePress}
                         data-message-container
                         data-message-id={message.id}
                         data-is-current-user={message.isMine}
-                        class={`relative max-w-[70%] ${message.lightningPayment ? "bg-opacity-10" : ""} ${!message.isSingleEmoji ? `rounded-lg ${message.isMine ? `bg-chat-bg-me text-gray-50 rounded-br` : `bg-chat-bg-other text-gray-50 rounded-bl`} p-3` : ''} ${showMessageMenu && message.id === selectedMessageId ? 'relative z-20' : ''}`}
+                        class={`font-normal text-base relative max-w-[70%] ${message.lightningPayment ? "bg-opacity-10" : ""} ${!message.isSingleEmoji ? `${message.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && message.id === selectedMessageId ? 'relative z-20' : ''}`}
                     >
                         {#if message.replyToId }
                             <RepliedTo
@@ -420,46 +426,62 @@ onDestroy(() => {
                             <div class="break-words-smart w-full {message.lightningPayment ? 'flex justify-center' : ''} {message.isSingleEmoji ? 'text-7xl leading-none' : ''}">
                                 {#if chatStore.isDeleted(message.id)}
                                     <div class="inline-flex flex-row items-center gap-2 bg-gray-200 rounded-full px-3 py-1 w-fit text-black">
-                                        <TrashSimple size={20} /><span class="italic opacity-60">Message deleted</span>
+                                        <TrashCan size={20} /><span class="italic opacity-60">Message deleted</span>
                                     </div>
                                 {:else if message.content.trim().length > 0}
-                                    <MessageTokens tokens={message.tokens} />
+                                    {#if !message.lightningInvoice}
+                                        <MessageTokens tokens={message.tokens} />
+                                    {/if}
                                     {#if message.lightningInvoice }
-                                    <div class="flex flex-col items-start mt-4 gap-4">
-                                        <div class="relative bg-slate-200 p-1 rounded-lg">
+                                    <div class="flex flex-col items-start gap-4">
+                                        <div class="relative">
                                             {#await lightningInvoiceToQRCode(message.lightningInvoice.invoice)}
-                                                <div class="w-64 h-64 rounded-lg shadow-lg flex items-center justify-center bg-slate-300">
-                                                    <CircleDashed size={48} weight="light" class="animate-spin-slow text-blue-600" />
+                                                <div class="max-w-64 max-h-64 shadow-lg flex items-center justify-center">
+                                                    <CircleDash size={32} class="animate-spin-slow text-blue-600" />
                                                 </div>
                                             {:then qrCodeUrl}
                                                 {#if qrCodeUrl}
-                                                    <img
-                                                        src={qrCodeUrl}
-                                                        alt="QR Code"
-                                                        class="w-64 h-64 rounded-lg shadow-lg {message.lightningInvoice.isPaid ? 'blur-sm' : ''}"
-                                                    />
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="lg"
+                                                        class="p-0 w-full h-auto aspect-square relative"
+                                                        onclick={() => {
+                                                            copyInvoice(message);
+                                                            toast.success("Invoice copied to clipboard");
+                                                        }}
+                                                    >
+                                                        <img
+                                                            src={qrCodeUrl}
+                                                            alt="QR Code"
+                                                            class="max-w-full w-full h-auto {message.lightningInvoice.isPaid ? 'blur-sm' : ''}"
+                                                        />
+                                                    </Button>
                                                 {/if}
                                             {:catch}
                                                 <!-- Show nothing in case of error -->
                                             {/await}
                                             {#if message.lightningInvoice.description}
-                                                <span class="text-sm text-blue-900 mx-1">{message.lightningInvoice.description}</span>
+                                                <div class="mt-4">{message.lightningInvoice.description}</div>
                                             {/if}
                                             {#if message.lightningInvoice.isPaid }
-                                                <CheckCircle
-                                                    size={48}
-                                                    weight="fill"
-                                                    class="text-green-500 bg-white rounded-full opacity-80 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
+                                                <CheckmarkOutline
+                                                    size={32}
+                                                    class="text-green-500 rounded-full opacity-80 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
                                                 />
                                             {/if}
                                         </div>
                                         <div class="flex flex-col gap-4">
-                                            <button
-                                                onclick={() => copyInvoice(message)}
-                                                class={`transition-all hover:shadow-xl duration-300 rounded-md px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow ${message.isMine ? "bg-gray-200 hover:bg-gray-300 text-blue-600" : "bg-blue-500 hover:bg-blue-600"}`}
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onclick={(() => {
+                                                    copyInvoice(message);
+                                                    toast.success("Invoice copied to clipboard");
+                                                })}
+                                                class={`px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow ${message.isMine ? "bg-secondary-foreground" : ""}`}
                                             >
-                                                Copy invoice  <CopySimple size={20} />
-                                            </button>
+                                                Copy invoice  <Copy size={20} />
+                                            </Button>
                                             {#if $hasLightningWallet && !message.lightningInvoice.isPaid}
                                                 <button
                                                     onclick={() => payLightningInvoice(message)}
@@ -479,11 +501,11 @@ onDestroy(() => {
                                     <span class="italic opacity-60">No message content</span>
                                 {/if}
                                 </div>
-                                <div class="flex flex-row gap-2 items-center ml-auto {message.isMine ? "text-gray-300" : "text-gray-400"}">
+                                <div class="flex flex-row gap-2 items-center ml-auto {message.isMine ? "text-primary-foreground" : "text-primary"}">
                                     {#if message.id !== "temp"}
-                                        <span><CheckCircle size={18} weight="light" /></span>
+                                        <span><CheckmarkOutline size={16} /></span>
                                     {:else}
-                                        <span><CircleDashed size={18} weight="light" class="animate-spin-slow"/></span>
+                                        <span><CircleDash size={16} class="animate-spin-slow"/></span>
                                     {/if}
                                     <span class="text-sm opacity-60 whitespace-nowrap">
                                         {formatMessageTime(message.createdAt)}
@@ -492,10 +514,10 @@ onDestroy(() => {
                             </div>
                             <div class="reactions flex flex-row gap-2 absolute -bottom-6 right-0">
                                 {#each chatStore.getMessageReactionsSummary(message.id) as {emoji, count}}
-                                    <button onclick={() => clickReaction(emoji, message.id)} class="py-1 px-2 bg-gray-900 rounded-full flex flex-row gap-1 items-center">
+                                    <button onclick={() => clickReaction(emoji, message.id)} class="text-sm py-1 px-2 ring-1 ring-background {message.isMine ? 'bg-accent-foreground text-primary-foreground' : 'text-primary bg-input'} rounded-full flex flex-row gap-1 items-center">
                                         {emoji}
                                         {#if count > 1}
-                                            <span class="text-sm opacity-60">{count}</span>
+                                            <span class="text-sm">{count}</span>
                                         {/if}
                                     </button>
                                 {/each}
@@ -520,7 +542,7 @@ onDestroy(() => {
 
 <div
     id="messageMenu"
-    class="{showMessageMenu ? 'visible' : 'invisible'} fixed bg-gray-900/90 backdrop-blur-sm drop-shadow-md drop-shadow-black py-1 px-2 rounded-full ring-1 ring-gray-700 z-30 translate-x-0"
+    class="{showMessageMenu ? 'visible' : 'invisible'} fixed bg-background backdrop-blur-sm ring-1 ring-muted-foreground/20 drop-shadow-xl drop-shadow-black py-0 px-2 z-30 translate-x-0"
     style="left: {messageMenuPosition.x}px; top: {messageMenuPosition.y}px;"
     role="menu"
 >
@@ -535,18 +557,18 @@ onDestroy(() => {
 
 <div
     id="messageMenuExtended"
-    class="{showMessageMenu ? 'opacity-100 visible' : 'opacity-0 invisible'} fixed bg-gray-900/90 backdrop-blur-sm drop-shadow-md drop-shadow-black rounded-md ring-1 ring-gray-700 z-30 translate-x-0 transition-opacity duration-200"
+    class="{showMessageMenu ? 'opacity-100 visible' : 'opacity-0 invisible'} fixed bg-background backdrop-blur-sm ring-1 ring-muted-foreground/20 drop-shadow-xl drop-shadow-black z-30 translate-x-0 transition-opacity duration-200"
     style="left: {messageMenuExtendedPosition.x}px; top: {messageMenuExtendedPosition.y}px;"
     role="menu"
 >
-    <div class="flex flex-col justify-start items-between divide-y divide-gray-800">
+    <div class="flex flex-col justify-start items-between divide-y divide-muted min-w-48">
         {#if isSelectedMessageCopyable()}
-            <button data-copy-button onclick={copyMessage} class="px-4 py-2 flex flex-row gap-20 items-center justify-between hover:bg-gray-700">Copy <CopySimple size={20} /></button>
+            <Button variant="ghost" size="sm" data-copy-button onclick={copyMessage} class="text-base font-normal flex flex-row items-center justify-between">Copy <Copy size={24} /></Button>
         {/if}
-        <button onclick={reply} class="px-4 py-2 flex flex-row gap-20 items-center justify-between hover:bg-gray-700">Reply <ArrowBendUpLeft size={20} /></button>
+        <Button variant="ghost" size="sm" data-copy-button onclick={reply} class="text-base font-normal flex flex-row items-center justify-between">Reply <Reply size={24} /></Button>
         <!-- <button onclick={editMessage} class="px-4 py-2 flex flex-row gap-20 items-center justify-between">Edit <PencilSimple size={20} /></button> -->
         {#if isSelectedMessageDeletable()}
-            <button onclick={deleteMessage} class="text-red-500 px-4 py-2 flex flex-row gap-20 items-center justify-between hover:bg-red-200">Delete <TrashSimple size={20} /></button>
+            <Button variant="ghost" size="sm" data-copy-button onclick={deleteMessage} class="text-base font-normal flex flex-row items-center justify-between">Delete <TrashCan size={24} /></Button>
         {/if}
     </div>
 </div>

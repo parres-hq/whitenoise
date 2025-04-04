@@ -9,7 +9,10 @@ import { latestMessagePreview, nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
 import Button from "./ui/button/button.svelte";
 
-let { group }: { group: NostrMlsGroup } = $props();
+let {
+    group,
+    selectedChatId = $bindable(null),
+}: { group: NostrMlsGroup; selectedChatId?: string | null } = $props();
 
 let counterpartyPubkey: string | undefined = $state(undefined);
 let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
@@ -75,6 +78,16 @@ $effect(() => {
         groupName = group.name;
     }
 });
+
+function handleClick(e: MouseEvent) {
+    const groupId = hexMlsGroupId(group.mls_group_id);
+
+    // On desktop, update selectedChatId instead of navigating
+    if (window.innerWidth >= 768) {
+        e.preventDefault();
+        selectedChatId = groupId;
+    }
+}
 </script>
 
 <Button
@@ -82,6 +95,7 @@ $effect(() => {
     variant="ghost"
     href={`/chats/${hexMlsGroupId(group.mls_group_id)}/`}
     class="flex flex-row gap-2 items-center justify-between py-10 px-4"
+    onclick={handleClick}
 >
     <div class="flex flex-row gap-2 items-center">
         <GroupAvatar bind:groupType={group.group_type} bind:groupName bind:counterpartyPubkey bind:enrichedCounterparty pxSize={56} />
