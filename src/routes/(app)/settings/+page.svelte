@@ -1,7 +1,7 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
-import Alert from "$lib/components/Alert.svelte";
 import Avatar from "$lib/components/Avatar.svelte";
+import ConfirmSheet from "$lib/components/ConfirmSheet.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import Header from "$lib/components/Header.svelte";
 import LoginSheet from "$lib/components/LoginSheet.svelte";
@@ -40,9 +40,6 @@ import { toast } from "svelte-sonner";
 
 let showLoginSheet = $state(false);
 let showSwitchAccountSheet = $state(false);
-let showDeleteAlert = $state(false);
-let showKeyPackageAlert = $state(false);
-let showDeleteKeyPackagesAlert = $state(false);
 let addProfileLoading = $state(false);
 
 let accordionOpenSection = $state("profile");
@@ -70,9 +67,7 @@ onDestroy(() => {
 
 async function handleLogout(pubkey: string): Promise<void> {
     logout(pubkey)
-        .then(() => {
-            toast.success("Successfully logged out");
-        })
+        .then(() => toast.success("Successfully logged out"))
         .catch((e) => {
             if (e instanceof LogoutError) {
                 goto("/");
@@ -98,23 +93,29 @@ async function testNotification() {
 }
 
 async function deleteAll() {
-    showDeleteAlert = true;
-}
-
-function launchKeyPackage() {
-    showKeyPackageAlert = true;
+    invoke("delete_all_data")
+        .then(() => {
+            toast.info("All accounts, groups, and messages have been deleted");
+            goto("/login");
+        })
+        .catch((e) => {
+            toast.error("Error deleting data");
+            console.error(e);
+        });
 }
 
 function deleteAllKeyPackages() {
-    showDeleteKeyPackagesAlert = true;
+    invoke("delete_all_key_packages")
+        .then(() => toast.success("Key Packages Deleted"))
+        .catch((e) => {
+            toast.error("Error Deleting Key Packages");
+            console.error(e);
+        });
 }
 
 function publishKeyPackage() {
     invoke("publish_new_key_package", {})
-        .then(() => {
-            toast.success("Key Package Published");
-            showKeyPackageAlert = false;
-        })
+        .then(() => toast.success("Key Package Published"))
         .catch((e) => {
             toast.error("Error Publishing Key Package");
             console.error(e);
@@ -122,70 +123,13 @@ function publishKeyPackage() {
 }
 </script>
 
-{#if showDeleteAlert}
-    <Alert
-        title="Delete everything?"
-        body="This will delete all group and message data, and sign you out of all accounts. This will not delete your nostr keys or any other events you've published to relays. Are you sure you want to delete all data from White Noise? This cannot be undone."
-        acceptFn={async () => {
-            invoke("delete_all_data")
-                .then(() => {
-                    toast.info("All accounts, groups, and messages have been deleted");
-                    showDeleteAlert = false;
-                    goto("/login");
-                })
-                .catch((e) => {
-                    toast.error("Error deleting data");
-                    console.error(e);
-                });
-        }}
-        acceptText="Yes, delete everything"
-        acceptStyle="warning"
-        cancelText="Cancel"
-        bind:showAlert={showDeleteAlert}
-    />
-{/if}
-
-{#if showKeyPackageAlert}
-    <Alert
-        title="Publish Key Package?"
-        body="Are you sure you want to publish a new Key Package event to relays?"
-        acceptFn={publishKeyPackage}
-        acceptText="Publish Key Package"
-        acceptStyle="primary"
-        cancelText="Cancel"
-        bind:showAlert={showKeyPackageAlert}
-    />
-{/if}
-
-{#if showDeleteKeyPackagesAlert}
-    <Alert
-        title="Delete All Key Packages?"
-        body="Are you sure you want to send delete requests to all relays where your key packages are found?"
-        acceptFn={async () => {
-            invoke("delete_all_key_packages")
-                .then(() => {
-                    toast.success("Key Packages Deleted");
-                    showDeleteKeyPackagesAlert = false;
-                })
-                .catch((e) => {
-                    toast.error("Error Deleting Key Packages");
-                    console.error(e);
-                });
-        }}
-        acceptText="Yes, delete all key packages"
-        acceptStyle="warning"
-        cancelText="Cancel"
-        bind:showAlert={showDeleteKeyPackagesAlert}
-    />
-{/if}
-
 <Header backLocation="/chats" title="Settings" />
 
 <main class="px-4 py-6 flex flex-col gap-4">
     <Accordion.Root bind:value={accordionOpenSection} class="px-2">
         <Accordion.Item value="profile">
             <Accordion.Trigger class="overflow-visible">
-                <h2 class="section-title">Profile</h2>
+                <h2 class="text-3xl font-normal text-primary leading-none">Profile</h2>
                 <LoginSheet title="Add new profile" loading={addProfileLoading} bind:sheetVisible={showLoginSheet} showCreateAccount={true}>
                     <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2">
                         <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
@@ -245,50 +189,52 @@ function publishKeyPackage() {
                         {/if}
                     </div>
 
-                    <ul class="section-list">
-                        <li class="section-list-item">
-                            <a href="/settings/profile/" class="row-button">
-                                <div class="row-button-content">
+                    <ul class="list-none p-0 m-0 overflow-hidden">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <a href="/settings/profile/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                <div class="flex flex-row gap-3 items-center">
                                     <User size={24} class="shrink-0"/>
                                     <span>Edit profile</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
                         </li>
-                        <li class="section-list-item">
-                            <a href="/settings/nostr-keys/" class="row-button">
-                                <div class="row-button-content">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <a href="/settings/nostr-keys/" class="flex flex-row justify-between items-center py-4 w-full no-underlinerow-button">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Password size={24} class="shrink-0"/>
                                     <span>Nostr keys</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
                         </li>
-                        <li class="section-list-item">
-                            <a href="/settings/network/" class="row-button">
-                                <div class="row-button-content">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <a href="/settings/network/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Satellite size={24} class="shrink-0"/>
                                     <span>Network</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
                         </li>
-                        <li class="section-list-item">
-                            <a href="/settings/wallet/" class="row-button">
-                                <div class="row-button-content">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <a href="/settings/wallet/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Wallet size={24} class="shrink-0"/>
                                     <span>Wallet</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
                         </li>
-                        <li class="section-list-item">
-                            <button onclick={() => handleLogout($activeAccount!.pubkey)} class="row-button">
-                                <div class="row-button-content">
-                                    <Logout size={24} class="shrink-0"/>
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <ConfirmSheet title="Sign out?" description="Are you sure you want to sign out of this account? If you haven't backed up your keys, you won't be able to recover them." acceptText="Sign out" cancelText="Cancel" acceptFn={() => handleLogout($activeAccount!.pubkey)}>
+                                <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                    <div class="flex flex-row gap-3 items-center">
+                                        <Logout size={24} class="shrink-0"/>
                                     <span>Sign out</span>
-                                </div>
-                            </button>
+                                    </div>
+                                </button>
+                            </ConfirmSheet>
                         </li>
                     </ul>
                 </div>
@@ -296,18 +242,20 @@ function publishKeyPackage() {
         </Accordion.Item>
         <Accordion.Item value="privacy">
             <Accordion.Trigger>
-                <h2 class="section-title">Privacy & Security</h2>
+                <h2 class="text-3xl font-normal text-primary leading-none">Privacy & Security</h2>
             </Accordion.Trigger>
             <Accordion.Content>
                 <div class="overflow-hidden p-0 m-0">
-                    <ul class="section-list">
-                        <li class="section-list-item">
-                            <button onclick={deleteAll} class="row-button">
-                            <div class="row-button-content">
+                    <ul class="list-none p-0 m-0 overflow-hidden">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <ConfirmSheet title="Delete everything?" description="This will delete all group and message data, and sign you out of all accounts but will not delete your nostr keys or any other events you've published to relays.<br><br>Are you sure you want to delete all data from White Noise? This cannot be undone." acceptText="Delete all data" cancelText="Cancel" acceptFn={deleteAll}>
+                                <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                    <div class="flex flex-row gap-3 items-center">
                                 <TrashCan size={24} class="shrink-0"/>
                                 <span>Delete all data</span>
-                            </div>
-                            </button>
+                                    </div>
+                                </button>
+                            </ConfirmSheet>
                         </li>
                     </ul>
                 </div>
@@ -315,46 +263,50 @@ function publishKeyPackage() {
         </Accordion.Item>
         <Accordion.Item value="developer">
             <Accordion.Trigger>
-                <h2 class="section-title">Developer Settings</h2>
+                <h2 class="text-3xl font-normal text-primary leading-none">Developer Settings</h2>
             </Accordion.Trigger>
             <Accordion.Content>
                 <div class="overflow-hidden p-0 m-0">
-                    <ul class="section-list">
-                        <li class="section-list-item">
-                            <button onclick={launchKeyPackage} class="row-button">
-                                <div class="row-button-content">
-                                    <Password size={24} class="shrink-0"/>
-                                    <span>Publish a key package</span>
-                                </div>
-                            </button>
+                    <ul class="list-none p-0 m-0 overflow-hidden">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <ConfirmSheet title="Publish a key package" description="Are you sure you want to publish a new Key Package event to relays?" acceptText="Publish key package" cancelText="Cancel" acceptFn={publishKeyPackage}>
+                                <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                    <div class="flex flex-row gap-3 items-center">
+                                        <Password size={24} class="shrink-0"/>
+                                        <span>Publish a key package</span>
+                                    </div>
+                                </button>
+                            </ConfirmSheet>
                         </li>
-                        <li class="section-list-item">
-                            <button onclick={deleteAllKeyPackages} class="row-button">
-                                <div class="row-button-content">
-                                    <TrashCan size={24} class="shrink-0"/>
-                                    <span>Delete all key packages</span>
-                                </div>
-                            </button>
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <ConfirmSheet title="Delete all key packages" description="Are you sure you want to delete all key packages?" acceptText="Delete all key packages" cancelText="Cancel" acceptFn={deleteAllKeyPackages}>
+                                <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                    <div class="flex flex-row gap-3 items-center">
+                                        <TrashCan size={24} class="shrink-0"/>
+                                        <span>Delete all key packages</span>
+                                    </div>
+                                </button>
+                            </ConfirmSheet>
                         </li>
-                        <li class="section-list-item">
-                            <button onclick={testNotification} class="row-button">
-                                <div class="row-button-content">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <button onclick={testNotification} class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
                                     <span>Test notifications</span>
                                 </div>
                             </button>
                         </li>
-                        <li class="section-list-item">
-                            <button onclick={() => toast.success("Toast success")} class="row-button">
-                                <div class="row-button-content">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <button onclick={() => toast.success("Toast success")} class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
                                     <span>Test toast success</span>
                                 </div>
                             </button>
                         </li>
-                        <li class="section-list-item">
-                            <button onclick={() => toast.error("Toast error")} class="row-button">
-                                <div class="row-button-content">
+                        <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
+                            <button onclick={() => toast.error("Toast error")} class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                                <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
                                     <span>Test toast error</span>
                                 </div>
@@ -366,26 +318,3 @@ function publishKeyPackage() {
         </Accordion.Item>
     </Accordion.Root>
 </main>
-
-<style lang="postcss">
-    .section-title {
-        @apply text-3xl font-normal text-primary leading-none;
-    }
-
-    .section-list {
-        @apply list-none p-0 m-0 overflow-hidden;
-    }
-
-    .section-list-item {
-        @apply p-0 m-0 leading-none text-2xl text-muted-foreground;
-    }
-
-    .section-list-item > button,
-    .section-list-item > a {
-        @apply flex flex-row justify-between items-center py-4 w-full no-underline;
-    }
-
-    .row-button-content {
-        @apply flex flex-row gap-3 items-center;
-    }
-</style>
