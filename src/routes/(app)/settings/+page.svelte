@@ -126,7 +126,7 @@ function publishKeyPackage() {
 <Header backLocation="/chats" title="Settings" />
 
 <main class="px-4 py-6 flex flex-col gap-4">
-    <Accordion.Root bind:value={accordionOpenSection} class="px-2">
+    <Accordion.Root type="single" bind:value={accordionOpenSection} class="px-2">
         <Accordion.Item value="profile">
             <Accordion.Trigger class="overflow-visible">
                 <h2 class="text-3xl font-normal text-primary leading-none">Profile</h2>
