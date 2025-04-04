@@ -6,15 +6,16 @@ import { hexMlsGroupId } from "$lib/utils/group";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
-import Check from "phosphor-svelte/lib/Check";
-import PaperPlaneTilt from "phosphor-svelte/lib/PaperPlaneTilt";
-import Plus from "phosphor-svelte/lib/Plus";
-import TrashSimple from "phosphor-svelte/lib/TrashSimple";
-import X from "phosphor-svelte/lib/X";
+import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
+import ArrowUp from "carbon-icons-svelte/lib/ArrowUp.svelte";
+import Checkmark from "carbon-icons-svelte/lib/Checkmark.svelte";
+import CloseLarge from "carbon-icons-svelte/lib/CloseLarge.svelte";
+import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { onMount } from "svelte";
 import { toast } from "svelte-sonner";
 import Loader from "./Loader.svelte";
-
+import Button from "./ui/button/button.svelte";
+import Textarea from "./ui/textarea/textarea.svelte";
 let {
     group,
     replyToMessage = $bindable(),
@@ -36,8 +37,6 @@ let media = $state<
 >([]);
 let textarea: HTMLTextAreaElement;
 let sendingMessage: boolean = $state(false);
-
-$inspect(media);
 
 function adjustTextareaHeight() {
     textarea.style.height = "auto";
@@ -109,7 +108,8 @@ async function sendMessage() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
         sendMessage();
     }
 }
@@ -194,23 +194,23 @@ onMount(() => {
 });
 </script>
 
-<div class="messagebar sticky bottom-0 left-0 right-0 bg-gray-900 drop-shadow-message-bar">
+<div class="messagebar sticky bottom-0 left-0 right-0 bg-background drop-shadow-message-bar">
     {#if replyToMessage}
-        <div class="w-full py-4 px-6 pl-8 bg-blue-700/50 text-white backdrop-blur-sm border-t border-gray-700 border-l-4 border-l-blue-500 flex flex-row gap-2 items-start justify-between rounded-t-xl">
+        <div class="w-full py-4 px-6 pl-8 bg-muted backdrop-blur-sm flex flex-row gap-2 items-start justify-between ">
             {#if isReplyToMessageDeleted}
                 <div class="inline-flex flex-row items-center gap-2 bg-gray-200 rounded-full px-3 py-1 w-fit text-black">
-                    <TrashSimple size={20} /><span class="italic opacity-60">Message deleted</span>
+                    <TrashCan size={20} /><span class="italic opacity-60">Message deleted</span>
                 </div>
             {:else}
                 <span>{replyToMessage.content}</span>
             {/if}
-            <button onclick={() => replyToMessage = undefined} class="p-1 bg-white/50 hover:bg-white rounded-full mr-0">
-                <X size={12} class="text-blue-700" />
+            <button onclick={() => replyToMessage = undefined} class="p-1 bg-primary hover:bg-primary/80 rounded-full mr-0">
+                <CloseLarge size={16} class="text-primary-foreground" />
             </button>
         </div>
     {/if}
     {#if media.length > 0}
-        <div class="w-full py-2 px-6 pl-8 bg-gray-800/50 backdrop-blur-sm border-t border-gray-700 flex flex-row gap-2 items-center overflow-x-auto">
+        <div class="w-full py-2 px-6 pt-4 bg-muted backdrop-blur-sm flex flex-row gap-2 items-center overflow-x-auto">
             {#each media as item, index}
                 <div class="relative group">
                     {#if item.file.type.startsWith('image/')}
@@ -238,64 +238,55 @@ onMount(() => {
                                 <Loader fullscreen={false} size={48} />
                             </div>
                         {:else if item.status === 'error'}
-                            <div class="text-red-500">
-                                <X size={24} />
+                            <div class="text-destructive">
+                                <CloseLarge size={24} />
                             </div>
                         {:else if item.status === 'success'}
                             <div class="text-green-500">
-                                <Check size={24} />
+                                <Checkmark size={24} />
                             </div>
                         {/if}
                     </div>
                     <button
-                        class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        class="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1"
                         onclick={() => {
                             media = media.filter((_, i) => i !== index);
                         }}
                     >
-                        <X size={12} />
+                        <CloseLarge size={16} />
                     </button>
                 </div>
             {/each}
         </div>
     {/if}
-    <div class="flex flex-row px-8 py-4 gap-4 items-center border-t border-gray-700">
+    <div class="flex flex-row p-4 gap-3 items-center border-t border-accent">
+        <button
+            class="p-2"
+            onclick={handleFileUpload}
+            disabled={false}
+        >
+            <AddLarge size={24} class="w-6 h-6" />
+        </button>
         <textarea
             id="newMessageInput"
-            bind:this={textarea}
-            class="px-4 py-2 w-full bg-transparent ring-1 ring-gray-700 rounded-lg min-h-[2.5rem] max-h-[12rem] resize-none overflow-y-auto"
-            rows="1"
+            class="px-4 py-2 w-full bg-input focus-visible:outline-none focus-visible:ring-input-foreground min-h-[2.5rem] max-h-[200px] resize-none overflow-y-auto"
+            rows={1}
             bind:value={message}
+            bind:this={textarea}
             oninput={handleInput}
             onkeydown={handleKeydown}
         ></textarea>
-        <div class="flex flex-row gap-2">
-            {#if message.length > 0}
-                <button
-                    class="p-2 bg-blue-700 rounded-full text-white ring-1 ring-blue-500 hover:bg-blue-600 disabled:hidden"
-                onclick={sendMessage}
-                disabled={sendingMessage || media.some(item => item.status === "uploading")}
-            >
-                <PaperPlaneTilt size={24} weight="regular" class="" />
-            </button>
-        {:else}
-            <button
-                class="p-2 rounded-full text-white ring-1 ring-gray-900 rounded-full text-white disabled:hidden"
-                onclick={handleFileUpload}
-                disabled={false}
-            >
-                <Plus size={24} weight="light" class="" />
-            </button>
-            {/if}
-        </div>
-
-
-        <div
-            class="p-3 bg-blue-700 rounded-full text-white ring-1 ring-blue-500"
-            class:hidden={!sendingMessage}
+        <button
+            class="p-2 bg-primary text-primary-foreground w-10 h-10"
+            onclick={sendMessage}
+            disabled={sendingMessage || media.some(item => item.status === "uploading")}
         >
-            <Loader fullscreen={false} size={24} />
-        </div>
+            {#if sendingMessage}
+                <Loader fullscreen={false} size={24} />
+            {:else}
+                <ArrowUp size={24} class="w-6 h-6" />
+            {/if}
+        </button>
     </div>
 </div>
 

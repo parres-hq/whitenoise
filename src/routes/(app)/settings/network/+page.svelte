@@ -25,8 +25,6 @@ let currentRelayType = $state<"inbox" | "key_package">("inbox");
 let isLoading = $state(false);
 let relayStatuses = $state<Record<string, string>>({});
 
-$inspect($activeAccount);
-
 // Fetch relay lists
 async function loadRelays() {
     // Fetch all connected relays with status and relay lists in parallel
