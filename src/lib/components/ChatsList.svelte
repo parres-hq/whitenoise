@@ -10,6 +10,7 @@ import Chat from "carbon-icons-svelte/lib/Chat.svelte";
 import Search from "carbon-icons-svelte/lib/Search.svelte";
 import WarningAlt from "carbon-icons-svelte/lib/WarningAlt.svelte";
 import { onDestroy, onMount } from "svelte";
+import { _ as t } from "svelte-i18n";
 import Avatar from "./Avatar.svelte";
 import FormattedNpub from "./FormattedNpub.svelte";
 import GroupListItem from "./GroupListItem.svelte";
@@ -240,10 +241,10 @@ $effect(() => {
                 </Sheet.Trigger>
                 <Sheet.Content side="bottom" class="pb-0 px-0 h-[90%]">
                     <Sheet.Header class="text-left mb-6 px-6">
-                        <Sheet.Title>Search</Sheet.Title>
+                        <Sheet.Title>{$t("chats.search")}</Sheet.Title>
                     </Sheet.Header>
                     <div class="flex flex-col gap-2 px-6">
-                        <Input type="search" placeholder="Search contacts or chats&hellip;" class="focus-visible:ring-0" />
+                        <Input type="search"  placeholder={$t("chats.searchPlaceholder")+"&hellip;"} class="focus-visible:ring-0" />
                     </div>
                     <div class="flex flex-col gap-2 px-6 mt-6 text-destructive">Not implemented yet</div>
                 </Sheet.Content>
@@ -271,14 +272,14 @@ $effect(() => {
                         {:else}
                             <div class="sticky top-0">
                                 <Sheet.Header class="text-left mb-6 px-6">
-                                    <Sheet.Title>New chat</Sheet.Title>
+                                    <Sheet.Title> {$t("chats.newChat")}</Sheet.Title>
                                 </Sheet.Header>
 
                                 <div class="flex flex-row gap-4 px-6 mb-4">
                                     <form onsubmit={searchRelays} class="flex flex-row gap-2 items-center w-full">
                                         <Input
                                             type="search"
-                                            placeholder="Search contact or public key..."
+                                            placeholder={$t("chats.searchContactPlaceholder")}
                                             bind:value={contactsSearch}
                                             class="focus-visible:ring-0"
                                         />
@@ -297,11 +298,13 @@ $effect(() => {
                                         </div>
                                     {:else if contactsLoadingError}
                                         <div class="text-destructive font-medium flex flex-col gap-2 px-6">
-                                            <span>Sorry, we couldn't load contacts because of an error.</span>
-                                            <pre class="font-mono p-2 bg-destructive/10 text-xs">{contactsLoadingError || "Unknown error"}</pre>
+                                            <span>{$t("chats.contactsLoadingError")}</span>
+                                            <pre class="font-mono p-2 bg-destructive/10 text-xs">
+                                                {contactsLoadingError || $t("chats.unknownError")}
+                                            </pre>
                                         </div>
                                     {:else}
-                                        <h2 class="text-xl font-normal mb-2 px-6">Contacts</h2>
+                                        <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.contacts")}</h2>
                                         {#if filteredContacts && Object.keys(filteredContacts).length > 0}
                                             <div class="px-0">
                                                 {#each Object.entries(filteredContacts) as [pubkey, contact] (pubkey)}
@@ -323,16 +326,16 @@ $effect(() => {
                                                 {/each}
                                             </div>
                                         {:else}
-                                            <span class="text-gray-400 px-6 text-center">No contacts found</span>
+                                            <span class="text-gray-400 px-6 text-center">{$t("chats.noContactsFound")}</span>
                                         {/if}
                                         <div class="mt-4">
                                             {#if isSearching}
-                                                <h2 class="text-xl font-normal mb-2 px-6">Searching&hellip;</h2>
+                                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searching")} &hellip;</h2>
                                                 <div class="px-6">
                                                     <Loader size={40} fullscreen={false} />
                                                 </div>
                                             {:else if searchResults && Object.keys(searchResults).length > 0}
-                                                <h2 class="text-xl font-normal mb-2 px-6">Search results</h2>
+                                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searchResults")}</h2>
                                                 {#each Object.entries(searchResults) as [pubkey, contact] (pubkey)}
                                                     <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap-3 px-6 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => startChatWithContact(pubkey, contact)}>
                                                         <Avatar
@@ -371,7 +374,7 @@ $effect(() => {
 {:else if loadingError}
     <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-destructive">
         <WarningAlt size={32} />
-        <span>Error loading chats</span>
+        <span>{$t("chats.errorLoadingChats")}</span>
         <span>{loadingError}</span>
     </div>
 {:else}
@@ -379,8 +382,8 @@ $effect(() => {
         {#if invites.length === 0 && groups.length === 0}
             <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground">
                 <Chat size={32} />
-                <span>No chats found</span>
-                <span>Click the "+" button to start a new chat</span>
+                <span>{$t("chats.noChatsFound")}</span>
+                <span>{$t("chats.startNewChat")}</span>
             </div>
         {/if}
         {#each invites as invite}

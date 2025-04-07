@@ -5,6 +5,7 @@ import type { EnrichedContact } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { formatMessageTime } from "$lib/utils/time";
 import { invoke } from "@tauri-apps/api/core";
+import { _ as t } from "svelte-i18n";
 import { latestMessagePreview, nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
 import Button from "./ui/button/button.svelte";
@@ -102,7 +103,7 @@ function handleClick(e: MouseEvent) {
         <GroupAvatar bind:groupType={group.group_type} bind:groupName bind:counterpartyPubkey bind:enrichedCounterparty pxSize={56} />
         <div class="truncate">
             <span class="text-lg font-medium truncate">{groupName}</span>
-            <p class="text-sm text-muted-foreground whitespace-pre-wrap break-words w-full line-clamp-2">{group.last_message_id ? messagePreview : "New chat"}</p>
+            <p class="text-sm text-muted-foreground whitespace-pre-wrap break-words w-full line-clamp-2">{group.last_message_id ? messagePreview : $t("chats.newChat")}</p>
         </div>
     </div>
     <span class="whitespace-nowrap text-sm text-muted-foreground ml-2">{group.last_message_at ? formatMessageTime(group.last_message_at) : ""}</span>

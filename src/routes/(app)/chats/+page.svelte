@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import Tree from "carbon-icons-svelte/lib/Tree.svelte";
 import { onDestroy, onMount } from "svelte";
+import { _ as t } from "svelte-i18n";
 import ChatPage from "./[id]/+page.svelte";
 import InfoPage from "./[id]/info/+page.svelte";
 
@@ -173,7 +174,7 @@ $effect(() => {
                         <div class="sticky top-0 left-0 right-0 z-40 flex flex-row items-center gap-4 p-4 pt-14 bg-primary text-primary-foreground"></div>
                         <div class="flex flex-row gap-2 items-center justify-center h-full">
                             <Tree size={32} class="text-muted-foreground mb-4" />
-                            <h1 class="text-base font-normal text-muted-foreground">Have you touched grass today?</h1>
+                            <h1 class="text-base font-normal text-muted-foreground">{$t("chats.noChatSelected")}</h1>
                         </div>
                     {/if}
                 </div>

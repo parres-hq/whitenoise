@@ -2,6 +2,7 @@
 import { cn } from "$lib/utils.js";
 import { Dialog as SheetPrimitive } from "bits-ui";
 import CloseLarge from "carbon-icons-svelte/lib/CloseLarge.svelte";
+import { _ as t } from "svelte-i18n";
 import { fly } from "svelte/transition";
 import { SheetOverlay, SheetPortal, type Side, sheetTransitions, sheetVariants } from "./index.js";
 
@@ -37,7 +38,7 @@ export let outTransitionConfig: $$Props["outTransitionConfig"] =
 			class="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none"
 		>
 			<CloseLarge size={24} />
-			<span class="sr-only">Close</span>
+			<span class="sr-only">{$t("shared.close")}</span>
 		</SheetPrimitive.Close>
 	</SheetPrimitive.Content>
 </SheetPortal>

@@ -7,6 +7,7 @@ import * as Sheet from "$lib/components/ui/sheet";
 import type { EnrichedContact, Invite } from "$lib/types/nostr";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
+import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 
 type InviteDetailProps = {
@@ -40,7 +41,9 @@ async function acceptInvite() {
             const event = new CustomEvent("inviteAccepted", { detail: invite.mls_group_id });
             window.dispatchEvent(event);
             toast.success(
-                `You've accepted an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`
+                $t("chats.inviteAccepted", {
+                    values: { name: nameFromMetadata(enrichedInviter.metadata) },
+                })
             );
         })
         .catch((e) => {
@@ -62,7 +65,9 @@ async function declineInvite() {
     invoke("decline_invite", { invite })
         .then(() => {
             toast.info(
-                `You've declined an invite to join a secure chat with ${nameFromMetadata(enrichedInviter.metadata)}`
+                $t("chats.inviteDeclined", {
+                    values: { name: nameFromMetadata(enrichedInviter.metadata) },
+                })
             );
         })
         .catch((e) => {
@@ -81,7 +86,7 @@ async function declineInvite() {
     <KeyboardAvoidingView withSheet={true}>
         <div class="flex flex-col h-full relative">
             <Sheet.Header class="text-left flex flex-row items-start gap-x-1 px-6">
-                <Sheet.Title>Invitation</Sheet.Title>
+                <Sheet.Title>{$t("chats.invitation")}</Sheet.Title>
             </Sheet.Header>
 
             <div class="flex flex-col justify-start items-center pt-24 flex-1 gap-4">
@@ -115,7 +120,7 @@ async function declineInvite() {
                     class="text-base font-medium w-full py-6 focus-visible:ring-0"
                     disabled={isDecliningInvite}
                     onclick={declineInvite}>
-                    {isDecliningInvite ? "Declining invite..." : "Decline invite"}
+                    {isDecliningInvite ? $t("chats.decliningInvite") : $t("chats.declineInvite")}
                 </Button>
                 <Button
                     variant="default"
@@ -124,7 +129,7 @@ async function declineInvite() {
                     class="text-base font-medium w-full pb-[calc(1.5rem+var(--sab))] pt-6 focus-visible:ring-0"
                     disabled={isAcceptingInvite}
                     onclick={acceptInvite}>
-                        {isAcceptingInvite ? "Accepting invite..." : "Accept invite"}
+                        {isAcceptingInvite ? $t("chats.acceptingInvite") : $t("chats.acceptInvite")}
                 </Button>
             </div>
         </div>
