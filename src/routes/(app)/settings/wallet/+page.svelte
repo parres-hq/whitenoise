@@ -14,6 +14,7 @@ import Information from "carbon-icons-svelte/lib/Information.svelte";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import ScanAlt from "carbon-icons-svelte/lib/ScanAlt.svelte";
 import { onMount } from "svelte";
+import { _ as t } from "svelte-i18n";
 
 let hasWallet = $state(false);
 let balance = $state(0);
@@ -37,7 +38,7 @@ async function checkWalletStatus() {
         if (e instanceof NostrWalletConnectError) {
             error = e.message;
         } else {
-            error = "An unexpected error occurred";
+            error = $t("wallet.unexpectedError");
         }
     }
 }
@@ -55,7 +56,7 @@ async function handleSetWallet() {
         if (e instanceof NostrWalletConnectError) {
             error = e.message;
         } else {
-            error = "An unexpected error occurred";
+            error = $t("wallet.unexpectedError");
         }
     } finally {
         loading = false;
@@ -72,7 +73,7 @@ async function handleRemoveWallet() {
         if (e instanceof NostrWalletConnectError) {
             error = e.message;
         } else {
-            error = "An unexpected error occurred";
+            error = $t("wallet.unexpectedError");
         }
     } finally {
         loading = false;
@@ -85,10 +86,10 @@ async function handlePaste() {
         if (text) {
             nwcUri = text;
         } else {
-            error = "No text found in clipboard";
+            error = $t("clipboard.emptyTextError");
         }
     } catch (e) {
-        error = "Failed to read from clipboard";
+        error = $t("clipboard.readError");
     }
 }
 
@@ -98,27 +99,29 @@ onMount(async () => {
 });
 </script>
 
-<Header backLocation="/settings" title="Wallet" />
+<Header backLocation="/settings" title={$t("wallet.title")} />
 
 <div class="px-4 py-6 pb-16 md:pb-6 flex flex-col gap-4">
     {#if hasWallet}
-        <h2 class="text-xl/7">Lightning Wallet Connected</h2>
+        <h2 class="text-xl/7">{$t("wallet.lightningWalletConnected")}</h2>
         <div class="flex flex-row items-center justify-between">
-            <span class="text-lg text-muted-foreground">Balance:</span>
+            <span class="text-lg text-muted-foreground">{$t("wallet.balance")}</span>
             <span class="text-lg">
                 {#if balanceLoading}
-                    <span class="text-lg text-muted-foreground animate-pulse">Loading...</span>
+                    <span class="text-lg text-muted-foreground animate-pulse">{$t("shared.loading")}</span>
                 {:else}
                     {balance.toLocaleString()} sats
                 {/if}
             </span>
         </div>
 
-        <Button size="lg" variant="outline" onclick={handleRemoveWallet} disabled={loading}>{loading ? 'Removing...' : 'Disconnect Wallet'}</Button>
+        <Button size="lg" variant="outline" onclick={handleRemoveWallet} disabled={loading}>
+            {loading ? $t("wallet.removing") : $t("wallet.disconnectWallet")}
+        </Button>
     {:else}
-        <h2 class="text-xl/7">Connect your bitcoin lightning wallet to send and receive payments in White Noise.</h2>
+        <h2 class="text-xl/7">{$t("wallet.connectionDescription")}</h2>
         <div class="flex flex-col gap-0">
-            <label for="nwc-uri">Connection String</label>
+            <label for="nwc-uri">{$t("wallet.connectionString")}</label>
             <div class="flex flex-row gap-2">
                 <input bind:value={nwcUri} type="text" id="nwc-uri" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="nostr+walletconnect://..." class="grow"/>
                 {#if showScanButton}
@@ -137,15 +140,25 @@ onMount(async () => {
         <div class="flex flex-row gap-3 items-start bg-accent p-4 text-accent-foreground mt-12">
             <Information size={24} class="shrink-0" />
             <div class="flex flex-col gap-2">
-                <h3 class="text-lg/6 font-medium">Which wallets can I connect?</h3>
+                <h3 class="text-lg/6 font-medium">
+                    {$t("wallet.informationQuestion")}
+                </h3>
                 <p>
-                    You can connect any wallet that supports Nostr Wallet Connect. See a full list <a href="https://github.com/getAlby/awesome-nwc/blob/master/README.md#nwc-wallets" target="_blank" class="underline">here</a>.
+                   {$t("wallet.informationAnswer")}
+                   <a href="https://github.com/getAlby/awesome-nwc/blob/master/README.md#nwc-wallets" target="_blank" class="underline">
+                    {$t("wallet.informationAnswerLink")}
+                   </a>.
                 </p>
             </div>
         </div>
 
-        <Button size="lg" onclick={handleSetWallet} disabled={!nwcUri || loading} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6">Connect Wallet</Button>
+        <Button
+            size="lg"
+            onclick={handleSetWallet}
+            disabled={!nwcUri || loading}
+            class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
+        >
+            {$t("wallet.connectWallet")}
+        </Button>
     {/if}
 </div>
-
-
