@@ -77,7 +77,7 @@ async function handleCreateAccount() {
     <Sheet.Trigger>
         {@render children()}
     </Sheet.Trigger>
-    <Sheet.Content side="bottom" class="pb-safe-bottom" keyboardAware={true}>
+    <Sheet.Content side="bottom">
         <div class="overflow-y-auto {showCreateAccount ? 'pb-24' : 'pb-12'} px-1 relative">
             <Sheet.Header class="text-left mb-8">
                 <Sheet.Title>{title ?? "Sign in with your Nostr key"}</Sheet.Title>
@@ -106,7 +106,7 @@ async function handleCreateAccount() {
                 </div>
             </div>
         </div>
-        <div class="flex flex-col gap-0 w-full px-0 absolute bottom-0 left-0 right-0">
+        <div class="flex flex-col gap-0 w-full px-0 fixed bottom-0 left-0 right-0">
             {#if showCreateAccount}
                 <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium py-4 px-0">
                     Create a new Nostr key

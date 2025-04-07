@@ -55,7 +55,7 @@ async function handleCreateAccount() {
 
 <div class="flex flex-col h-dvh items-center justify-between w-screen bg-background relative pl-safe-left pr-safe-right relative">
     <div class="relative w-full">
-        <img src="images/login-splash.webp" alt="login splash" class="max-h-[700px] w-full object-cover {loading ? 'animate-pulse' : ''}" />
+        <img src="images/login-splash.webp" alt="login splash" class="max-h-[330px] sm:max-h-[400px] md:max-h-[600px] w-full object-cover {loading ? 'animate-pulse' : ''}" />
         <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent from-10% to-transparent"></div>
     </div>
     <div class="flex flex-col self-start mx-4 text-foreground mb-16">
@@ -63,10 +63,12 @@ async function handleCreateAccount() {
         <h1 class="text-5xl font-semibold">White Noise</h1>
         <p class="text-xl mt-4 font-normal text-muted-foreground">Secure. Distributed. Uncensorable.</p>
     </div>
-    <LoginSheet {loading}>
-        <Button variant="ghost" class="w-full h-fit text-base font-medium py-4">Sign in with Nostr key</Button>
-    </LoginSheet>
-    <Button size="lg" variant="default" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium pt-4 pb-[calc(1rem+var(--sab))]">
-        Create a new Nostr key
-    </Button>
+    <div class="w-full flex flex-col gap-0">
+        <LoginSheet {loading}>
+            <Button variant="ghost" class="w-full h-fit text-base font-medium py-4">Sign in with Nostr key</Button>
+        </LoginSheet>
+        <Button size="lg" variant="default" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium pt-4 pb-[calc(1rem+var(--sab))]">
+            Create a new Nostr key
+        </Button>
+    </div>
 </div>

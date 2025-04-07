@@ -23,7 +23,7 @@ onMount(async () => {
 <div class="flex flex-col items-center w-screen h-dvh">
     <div class="w-full h-2/3 flex flex-col items-center bg-background">
         <div class="relative w-full h-full">
-            <img src="images/login-splash.webp" alt="login splash" class="w-full h-full object-cover animate-pulse" />
+            <img src="images/login-splash.webp" alt="login splash" class="max-h-[330px] sm:max-h-[400px] md:max-h-[600px] w-full object-cover" />
             <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent from-10% to-transparent"></div>
         </div>
         <div class="flex flex-col self-start mx-4 text-foreground">

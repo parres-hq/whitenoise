@@ -219,8 +219,8 @@ onMount(async () => {
 
 <!-- Add Relay Sheet -->
 <Sheet.Root bind:open={showAddRelaySheet}>
-    <Sheet.Content side="bottom" class="pb-safe-bottom">
-        <div class="overflow-y-auto pb-16">
+    <Sheet.Content side="bottom">
+        <div class="pb-8">
             <Sheet.Header class="text-left mb-8">
                 <Sheet.Title>Add new relay</Sheet.Title>
             </Sheet.Header>
@@ -242,7 +242,7 @@ onMount(async () => {
                     </div>
                 </div>
             </div>
-            <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6">Add relay</Button>
+            <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:mt-6">Add relay</Button>
         </div>
     </Sheet.Content>
 </Sheet.Root>
