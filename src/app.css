@@ -131,6 +131,11 @@ html {
     .pb-safe-bottom {
         padding-bottom: max(8px, var(--sab, 8px));
     }
+
+    /* Add styles for keyboard adjustments on Android */
+    body.keyboard-visible {
+        height: calc(100vh - var(--keyboard-height-value, 0px));
+    }
 }
 
 input[type="text"],

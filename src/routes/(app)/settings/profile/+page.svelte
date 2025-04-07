@@ -65,7 +65,7 @@ async function handleSave() {
 
 <Header backLocation="/settings" title="Profile" />
 
-<main class="pb-6 flex flex-col gap-4 relative h-[calc(100svh-7rem)]">
+<div class="pb-16 md:pb-6 flex flex-col gap-4">
     <div class="relative">
         {#if bannerImage}
             <img src={bannerImage} alt="Cover" class="w-full h-48 object-cover" />
@@ -148,6 +148,6 @@ async function handleSave() {
         </div>
     </div>
     <div class="md:px-4">
-        <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6">Save Changes</Button>
+        <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6">Save Changes</Button>
     </div>
-</main>
+</div>

@@ -53,24 +53,20 @@ async function handleCreateAccount() {
 }
 </script>
 
-<div class="flex flex-col items-center w-screen bg-background relative">
-    <div class="w-full h-svh flex flex-col items-center bg-background">
-        <div class="relative w-full">
-            <img src="images/login-splash.webp" alt="login splash" class="max-h-[700px] w-full object-cover {loading ? 'animate-pulse' : ''}" />
-            <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent from-10% to-transparent"></div>
-        </div>
-        <div class="flex flex-col self-start mx-4 text-foreground mb-16">
-            <h2 class="text-5xl font-normal">Welcome to</h2>
-            <h1 class="text-5xl font-semibold">White Noise</h1>
-            <p class="text-xl mt-4 font-normal text-muted-foreground">Secure. Distributed. Uncensorable.</p>
-        </div>
-        <div class="flex flex-col gap-0 w-full px-0 absolute bottom-0 left-0 right-0">
-            <LoginSheet {loading}>
-                <Button variant="ghost" class="w-full h-fit text-base font-medium py-4">Sign in with Nostr key</Button>
-            </LoginSheet>
-            <Button size="lg" variant="default" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium pt-4 pb-[calc(1rem+var(--sab))]">
-                Create a new Nostr key
-            </Button>
-        </div>
+<div class="flex flex-col h-dvh items-center justify-between w-screen bg-background relative pl-safe-left pr-safe-right relative">
+    <div class="relative w-full">
+        <img src="images/login-splash.webp" alt="login splash" class="max-h-[700px] w-full object-cover {loading ? 'animate-pulse' : ''}" />
+        <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent from-10% to-transparent"></div>
     </div>
+    <div class="flex flex-col self-start mx-4 text-foreground mb-16">
+        <h2 class="text-5xl font-normal">Welcome to</h2>
+        <h1 class="text-5xl font-semibold">White Noise</h1>
+        <p class="text-xl mt-4 font-normal text-muted-foreground">Secure. Distributed. Uncensorable.</p>
+    </div>
+    <LoginSheet {loading}>
+        <Button variant="ghost" class="w-full h-fit text-base font-medium py-4">Sign in with Nostr key</Button>
+    </LoginSheet>
+    <Button size="lg" variant="default" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium pt-4 pb-[calc(1rem+var(--sab))]">
+        Create a new Nostr key
+    </Button>
 </div>

@@ -19,7 +19,7 @@ let keyPackageRelays: string[] | undefined = $derived($activeAccount?.key_packag
 
 // State for add relay sheet
 let showAddRelaySheet = $state(false);
-let newRelayUrl = $state("");
+let newRelayUrl = $state("wss://");
 let urlError = $state("");
 let currentRelayType = $state<"inbox" | "key_package">("inbox");
 let isLoading = $state(false);
@@ -50,7 +50,7 @@ async function loadRelays() {
 // Open add relay sheet
 function openAddRelaySheet(type: "inbox" | "key_package") {
     currentRelayType = type;
-    newRelayUrl = "";
+    newRelayUrl = "wss://";
     urlError = "";
     showAddRelaySheet = true;
 }
@@ -226,7 +226,7 @@ onMount(async () => {
             </Sheet.Header>
             <div class="flex flex-col gap-x-4 relative">
                 <div class="flex flex-col gap-0">
-                    <div class="flex flex-row gap-2">
+                    <div class="flex flex-row gap-2 pl-1">
                         <Input
                             bind:value={newRelayUrl}
                             placeholder="wss://..."

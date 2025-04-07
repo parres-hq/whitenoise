@@ -80,5 +80,8 @@ mockito = "1.2"
 tempfile = "3.19.1"
 
 [profile.release]
-debug = true
-
+debug = false
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

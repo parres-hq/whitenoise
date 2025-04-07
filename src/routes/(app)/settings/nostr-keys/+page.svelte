@@ -45,7 +45,7 @@ async function copyPrivateKey() {
 
 <Header backLocation="/settings" title="Nostr Keys" />
 
-<main class="px-4 flex flex-col gap-12 py-6">
+<div class="px-4 flex flex-col gap-12 py-6">
     <section class="flex flex-col gap-4">
         <h2 class="text-2xl font-normal">Public Key</h2>
         <p class="text-base text-muted-foreground">
@@ -101,4 +101,4 @@ async function copyPrivateKey() {
             </Button>
         </div>
     </section>
-</main>
+</div>

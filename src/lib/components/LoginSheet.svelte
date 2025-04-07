@@ -77,7 +77,7 @@ async function handleCreateAccount() {
     <Sheet.Trigger>
         {@render children()}
     </Sheet.Trigger>
-    <Sheet.Content side="bottom" class="pb-safe-bottom">
+    <Sheet.Content side="bottom" class="pb-safe-bottom" keyboardAware={true}>
         <div class="overflow-y-auto {showCreateAccount ? 'pb-24' : 'pb-12'} px-1 relative">
             <Sheet.Header class="text-left mb-8">
                 <Sheet.Title>{title ?? "Sign in with your Nostr key"}</Sheet.Title>

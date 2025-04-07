@@ -12,7 +12,7 @@ let {
 } = $props();
 </script>
 
-<div class="sticky top-0 left-0 right-0 z-20 flex flex-row items-center gap-4 p-4 pt-16 md:pt-4 bg-primary text-primary-foreground">
+<div class="sticky top-0 left-0 right-0 z-20 flex flex-row items-center gap-4 p-4 pt-[calc(1rem+var(--sat))] bg-primary text-primary-foreground">
     {#if backLocation}
         <a href={backLocation}>
             <ChevronLeft size={24} />

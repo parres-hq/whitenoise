@@ -128,10 +128,14 @@ function publishKeyPackage() {
 <main class="px-4 py-6 flex flex-col gap-4">
     <Accordion.Root bind:value={accordionOpenSection} class="px-2">
         <Accordion.Item value="profile">
-            <Accordion.Trigger class="overflow-visible">
+            <Accordion.Trigger onclick={(e) => {
+                if ((e.target as HTMLElement).id === "add-profile-button") {
+                    accordionOpenSection = "profile";
+                }
+            }}>
                 <h2 class="text-3xl font-normal text-primary leading-none">Profile</h2>
                 <LoginSheet title="Add new profile" loading={addProfileLoading} bind:sheetVisible={showLoginSheet} showCreateAccount={true}>
-                    <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2">
+                    <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2" id="add-profile-button">
                         <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
                     </Button>
                 </LoginSheet>

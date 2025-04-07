@@ -20,7 +20,7 @@ onMount(async () => {
 });
 </script>
 
-<div class="flex flex-col items-center w-screen h-svh">
+<div class="flex flex-col items-center w-screen h-dvh">
     <div class="w-full h-2/3 flex flex-col items-center bg-background">
         <div class="relative w-full h-full">
             <img src="images/login-splash.webp" alt="login splash" class="w-full h-full object-cover animate-pulse" />
