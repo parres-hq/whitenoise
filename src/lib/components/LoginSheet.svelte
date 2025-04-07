@@ -7,6 +7,7 @@ import { LoginError, createAccount, login } from "$lib/stores/accounts";
 import { readFromClipboard } from "$lib/utils/clipboard";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import type { Snippet } from "svelte";
+import { _ as t } from "svelte-i18n";
 
 let {
     title,
@@ -30,10 +31,16 @@ async function handlePaste() {
         if (text) {
             nsecOrHex = text;
         } else {
-            loginError = { name: "ClipboardError", message: "No text found in clipboard" };
+            loginError = {
+                name: $t("clipboard.error"),
+                message: $t("clipboard.emptyTextError"),
+            };
         }
     } catch (e) {
-        loginError = { name: "ClipboardError", message: "Failed to read from clipboard" };
+        loginError = {
+            name: $t("clipboard.error"),
+            message: $t("clipboard.readError"),
+        };
     }
 }
 
@@ -83,9 +90,9 @@ async function handleCreateAccount() {
         <KeyboardAvoidingView withSheet={true} bottomOffset={10} strategy="transform">
             <div class="overflow-y-auto pt-2 {showCreateAccount ? 'pb-32' : 'pb-20'} px-1 relative">
                 <Sheet.Header class="text-left mb-8 px-6">
-                    <Sheet.Title>{title ?? "Sign in with your Nostr key"}</Sheet.Title>
+                    <Sheet.Title>{title ?? $t("login.signInWithNostrKey")}</Sheet.Title>
                     <Sheet.Description class="text-lg font-normal">
-                        Your key will be encrypted and stored only on your device.
+                        {$t("login.signInDescription")}
                     </Sheet.Description>
                 </Sheet.Header>
                 <div class="flex flex-col gap-x-4 relative px-6">
@@ -112,7 +119,7 @@ async function handleCreateAccount() {
             <div class="flex flex-col gap-0 w-full px-0 fixed bottom-0 left-0 right-0 bg-background">
                 {#if showCreateAccount}
                     <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium py-4 px-0 focus-visible:ring-0">
-                        Create a new Nostr key
+                        {$t("login.createNewNostrKey")}
                     </Button>
                 {/if}
                 <Button
@@ -121,7 +128,9 @@ async function handleCreateAccount() {
                     onclick={handleLogin}
                     disabled={loading || nsecOrHex.length === 0}
                     class="text-base font-medium w-full h-fit mx-0 pt-4 pb-[calc(1rem+var(--sab))] focus-visible:ring-0"
-                >Log in</Button>
+                >
+                    {$t("login.logIn")}
+                </Button>
             </div>
         </KeyboardAvoidingView>
     </Sheet.Content>
