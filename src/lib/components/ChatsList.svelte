@@ -229,12 +229,12 @@ $effect(() => {
                         <Search size={24} class="shrink-0 !h-6 !w-6" />
                     </Button>
                 </Sheet.Trigger>
-                <Sheet.Content side="bottom">
-                    <Sheet.Header class="text-left mb-6">
+                <Sheet.Content side="bottom" class="pb-0 px-0 h-[90%]">
+                    <Sheet.Header class="text-left mb-6 px-6">
                         <Sheet.Title>Search</Sheet.Title>
                     </Sheet.Header>
-                    <div class="flex flex-col gap-2">
-                        <Input type="text" placeholder="Search contacts or chats&hellip;" />
+                    <div class="flex flex-col gap-2 px-6">
+                        <Input type="search" placeholder="Search contacts or chats&hellip;" class="focus-visible:ring-0" />
                     </div>
                 </Sheet.Content>
             </Sheet.Root>
@@ -266,7 +266,7 @@ $effect(() => {
                                             type="search"
                                             placeholder="Search contact or public key..."
                                             bind:value={contactsSearch}
-                                            class="focus-visible:ring-input"
+                                            class="focus-visible:ring-0"
                                         />
                                         <Button type="submit" variant="outline" size="icon" class="shrink-0">
                                             <Search size={24} class="shrink-0 !h-6 !w-6" />

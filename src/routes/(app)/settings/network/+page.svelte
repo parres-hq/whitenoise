@@ -6,7 +6,7 @@ import * as Sheet from "$lib/components/ui/sheet";
 import { activeAccount, colorForRelayStatus } from "$lib/stores/accounts";
 import { readFromClipboard } from "$lib/utils/clipboard";
 import { invoke } from "@tauri-apps/api/core";
-import Add from "carbon-icons-svelte/lib/Add.svelte";
+import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { onMount } from "svelte";
@@ -98,6 +98,7 @@ async function addRelay() {
         console.error(error);
     } finally {
         isLoading = false;
+        showAddRelaySheet = false;
     }
 }
 
@@ -162,10 +163,10 @@ onMount(async () => {
                 variant="ghost"
                 size="icon"
                 onclick={() => openAddRelaySheet('inbox')}
-                class="h-8 w-8"
+                class="shrink-0! p-0!"
                 aria-label="Add inbox relay"
             >
-                <Add size={20} />
+                <AddLarge size={24} class="w-6! h-6! shrink-0"/>
             </Button>
         </div>
 
@@ -192,11 +193,11 @@ onMount(async () => {
             <Button
                 variant="ghost"
                 size="icon"
+                class="shrink-0! p-0!"
                 onclick={() => openAddRelaySheet('key_package')}
-                class="h-8 w-8 shrink-0"
                 aria-label="Add key package relay"
             >
-                <Add size={24} class="w-6! h-6! shrink-0"/>
+                <AddLarge size={24} class="w-6! h-6! shrink-0"/>
             </Button>
         </div>
 
@@ -219,30 +220,28 @@ onMount(async () => {
 
 <!-- Add Relay Sheet -->
 <Sheet.Root bind:open={showAddRelaySheet}>
-    <Sheet.Content side="bottom">
-        <div class="pb-8">
-            <Sheet.Header class="text-left mb-8">
-                <Sheet.Title>Add new relay</Sheet.Title>
-            </Sheet.Header>
-            <div class="flex flex-col gap-x-4 relative">
-                <div class="flex flex-col gap-0">
-                    <div class="flex flex-row gap-2 pl-1">
-                        <Input
-                            bind:value={newRelayUrl}
-                            placeholder="wss://..."
-                            type="text"
-                            class="w-full"
-                        />
-                        <Button variant="outline" size="icon" onclick={handlePaste}>
-                            <Paste size={16} />
-                        </Button>
-                    </div>
-                    <div class="text-destructive text-sm mt-2 min-h-[1.25rem]">
-                        {urlError}
-                    </div>
+    <Sheet.Content side="bottom" class="pb-20">
+        <Sheet.Header class="text-left mb-8">
+            <Sheet.Title>Add new relay</Sheet.Title>
+        </Sheet.Header>
+        <div class="flex flex-col gap-x-4 relative">
+            <div class="flex flex-col gap-0">
+                <div class="flex flex-row gap-2 pl-1">
+                    <Input
+                        bind:value={newRelayUrl}
+                        placeholder="wss://..."
+                        type="text"
+                        class="w-full"
+                    />
+                    <Button variant="outline" size="icon" onclick={handlePaste}>
+                        <Paste size={16} />
+                    </Button>
+                </div>
+                <div class="text-destructive text-sm mt-2 min-h-[1.25rem]">
+                    {urlError}
                 </div>
             </div>
-            <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:mt-6">Add relay</Button>
         </div>
+        <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:mt-6">Add relay</Button>
     </Sheet.Content>
 </Sheet.Root>

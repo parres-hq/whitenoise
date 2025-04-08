@@ -62,6 +62,7 @@ async function handleCreateAccount() {
         })
         .finally(() => {
             loading = false;
+            sheetVisible = false;
         });
 }
 </script>
@@ -78,10 +79,10 @@ async function handleCreateAccount() {
     <Sheet.Trigger>
         {@render children()}
     </Sheet.Trigger>
-    <Sheet.Content side="bottom" class="max-h-[90vh]">
+    <Sheet.Content side="bottom">
         <KeyboardAvoidingView withSheet={true} bottomOffset={10} strategy="transform">
-            <div class="overflow-y-auto pt-2 pb-32 px-1 relative min-h-[200px]">
-                <Sheet.Header class="text-left mb-8">
+            <div class="overflow-y-auto pt-2 {showCreateAccount ? 'pb-32' : 'pb-20'} px-1 relative">
+                <Sheet.Header class="text-left mb-8 md:mb-0">
                     <Sheet.Title>{title ?? "Sign in with your Nostr key"}</Sheet.Title>
                     <Sheet.Description class="text-lg font-normal">
                         Your key will be encrypted and stored only on your device.
@@ -108,9 +109,9 @@ async function handleCreateAccount() {
                     </div>
                 </div>
             </div>
-            <div class="flex flex-col gap-0 w-full px-0 fixed bottom-0 left-0 right-0 bg-background border-t">
+            <div class="flex flex-col gap-0 w-full px-0 fixed bottom-0 left-0 right-0 bg-background">
                 {#if showCreateAccount}
-                    <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium py-4 px-0">
+                    <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium py-4 px-0 focus-visible:ring-0">
                         Create a new Nostr key
                     </Button>
                 {/if}
@@ -119,7 +120,7 @@ async function handleCreateAccount() {
                     variant="default"
                     onclick={handleLogin}
                     disabled={loading || nsecOrHex.length === 0}
-                    class="text-base font-medium w-full h-fit mx-0 pt-4 pb-[calc(1rem+var(--sab))]"
+                    class="text-base font-medium w-full h-fit mx-0 pt-4 pb-[calc(1rem+var(--sab))] focus-visible:ring-0"
                 >Log in</Button>
             </div>
         </KeyboardAvoidingView>
