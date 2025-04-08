@@ -72,7 +72,10 @@ onDestroy(() => {
 
 async function handleLogout(pubkey: string): Promise<void> {
     logout(pubkey)
-        .then(() => toast.success("Successfully logged out"))
+        .then(() => {
+            toast.success("Successfully logged out");
+            showLogoutConfirmSheet = false;
+        })
         .catch((e) => {
             if (e instanceof LogoutError) {
                 goto("/");

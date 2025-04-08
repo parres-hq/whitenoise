@@ -95,6 +95,7 @@ pub struct Account {
 impl Account {
     /// Generates a new keypair and saves the mostly blank account to the database
     pub async fn new(wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
+        tracing::debug!(target: "whitenoise::accounts", "Generating new keypair");
         let keys = Keys::generate();
         let account = Self {
             pubkey: keys.public_key(),
@@ -105,10 +106,98 @@ impl Account {
             last_synced: Timestamp::zero(),
             active: false,
         };
-        let account = account.save(wn.clone()).await?;
+
+        // Onboarding steps for the new account
+        tracing::debug!(target: "whitenoise::accounts::new", "Starting onboarding process");
+
+        // Create key package and inbox relays lists with default relays
+        let default_relays = wn.nostr.relays().await?;
+        tracing::debug!(target: "whitenoise::accounts::new", "Using default relays: {:?}", default_relays);
+
+        // Save the account first so relay updates work correctly
+        let mut account = account.save(wn.clone()).await?;
+
+        // Set onboarding flags
+        account.onboarding.inbox_relays = true;
+        account.onboarding.key_package_relays = true;
+
+        // Update relays in database
+        account
+            .update_relays(RelayType::KeyPackage, &default_relays, wn.clone())
+            .await?;
+        account
+            .update_relays(RelayType::Inbox, &default_relays, wn.clone())
+            .await?;
+        account
+            .update_relays(RelayType::Nostr, &default_relays, wn.clone())
+            .await?;
+
+        // Generate a petname for the account (two words, separated by a space)
+        let petname_raw = petname::petname(2, " ").unwrap_or_else(|| "Anonymous User".to_string());
+
+        // Capitalize each word in the petname
+        let petname = petname_raw
+            .split_whitespace()
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first_char) => {
+                        let first_upper = first_char.to_uppercase().collect::<String>();
+                        first_upper + chars.as_str()
+                    }
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(" ");
+
+        tracing::debug!(target: "whitenoise::accounts::new", "Generated petname: {}", petname);
+
+        // Update account metadata with petname - metadata fields expect Option<String>
+        account.metadata.name = Some(petname.clone());
+        account.metadata.display_name = Some(petname);
+
+        // Save the updated account to the database
+        account = account.save(wn.clone()).await?;
 
         // If the record saves, add the keys to the secret store
         secrets_store::store_private_key(&keys, &wn.data_dir)?;
+
+        // Set the signer before publishing any Nostr events
+        wn.nostr.client.set_signer(keys.clone()).await;
+
+        // Publish the metadata event to Nostr
+        let metadata_json = serde_json::to_string(&account.metadata)?;
+        let event = EventBuilder::new(Kind::Metadata, metadata_json);
+        wn.nostr
+            .client
+            .send_event_builder(event.clone())
+            .await
+            .map_err(|e| AccountError::NostrManagerError(e.into()))?;
+        tracing::debug!(target: "whitenoise::accounts::new", "Published metadata event to Nostr: {:?}", event);
+
+        // Also publish relay lists to Nostr
+        account.publish_relay_list(wn.clone()).await?;
+        account.publish_specialized_relay_lists(wn.clone()).await?;
+
+        // Update Nostr MLS to use the new account's identity
+        {
+            let mut nostr_mls = wn.nostr_mls.lock().await;
+            *nostr_mls = NostrMls::new(wn.data_dir.clone(), Some(account.pubkey.to_hex()));
+            tracing::debug!(target: "whitenoise::accounts::new", "Updated Nostr MLS to use new account: {}", account.pubkey.to_hex());
+        }
+
+        // Publish key package to key package relays
+        // This comes last since we need the account properly set up first
+        if let Err(e) = crate::key_packages::publish_key_package(wn.clone()).await {
+            tracing::warn!(target: "whitenoise::accounts::new", "Failed to publish key package: {}", e);
+        } else {
+            account.onboarding.publish_key_package = true;
+            account = account.save(wn.clone()).await?;
+            tracing::debug!(target: "whitenoise::accounts::new", "Published key package to relays");
+        }
+
+        tracing::debug!(target: "whitenoise::accounts::new", "Onboarding complete for new account: {:?}", account);
 
         Ok(account)
     }
@@ -716,5 +805,72 @@ impl Account {
     pub fn remove_nostr_wallet_connect_uri(&self, wn: tauri::State<'_, Whitenoise>) -> Result<()> {
         secrets_store::remove_nostr_wallet_connect_uri(&self.pubkey.to_hex(), &wn.data_dir)
             .map_err(AccountError::SecretsStoreError)
+    }
+
+    /// Helper method to publish a relay list event to Nostr
+    async fn publish_relay_list(&self, wn: tauri::State<'_, Whitenoise>) -> Result<()> {
+        let relays = self.relays(RelayType::Nostr, wn.clone()).await?;
+        if relays.is_empty() {
+            return Ok(());
+        }
+
+        // Create a minimal relay list event
+        let tags: Vec<Tag> = relays
+            .into_iter()
+            .map(|url| {
+                Tag::custom(
+                    TagKind::Relay,
+                    vec![url, "read".to_string(), "write".to_string()],
+                )
+            })
+            .collect();
+
+        let event = EventBuilder::new(Kind::RelayList, "").tags(tags);
+        wn.nostr
+            .client
+            .send_event_builder(event.clone())
+            .await
+            .map_err(|e| AccountError::NostrManagerError(e.into()))?;
+
+        tracing::debug!(target: "whitenoise::accounts::publish_relay_list", "Published relay list event to Nostr: {:?}", event);
+        Ok(())
+    }
+
+    /// Helper method to publish inbox and key package relay lists to Nostr
+    async fn publish_specialized_relay_lists(
+        &self,
+        wn: tauri::State<'_, Whitenoise>,
+    ) -> Result<()> {
+        // Publish inbox relays
+        let inbox_relays = self.relays(RelayType::Inbox, wn.clone()).await?;
+        if !inbox_relays.is_empty() {
+            let event = EventBuilder::new(Kind::InboxRelays, "")
+                .tags(vec![Tag::custom(TagKind::Relays, inbox_relays)]);
+
+            wn.nostr
+                .client
+                .send_event_builder(event.clone())
+                .await
+                .map_err(|e| AccountError::NostrManagerError(e.into()))?;
+
+            tracing::debug!(target: "whitenoise::accounts::publish_specialized_relay_lists", "Published inbox relays event to Nostr: {:?}", event);
+        }
+
+        // Publish key package relays
+        let key_package_relays = self.relays(RelayType::KeyPackage, wn.clone()).await?;
+        if !key_package_relays.is_empty() {
+            let event = EventBuilder::new(Kind::MlsKeyPackageRelays, "")
+                .tags(vec![Tag::custom(TagKind::Relays, key_package_relays)]);
+
+            wn.nostr
+                .client
+                .send_event_builder(event.clone())
+                .await
+                .map_err(|e| AccountError::NostrManagerError(e.into()))?;
+
+            tracing::debug!(target: "whitenoise::accounts::publish_specialized_relay_lists", "Published key package relays event to Nostr: {:?}", event);
+        }
+
+        Ok(())
     }
 }

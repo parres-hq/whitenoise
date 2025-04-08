@@ -12,7 +12,12 @@ import { toast } from "svelte-sonner";
 import Button from "./ui/button/button.svelte";
 import * as Sheet from "./ui/sheet";
 
-let { contact, pubkey, onBack, onClose } = $props<{
+let {
+    contact = $bindable(null),
+    pubkey = $bindable(""),
+    onBack,
+    onClose,
+} = $props<{
     contact: EnrichedContact | null;
     pubkey: string;
     onBack: () => void;

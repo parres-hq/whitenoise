@@ -28,6 +28,8 @@ pub async fn publish_relay_list(
         .await
         .map_err(|e| e.to_string())?;
 
+    tracing::debug!("Publishing relay list: {:?}", event);
+
     wn.nostr
         .client
         .send_event(&event)
@@ -53,5 +55,21 @@ pub async fn publish_relay_list(
         }
         _ => return Err("Invalid relay list kind".to_string()),
     }
+
+    tracing::debug!("Relay list published & relays updated");
+
+    for relay in relays.clone() {
+        wn.nostr
+            .client
+            .add_relay(&relay)
+            .await
+            .map_err(|e| e.to_string())?;
+        wn.nostr
+            .client
+            .connect_relay(&relay)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }

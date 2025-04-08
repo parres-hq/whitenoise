@@ -375,8 +375,6 @@ onDestroy(() => {
     chatStore.clear();
 });
 
-$inspect(selectedMessageId);
-
 function navigateToInfo() {
     if (window.innerWidth >= 768) {
         // Desktop mode (md breakpoint)

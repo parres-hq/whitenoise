@@ -144,8 +144,6 @@ $effect(() => {
         }
     }
 });
-
-$inspect("chat_id", selectedChatId);
 </script>
 
 

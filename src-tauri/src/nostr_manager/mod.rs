@@ -4,6 +4,7 @@ use crate::nostr_manager::event_processor::EventProcessor;
 use crate::types::NostrEncryptionMethod;
 use crate::Whitenoise;
 use nostr_sdk::prelude::*;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +36,8 @@ pub enum NostrManagerError {
     FailedToQueueEvent(String),
     #[error("Failed to shutdown event processor: {0}")]
     FailedToShutdownEventProcessor(String),
+    #[error("I/O error: {0}")]
+    IoError(String),
 }
 
 #[derive(Debug, Clone)]
@@ -447,13 +450,56 @@ impl NostrManager {
             .collect()
     }
 
-    pub async fn delete_all_data(&self) -> Result<()> {
+    pub async fn delete_all_data(&self, data_dir: &Path) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::delete_all_data",
             "Deleting Nostr data"
         );
         self.client.reset().await;
-        self.client.database().wipe().await?;
+
+        // Handle database wiping differently based on platform
+        #[cfg(any(target_os = "ios", target_os = "macos"))]
+        {
+            // On macOS/iOS, we need to delete the database files directly
+            // since NdbDatabase doesn't support the wipe method
+            let db_path = data_dir.join("nostr_ndb");
+
+            // Remove the database directory
+            if db_path.exists() {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::delete_all_data",
+                    "Removing NDB database directory: {:?}",
+                    db_path
+                );
+
+                // Use tokio's async filesystem operations
+                if let Err(e) = tokio::fs::remove_dir_all(&db_path).await {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::delete_all_data",
+                        "Failed to remove NDB database directory: {:?}",
+                        e
+                    );
+                    return Err(NostrManagerError::IoError(e.to_string()));
+                }
+
+                // Recreate the empty directory
+                if let Err(e) = tokio::fs::create_dir_all(&db_path).await {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::delete_all_data",
+                        "Failed to recreate NDB database directory: {:?}",
+                        e
+                    );
+                    return Err(NostrManagerError::IoError(e.to_string()));
+                }
+            }
+        }
+
+        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+        {
+            // On other platforms, use the wipe method
+            self.client.database().wipe().await?;
+        }
+
         Ok(())
     }
 }

@@ -261,10 +261,10 @@ $effect(() => {
                 </Sheet.Trigger>
                 <Sheet.Content side="bottom" class="pb-0 px-0 h-[90%]">
                     <div class="flex flex-col h-full relative">
-                        {#if showStartChatView && selectedContactPubkey}
+                        {#if showStartChatView && selectedContactPubkey && selectedContact}
                             <StartSecureChat
-                                pubkey={selectedContactPubkey}
-                                contact={selectedContact}
+                                bind:pubkey={selectedContactPubkey}
+                                bind:contact={selectedContact}
                                 onBack={resetChatSheet}
                                 onClose={closeNewChatSheet}
                             />
