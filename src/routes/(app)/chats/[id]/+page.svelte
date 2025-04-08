@@ -36,7 +36,10 @@ import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
 import { toast } from "svelte-sonner";
 
-let { selectedChatId = $bindable() }: { selectedChatId?: string } = $props();
+let {
+    selectedChatId = $bindable(),
+    showInfoPage = $bindable(false),
+}: { selectedChatId?: string; showInfoPage?: boolean } = $props();
 
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
@@ -373,12 +376,23 @@ onDestroy(() => {
 });
 
 $inspect(selectedMessageId);
+
+function navigateToInfo() {
+    if (window.innerWidth >= 768) {
+        // Desktop mode (md breakpoint)
+        showInfoPage = true;
+    } else {
+        // Mobile: use regular navigation
+        const url = `/chats/${page.params.id}/info`;
+        window.location.href = url;
+    }
+}
 </script>
 
 {#if group}
     <Header backLocation={selectedChatId ? undefined : "/chats"}>
         <div class="flex flex-row items-center justify-between w-full">
-            <a href={`/chats/${page.params.id}/info`} class="flex flex-row items-center gap-3">
+            <button onclick={navigateToInfo} class="flex flex-row items-center gap-3">
                 <GroupAvatar
                     groupType={group!.group_type}
                     {groupName}
@@ -387,7 +401,7 @@ $inspect(selectedMessageId);
                 pxSize={40}
                 />
                 <span class="text-2xl font-medium">{groupName}</span>
-            </a>
+            </button>
             <!-- TODO: Implement chat search -->
             <!-- <Search size={24} class="text-muted-foreground shrink-0 !w-6 !h-6"/> -->
         </div>

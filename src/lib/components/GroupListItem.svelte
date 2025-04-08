@@ -95,7 +95,7 @@ function handleClick(e: MouseEvent) {
     size="lg"
     variant="ghost"
     href={`/chats/${hexMlsGroupId(group.mls_group_id)}/`}
-    class="flex flex-row gap-2 items-center justify-between py-10 px-4 w-full"
+    class="flex flex-row gap-2 items-center justify-between py-10 px-4 w-full {selectedChatId === hexMlsGroupId(group.mls_group_id) ? "bg-muted" : ""}"
     onclick={handleClick}
 >
     <div class="flex flex-row gap-2 items-center flex-1 min-w-0">

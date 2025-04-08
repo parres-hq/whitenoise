@@ -10,6 +10,7 @@ import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import Tree from "carbon-icons-svelte/lib/Tree.svelte";
 import { onDestroy, onMount } from "svelte";
 import ChatPage from "./[id]/+page.svelte";
+import InfoPage from "./[id]/info/+page.svelte";
 
 let unlistenAccountChanging: UnlistenFn;
 let unlistenAccountChanged: UnlistenFn;
@@ -21,6 +22,7 @@ let unlistenInviteProcessed: UnlistenFn;
 let unlistenInviteFailedToProcess: UnlistenFn;
 
 let selectedChatId: string | null = $state(null);
+let showInfoPage: boolean = $state(false);
 let isLoading = $state(true);
 let loadingError: string | null = $state(null);
 let groups: NostrMlsGroup[] = $state([]);
@@ -164,7 +166,11 @@ $inspect("chat_id", selectedChatId);
             <div class="flex w-full h-svh">
                 <div class="w-full overflow-y-auto">
                     {#if selectedChatId}
-                        <ChatPage bind:selectedChatId />
+                        {#if showInfoPage}
+                            <InfoPage bind:selectedChatId bind:showInfoPage />
+                        {:else}
+                            <ChatPage bind:selectedChatId bind:showInfoPage />
+                        {/if}
                     {:else}
                         <div class="sticky top-0 left-0 right-0 z-40 flex flex-row items-center gap-4 p-4 pt-14 bg-primary text-primary-foreground"></div>
                         <div class="flex flex-row gap-2 items-center justify-center h-full">

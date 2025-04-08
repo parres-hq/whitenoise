@@ -1,5 +1,5 @@
 <script lang="ts">
-import { page } from "$app/state";
+import { page } from "$app/stores";
 import Avatar from "$lib/components/Avatar.svelte";
 import GroupAvatar from "$lib/components/GroupAvatar.svelte";
 import Header from "$lib/components/Header.svelte";
@@ -16,6 +16,11 @@ import { invoke } from "@tauri-apps/api/core";
 import Security from "carbon-icons-svelte/lib/Security.svelte";
 import { onMount } from "svelte";
 
+let {
+    selectedChatId = $bindable(),
+    showInfoPage = $bindable(false),
+}: { selectedChatId?: string; showInfoPage?: boolean } = $props();
+
 let groupWithRelays: NostrMlsGroupWithRelays | undefined = $state(undefined);
 let group: NostrMlsGroup | undefined = $state(undefined);
 let groupRelays: string[] = $state([]);
@@ -28,6 +33,14 @@ let admins: string[] = $state([]);
 let rotatingKey = $state(false);
 
 $effect(() => {
+    // Check if selectedChatId is in URL query params
+    if (!selectedChatId && $page.url.searchParams.has("selectedChatId")) {
+        const urlSelectedChatId = $page.url.searchParams.get("selectedChatId");
+        if (urlSelectedChatId) {
+            selectedChatId = urlSelectedChatId;
+        }
+    }
+
     if (group && !counterpartyPubkey && !enrichedCounterparty) {
         counterpartyPubkey =
             group.group_type === NostrMlsGroupType.DirectMessage
@@ -56,10 +69,13 @@ $effect(() => {
 });
 
 async function loadGroup() {
+    // Use selectedChatId from props if available, otherwise use page.params.id
+    const groupId = selectedChatId || $page.params.id;
+
     let groupResponses = Promise.all([
-        invoke("get_group", { groupId: page.params.id }),
-        invoke("get_group_members", { groupId: page.params.id }),
-        invoke("get_group_admins", { groupId: page.params.id }),
+        invoke("get_group", { groupId }),
+        invoke("get_group_members", { groupId }),
+        invoke("get_group_admins", { groupId }),
     ]);
     let [groupResponse, membersResponse, adminsResponse] = await groupResponses;
     groupWithRelays = groupResponse as NostrMlsGroupWithRelays;
@@ -77,6 +93,12 @@ async function loadGroup() {
     admins = adminsResponse as string[];
 }
 
+$effect(() => {
+    if (selectedChatId) {
+        loadGroup();
+    }
+});
+
 onMount(async () => {
     await loadGroup();
 });
@@ -92,10 +114,22 @@ function reportSpam() {
 async function rotateKey() {
     console.log("rotateKey not implemented");
 }
+
+function handleBack() {
+    if (window.innerWidth >= 768 && showInfoPage !== undefined) {
+        // In desktop mode with panel layout, just toggle the info page off
+        showInfoPage = false;
+    } else {
+        // Normal navigation otherwise
+        window.history.back();
+    }
+}
 </script>
 
 {#if group}
-    <Header backLocation={`/chats/${page.params.id}`} title="Chat details" />
+    <Header onBackAction={handleBack} title="Chat details">
+        <!-- Using onBackAction prop for custom back behavior -->
+    </Header>
     <div class="flex flex-col items-center justify-center gap-2 p-4 mb-8 mt-12">
         <GroupAvatar groupType={group.group_type} {groupName} {counterpartyPubkey} {enrichedCounterparty} pxSize={80} />
         <h1 class="text-2xl font-bold">{groupName}</h1>
