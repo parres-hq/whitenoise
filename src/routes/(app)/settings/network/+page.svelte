@@ -231,7 +231,7 @@ onMount(async () => {
                         bind:value={newRelayUrl}
                         placeholder="wss://..."
                         type="text"
-                        class="w-full"
+                        class="w-full focus-visible:ring-0"
                     />
                     <Button variant="outline" size="icon" onclick={handlePaste}>
                         <Paste size={16} />

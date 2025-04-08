@@ -371,10 +371,12 @@ onDestroy(() => {
     unlistenMlsMessageReceived();
     chatStore.clear();
 });
+
+$inspect(selectedMessageId);
 </script>
 
 {#if group}
-    <Header backLocation={selectedMessageId ? undefined : "/chats"}>
+    <Header backLocation={selectedChatId ? undefined : "/chats"}>
         <div class="flex flex-row items-center justify-between w-full">
             <a href={`/chats/${page.params.id}/info`} class="flex flex-row items-center gap-3">
                 <GroupAvatar
@@ -386,7 +388,8 @@ onDestroy(() => {
                 />
                 <span class="text-2xl font-medium">{groupName}</span>
             </a>
-            <Search size={24} class="text-muted-foreground shrink-0 !w-6 !h-6"/>
+            <!-- TODO: Implement chat search -->
+            <!-- <Search size={24} class="text-muted-foreground shrink-0 !w-6 !h-6"/> -->
         </div>
     </Header>
 
@@ -414,7 +417,7 @@ onDestroy(() => {
                         data-message-container
                         data-message-id={message.id}
                         data-is-current-user={message.isMine}
-                        class={`font-normal text-base relative max-w-[70%] ${message.lightningPayment ? "bg-opacity-10" : ""} ${!message.isSingleEmoji ? `${message.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && message.id === selectedMessageId ? 'relative z-20' : ''}`}
+                        class={`font-normal text-base relative rounded-md max-w-[70%] ${message.lightningPayment ? "bg-opacity-10" : ""} ${!message.isSingleEmoji ? `${message.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && message.id === selectedMessageId ? 'relative z-20' : ''}`}
                     >
                         {#if message.replyToId }
                             <RepliedTo
@@ -425,8 +428,8 @@ onDestroy(() => {
                         <div class="flex {message.content.trim().length < 50 && !message.isSingleEmoji ? "flex-row gap-6" : "flex-col gap-2"} w-full {message.lightningPayment ? "items-center justify-center" : "items-end"}  {message.isSingleEmoji ? 'mb-4 my-6' : ''}">
                             <div class="break-words-smart w-full {message.lightningPayment ? 'flex justify-center' : ''} {message.isSingleEmoji ? 'text-7xl leading-none' : ''}">
                                 {#if chatStore.isDeleted(message.id)}
-                                    <div class="inline-flex flex-row items-center gap-2 bg-gray-200 rounded-full px-3 py-1 w-fit text-black">
-                                        <TrashCan size={20} /><span class="italic opacity-60">Message deleted</span>
+                                    <div class="inline-flex flex-row items-center gap-2 px-3 py-1 w-fit text-muted-foreground">
+                                        <span class="font-italic text-base opacity-60">Message deleted</span>
                                     </div>
                                 {:else if message.content.trim().length > 0}
                                     {#if !message.lightningInvoice}

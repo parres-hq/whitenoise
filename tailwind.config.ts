@@ -108,9 +108,26 @@ const config: Config = {
                 "accordion-up": "accordion-up 0.2s ease-out",
                 "caret-blink": "caret-blink 1.25s ease-out infinite",
             },
+            fontVariationSettings: {
+                normal: "normal",
+                italic: '"slnt" -10',
+            },
         },
     },
-    plugins: [tailwindcssAnimate],
+    plugins: [
+        tailwindcssAnimate,
+        ({ addUtilities }) => {
+            const newUtilities = {
+                ".font-normal": {
+                    "font-variation-settings": "normal",
+                },
+                ".font-italic": {
+                    "font-variation-settings": '"slnt" -10',
+                },
+            };
+            addUtilities(newUtilities);
+        },
+    ],
 };
 
 export default config;

@@ -42,6 +42,11 @@ let showLoginSheet = $state(false);
 let showSwitchAccountSheet = $state(false);
 let addProfileLoading = $state(false);
 
+let showLogoutConfirmSheet = $state(false);
+let showDeleteAllConfirmSheet = $state(false);
+let showDeleteAllKeyPackagesConfirmSheet = $state(false);
+let showPublishKeyPackageConfirmSheet = $state(false);
+
 let accordionOpenSection = $state("profile");
 
 let unlisten: UnlistenFn;
@@ -75,6 +80,9 @@ async function handleLogout(pubkey: string): Promise<void> {
                 toast.error("Failed to log out");
                 console.error(e);
             }
+        })
+        .finally(() => {
+            showLogoutConfirmSheet = false;
         });
 }
 
@@ -101,6 +109,9 @@ async function deleteAll() {
         .catch((e) => {
             toast.error("Error deleting data");
             console.error(e);
+        })
+        .finally(() => {
+            showDeleteAllConfirmSheet = false;
         });
 }
 
@@ -110,6 +121,9 @@ function deleteAllKeyPackages() {
         .catch((e) => {
             toast.error("Error Deleting Key Packages");
             console.error(e);
+        })
+        .finally(() => {
+            showDeleteAllKeyPackagesConfirmSheet = false;
         });
 }
 
@@ -119,6 +133,9 @@ function publishKeyPackage() {
         .catch((e) => {
             toast.error("Error Publishing Key Package");
             console.error(e);
+        })
+        .finally(() => {
+            showPublishKeyPackageConfirmSheet = false;
         });
 }
 </script>
@@ -231,7 +248,7 @@ function publishKeyPackage() {
                             </a>
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet title="Sign out?" description="Are you sure you want to sign out of this account? If you haven't backed up your keys, you won't be able to recover them." acceptText="Sign out" cancelText="Cancel" acceptFn={() => handleLogout($activeAccount!.pubkey)}>
+                            <ConfirmSheet bind:open={showLogoutConfirmSheet} title="Sign out?" description="Are you sure you want to sign out of this account? If you haven't backed up your keys, you won't be able to recover them." acceptText="Sign out" cancelText="Cancel" acceptFn={() => handleLogout($activeAccount!.pubkey)}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
                                         <Logout size={24} class="shrink-0"/>
@@ -252,7 +269,7 @@ function publishKeyPackage() {
                 <div class="overflow-hidden p-0 m-0">
                     <ul class="list-none p-0 m-0 overflow-hidden">
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet title="Delete everything?" description="This will delete all group and message data, and sign you out of all accounts but will not delete your nostr keys or any other events you've published to relays.<br><br>Are you sure you want to delete all data from White Noise? This cannot be undone." acceptText="Delete all data" cancelText="Cancel" acceptFn={deleteAll}>
+                            <ConfirmSheet bind:open={showDeleteAllConfirmSheet} title="Delete everything?" description="This will delete all group and message data, and sign you out of all accounts but will not delete your nostr keys or any other events you've published to relays.<br><br>Are you sure you want to delete all data from White Noise? This cannot be undone." acceptText="Delete all data" cancelText="Cancel" acceptFn={deleteAll}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
                                 <TrashCan size={24} class="shrink-0"/>
@@ -273,7 +290,7 @@ function publishKeyPackage() {
                 <div class="overflow-hidden p-0 m-0">
                     <ul class="list-none p-0 m-0 overflow-hidden">
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet title="Publish a key package" description="Are you sure you want to publish a new Key Package event to relays?" acceptText="Publish key package" cancelText="Cancel" acceptFn={publishKeyPackage}>
+                            <ConfirmSheet bind:open={showPublishKeyPackageConfirmSheet} title="Publish a key package" description="Are you sure you want to publish a new Key Package event to relays?" acceptText="Publish key package" cancelText="Cancel" acceptFn={publishKeyPackage}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
                                         <Password size={24} class="shrink-0"/>
@@ -283,7 +300,7 @@ function publishKeyPackage() {
                             </ConfirmSheet>
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet title="Delete all key packages" description="Are you sure you want to delete all key packages?" acceptText="Delete all key packages" cancelText="Cancel" acceptFn={deleteAllKeyPackages}>
+                            <ConfirmSheet bind:open={showDeleteAllKeyPackagesConfirmSheet} title="Delete all key packages" description="Are you sure you want to delete all key packages?" acceptText="Delete all key packages" cancelText="Cancel" acceptFn={deleteAllKeyPackages}>
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
                                         <TrashCan size={24} class="shrink-0"/>

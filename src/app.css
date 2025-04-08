@@ -4,10 +4,11 @@
 
 @font-face {
     font-family: "OverusedGrotesk";
-    src: url("/fonts/OverusedGroteskRoman-VF.ttf") format("truetype-variations");
+    src: url("/fonts/OverusedGrotesk-VF.woff2") format("woff2-variations");
     font-weight: 100 200 300 400 500 600 700 800 900;
     font-style: normal;
     font-display: swap;
+    font-variation-settings: "wght" 100 900, "slnt" 0 -10;
 }
 
 html {

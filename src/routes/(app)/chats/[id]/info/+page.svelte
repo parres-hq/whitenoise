@@ -111,7 +111,7 @@ async function rotateKey() {
                 {#each members as member}
                     <li class="flex flex-row items-center gap-4 border-b border-gray-700 py-2 last:border-b-0">
                         <Avatar pubkey={member} pxSize={40} />
-                        <span class="text-base font-medium"><Name pubkey={member} unstyled={true} /></span>
+                        <span class="text-base font-medium truncate"><Name pubkey={member} unstyled={true} /></span>
                         {#if admins.includes(member)}
                             <span class="text-xs text-violet-50 bg-violet-600 border border-violet-400 px-2 pt-0.5 rounded-full">admin</span>
                         {/if}

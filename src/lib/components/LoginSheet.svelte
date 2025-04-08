@@ -79,16 +79,16 @@ async function handleCreateAccount() {
     <Sheet.Trigger>
         {@render children()}
     </Sheet.Trigger>
-    <Sheet.Content side="bottom">
+    <Sheet.Content side="bottom" class="pb-0 px-0">
         <KeyboardAvoidingView withSheet={true} bottomOffset={10} strategy="transform">
             <div class="overflow-y-auto pt-2 {showCreateAccount ? 'pb-32' : 'pb-20'} px-1 relative">
-                <Sheet.Header class="text-left mb-8 md:mb-0">
+                <Sheet.Header class="text-left mb-8 px-6">
                     <Sheet.Title>{title ?? "Sign in with your Nostr key"}</Sheet.Title>
                     <Sheet.Description class="text-lg font-normal">
                         Your key will be encrypted and stored only on your device.
                     </Sheet.Description>
                 </Sheet.Header>
-                <div class="flex flex-col gap-x-4 relative">
+                <div class="flex flex-col gap-x-4 relative px-6">
                     <div class="flex flex-row gap-2">
                         <Input
                             bind:value={nsecOrHex}

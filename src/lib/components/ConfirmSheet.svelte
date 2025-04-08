@@ -9,21 +9,27 @@ interface ConfirmSheetProps {
     description: string;
     acceptText: string;
     cancelText: string;
+    open: boolean;
     acceptFn: () => void;
     children: Snippet;
 }
 
-let { title, description, acceptText, cancelText, acceptFn, children }: ConfirmSheetProps =
-    $props();
-
-let open = $state(false);
+let {
+    title,
+    description,
+    acceptText,
+    cancelText,
+    open = $bindable(false),
+    acceptFn,
+    children,
+}: ConfirmSheetProps = $props();
 </script>
 
 <Sheet.Root bind:open openFocus={undefined}>
     <Sheet.Trigger>
         {@render children()}
     </Sheet.Trigger>
-    <Sheet.Content side="bottom">
+    <Sheet.Content side="bottom" class="pb-0 px-0">
         <KeyboardAvoidingView withSheet={true}>
             <div class="overflow-y-auto pt-2 pb-16 px-1 relative">
                 <Sheet.Header class="text-left mb-24 px-6">

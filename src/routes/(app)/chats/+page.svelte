@@ -153,14 +153,16 @@ $inspect("chat_id", selectedChatId);
         <Resizable.Pane defaultSize={35} minSize={20}>
             <div class="flex w-full h-svh">
                 <div class="w-full overflow-y-auto overscroll-none">
-                    <ChatsList bind:invites bind:groups bind:selectedChatId />
+                    <div class="max-w-full">
+                        <ChatsList bind:invites bind:groups bind:selectedChatId />
+                    </div>
                 </div>
             </div>
         </Resizable.Pane>
         <Resizable.Handle class="bg-muted-foreground" />
         <Resizable.Pane defaultSize={65} minSize={50}>
             <div class="flex w-full h-svh">
-                <div class="w-full overflow-y-auto overscroll-none">
+                <div class="w-full overflow-y-auto">
                     {#if selectedChatId}
                         <ChatPage bind:selectedChatId />
                     {:else}
@@ -178,5 +180,7 @@ $inspect("chat_id", selectedChatId);
 
 <!-- On mobile, show just the chats list -->
 <div class="md:hidden">
-    <ChatsList bind:invites bind:groups />
+    <div class="max-w-full">
+        <ChatsList bind:invites bind:groups />
+    </div>
 </div>

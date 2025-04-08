@@ -20,6 +20,7 @@ let picture: string | undefined = $state(undefined);
 let groupName: string | undefined = $state(undefined);
 let counterpartyQueried: boolean = $state(false);
 let counterpartyFetched: boolean = $state(false);
+// TODO: This needs to listen for new messages and update the preview
 let messagePreview: string = $state("");
 
 $effect(() => {
@@ -94,15 +95,15 @@ function handleClick(e: MouseEvent) {
     size="lg"
     variant="ghost"
     href={`/chats/${hexMlsGroupId(group.mls_group_id)}/`}
-    class="flex flex-row gap-2 items-center justify-between py-10 px-4"
+    class="flex flex-row gap-2 items-center justify-between py-10 px-4 w-full"
     onclick={handleClick}
 >
-    <div class="flex flex-row gap-2 items-center">
+    <div class="flex flex-row gap-2 items-center flex-1 min-w-0">
         <GroupAvatar bind:groupType={group.group_type} bind:groupName bind:counterpartyPubkey bind:enrichedCounterparty pxSize={56} />
-        <div class="flex flex-col gap-0">
-            <span class="text-lg font-medium">{groupName}</span>
-            <span class="text-sm text-muted-foreground line-clamp-2">{group.last_message_id ? messagePreview : "New chat"}</span>
+        <div class="truncate">
+            <span class="text-lg font-medium truncate">{groupName}</span>
+            <p class="text-sm text-muted-foreground whitespace-pre-wrap break-words w-full line-clamp-2">{group.last_message_id ? messagePreview : "New chat"}</p>
         </div>
     </div>
-    <span class="whitespace-nowrap text-sm text-muted-foreground">{group.last_message_at ? formatMessageTime(group.last_message_at) : ""}</span>
+    <span class="whitespace-nowrap text-sm text-muted-foreground ml-2">{group.last_message_at ? formatMessageTime(group.last_message_at) : ""}</span>
 </Button>

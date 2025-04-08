@@ -245,6 +245,7 @@ $effect(() => {
                     <div class="flex flex-col gap-2 px-6">
                         <Input type="search" placeholder="Search contacts or chats&hellip;" class="focus-visible:ring-0" />
                     </div>
+                    <div class="flex flex-col gap-2 px-6 mt-6 text-destructive">Not implemented yet</div>
                 </Sheet.Content>
             </Sheet.Root>
 
@@ -363,8 +364,7 @@ $effect(() => {
 </Header>
 
 <!-- Chat list -->
-<div>
-    {#if isLoading}
+{#if isLoading}
     <div class="flex justify-center items-center mt-20 w-full">
         <Loader size={40} fullscreen={false} />
     </div>
@@ -375,7 +375,7 @@ $effect(() => {
         <span>{loadingError}</span>
     </div>
 {:else}
-    <div class="flex flex-col gap-2 pt-3">
+    <div class="flex flex-col gap-2">
         {#if invites.length === 0 && groups.length === 0}
             <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground">
                 <Chat size={32} />
@@ -391,4 +391,3 @@ $effect(() => {
         {/each}
     </div>
 {/if}
-</div>

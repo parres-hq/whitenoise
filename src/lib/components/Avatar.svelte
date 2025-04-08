@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { EnrichedContact } from "$lib/types/nostr";
+import { generateWhiteNoiseAvatar } from "$lib/utils/avatar";
 import { invoke } from "@tauri-apps/api/core";
 
 interface Props {
@@ -41,6 +42,11 @@ $effect(() => {
             .catch((e) => console.error(e));
     }
 });
+
+// Generate a white noise avatar as fallback
+function getWhiteNoiseAvatar() {
+    return generateWhiteNoiseAvatar(pubkey, pxSize * 2);
+}
 </script>
 
 <div
@@ -50,11 +56,6 @@ $effect(() => {
     {#if avatarImage}
         <img src={avatarImage} alt="avatar" class="shrink-0 w-full h-full rounded-full object-cover" />
     {:else}
-        <div
-            class="w-full h-full rounded-full font-semibold text-xl font-mono shrink-0 flex flex-col justify-center text-center"
-            style="background-color: #{pubkey.slice(0, 6)};"
-        >
-            {pubkey.slice(0, 2)}
-        </div>
+        <img src={getWhiteNoiseAvatar()} alt="avatar" class="shrink-0 w-full h-full rounded-full object-cover" />
     {/if}
 </div>

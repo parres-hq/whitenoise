@@ -1,6 +1,7 @@
 <script lang="ts">
 import { NostrMlsGroupType } from "$lib/types/nostr";
 import type { EnrichedContact } from "$lib/types/nostr";
+import { generateWhiteNoiseAvatar } from "$lib/utils/avatar";
 import Avatar from "./Avatar.svelte";
 
 let {
@@ -17,16 +18,12 @@ let {
     pxSize: number;
 } = $props();
 
-let groupAvatarColor: string = $derived(
-    groupName
-        ? groupName
-              .split("")
-              .reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)
-              .toString(16)
-              .padStart(6, "5")
-              .slice(0, 6)
-        : "555555"
-);
+// Generate a white noise avatar for the group
+function getGroupWhiteNoiseAvatar() {
+    // Use groupName as seed if available, otherwise use a combination of type and counterparty
+    const seed = groupName || `${groupType}_${counterpartyPubkey || "unknown"}`;
+    return generateWhiteNoiseAvatar(seed, pxSize * 2, 0.8, 2.5);
+}
 </script>
 
 {#if groupType === NostrMlsGroupType.DirectMessage && counterpartyPubkey && enrichedCounterparty}
@@ -36,11 +33,6 @@ let groupAvatarColor: string = $derived(
         class="flex flex-col items-center justify-center rounded-full bg-gray-900"
         style="width: {pxSize}px; height: {pxSize}px; min-width: {pxSize}px; min-height: {pxSize}px;"
     >
-        <div
-            class="w-full h-full rounded-full font-semibold text-xl font-mono shrink-0 flex flex-col justify-center text-center"
-            style="background-color: #{groupAvatarColor};"
-        >
-            {groupName?.slice(0, 2)}
-        </div>
+        <img src={getGroupWhiteNoiseAvatar()} alt="group avatar" class="shrink-0 w-full h-full rounded-full object-cover" />
     </div>
 {/if}
