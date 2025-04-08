@@ -1,6 +1,7 @@
 <script lang="ts">
 import Avatar from "$lib/components/Avatar.svelte";
 import Header from "$lib/components/Header.svelte";
+import KeyboardAvoidingView from "$lib/components/keyboard-avoiding-view";
 import { Button } from "$lib/components/ui/button";
 import { Input } from "$lib/components/ui/input";
 import { Label } from "$lib/components/ui/label";
@@ -65,89 +66,91 @@ async function handleSave() {
 
 <Header backLocation="/settings" title="Profile" />
 
-<div class="pb-16 md:pb-6 flex flex-col gap-4">
-    <div class="relative">
-        {#if bannerImage}
-            <img src={bannerImage} alt="Cover" class="w-full h-48 object-cover" />
-        {:else}
-            <img src="/images/static-placeholder.webp" alt="Cover" class="w-full h-48 object-cover" />
-        {/if}
+<KeyboardAvoidingView class="h-full">
+    <div class="pb-16 md:pb-6 flex flex-col gap-4">
+        <div class="relative">
+            {#if bannerImage}
+                <img src={bannerImage} alt="Cover" class="w-full h-48 object-cover" />
+            {:else}
+                <img src="/images/static-placeholder.webp" alt="Cover" class="w-full h-48 object-cover" />
+            {/if}
 
-        <div class="absolute -bottom-16 left-1/2 -translate-x-1/2">
-            <div class="relative border-8 border-background rounded-full">
-                <Avatar
-                    pubkey={$activeAccount!.pubkey}
-                    picture={profilePicture}
-                    pxSize={128}
-                />
-                <label class="absolute bottom-0 right-0 p-2 rounded-full bg-background border border-input hover:bg-accent cursor-pointer">
-                    <input
-                        type="file"
-                        accept="image/*"
-                        bind:this={profileFileInput}
-                        class="hidden"
-                        onchange={(e: Event) => {
-                            const target = e.target as HTMLInputElement;
-                            const file = target.files?.[0];
-                            if (file) handleFileUpload(file, 'profile');
-                        }}
+            <div class="absolute -bottom-16 left-1/2 -translate-x-1/2">
+                <div class="relative border-8 border-background rounded-full">
+                    <Avatar
+                        pubkey={$activeAccount!.pubkey}
+                        picture={profilePicture}
+                        pxSize={128}
                     />
-                    <Edit size={16} />
-                </label>
+                    <label class="absolute bottom-0 right-0 p-2 rounded-full bg-background border border-input hover:bg-accent cursor-pointer">
+                        <input
+                            type="file"
+                            accept="image/*"
+                            bind:this={profileFileInput}
+                            class="hidden"
+                            onchange={(e: Event) => {
+                                const target = e.target as HTMLInputElement;
+                                const file = target.files?.[0];
+                                if (file) handleFileUpload(file, 'profile');
+                            }}
+                        />
+                        <Edit size={16} />
+                    </label>
+                </div>
+            </div>
+
+            <label class="absolute top-4 right-4 p-2 rounded-full bg-background border border-input hover:bg-accent cursor-pointer">
+                <input
+                    type="file"
+                    accept="image/*"
+                    bind:this={bannerFileInput}
+                    class="hidden"
+                    onchange={(e: Event) => {
+                        const target = e.target as HTMLInputElement;
+                        const file = target.files?.[0];
+                        if (file) handleFileUpload(file, 'banner');
+                    }}
+                />
+                <Edit size={16} />
+            </label>
+        </div>
+
+        <div class="flex flex-col gap-6 mt-20 relative overflow-y-auto pb-20">
+            <div class="flex flex-col gap-2 px-4">
+                <Label for="displayName">Display Name</Label>
+                <Input type="text" id="displayName" bind:value={displayName} />
+            </div>
+
+            <div class="flex flex-col gap-2 px-4">
+                <Label for="name">Name</Label>
+                <Input type="text" id="name" bind:value={name} />
+            </div>
+
+            <div class="flex flex-col gap-2 px-4">
+                <Label for="about">About</Label>
+                <Textarea
+                    id="about"
+                    bind:value={about}
+                ></Textarea>
+            </div>
+
+            <div class="flex flex-col gap-2 px-4">
+                <Label for="website">Website</Label>
+                <Input type="url" id="website" bind:value={website} />
+            </div>
+
+            <div class="flex flex-col gap-2 px-4">
+                <Label for="nostrAddress">Nostr Address (NIP-05)</Label>
+                <Input type="text" id="nostrAddress" bind:value={nostrAddress} />
+            </div>
+
+            <div class="flex flex-col gap-2 px-4">
+                <Label for="lightningAddress">Lightning Address</Label>
+                <Input type="text" id="lightningAddress" bind:value={lightningAddress} />
             </div>
         </div>
-
-        <label class="absolute top-4 right-4 p-2 rounded-full bg-background border border-input hover:bg-accent cursor-pointer">
-            <input
-                type="file"
-                accept="image/*"
-                bind:this={bannerFileInput}
-                class="hidden"
-                onchange={(e: Event) => {
-                    const target = e.target as HTMLInputElement;
-                    const file = target.files?.[0];
-                    if (file) handleFileUpload(file, 'banner');
-                }}
-            />
-            <Edit size={16} />
-        </label>
-    </div>
-
-    <div class="flex flex-col gap-6 mt-20 relative">
-        <div class="flex flex-col gap-2 px-4">
-            <Label for="displayName">Display Name</Label>
-            <Input type="text" id="displayName" bind:value={displayName} />
-        </div>
-
-        <div class="flex flex-col gap-2 px-4">
-            <Label for="name">Name</Label>
-            <Input type="text" id="name" bind:value={name} />
-        </div>
-
-        <div class="flex flex-col gap-2 px-4">
-            <Label for="about">About</Label>
-            <Textarea
-                id="about"
-                bind:value={about}
-            ></Textarea>
-        </div>
-
-        <div class="flex flex-col gap-2 px-4">
-            <Label for="website">Website</Label>
-            <Input type="url" id="website" bind:value={website} />
-        </div>
-
-        <div class="flex flex-col gap-2 px-4">
-            <Label for="nostrAddress">Nostr Address (NIP-05)</Label>
-            <Input type="text" id="nostrAddress" bind:value={nostrAddress} />
-        </div>
-
-        <div class="flex flex-col gap-2 px-4">
-            <Label for="lightningAddress">Lightning Address</Label>
-            <Input type="text" id="lightningAddress" bind:value={lightningAddress} />
+        <div class="md:px-4 fixed bottom-0 left-0 right-0 bg-background z-10 w-full md:static">
+            <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit pt-4 pb-[calc(1rem+var(--sab))] md:py-4">Save Changes</Button>
         </div>
     </div>
-    <div class="md:px-4">
-        <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6">Save Changes</Button>
-    </div>
-</div>
+</KeyboardAvoidingView>

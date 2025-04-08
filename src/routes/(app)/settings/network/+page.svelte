@@ -193,10 +193,10 @@ onMount(async () => {
                 variant="ghost"
                 size="icon"
                 onclick={() => openAddRelaySheet('key_package')}
-                class="h-8 w-8"
+                class="h-8 w-8 shrink-0"
                 aria-label="Add key package relay"
             >
-                <Add size={20} />
+                <Add size={24} class="w-6! h-6! shrink-0"/>
             </Button>
         </div>
 
