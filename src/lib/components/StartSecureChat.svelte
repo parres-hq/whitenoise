@@ -1,4 +1,5 @@
 <script lang="ts">
+import { goto, pushState } from "$app/navigation";
 import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import { activeAccount } from "$lib/stores/accounts";
@@ -44,14 +45,32 @@ async function startChat() {
 
         toast.success(`Started a secure chat with ${nameFromMetadata(contact?.metadata, pubkey)}`);
 
-        // Navigate to the new chat
-        window.location.href = `/chats/${hexMlsGroupId(group.mls_group_id)}`;
+        // Get the group ID
+        const groupId = hexMlsGroupId(group.mls_group_id);
+
+        // Close the sheet first
+        onClose();
+
+        // Check if on desktop (md breakpoint) or mobile
+        if (window.innerWidth >= 768) {
+            // On desktop: Navigate to chats, then update the state to select the chat
+            // We need to delay the pushState to make sure it comes after navigation
+            goto("/chats").then(() => {
+                // After navigation, use pushState to set the selectedChatId in page state
+                const href = `/chats/${groupId}`;
+                setTimeout(() => {
+                    pushState(href, { selectedChatId: groupId });
+                }, 100);
+            });
+        } else {
+            // On mobile: navigate directly to the chat page
+            goto(`/chats/${groupId}`);
+        }
     } catch (error) {
         toast.error("Failed to create chat");
         console.error(error);
     } finally {
         isCreatingChat = false;
-        onClose();
     }
 }
 
