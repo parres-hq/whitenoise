@@ -127,6 +127,7 @@ function resetChatSheet(): void {
     selectedContactPubkey = null;
     selectedContact = null;
     contactsSearch = "";
+    searchResults = {};
 }
 
 function closeNewChatSheet(): void {
@@ -188,6 +189,14 @@ $effect(() => {
         if (validKeyPubkey) {
             fetchEnrichedContact(validKeyPubkey).then((contact) => {
                 validKeyContact = contact;
+
+                // Add the contact to search results if it's valid
+                if (contact && validKeyPubkey) {
+                    searchResults = {
+                        ...searchResults,
+                        [validKeyPubkey as string]: contact,
+                    };
+                }
             });
         }
 
@@ -239,7 +248,11 @@ $effect(() => {
                 </Sheet.Content>
             </Sheet.Root>
 
-            <Sheet.Root bind:open={newChatSheetOpen}>
+            <Sheet.Root bind:open={newChatSheetOpen} onOpenChange={() => {
+                if (!newChatSheetOpen) {
+                    resetChatSheet();
+                }
+            }}>
                 <Sheet.Trigger>
                     <Button variant="link" size="icon" class="p-2 shrink-0 text-primary-foreground">
                         <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
@@ -311,13 +324,13 @@ $effect(() => {
                                         {:else}
                                             <span class="text-gray-400 px-6 text-center">No contacts found</span>
                                         {/if}
-                                        {#if isSearching}
-                                            <h2 class="text-xl font-normal mb-2 px-6">Searching&hellip;</h2>
-                                            <div class="px-6">
-                                                <Loader size={40} fullscreen={false} />
-                                            </div>
-                                        {:else if searchResults && Object.keys(searchResults).length > 0}
-                                            <div class="mt-4">
+                                        <div class="mt-4">
+                                            {#if isSearching}
+                                                <h2 class="text-xl font-normal mb-2 px-6">Searching&hellip;</h2>
+                                                <div class="px-6">
+                                                    <Loader size={40} fullscreen={false} />
+                                                </div>
+                                            {:else if searchResults && Object.keys(searchResults).length > 0}
                                                 <h2 class="text-xl font-normal mb-2 px-6">Search results</h2>
                                                 {#each Object.entries(searchResults) as [pubkey, contact] (pubkey)}
                                                     <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap-3 px-6 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => startChatWithContact(pubkey, contact)}>
@@ -336,8 +349,8 @@ $effect(() => {
                                                         </div>
                                                     </Button>
                                                 {/each}
-                                            </div>
-                                        {/if}
+                                            {/if}
+                                        </div>
                                     {/if}
                                 </div>
                             </div>
