@@ -94,7 +94,7 @@
         "title": "Billetera",
         "unexpectedError": "Ocurrió un error inesperado",
         "lightningWalletConnected": "Billetera Lightning conectada",
-        "balance": "Balance",
+        "balance": "Saldo",
         "removing": "Eliminando...",
         "disconnectWallet": "Desconectar billetera",
         "connectionDescription": "Conecta tu billetera lightning para enviar y recibir pagos de bitcoin en White Noise.",
@@ -139,7 +139,7 @@
         "admin": "Administrador",
         "groupRelays": "Relés del grupo",
         "closeMessageMenu": "Cerrar menú de mensaje",
-        "video": "Video",
+        "video": "Vídeo",
         "audio": "Audio",
         "pdf": "PDF",
         "privateChatInvite": "Te han invitado a unirte a una conversación privada",
@@ -149,8 +149,8 @@
         "decliningInvite": "Rechazando invitación...",
         "acceptInvite": "Aceptar invitación",
         "acceptingInvite": "Aceptando invitación...",
-        "inviteAccepted": "You've accepted an invite to join a secure chat with {name}",
-        "inviteDeclined": "You've declined an invite to join a secure chat with {name}"
+        "inviteAccepted": "Has aceptado una invitación para unirte a un chat seguro con {name}",
+        "inviteDeclined": "Has rechazado una invitación para unirte a un chat seguro con {name}"
     },
     "login": {
         "signInWithNostrKey": "Iniciar sesión con tu llave de Nostr",
