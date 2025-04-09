@@ -15,6 +15,7 @@ import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import Security from "carbon-icons-svelte/lib/Security.svelte";
 import { onMount } from "svelte";
+import { _ as t } from "svelte-i18n";
 
 let {
     selectedChatId = $bindable(),
@@ -127,7 +128,7 @@ function handleBack() {
 </script>
 
 {#if group}
-    <Header onBackAction={handleBack} title="Chat details">
+    <Header onBackAction={handleBack} title={$t("chats.chatDetails")}>
         <!-- Using onBackAction prop for custom back behavior -->
     </Header>
     <div class="flex flex-col items-center justify-center gap-2 p-4 mb-8 mt-12">
@@ -139,7 +140,7 @@ function handleBack() {
         </p>
     </div>
     <div class="mx-6">
-        <h2 class="text-2xl font-normal mb-4">{members.length} Members</h2>
+        <h2 class="text-2xl font-normal mb-4">{members.length} {$t("chats.members")}</h2>
         <div class="mb-12">
             <ul class="flex flex-col">
                 {#each members as member}
@@ -147,13 +148,13 @@ function handleBack() {
                         <Avatar pubkey={member} pxSize={40} />
                         <span class="text-base font-medium truncate"><Name pubkey={member} unstyled={true} /></span>
                         {#if admins.includes(member)}
-                            <span class="text-xs text-violet-50 bg-violet-600 border border-violet-400 px-2 pt-0.5 rounded-full">admin</span>
+                            <span class="text-xs text-violet-50 bg-violet-600 border border-violet-400 px-2 pt-0.5 rounded-full">{$t("chats.admin")}</span>
                         {/if}
                     </li>
                 {/each}
             </ul>
         </div>
-        <h2 class="text-2xl font-normal mb-4">Group Relays</h2>
+        <h2 class="text-2xl font-normal mb-4">{$t("chats.groupRelays")}</h2>
         <div class="mb-12">
             <ul class="flex flex-col gap-1">
                 {#each Object.entries(groupRelaysWithStatus) as [relay_url, relay_status]}

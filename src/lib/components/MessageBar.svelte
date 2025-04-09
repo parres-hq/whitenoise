@@ -12,6 +12,7 @@ import Checkmark from "carbon-icons-svelte/lib/Checkmark.svelte";
 import CloseLarge from "carbon-icons-svelte/lib/CloseLarge.svelte";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { onMount } from "svelte";
+import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 import Loader from "./Loader.svelte";
 import Button from "./ui/button/button.svelte";
@@ -199,7 +200,7 @@ onMount(() => {
         <div class="w-full py-4 px-6 pl-8 bg-muted backdrop-blur-sm flex flex-row gap-2 items-start justify-between ">
             {#if isReplyToMessageDeleted}
                 <div class="inline-flex flex-row items-center gap-2 bg-gray-200 rounded-full px-3 py-1 w-fit text-black">
-                    <TrashCan size={20} /><span class="italic opacity-60">Message deleted</span>
+                    <TrashCan size={20} /><span class="italic opacity-60">{$t("chats.messageDeleted")}</span>
                 </div>
             {:else}
                 <span>{replyToMessage.content}</span>
@@ -221,15 +222,15 @@ onMount(() => {
                         />
                     {:else if item.file.type.startsWith('video/')}
                         <div class="h-16 w-16 bg-gray-700 rounded-lg flex items-center justify-center">
-                            <span class="text-white text-sm">Video</span>
+                            <span class="text-white text-sm">{$t("chats.video")}</span>
                         </div>
                     {:else if item.file.type.startsWith('audio/')}
                         <div class="h-16 w-16 bg-gray-700 rounded-lg flex items-center justify-center">
-                            <span class="text-white text-sm">Audio</span>
+                            <span class="text-white text-sm">{$t("chats.audio")}</span>
                         </div>
                     {:else}
                         <div class="h-16 w-16 bg-gray-700 rounded-lg flex items-center justify-center">
-                            <span class="text-white text-sm">PDF</span>
+                            <span class="text-white text-sm">{$t("chats.pdf")}</span>
                         </div>
                     {/if}
                     <div class="absolute inset-0 bg-black/50 rounded-lg flex items-center justify-center">

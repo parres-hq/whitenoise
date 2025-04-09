@@ -2,6 +2,7 @@
 import type { EnrichedContact, Invite } from "$lib/types/nostr";
 import { NostrMlsGroupType } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
+import { _ as t } from "svelte-i18n";
 import { nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
 import InviteDetail from "./InviteDetail.svelte";
@@ -18,7 +19,9 @@ let groupType = $state(
 );
 
 let inviteDescription = $derived(
-    invite.member_count === 2 ? "private chat" : `group with ${invite.member_count} members`
+    invite.member_count === 2
+        ? $t("chats.privateChatInvite")
+        : $t("chats.groupChatInvite", { values: { memberCount: invite.member_count } })
 );
 
 $effect(() => {
@@ -53,7 +56,7 @@ $effect(() => {
             />
             <div class="flex flex-col gap-0 items-start">
                 <span class="text-lg font-medium">{groupName}</span>
-                <span class="text-sm text-muted-foreground">You're invited to join a {inviteDescription}</span>
+                <span class="text-sm text-muted-foreground">{inviteDescription}</span>
             </div>
         </Button>
     </Sheet.Trigger>
@@ -61,5 +64,3 @@ $effect(() => {
         <InviteDetail {invite} bind:enrichedInviter bind:showSheet />
     </Sheet.Content>
 </Sheet.Root>
-
-

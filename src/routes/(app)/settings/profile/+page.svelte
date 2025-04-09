@@ -10,6 +10,7 @@ import { activeAccount } from "$lib/stores/accounts";
 import type { NMetadata } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import Edit from "carbon-icons-svelte/lib/Edit.svelte";
+import { _ as t } from "svelte-i18n";
 
 let displayName = $state($activeAccount?.metadata?.display_name);
 let name = $state($activeAccount?.metadata?.name);
@@ -64,7 +65,7 @@ async function handleSave() {
 }
 </script>
 
-<Header backLocation="/settings" title="Profile" />
+<Header backLocation="/settings" title={$t('profile.title')} />
 
 <KeyboardAvoidingView class="h-full">
     <div class="pb-16 md:pb-6 flex flex-col gap-4">
@@ -117,17 +118,17 @@ async function handleSave() {
 
         <div class="flex flex-col gap-6 mt-20 relative overflow-y-auto pb-20">
             <div class="flex flex-col gap-2 px-4">
-                <Label for="displayName">Display Name</Label>
+                <Label for="displayName">{$t('profile.displayName')}</Label>
                 <Input type="text" id="displayName" bind:value={displayName} />
             </div>
 
             <div class="flex flex-col gap-2 px-4">
-                <Label for="name">Name</Label>
+                <Label for="name">{$t('profile.name')}</Label>
                 <Input type="text" id="name" bind:value={name} />
             </div>
 
             <div class="flex flex-col gap-2 px-4">
-                <Label for="about">About</Label>
+                <Label for="about">{$t('profile.about')}</Label>
                 <Textarea
                     id="about"
                     bind:value={about}
@@ -135,22 +136,22 @@ async function handleSave() {
             </div>
 
             <div class="flex flex-col gap-2 px-4">
-                <Label for="website">Website</Label>
+                <Label for="website">{$t('profile.website')}</Label>
                 <Input type="url" id="website" bind:value={website} />
             </div>
 
             <div class="flex flex-col gap-2 px-4">
-                <Label for="nostrAddress">Nostr Address (NIP-05)</Label>
+                <Label for="nostrAddress">{$t('profile.nostrAddress')}</Label>
                 <Input type="text" id="nostrAddress" bind:value={nostrAddress} />
             </div>
 
             <div class="flex flex-col gap-2 px-4">
-                <Label for="lightningAddress">Lightning Address</Label>
+                <Label for="lightningAddress">{$t('profile.lightningAddress')}</Label>
                 <Input type="text" id="lightningAddress" bind:value={lightningAddress} />
             </div>
         </div>
         <div class="md:px-4 fixed bottom-0 left-0 right-0 bg-background z-10 w-full md:static">
-            <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit pt-4 pb-[calc(1rem+var(--sab))] md:py-4">Save Changes</Button>
+            <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit pt-4 pb-[calc(1rem+var(--sab))] md:py-4">{$t('profile.saveChanges')}</Button>
         </div>
     </div>
 </KeyboardAvoidingView>

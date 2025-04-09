@@ -9,6 +9,7 @@ import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
 import Information from "carbon-icons-svelte/lib/Information.svelte";
+import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 import Button from "./ui/button/button.svelte";
 import * as Sheet from "./ui/sheet";
@@ -95,7 +96,7 @@ async function inviteContact() {
         <Button variant="link" size="icon" class="p-0 shrink-0" onclick={onBack}>
             <ChevronLeft size={24} class="shrink-0 !h-6 !w-6" />
         </Button>
-        <Sheet.Title>Start secure chat</Sheet.Title>
+        <Sheet.Title>{$t("chats.startSecureChat")}</Sheet.Title>
     </Sheet.Header>
 
     <div class="flex flex-col justify-start items-center pt-40 flex-1 gap-4">
@@ -123,10 +124,8 @@ async function inviteContact() {
             <div class="flex flex-row gap-3 items-start bg-accent p-4 text-accent-foreground mt-12 mx-6">
                 <Information size={24} class="shrink-0" />
                 <div class="flex flex-col gap-2">
-                    <h3 class="text-lg/6 font-medium">{nameFromMetadata(contact?.metadata, pubkey)} is not yet set up to use secure messaging</h3>
-                    <p>
-                        Do you want to invite them to White Noise? We'll send them a legacy direct message via Nostr with a link to download the app.
-                    </p>
+                    <h3 class="text-lg/6 font-medium">{nameFromMetadata(contact?.metadata, pubkey)} {$t("chats.contactNotSetUp")}</h3>
+                    <p>{$t("chats.sendInviteQuestion")}</p>
                 </div>
             </div>
         {/if}
@@ -139,7 +138,7 @@ async function inviteContact() {
             class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
             disabled={isInviting}
             onclick={inviteContact}>
-            {isInviting ? "Sending invite..." : "Invite to White Noise"}
+            {isInviting ? $t("chats.sendingInvite") : $t("chats.sendInvite")}
         </Button>
     {:else}
         <Button
@@ -148,7 +147,7 @@ async function inviteContact() {
             class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
             disabled={isCreatingChat}
             onclick={startChat}>
-            {isCreatingChat ? "Creating chat..." : "Start Chat & Send Invite"}
+            {isCreatingChat ? $t("chats.creatingChat") : $t("chats.startChatAndSendInvite")}
         </Button>
     {/if}
 </div>

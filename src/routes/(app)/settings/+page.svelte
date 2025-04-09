@@ -36,6 +36,7 @@ import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import User from "carbon-icons-svelte/lib/User.svelte";
 import Wallet from "carbon-icons-svelte/lib/Wallet.svelte";
 import { onDestroy, onMount } from "svelte";
+import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 
 let showLoginSheet = $state(false);
@@ -73,14 +74,14 @@ onDestroy(() => {
 async function handleLogout(pubkey: string): Promise<void> {
     logout(pubkey)
         .then(() => {
-            toast.success("Successfully logged out");
+            toast.success($t("settings.logoutSuccess"));
             showLogoutConfirmSheet = false;
         })
         .catch((e) => {
             if (e instanceof LogoutError) {
                 goto("/");
             } else {
-                toast.error("Failed to log out");
+                toast.error($t("settings.logoutError"));
                 console.error(e);
             }
         })
@@ -98,7 +99,7 @@ async function testNotification() {
     if (permissionGranted) {
         sendNotification({
             title: "White Noise",
-            body: "Notification test successful!",
+            body: $t("settings.notificationSuccess"),
         });
     }
 }
@@ -106,11 +107,11 @@ async function testNotification() {
 async function deleteAll() {
     invoke("delete_all_data")
         .then(() => {
-            toast.info("All accounts, groups, and messages have been deleted");
+            toast.info($t("settings.deleteAllDataSuccess"));
             goto("/login");
         })
         .catch((e) => {
-            toast.error("Error deleting data");
+            toast.error($t("settings.deleteAllDataError"));
             console.error(e);
         })
         .finally(() => {
@@ -120,9 +121,9 @@ async function deleteAll() {
 
 function deleteAllKeyPackages() {
     invoke("delete_all_key_packages")
-        .then(() => toast.success("Key Packages Deleted"))
+        .then(() => toast.success($t("settings.deleteKeyPackagesSuccess")))
         .catch((e) => {
-            toast.error("Error Deleting Key Packages");
+            toast.error($t("settings.deleteKeyPackagesError"));
             console.error(e);
         })
         .finally(() => {
@@ -132,9 +133,9 @@ function deleteAllKeyPackages() {
 
 function publishKeyPackage() {
     invoke("publish_new_key_package", {})
-        .then(() => toast.success("Key Package Published"))
+        .then(() => toast.success($t("settings.publishKeyPackageSuccess")))
         .catch((e) => {
-            toast.error("Error Publishing Key Package");
+            toast.error($t("settings.publishKeyPackageError"));
             console.error(e);
         })
         .finally(() => {
@@ -143,7 +144,7 @@ function publishKeyPackage() {
 }
 </script>
 
-<Header backLocation="/chats" title="Settings" />
+<Header backLocation="/chats" title={$t("settings.title")} />
 
 <main class="px-4 py-6 flex flex-col gap-4">
     <Accordion.Root bind:value={accordionOpenSection} class="px-2">
@@ -153,8 +154,15 @@ function publishKeyPackage() {
                     accordionOpenSection = "profile";
                 }
             }}>
-                <h2 class="text-3xl font-normal text-primary leading-none">Profile</h2>
-                <LoginSheet title="Add new profile" loading={addProfileLoading} bind:sheetVisible={showLoginSheet} showCreateAccount={true}>
+                <h2 class="text-3xl font-normal text-primary leading-none">
+                  {$t("settings.profile")}
+                </h2>
+                <LoginSheet
+                  title={$t("settings.addNewProfile")}
+                  loading={addProfileLoading}
+                  bind:sheetVisible={showLoginSheet}
+                  showCreateAccount={true}
+                >
                     <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2" id="add-profile-button">
                         <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
                     </Button>
@@ -186,11 +194,11 @@ function publishKeyPackage() {
                                 <Sheet.Content side="bottom" class="pb-safe-bottom px-0 max-h-[90%]">
                                     <div class="flex flex-col h-full relative">
                                         <Sheet.Header class="text-left mb-4 px-6 sticky top-0">
-                                            <Sheet.Title>Switch profile</Sheet.Title>
+                                            <Sheet.Title>{$t("settings.switchProfile")}</Sheet.Title>
                                         </Sheet.Header>
                                         <div class="max-h-[500px] flex flex-col gap-0.5 overflow-y-auto pb-6">
                                             {#each $accounts as account (account.pubkey)}
-                                                <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap-3 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => setActiveAccount(account.pubkey)}>
+                                                <Button variant="ghost" size="lg" class="h-fit flex flex-row gap-3 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => setActiveAccount(account.pubkey)}>
                                                     <Avatar
                                                         pubkey={account.pubkey}
                                                         picture={account.metadata?.picture}
@@ -218,7 +226,7 @@ function publishKeyPackage() {
                             <a href="/settings/profile/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                 <div class="flex flex-row gap-3 items-center">
                                     <User size={24} class="shrink-0"/>
-                                    <span>Edit profile</span>
+                                    <span>{$t("settings.editProfile")}</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
@@ -227,7 +235,7 @@ function publishKeyPackage() {
                             <a href="/settings/nostr-keys/" class="flex flex-row justify-between items-center py-4 w-full no-underlinerow-button">
                                 <div class="flex flex-row gap-3 items-center">
                                     <Password size={24} class="shrink-0"/>
-                                    <span>Nostr keys</span>
+                                    <span>{$t("settings.nostrKeys")}</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
@@ -236,7 +244,7 @@ function publishKeyPackage() {
                             <a href="/settings/network/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                 <div class="flex flex-row gap-3 items-center">
                                     <Satellite size={24} class="shrink-0"/>
-                                    <span>Network</span>
+                                    <span>{$t("settings.network")}</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
@@ -245,17 +253,24 @@ function publishKeyPackage() {
                             <a href="/settings/wallet/" class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                 <div class="flex flex-row gap-3 items-center">
                                     <Wallet size={24} class="shrink-0"/>
-                                    <span>Wallet</span>
+                                    <span>{$t("settings.wallet")}</span>
                                 </div>
                                 <ChevronRight size={24} class="icon-right"/>
                             </a>
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet bind:open={showLogoutConfirmSheet} title="Sign out?" description="Are you sure you want to sign out of this account? If you haven't backed up your keys, you won't be able to recover them." acceptText="Sign out" cancelText="Cancel" acceptFn={() => handleLogout($activeAccount!.pubkey)}>
+                            <ConfirmSheet
+                                bind:open={showLogoutConfirmSheet}
+                                title={$t("settings.signOutTitle")}
+                                description={$t("settings.signOutDescription")}
+                                acceptText={$t("settings.signOut")}
+                                cancelText={$t("shared.cancel")}
+                                acceptFn={() => handleLogout($activeAccount!.pubkey)}
+                            >
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
                                         <Logout size={24} class="shrink-0"/>
-                                    <span>Sign out</span>
+                                    <span>{$t("settings.signOut")}</span>
                                     </div>
                                 </button>
                             </ConfirmSheet>
@@ -266,17 +281,26 @@ function publishKeyPackage() {
         </Accordion.Item>
         <Accordion.Item value="privacy">
             <Accordion.Trigger>
-                <h2 class="text-3xl font-normal text-primary leading-none">Privacy & Security</h2>
+                <h2 class="text-3xl font-normal text-primary leading-none">
+                    {$t("settings.privacyAndSecurity")}
+                </h2>
             </Accordion.Trigger>
             <Accordion.Content>
                 <div class="overflow-hidden p-0 m-0">
                     <ul class="list-none p-0 m-0 overflow-hidden">
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet bind:open={showDeleteAllConfirmSheet} title="Delete everything?" description="This will delete all group and message data, and sign you out of all accounts but will not delete your nostr keys or any other events you've published to relays.<br><br>Are you sure you want to delete all data from White Noise? This cannot be undone." acceptText="Delete all data" cancelText="Cancel" acceptFn={deleteAll}>
+                            <ConfirmSheet
+                                bind:open={showDeleteAllConfirmSheet}
+                                title={$t("settings.deleteAllDataTitle")}
+                                description={$t("settings.deleteAllDataDescription")}
+                                acceptText={$t("settings.deleteAllData")}
+                                cancelText={$t("shared.cancel")}
+                                acceptFn={deleteAll}
+                            >
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
-                                <TrashCan size={24} class="shrink-0"/>
-                                <span>Delete all data</span>
+                                        <TrashCan size={24} class="shrink-0"/>
+                                        <span>{$t("settings.deleteAllData")}</span>
                                     </div>
                                 </button>
                             </ConfirmSheet>
@@ -287,27 +311,43 @@ function publishKeyPackage() {
         </Accordion.Item>
         <Accordion.Item value="developer">
             <Accordion.Trigger>
-                <h2 class="text-3xl font-normal text-primary leading-none">Developer Settings</h2>
+                <h2 class="text-3xl font-normal text-primary leading-none">
+                    {$t("settings.developerSettings")}
+                </h2>
             </Accordion.Trigger>
             <Accordion.Content>
                 <div class="overflow-hidden p-0 m-0">
                     <ul class="list-none p-0 m-0 overflow-hidden">
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet bind:open={showPublishKeyPackageConfirmSheet} title="Publish a key package" description="Are you sure you want to publish a new Key Package event to relays?" acceptText="Publish key package" cancelText="Cancel" acceptFn={publishKeyPackage}>
+                            <ConfirmSheet
+                                bind:open={showPublishKeyPackageConfirmSheet}
+                                title={$t("settings.publishKeyPackage")}
+                                description={$t("settings.publishKeyPackageDescription")}
+                                acceptText={$t("settings.publishKeyPackage")}
+                                cancelText={$t("shared.cancel")}
+                                acceptFn={publishKeyPackage}
+                            >
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
                                         <Password size={24} class="shrink-0"/>
-                                        <span>Publish a key package</span>
+                                        <span>{$t("settings.publishAKeyPackage")}</span>
                                     </div>
                                 </button>
                             </ConfirmSheet>
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <ConfirmSheet bind:open={showDeleteAllKeyPackagesConfirmSheet} title="Delete all key packages" description="Are you sure you want to delete all key packages?" acceptText="Delete all key packages" cancelText="Cancel" acceptFn={deleteAllKeyPackages}>
+                            <ConfirmSheet
+                                bind:open={showDeleteAllKeyPackagesConfirmSheet}
+                                title={$t("settings.deleteAllKeyPackages")}
+                                description={$t("settings.deleteAllKeyPackagesDescription")}
+                                acceptText={$t("settings.deleteAllKeyPackages")}       
+                                cancelText={$t("shared.cancel")}     
+                                acceptFn={deleteAllKeyPackages}
+                            >
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                     <div class="flex flex-row gap-3 items-center">
                                         <TrashCan size={24} class="shrink-0"/>
-                                        <span>Delete all key packages</span>
+                                        <span>{$t("settings.deleteAllKeyPackages")}</span>
                                     </div>
                                 </button>
                             </ConfirmSheet>
@@ -316,23 +356,26 @@ function publishKeyPackage() {
                             <button onclick={testNotification} class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                 <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
-                                    <span>Test notifications</span>
+                                    <span>{$t("settings.testNotifications")}</span>
                                 </div>
                             </button>
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <button onclick={() => toast.success("Toast success")} class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                            <button
+                                onclick={() => toast.success($t("settings.toastSuccess"))}
+                                class="flex flex-row justify-between items-center py-4 w-full no-underline"
+                            >
                                 <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
-                                    <span>Test toast success</span>
+                                    <span>{$t("settings.testToastSuccess")}</span>
                                 </div>
                             </button>
                         </li>
                         <li class="p-0 m-0 leading-none text-2xl text-muted-foreground">
-                            <button onclick={() => toast.error("Toast error")} class="flex flex-row justify-between items-center py-4 w-full no-underline">
+                            <button onclick={() => toast.error($t("settings.toastError"))} class="flex flex-row justify-between items-center py-4 w-full no-underline">
                                 <div class="flex flex-row gap-3 items-center">
                                     <Notification size={24} class="shrink-0"/>
-                                    <span>Test toast error</span>
+                                    <span>{$t("settings.testToastError")}</span>
                                 </div>
                             </button>
                         </li>

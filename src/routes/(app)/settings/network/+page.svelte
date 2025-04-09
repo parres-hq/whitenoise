@@ -10,6 +10,7 @@ import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { onMount } from "svelte";
+import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 
 // Inbox relay list
@@ -40,7 +41,7 @@ async function loadRelays() {
         inboxRelays = inboxRelaysResult;
         keyPackageRelays = keyPackageRelaysResult;
     } catch (error) {
-        toast.error("Error fetching relay data");
+        toast.error($t("network.fetchRelayDataError"));
         console.error(error);
     } finally {
         isLoading = false;
@@ -63,22 +64,22 @@ function closeAddRelaySheet() {
 // Add a new relay
 async function addRelay() {
     if (!newRelayUrl.startsWith("wss://") && !newRelayUrl.startsWith("ws://")) {
-        urlError = "Invalid format: must start with 'wss://' or 'ws://'";
+        urlError = $t("network.invalidRelayUrlFormat");
         return;
     }
 
     // Check for duplicate URL in the specific relay list being modified
     if (currentRelayType === "inbox" && inboxRelays?.includes(newRelayUrl)) {
-        urlError = "This relay URL is already in your inbox relay list";
+        urlError = $t("network.inboxRelayAlreadyConfigured");
         return;
     }
     if (currentRelayType === "key_package" && keyPackageRelays?.includes(newRelayUrl)) {
-        urlError = "This relay URL is already in your key package relay list";
+        urlError = $t("network.keyPackageRelayAlreadyConfigured");
         return;
     }
 
     if (!$activeAccount) {
-        toast.error("No active account found");
+        toast.error($t("network.noActiveAccountError"));
         return;
     }
 
@@ -94,7 +95,7 @@ async function addRelay() {
         closeAddRelaySheet();
         await loadRelays();
     } catch (error) {
-        toast.error("Failed to add relay");
+        toast.error($t("network.addRelayError"));
         console.error(error);
     } finally {
         isLoading = false;
@@ -119,10 +120,10 @@ async function handlePaste() {
         if (text) {
             newRelayUrl = text;
         } else {
-            urlError = "No text found in clipboard";
+            urlError = $t("clipboard.emptyTextError");
         }
     } catch (e) {
-        urlError = "Failed to read from clipboard";
+        urlError = $t("clipboard.readError");
     }
 }
 
@@ -131,16 +132,16 @@ onMount(async () => {
 });
 </script>
 
-<Header backLocation="/settings" title="Network" />
+<Header backLocation="/settings" title={$t("network.title")} />
 
 <main class="px-4 flex flex-col gap-12 py-6">
     <section class="flex flex-col gap-3">
         <div class="flex justify-between items-center">
-            <h2 class="text-2xl font-normal">Connected Relays</h2>
+            <h2 class="text-2xl font-normal">{$t("network.connectedRelays")}</h2>
         </div>
 
         {#if Object.keys(relayStatuses).length === 0}
-            <p class="text-lg text-muted-foreground">No relays connected.</p>
+            <p class="text-lg text-muted-foreground">{$t("network.noRelaysConnected")}</p>
         {:else}
             <ul class="flex flex-col gap-1">
                 {#each Object.entries(relayStatuses) as [relay_url, relay_status]}
@@ -148,7 +149,7 @@ onMount(async () => {
                     <span class="text-lg">{relay_url}</span>
                         <div class="flex items-center gap-2">
                             <div class="w-2 h-2 rounded-full {colorForRelayStatus(relay_status)}"></div>
-                            <span class="text-xs text-muted-foreground">{relay_status}</span>
+                            <span class="text-xs text-muted-foreground">{$t(`network.relayStatuses.${relay_status.toLowerCase()}`)}</span>
                         </div>
                 </li>
                 {/each}
@@ -158,26 +159,26 @@ onMount(async () => {
 
     <section class="flex flex-col gap-3">
         <div class="flex justify-between items-center">
-            <h2 class="text-2xl font-normal">Inbox Relay List</h2>
+            <h2 class="text-2xl font-normal">{$t("network.inboxRelayList")}</h2>
             <Button
                 variant="ghost"
                 size="icon"
                 onclick={() => openAddRelaySheet('inbox')}
                 class="shrink-0! p-0!"
-                aria-label="Add inbox relay"
+                aria-label={$t("network.addInboxRelay")}
             >
                 <AddLarge size={24} class="w-6! h-6! shrink-0"/>
             </Button>
         </div>
 
         {#if !inboxRelays ||inboxRelays.length === 0}
-            <p class="text-sm text-muted-foreground">You don't have any inbox relays configured.</p>
+            <p class="text-sm text-muted-foreground">{$t("network.noInboxRelays")}</p>
         {:else}
             <ul class="flex flex-col">
                 {#each inboxRelays! as relay_url}
                     <li class="flex items-center justify-between py-2 border-b border-border last:border-none">
                         <span class="text-base">{relay_url}</span>
-                        <Button variant="ghost" size="icon" aria-label="Remove relay" onclick={() => removeRelay("inbox", relay_url)}>
+                        <Button variant="ghost" size="icon" aria-label={$t("network.removeRelay")} onclick={() => removeRelay("inbox", relay_url)}>
                             <TrashCan size={20} />
                         </Button>
                     </li>
@@ -189,26 +190,31 @@ onMount(async () => {
     <!-- Key Package Relay List Section -->
     <section class="flex flex-col gap-3">
         <div class="flex justify-between items-center">
-            <h2 class="text-2xl font-normal">Key Package Relay List</h2>
+            <h2 class="text-2xl font-normal">{$t("network.keyPackageRelaysList")}</h2>
             <Button
                 variant="ghost"
                 size="icon"
                 class="shrink-0! p-0!"
                 onclick={() => openAddRelaySheet('key_package')}
-                aria-label="Add key package relay"
+                aria-label={$t("network.addKeyPackageRelay")}
             >
                 <AddLarge size={24} class="w-6! h-6! shrink-0"/>
             </Button>
         </div>
 
         {#if !keyPackageRelays || keyPackageRelays.length === 0}
-            <p class="text-sm text-muted-foreground">You don't have any key package relays configured.</p>
+            <p class="text-sm text-muted-foreground">{$t("network.noKeyPackageRelays")}</p>
         {:else}
             <ul class="flex flex-col">
                 {#each keyPackageRelays! as relay_url}
                     <li class="flex items-center justify-between py-2 border-b border-border last:border-none">
                         <span class="text-base">{relay_url}</span>
-                        <Button variant="ghost" size="icon" aria-label="Remove relay" onclick={() => removeRelay("key_package", relay_url)}>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={$t("network.removeRelay")}
+                            onclick={() => removeRelay("key_package", relay_url)}
+                        >
                             <TrashCan size={20} />
                         </Button>
                     </li>
@@ -222,7 +228,7 @@ onMount(async () => {
 <Sheet.Root bind:open={showAddRelaySheet}>
     <Sheet.Content side="bottom" class="pb-20">
         <Sheet.Header class="text-left mb-8">
-            <Sheet.Title>Add new relay</Sheet.Title>
+            <Sheet.Title>{$t("network.addNewRelay")}</Sheet.Title>
         </Sheet.Header>
         <div class="flex flex-col gap-x-4 relative">
             <div class="flex flex-col gap-0">
@@ -242,6 +248,6 @@ onMount(async () => {
                 </div>
             </div>
         </div>
-        <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:mt-6">Add relay</Button>
+        <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:mt-6">{$t("network.addRelay")}</Button>
     </Sheet.Content>
 </Sheet.Root>

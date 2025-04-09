@@ -34,6 +34,7 @@ import Search from "carbon-icons-svelte/lib/Search.svelte";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { onDestroy, onMount, tick } from "svelte";
 import { type PressCustomEvent, press } from "svelte-gestures";
+import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 
 let {
@@ -441,7 +442,7 @@ function navigateToInfo() {
                             <div class="break-words-smart w-full {message.lightningPayment ? 'flex justify-center' : ''} {message.isSingleEmoji ? 'text-7xl leading-none' : ''}">
                                 {#if chatStore.isDeleted(message.id)}
                                     <div class="inline-flex flex-row items-center gap-2 px-3 py-1 w-fit text-muted-foreground">
-                                        <span class="font-italic text-base opacity-60">Message deleted</span>
+                                        <span class="font-italic text-base opacity-60">{$t("chats.messageDeleted")}</span>
                                     </div>
                                 {:else if message.content.trim().length > 0}
                                     {#if !message.lightningInvoice}
@@ -495,14 +496,14 @@ function navigateToInfo() {
                                                 })}
                                                 class={`px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow ${message.isMine ? "bg-secondary-foreground" : ""}`}
                                             >
-                                                Copy invoice  <Copy size={20} />
+                                                {$t("chats.copyInvoice")}  <Copy size={20} />
                                             </Button>
                                             {#if $hasLightningWallet && !message.lightningInvoice.isPaid}
                                                 <button
                                                     onclick={() => payLightningInvoice(message)}
                                                     class="transition-all bg-gradient-to-bl from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-500  hover:shadow-xl duration-300 rounded-md px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow"
                                                 >
-                                                    Pay {message.lightningInvoice.amount} sats
+                                                {$t("chats.paySats", { values: { amount :message.lightningInvoice.amount } })}
                                                 </button>
                                             {/if}
                                         </div>
@@ -510,10 +511,10 @@ function navigateToInfo() {
                                     {/if}
                                 {:else if message.lightningPayment}
                                     <div class="inline-flex flex-row items-center gap-2 bg-orange-400 rounded-full px-2 py-0 w-fit">
-                                        <span>⚡️</span><span class="italic font-bold">Invoice paid</span><span>⚡️</span>
+                                        <span>⚡️</span><span class="italic font-bold">{$t("chats.invoicePaid")}</span><span>⚡️</span>
                                     </div>
                                 {:else}
-                                    <span class="italic opacity-60">No message content</span>
+                                    <span class="italic opacity-60">{$t("chats.noMessageContent")}</span>
                                 {/if}
                                 </div>
                                 <div class="flex flex-row gap-2 items-center ml-auto {message.isMine ? "text-primary-foreground" : "text-primary"}">
@@ -551,7 +552,7 @@ function navigateToInfo() {
         class="fixed inset-0 backdrop-blur-sm z-10"
         onclick={handleOutsideClick}
         onkeydown={(e) => e.key === 'Escape' && handleOutsideClick()}
-        aria-label="Close message menu"
+        aria-label={$t("chats.closeMessageMenu")}
     ></button>
 {/if}
 
@@ -578,12 +579,12 @@ function navigateToInfo() {
 >
     <div class="flex flex-col justify-start items-between divide-y divide-muted min-w-48">
         {#if isSelectedMessageCopyable()}
-            <Button variant="ghost" size="sm" data-copy-button onclick={copyMessage} class="text-base font-normal flex flex-row items-center justify-between">Copy <Copy size={24} /></Button>
+            <Button variant="ghost" size="sm" data-copy-button onclick={copyMessage} class="text-base font-normal flex flex-row items-center justify-between">{$t("chats.copy")} <Copy size={24} /></Button>
         {/if}
-        <Button variant="ghost" size="sm" data-copy-button onclick={reply} class="text-base font-normal flex flex-row items-center justify-between">Reply <Reply size={24} /></Button>
+        <Button variant="ghost" size="sm" data-copy-button onclick={reply} class="text-base font-normal flex flex-row items-center justify-between">{$t("chats.reply")} <Reply size={24} /></Button>
         <!-- <button onclick={editMessage} class="px-4 py-2 flex flex-row gap-20 items-center justify-between">Edit <PencilSimple size={20} /></button> -->
         {#if isSelectedMessageDeletable()}
-            <Button variant="ghost" size="sm" data-copy-button onclick={deleteMessage} class="text-base font-normal flex flex-row items-center justify-between">Delete <TrashCan size={24} /></Button>
+            <Button variant="ghost" size="sm" data-copy-button onclick={deleteMessage} class="text-base font-normal flex flex-row items-center justify-between">{$t("chats.delete")} <TrashCan size={24} /></Button>
         {/if}
     </div>
 </div>
