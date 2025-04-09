@@ -218,6 +218,9 @@ function publishKeyPackage() {
                                     </div>
                                 </Sheet.Content>
                             </Sheet.Root>
+                        {:else}
+                            <!-- Empty div to keep the layout consistent -->
+                            <div class="w-6 h-6"></div>
                         {/if}
                     </div>
 
@@ -340,8 +343,8 @@ function publishKeyPackage() {
                                 bind:open={showDeleteAllKeyPackagesConfirmSheet}
                                 title={$t("settings.deleteAllKeyPackages")}
                                 description={$t("settings.deleteAllKeyPackagesDescription")}
-                                acceptText={$t("settings.deleteAllKeyPackages")}       
-                                cancelText={$t("shared.cancel")}     
+                                acceptText={$t("settings.deleteAllKeyPackages")}
+                                cancelText={$t("shared.cancel")}
                                 acceptFn={deleteAllKeyPackages}
                             >
                                 <button class="flex flex-row justify-between items-center py-4 w-full no-underline">

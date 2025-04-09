@@ -79,8 +79,9 @@ export async function setActiveAccount(pubkey: string): Promise<void> {
 
 export async function createAccount(): Promise<void> {
     return invoke("create_identity").then(async (account) => {
+        console.log("Account created:", account);
         activeAccount.set(account as Account);
-        await fetchRelays();
+        // await fetchRelays();
     });
 }
 

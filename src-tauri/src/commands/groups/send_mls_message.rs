@@ -29,7 +29,21 @@ pub async fn send_mls_message(
     let export_secret_hex;
     let epoch;
     {
-        let nostr_mls = wn.nostr_mls.lock().await;
+        let nostr_mls = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            wn.nostr_mls.lock(),
+        )
+        .await
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                tracing::error!(
+                    target: "whitenoise::commands::groups::send_mls_message",
+                    "Timeout waiting for nostr_mls lock"
+                );
+                return Err("Timeout waiting for nostr_mls lock".to_string());
+            }
+        };
         (export_secret_hex, epoch) = nostr_mls
             .export_secret_as_hex_secret_key_and_epoch(group.mls_group_id.clone())
             .map_err(|e| e.to_string())?;

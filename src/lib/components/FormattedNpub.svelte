@@ -32,7 +32,7 @@ async function copyNpub() {
             {/if}
         {/each}
         {#if showCopy}
-            <button class="ml-2 transition-colors duration-200 text-muted-foreground-light dark:text-muted-foreground-dark {highlightButton ? 'text-green-500!' : ''}" onclick={copyNpub}>
+            <button class="ml-2 transition-colors duration-200 text-muted-foreground-light dark:text-muted-foreground-dark {highlightButton ? 'text-green-500' : ''}" onclick={copyNpub}>
                 <Copy size={16} />
             </button>
         {/if}

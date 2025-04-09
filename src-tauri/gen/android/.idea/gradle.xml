@@ -20,7 +20,12 @@
         <option name="gradleJvm" value="#GRADLE_LOCAL_JAVA_HOME" />
         <option name="modules">
           <set>
-            <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-2.2.2/mobile/android" />
+            <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-2.4.0/mobile/android" />
+            <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-plugin-barcode-scanner-2.2.0/android" />
+            <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-plugin-clipboard-manager-2.2.2/android" />
+            <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-plugin-dialog-2.2.0/android" />
+            <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-plugin-fs-2.2.0/android" />
+            <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-plugin-notification-2.2.2/android" />
             <option value="$USER_HOME$/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tauri-plugin-shell-2.2.0/android" />
             <option value="$PROJECT_DIR$" />
             <option value="$PROJECT_DIR$/app" />

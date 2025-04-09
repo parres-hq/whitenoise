@@ -110,7 +110,6 @@ function setupViewportListeners() {
 
         // Device-specific adjustments
         if (isAndroid) {
-            console.log("isAndroid");
             // Check if viewport height decreased significantly (keyboard appeared)
             // OR if there is a significant difference between window and viewport height
             const heightDecrease = previousViewportHeight - viewportHeight;
@@ -141,7 +140,6 @@ function setupViewportListeners() {
             // Update previous height for next comparison
             previousViewportHeight = viewportHeight;
         } else if (isIOS) {
-            console.log("isIOS");
             // Standard detection for iOS
             if (windowHeight - viewportHeight > minKeyboardThreshold) {
                 // Add extra offset for iOS sheets which need more space

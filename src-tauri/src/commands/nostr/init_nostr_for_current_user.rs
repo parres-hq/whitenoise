@@ -20,7 +20,21 @@ pub async fn init_nostr_for_current_user(
 
     // Then update Nostr MLS instance
     {
-        let mut nostr_mls = wn.nostr_mls.lock().await;
+        let mut nostr_mls = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            wn.nostr_mls.lock(),
+        )
+        .await
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                tracing::error!(
+                    target: "whitenoise::commands::nostr::init_nostr_for_current_user",
+                    "Timeout waiting for nostr_mls lock"
+                );
+                return Err("Timeout waiting for nostr_mls lock".to_string());
+            }
+        };
         *nostr_mls = NostrMls::new(wn.data_dir.clone(), Some(current_account.pubkey.to_hex()));
     }
 

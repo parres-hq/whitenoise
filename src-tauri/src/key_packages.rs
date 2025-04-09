@@ -211,6 +211,34 @@ pub async fn delete_key_package_from_relays(
     Ok(())
 }
 
+/// Publishes a new key package for the active account to the Nostr network.
+///
+/// This function performs the following steps:
+/// 1. Retrieves the active account and its public key.
+/// 2. Determines the relays to publish the key package to (dev relays or from account settings).
+/// 3. Creates a new MLS key package for the account's public key.
+/// 4. Builds a Nostr event with the key package and relevant metadata tags.
+/// 5. Sends the event to the specified key package relays.
+///
+/// Key packages are essential for secure messaging in MLS (Messaging Layer Security) as they
+/// contain the public cryptographic material needed to add members to encrypted groups.
+///
+/// # Arguments
+///
+/// * `wn` - A Tauri State containing a Whitenoise instance, which provides access to account info and Nostr functionality.
+///
+/// # Returns
+///
+/// * `Result<()>` - A Result that is Ok(()) if the key package was successfully published,
+///   or an Err with a descriptive error if any step of the process failed.
+///
+/// # Errors
+///
+/// This function may return an error if:
+/// - There's an error retrieving the active account.
+/// - There's an error determining the key package relays.
+/// - There's an error creating the key package.
+/// - There's an error building or sending the Nostr event.
 pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()> {
     let active_account = Account::get_active(wn.clone()).await?;
     let pubkey = active_account.pubkey;
