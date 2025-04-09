@@ -1,16 +1,19 @@
 use crate::accounts::Account;
 use crate::media::blossom::BlossomClient;
 use crate::nostr_manager::event_processor::EventProcessor;
+use crate::relays::RelayType;
 use crate::types::NostrEncryptionMethod;
 use crate::Whitenoise;
 use nostr_sdk::prelude::*;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use tokio::{spawn, sync::Mutex};
+
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+use std::path::Path;
 
 pub mod event_processor;
 pub mod fetch;
@@ -36,8 +39,11 @@ pub enum NostrManagerError {
     FailedToQueueEvent(String),
     #[error("Failed to shutdown event processor: {0}")]
     FailedToShutdownEventProcessor(String),
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
     #[error("I/O error: {0}")]
     IoError(String),
+    #[error("Account error: {0}")]
+    AccountError(String),
 }
 
 #[derive(Debug, Clone)]
@@ -67,11 +73,11 @@ impl Default for NostrManagerSettings {
             relays.push("wss://relay.damus.io".to_string());
             relays.push("wss://purplepag.es".to_string());
             relays.push("wss://relay.primal.net".to_string());
-            relays.push("wss://nostr.oxtr.dev".to_string());
+            relays.push("wss://nos.lol".to_string());
         }
 
         Self {
-            timeout: Duration::from_secs(5),
+            timeout: Duration::from_secs(3),
             relays,
             blossom_server: if cfg!(dev) {
                 "http://localhost:3000".to_string()
@@ -234,45 +240,136 @@ impl NostrManager {
                 target: "whitenoise::nostr_manager::set_nostr_identity",
                 "Setting up user-specific relays"
             );
-            // Add the new user's relays
-            // TODO: We should query first and only fetch if we don't have them
-            let relays = self.fetch_user_relays(keys.public_key()).await?;
+
+            // Get currently connected relays to avoid duplicate connections
+            let connected_relays = self
+                .client
+                .relays()
+                .await
+                .keys()
+                .map(|url| url.to_string())
+                .collect::<std::collections::HashSet<String>>();
+
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::set_nostr_identity",
+                "Already connected to relays: {:?}",
+                connected_relays
+            );
+
+            // 1. Try to get relays from account object (cached in database)
+            // 2. If none found, try to query from local database
+            // 3. If still none found, fetch from network
+
+            // Handle standard Nostr relays
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::set_nostr_identity",
+                "Getting user's standard relays"
+            );
+            let mut relays = account
+                .relays(RelayType::Nostr, wn.clone())
+                .await
+                .map_err(|e| NostrManagerError::AccountError(e.to_string()))?;
+            if relays.is_empty() {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::set_nostr_identity",
+                    "No cached relays found, trying query_user_relays"
+                );
+                relays = self.query_user_relays(keys.public_key()).await?;
+            }
+            if relays.is_empty() {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::set_nostr_identity",
+                    "No relays found via query, trying fetch_user_relays"
+                );
+                relays = self.fetch_user_relays(keys.public_key()).await?;
+            }
+
             for relay in relays.iter() {
-                self.client.add_relay(relay).await?;
-                self.client.connect_relay(relay).await?;
-                tracing::debug!(
-                    target: "whitenoise::nostr_manager::set_nostr_identity",
-                    "Connected to user relay: {}",
-                    relay
-                );
+                if !connected_relays.contains(relay) {
+                    self.client.add_relay(relay).await?;
+                    self.client.connect_relay(relay).await?;
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::set_nostr_identity",
+                        "Connected to user relay: {}",
+                        relay
+                    );
+                }
             }
 
-            // Add the new user's inbox relays
-            // TODO: We should query first and only fetch if we don't have them
-            let inbox_relays = self.fetch_user_inbox_relays(keys.public_key()).await?;
+            // Handle inbox relays
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::set_nostr_identity",
+                "Getting user's inbox relays"
+            );
+            let mut inbox_relays = account
+                .relays(RelayType::Inbox, wn.clone())
+                .await
+                .map_err(|e| NostrManagerError::AccountError(e.to_string()))?;
+            if inbox_relays.is_empty() {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::set_nostr_identity",
+                    "No cached inbox relays found, trying query_user_inbox_relays"
+                );
+                inbox_relays = self.query_user_inbox_relays(keys.public_key()).await?;
+            }
+            if inbox_relays.is_empty() {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::set_nostr_identity",
+                    "No inbox relays found via query, trying fetch_user_inbox_relays"
+                );
+                inbox_relays = self.fetch_user_inbox_relays(keys.public_key()).await?;
+            }
+
             for relay in inbox_relays.iter() {
-                self.client.add_read_relay(relay).await?;
-                self.client.connect_relay(relay).await?;
-                tracing::debug!(
-                    target: "whitenoise::nostr_manager::set_nostr_identity",
-                    "Connected to user inbox relay: {}",
-                    relay
-                );
+                if !connected_relays.contains(relay) {
+                    self.client.add_read_relay(relay).await?;
+                    self.client.connect_relay(relay).await?;
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::set_nostr_identity",
+                        "Connected to user inbox relay: {}",
+                        relay
+                    );
+                }
             }
 
-            // Add the new user's key package relays
-            // TODO: We should query first and only fetch if we don't have them
-            let key_package_relays = self
-                .fetch_user_key_package_relays(keys.public_key())
-                .await?;
-            for relay in key_package_relays.iter() {
-                self.client.add_relay(relay).await?;
-                self.client.connect_relay(relay).await?;
+            // Handle key package relays
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::set_nostr_identity",
+                "Getting user's key package relays"
+            );
+            let mut key_package_relays = account
+                .relays(RelayType::KeyPackage, wn.clone())
+                .await
+                .map_err(|e| NostrManagerError::AccountError(e.to_string()))?;
+            if key_package_relays.is_empty() {
                 tracing::debug!(
                     target: "whitenoise::nostr_manager::set_nostr_identity",
-                    "Connected to user key package relay: {}",
-                    relay
+                    "No cached key package relays found, trying query_user_key_package_relays"
                 );
+                key_package_relays = self
+                    .query_user_key_package_relays(keys.public_key())
+                    .await?;
+            }
+            if key_package_relays.is_empty() {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::set_nostr_identity",
+                    "No key package relays found via query, trying fetch_user_key_package_relays"
+                );
+                key_package_relays = self
+                    .fetch_user_key_package_relays(keys.public_key())
+                    .await?;
+            }
+
+            for relay in key_package_relays.iter() {
+                if !connected_relays.contains(relay) {
+                    self.client.add_relay(relay).await?;
+                    self.client.connect_relay(relay).await?;
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::set_nostr_identity",
+                        "Connected to user key package relay: {}",
+                        relay
+                    );
+                }
             }
         }
 
@@ -450,7 +547,10 @@ impl NostrManager {
             .collect()
     }
 
-    pub async fn delete_all_data(&self, data_dir: &Path) -> Result<()> {
+    pub async fn delete_all_data(
+        &self,
+        #[cfg(any(target_os = "ios", target_os = "macos"))] data_dir: &Path,
+    ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::delete_all_data",
             "Deleting Nostr data"

@@ -11,6 +11,7 @@ import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
 import Information from "carbon-icons-svelte/lib/Information.svelte";
 import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
+import Loader from "./Loader.svelte";
 import Button from "./ui/button/button.svelte";
 import * as Sheet from "./ui/sheet";
 
@@ -138,7 +139,12 @@ async function inviteContact() {
             class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
             disabled={isInviting}
             onclick={inviteContact}>
-            {isInviting ? $t("chats.sendingInvite") : $t("chats.sendInvite")}
+            {#if isInviting}
+                <Loader size={16} fullscreen={false} />
+                {$t("chats.sendingInvite")}
+            {:else}
+                {$t("chats.sendInvite")}
+            {/if}
         </Button>
     {:else}
         <Button
@@ -147,7 +153,12 @@ async function inviteContact() {
             class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
             disabled={isCreatingChat}
             onclick={startChat}>
-            {isCreatingChat ? $t("chats.creatingChat") : $t("chats.startChatAndSendInvite")}
+            {#if isCreatingChat}
+                <Loader size={16} fullscreen={false} />
+                {$t("chats.creatingChat")}
+            {:else}
+                {$t("chats.startChatAndSendInvite")}
+            {/if}
         </Button>
     {/if}
 </div>

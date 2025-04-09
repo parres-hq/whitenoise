@@ -63,6 +63,7 @@ let showStartChatView = $state(false);
 
 async function loadContacts() {
     try {
+        // TODO: Add pagination
         const contactsResponse = await invoke("query_enriched_contacts");
         // Sort contacts by name
         contacts = Object.fromEntries(
@@ -172,6 +173,7 @@ $effect(() => {
         isValidKey = false;
         validKeyPubkey = null;
         validKeyContact = null;
+        searchResults = {};
     } else {
         // Check if input is a valid npub or hex key
         if (isValidNpub(contactsSearch)) {
@@ -188,16 +190,18 @@ $effect(() => {
 
         // If we have a valid key, try to fetch the contact info
         if (validKeyPubkey) {
+            isSearching = true;
             fetchEnrichedContact(validKeyPubkey).then((contact) => {
                 validKeyContact = contact;
 
                 // Add the contact to search results if it's valid
                 if (contact && validKeyPubkey) {
                     searchResults = {
-                        ...searchResults,
                         [validKeyPubkey as string]: contact,
+                        ...searchResults,
                     };
                 }
+                isSearching = false;
             });
         }
 

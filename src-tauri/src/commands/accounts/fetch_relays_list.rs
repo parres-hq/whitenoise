@@ -1,4 +1,5 @@
 use crate::accounts::Account;
+use crate::relays::RelayType;
 use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
 
@@ -44,21 +45,83 @@ pub async fn fetch_relays_list(
         }
     };
 
-    let relay_urls = match kind {
-        10050 => wn
-            .nostr
-            .fetch_user_inbox_relays(target_pubkey)
-            .await
-            .map_err(|e| e.to_string())?,
-        10051 => wn
-            .nostr
-            .fetch_user_key_package_relays(target_pubkey)
-            .await
-            .map_err(|e| e.to_string())?,
+    // Map the kind to the appropriate RelayType
+    let relay_type = match kind {
+        10050 => RelayType::Inbox,
+        10051 => RelayType::KeyPackage,
         _ => {
             return Err(
                 "Invalid relay list kind. Must be 10050 (inbox) or 10051 (key package)".to_string(),
             )
+        }
+    };
+
+    // First try to get relays from our database
+    let relay_urls = match Account::find_by_pubkey(&target_pubkey, wn.clone()).await {
+        Ok(account) => {
+            match account.relays(relay_type, wn.clone()).await {
+                Ok(urls) if !urls.is_empty() => urls,
+                _ => {
+                    // If no relays found in database, try query methods
+                    match relay_type {
+                        RelayType::Inbox => {
+                            match wn.nostr.query_user_inbox_relays(target_pubkey).await {
+                                Ok(urls) if !urls.is_empty() => urls,
+                                _ => {
+                                    // If query fails, fall back to fetch methods
+                                    wn.nostr
+                                        .fetch_user_inbox_relays(target_pubkey)
+                                        .await
+                                        .map_err(|e| e.to_string())?
+                                }
+                            }
+                        }
+                        RelayType::KeyPackage => {
+                            match wn.nostr.query_user_key_package_relays(target_pubkey).await {
+                                Ok(urls) if !urls.is_empty() => urls,
+                                _ => {
+                                    // If query fails, fall back to fetch methods
+                                    wn.nostr
+                                        .fetch_user_key_package_relays(target_pubkey)
+                                        .await
+                                        .map_err(|e| e.to_string())?
+                                }
+                            }
+                        }
+                        _ => Vec::new(), // This should never happen due to the match above
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            // If account not found in database, try query methods
+            match relay_type {
+                RelayType::Inbox => {
+                    match wn.nostr.query_user_inbox_relays(target_pubkey).await {
+                        Ok(urls) if !urls.is_empty() => urls,
+                        _ => {
+                            // If query fails, fall back to fetch methods
+                            wn.nostr
+                                .fetch_user_inbox_relays(target_pubkey)
+                                .await
+                                .map_err(|e| e.to_string())?
+                        }
+                    }
+                }
+                RelayType::KeyPackage => {
+                    match wn.nostr.query_user_key_package_relays(target_pubkey).await {
+                        Ok(urls) if !urls.is_empty() => urls,
+                        _ => {
+                            // If query fails, fall back to fetch methods
+                            wn.nostr
+                                .fetch_user_key_package_relays(target_pubkey)
+                                .await
+                                .map_err(|e| e.to_string())?
+                        }
+                    }
+                }
+                _ => Vec::new(), // This should never happen due to the match above
+            }
         }
     };
 

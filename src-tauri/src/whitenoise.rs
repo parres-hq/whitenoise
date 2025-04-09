@@ -42,7 +42,15 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
         // Clear data first
-        self.nostr.delete_all_data(&self.data_dir).await?;
+        #[cfg(any(target_os = "ios", target_os = "macos"))]
+        {
+            self.nostr.delete_all_data(&self.data_dir).await?;
+        }
+        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+        {
+            self.nostr.delete_all_data().await?;
+        }
+
         self.database.delete_all_data().await?;
         self.nostr_mls.lock().await.delete_all_data()?;
 
