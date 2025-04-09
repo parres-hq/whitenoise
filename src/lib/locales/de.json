@@ -109,6 +109,7 @@
         "startNewChat": "Klicke auf den \"+\"-Button, um einen neuen Chat zu starten",
         "errorLoadingChats": "Fehler beim Laden der Chats",
         "newChat": "Neuer Chat",
+        "chatDetails": "Chat-Details",
         "search": "Suchen",
         "searchContactPlaceholder": "Kontakt oder öffentlichen Schlüssel suchen...",
         "contactsLoadingError": "Entschuldigung, wir konnten die Kontakte aufgrund eines Fehlers nicht laden.",

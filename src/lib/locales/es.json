@@ -109,6 +109,7 @@
         "startNewChat": "Presiona el botón \"+\" para empezar una nueva conversación",
         "errorLoadingChats": "Ocurrió un error al cargar las conversaciones",
         "newChat": "Nueva conversación",
+        "chatDetails": "Detalles de la conversación",
         "search": "Buscar",
         "searchContactPlaceholder": "Buscar contacto o clave pública...",
         "contactsLoadingError": "Lo sentimos, no pudimos cargar los contactos debido a un error.",
