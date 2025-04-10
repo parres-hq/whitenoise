@@ -15,6 +15,18 @@ const MIGRATION_FILES: &[(&str, &[u8])] = &[
         "0002_add_media_files.sql",
         include_bytes!("../db_migrations/0002_add_media_files.sql"),
     ),
+    (
+        "0003_add_tokens_to_messages.sql",
+        include_bytes!("../db_migrations/0003_add_tokens_to_messages.sql"),
+    ),
+    (
+        "0004_add_event_kind_to_messages.sql",
+        include_bytes!("../db_migrations/0004_add_event_kind_to_messages.sql"),
+    ),
+    (
+        "0005_add_relay_uniqueness_constraints.sql",
+        include_bytes!("../db_migrations/0005_add_relay_uniqueness_constraints.sql"),
+    ),
     // Add new migrations here in order, for example:
     // ("0002_something.sql", include_bytes!("../db_migrations/0002_something.sql")),
     // ("0003_another.sql", include_bytes!("../db_migrations/0003_another.sql")),

@@ -48,11 +48,6 @@ async function loadRelays() {
     }
 }
 
-$inspect($activeAccount);
-$inspect(inboxRelays);
-$inspect(keyPackageRelays);
-$inspect(relayStatuses);
-
 // Open add relay sheet
 function openAddRelaySheet(type: "inbox" | "key_package") {
     currentRelayType = type;
