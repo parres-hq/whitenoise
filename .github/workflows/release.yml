@@ -12,10 +12,10 @@ on:
         type: string
         default: 'v0.0.0'
 
-# Add concurrency group to cancel redundant workflow runs
+# Update concurrency configuration to avoid deadlocks with called workflows
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' && github.event.inputs.version == '' }}
 
 permissions:
   contents: write

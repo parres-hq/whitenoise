@@ -40,10 +40,10 @@ on:
       - 'vite.config.js'
       - '.github/workflows/build_macos.yml'
 
-# Add concurrency group to cancel redundant workflow runs
+# Update concurrency configuration to avoid deadlocks with parent workflows
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}-build-macos
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
   setup:
