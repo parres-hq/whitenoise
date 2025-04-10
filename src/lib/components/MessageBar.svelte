@@ -102,6 +102,10 @@ async function sendMessage() {
             media = []; // Clear media after successful send
             setTimeout(adjustTextareaHeight, 0);
         })
+        .catch((error) => {
+            console.error("Error sending message:", error);
+            toast.error(`Failed to send message: ${error}`);
+        })
         .finally(() => {
             replyToMessage = undefined;
             sendingMessage = false;
