@@ -53,7 +53,7 @@ async function sendMessage() {
 
     // Check if any uploads are still in progress
     if (media.some((item) => item.status === "uploading")) {
-        toast.info("Please wait for uploads to complete");
+        toast.info($t("chats.waitMediaUpload"));
         return;
     }
 

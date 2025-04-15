@@ -248,9 +248,9 @@ $effect(() => {
                         <Sheet.Title>{$t("chats.search")}</Sheet.Title>
                     </Sheet.Header>
                     <div class="flex flex-col gap-2 px-6">
-                        <Input type="search"  placeholder={$t("chats.searchPlaceholder")+"&hellip;"} class="focus-visible:ring-0" />
+                        <Input type="search"  placeholder={$t("chats.searchPlaceholder")} class="focus-visible:ring-0" />
                     </div>
-                    <div class="flex flex-col gap-2 px-6 mt-6 text-destructive">Not implemented yet</div>
+                    <div class="flex flex-col gap-2 px-6 mt-6 text-destructive">{$t("shared.notImplementedYet")}</div>
                 </Sheet.Content>
             </Sheet.Root>
 
@@ -334,7 +334,7 @@ $effect(() => {
                                         {/if}
                                         <div class="mt-4">
                                             {#if isSearching}
-                                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searching")} &hellip;</h2>
+                                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searching")}</h2>
                                                 <div class="px-6">
                                                     <Loader size={40} fullscreen={false} />
                                                 </div>
