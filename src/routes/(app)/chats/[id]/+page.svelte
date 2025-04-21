@@ -9,7 +9,7 @@ import Button from "$lib/components/ui/button/button.svelte";
 import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 import { activeAccount, hasLightningWallet } from "$lib/stores/accounts";
 import { createChatStore } from "$lib/stores/chat";
-import type { CachedMessage, Message } from "$lib/types/chat";
+import type { ChatMessage, Message } from "$lib/types/chat";
 import {
     type EnrichedContact,
     type NEvent,
@@ -51,12 +51,12 @@ let group: NostrMlsGroup | undefined = $state(undefined);
 let counterpartyPubkey: string | undefined = $state(undefined);
 let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
 let groupName = $state("");
-let cachedMessages: CachedMessage[] | undefined = $state(undefined);
+let messages: Message[] | undefined = $state(undefined);
 let showMessageMenu = $state(false);
 let selectedMessageId: string | null | undefined = $state(undefined);
 let messageMenuPosition = $state({ x: 0, y: 0 });
 let messageMenuExtendedPosition = $state({ x: 0, y: 0 });
-let replyToMessage: Message | undefined = $state(undefined);
+let replyToMessage: ChatMessage | undefined = $state(undefined);
 let isReplyToMessageDeleted = $state(false);
 
 $effect(() => {
@@ -90,18 +90,18 @@ async function loadGroup() {
     const groupId = selectedChatId || page.params.id;
     invoke("get_group_and_messages", { groupId }).then(async (groupResponse) => {
         const groupData: NostrMlsGroup = (
-            groupResponse as { group: NostrMlsGroup; messages: CachedMessage[] }
+            groupResponse as { group: NostrMlsGroup; messages: Message[] }
         ).group;
-        const cachedMessagesData: CachedMessage[] = (
-            groupResponse as { group: NostrMlsGroup; messages: CachedMessage[] }
+        const messagesData: Message[] = (
+            groupResponse as { group: NostrMlsGroup; messages: Message[] }
         ).messages;
 
         group = groupData;
-        cachedMessages = cachedMessagesData;
+        messages = messagesData;
         // Add messages to the chat store
         chatStore.clear();
-        for (const cachedMessage of cachedMessages) {
-            chatStore.handleCachedMessage(cachedMessage);
+        for (const message of messages) {
+            chatStore.handleMessage(message);
         }
 
         if (!counterpartyPubkey) {
@@ -137,13 +137,13 @@ async function scrollToBottom() {
 
 onMount(async () => {
     if (!unlistenMlsMessageProcessed) {
-        unlistenMlsMessageProcessed = await listen<[NostrMlsGroup, CachedMessage]>(
+        unlistenMlsMessageProcessed = await listen<[NostrMlsGroup, Message]>(
             "mls_message_processed",
-            ({ payload: [_updatedGroup, cachedMessage] }) => {
-                const message = chatStore.findMessage(cachedMessage.event_id);
-                if (!message) {
+            ({ payload: [_updatedGroup, message] }) => {
+                const storedMessage = chatStore.findChatMessage(message.event_id);
+                if (!storedMessage) {
                     console.log("pushing message to transcript");
-                    chatStore.handleCachedMessage(cachedMessage);
+                    chatStore.handleMessage(message);
                 }
                 scrollToBottom();
             }
@@ -163,8 +163,8 @@ onMount(async () => {
     await loadGroup();
 });
 
-function handleNewEvent(cachedMessage: CachedMessage) {
-    chatStore.handleCachedMessage(cachedMessage);
+function handleNewMessage(message: Message) {
+    chatStore.handleMessage(message);
 }
 
 function handlePress(event: PressCustomEvent | MouseEvent) {
@@ -260,9 +260,9 @@ async function clickReaction(reaction: string, messageId: string | null | undefi
 
 async function copyMessage() {
     if (selectedMessageId) {
-        const message = chatStore.findMessage(selectedMessageId);
-        if (message) {
-            await writeText(message.content);
+        const chatMessage = chatStore.findChatMessage(selectedMessageId);
+        if (chatMessage) {
+            await writeText(chatMessage.content);
             const button = document.querySelector("[data-copy-button]");
             button?.classList.add("copy-success");
             setTimeout(() => {
@@ -273,13 +273,13 @@ async function copyMessage() {
     }
 }
 
-async function payLightningInvoice(message: Message) {
+async function payLightningInvoice(chatMessage: ChatMessage) {
     if (!group) {
         console.error("no group found");
         return;
     }
 
-    if (!message.lightningInvoice) {
+    if (!chatMessage.lightningInvoice) {
         toast.error("Message does not have a lightning invoice");
         return;
     }
@@ -299,9 +299,9 @@ async function payLightningInvoice(message: Message) {
     }
 
     chatStore
-        .payLightningInvoice(groupWithRelays, message)
+        .payLightningInvoice(groupWithRelays, chatMessage)
         .then(
-            (_paymentEvent: CachedMessage | null) => {
+            (_paymentEvent: Message | null) => {
                 toast.success("Payment success", {
                     description: "Successfully sent payment to invoice",
                 });
@@ -316,14 +316,14 @@ async function payLightningInvoice(message: Message) {
         });
 }
 
-async function copyInvoice(message: Message) {
-    const invoice = message.lightningInvoice?.invoice;
+async function copyInvoice(chatMessage: ChatMessage) {
+    const invoice = chatMessage.lightningInvoice?.invoice;
     if (invoice) await copyToClipboard(invoice, "bolt11 invoice");
 }
 
 function reply() {
     if (selectedMessageId) {
-        replyToMessage = chatStore.findMessage(selectedMessageId);
+        replyToMessage = chatStore.findChatMessage(selectedMessageId);
         document.getElementById("newMessageInput")?.focus();
         showMessageMenu = false;
     }
@@ -366,8 +366,8 @@ function isSelectedMessageCopyable(): boolean {
     return chatStore.isMessageCopyable(selectedMessageId);
 }
 
-function hasMessageReactions(message: Message): boolean {
-    return chatStore.hasReactions(message);
+function hasMessageReactions(chatMessage: ChatMessage): boolean {
+    return chatStore.hasReactions(chatMessage);
 }
 
 onDestroy(() => {
@@ -411,15 +411,15 @@ function navigateToInfo() {
             id="messagesContainer"
             class="flex-1 px-8 flex flex-col gap-2 pt-10 pb-24 overflow-y-auto opacity-100 transition-opacity ease-in-out duration-50"
         >
-            {#each $chatStore.messages as message (message.id)}
+            {#each $chatStore.chatMessages as chatMessage (chatMessage.id)}
                 <div
-                    class={`flex justify-end ${message.isMine ? "" : "flex-row-reverse"} items-center gap-4 group ${hasMessageReactions(message) ? "mb-6" : ""}`}
+                    class={`flex justify-end ${chatMessage.isMine ? "" : "flex-row-reverse"} items-center gap-4 group ${hasMessageReactions(chatMessage) ? "mb-6" : ""}`}
                 >
                     <button
                         onclick={handlePress}
                         data-message-container
-                        data-message-id={message.id}
-                        data-is-current-user={message.isMine}
+                        data-message-id={chatMessage.id}
+                        data-is-current-user={chatMessage.isMine}
                         class="p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                     >
                         <OverflowMenuHorizontal size={24} />
@@ -428,30 +428,30 @@ function navigateToInfo() {
                         use:press={()=>({ triggerBeforeFinished: true, timeframe: 100 })}
                         onpress={handlePress}
                         data-message-container
-                        data-message-id={message.id}
-                        data-is-current-user={message.isMine}
-                        class={`font-normal text-base relative rounded-md max-w-[70%] ${message.lightningPayment ? "bg-opacity-10" : ""} ${!message.isSingleEmoji ? `${message.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && message.id === selectedMessageId ? 'relative z-20' : ''}`}
+                        data-message-id={chatMessage.id}
+                        data-is-current-user={chatMessage.isMine}
+                        class={`font-normal text-base relative rounded-md max-w-[70%] ${chatMessage.lightningPayment ? "bg-opacity-10" : ""} ${!chatMessage.isSingleEmoji ? `${chatMessage.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && chatMessage.id === selectedMessageId ? 'relative z-20' : ''}`}
                     >
-                        {#if message.replyToId }
+                        {#if chatMessage.replyToId }
                             <RepliedTo
-                                message={chatStore.findReplyToMessage(message)}
-                                isDeleted={chatStore.isDeleted(message.replyToId)}
+                                message={chatStore.findReplyToChatMessage(chatMessage)}
+                                isDeleted={chatStore.isDeleted(chatMessage.replyToId)}
                             />
                         {/if}
-                        <div class="flex {message.content.trim().length < 50 && !message.isSingleEmoji ? "flex-row gap-6" : "flex-col gap-2"} w-full {message.lightningPayment ? "items-center justify-center" : "items-end"}  {message.isSingleEmoji ? 'mb-4 my-6' : ''}">
-                            <div class="break-words-smart w-full {message.lightningPayment ? 'flex justify-center' : ''} {message.isSingleEmoji ? 'text-7xl leading-none' : ''}">
-                                {#if chatStore.isDeleted(message.id)}
+                        <div class="flex {chatMessage.content.trim().length < 50 && !chatMessage.isSingleEmoji ? "flex-row gap-6" : "flex-col gap-2"} w-full {chatMessage.lightningPayment ? "items-center justify-center" : "items-end"}  {chatMessage.isSingleEmoji ? 'mb-4 my-6' : ''}">
+                            <div class="w-full {chatMessage.lightningPayment ? 'flex justify-center' : ''} {chatMessage.isSingleEmoji ? 'text-7xl leading-none' : ''}">
+                                {#if chatStore.isDeleted(chatMessage.id)}
                                     <div class="inline-flex flex-row items-center gap-2 px-3 py-1 w-fit text-muted-foreground">
                                         <span class="font-italic text-base opacity-60">{$t("chats.messageDeleted")}</span>
                                     </div>
-                                {:else if message.content.trim().length > 0}
-                                    {#if !message.lightningInvoice}
-                                        <MessageTokens tokens={message.tokens} />
+                                {:else if chatMessage.content.trim().length > 0}
+                                    {#if !chatMessage.lightningInvoice}
+                                        <MessageTokens tokens={chatMessage.tokens} />
                                     {/if}
-                                    {#if message.lightningInvoice }
+                                    {#if chatMessage.lightningInvoice }
                                     <div class="flex flex-col items-start gap-4">
                                         <div class="relative">
-                                            {#await lightningInvoiceToQRCode(message.lightningInvoice.invoice)}
+                                            {#await lightningInvoiceToQRCode(chatMessage.lightningInvoice.invoice)}
                                                 <div class="max-w-64 max-h-64 shadow-lg flex items-center justify-center">
                                                     <CircleDash size={32} class="animate-spin-slow text-blue-600" />
                                                 </div>
@@ -462,24 +462,24 @@ function navigateToInfo() {
                                                         size="lg"
                                                         class="p-0 w-full h-auto aspect-square relative"
                                                         onclick={() => {
-                                                            copyInvoice(message);
+                                                            copyInvoice(chatMessage);
                                                             toast.success("Invoice copied to clipboard");
                                                         }}
                                                     >
                                                         <img
                                                             src={qrCodeUrl}
                                                             alt="QR Code"
-                                                            class="max-w-full w-full h-auto {message.lightningInvoice.isPaid ? 'blur-sm' : ''}"
+                                                            class="max-w-full w-full h-auto {chatMessage.lightningInvoice.isPaid ? 'blur-sm' : ''}"
                                                         />
                                                     </Button>
                                                 {/if}
                                             {:catch}
                                                 <!-- Show nothing in case of error -->
                                             {/await}
-                                            {#if message.lightningInvoice.description}
-                                                <div class="mt-4">{message.lightningInvoice.description}</div>
+                                            {#if chatMessage.lightningInvoice.description}
+                                                <div class="mt-4">{chatMessage.lightningInvoice.description}</div>
                                             {/if}
-                                            {#if message.lightningInvoice.isPaid }
+                                            {#if chatMessage.lightningInvoice.isPaid }
                                                 <CheckmarkOutline
                                                     size={32}
                                                     class="text-green-500 rounded-full opacity-80 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
@@ -491,25 +491,25 @@ function navigateToInfo() {
                                                 variant="outline"
                                                 size="sm"
                                                 onclick={(() => {
-                                                    copyInvoice(message);
+                                                    copyInvoice(chatMessage);
                                                     toast.success("Invoice copied to clipboard");
                                                 })}
-                                                class={`px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow ${message.isMine ? "bg-secondary-foreground" : ""}`}
+                                                class={`px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow ${chatMessage.isMine ? "bg-secondary-foreground" : ""}`}
                                             >
                                                 {$t("chats.copyInvoice")}  <Copy size={20} />
                                             </Button>
-                                            {#if $hasLightningWallet && !message.lightningInvoice.isPaid}
+                                            {#if $hasLightningWallet && !chatMessage.lightningInvoice.isPaid}
                                                 <button
-                                                    onclick={() => payLightningInvoice(message)}
+                                                    onclick={() => payLightningInvoice(chatMessage)}
                                                     class="transition-all bg-gradient-to-bl from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-500  hover:shadow-xl duration-300 rounded-md px-6 py-2 flex flex-row gap-4 items-center justify-center font-semibold grow"
                                                 >
-                                                {$t("chats.paySats", { values: { amount :message.lightningInvoice.amount } })}
+                                                {$t("chats.paySats", { values: { amount : chatMessage.lightningInvoice.amount } })}
                                                 </button>
                                             {/if}
                                         </div>
                                     </div>
                                     {/if}
-                                {:else if message.lightningPayment}
+                                {:else if chatMessage.lightningPayment}
                                     <div class="inline-flex flex-row items-center gap-2 bg-orange-400 rounded-full px-2 py-0 w-fit">
                                         <span>⚡️</span><span class="italic font-bold">{$t("chats.invoicePaid")}</span><span>⚡️</span>
                                     </div>
@@ -517,20 +517,20 @@ function navigateToInfo() {
                                     <span class="italic opacity-60">{$t("chats.noMessageContent")}</span>
                                 {/if}
                                 </div>
-                                <div class="flex flex-row gap-2 items-center ml-auto {message.isMine ? "text-primary-foreground" : "text-primary"}">
-                                    {#if message.id !== "temp"}
+                                <div class="flex flex-row gap-2 items-center ml-auto {chatMessage.isMine ? "text-primary-foreground" : "text-primary"}">
+                                    {#if chatMessage.id !== "temp"}
                                         <span><CheckmarkOutline size={16} /></span>
                                     {:else}
                                         <span><CircleDash size={16} class="animate-spin-slow"/></span>
                                     {/if}
                                     <span class="text-sm opacity-60 whitespace-nowrap">
-                                        {formatMessageTime(message.createdAt)}
+                                        {formatMessageTime(chatMessage.createdAt)}
                                     </span>
                                 </div>
                             </div>
                             <div class="reactions flex flex-row gap-2 absolute -bottom-6 right-0">
-                                {#each chatStore.getMessageReactionsSummary(message.id) as {emoji, count}}
-                                    <button onclick={() => clickReaction(emoji, message.id)} class="text-sm py-1 px-2 ring-1 ring-background {message.isMine ? 'bg-accent-foreground text-primary-foreground' : 'text-primary bg-input'} rounded-full flex flex-row gap-1 items-center">
+                                {#each chatStore.getMessageReactionsSummary(chatMessage.id) as {emoji, count}}
+                                    <button onclick={() => clickReaction(emoji, chatMessage.id)} class="text-sm py-1 px-2 ring-1 ring-background {chatMessage.isMine ? 'bg-accent-foreground text-primary-foreground' : 'text-primary bg-input'} rounded-full flex flex-row gap-1 items-center">
                                         {emoji}
                                         {#if count > 1}
                                             <span class="text-sm">{count}</span>
@@ -542,7 +542,7 @@ function navigateToInfo() {
                     </div>
             {/each}
         </div>
-        <MessageBar {group} bind:replyToMessage={replyToMessage} handleNewMessage={handleNewEvent} bind:isReplyToMessageDeleted={isReplyToMessageDeleted} />
+        <MessageBar {group} bind:replyToMessage={replyToMessage} handleNewMessage={handleNewMessage} bind:isReplyToMessageDeleted={isReplyToMessageDeleted} />
     </main>
 {/if}
 

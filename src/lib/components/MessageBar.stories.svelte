@@ -1,6 +1,6 @@
 <script lang="ts" module>
+import type { Message } from "$lib/types/chat";
 import { NostrMlsGroupType } from "$lib/types/nostr";
-import type { NEvent } from "$lib/types/nostr";
 import { defineMeta } from "@storybook/addon-svelte-csf";
 import MessageBar from "./MessageBar.svelte";
 
@@ -54,6 +54,7 @@ const mockReplyMessage = {
     reactions: [],
     isSingleEmoji: false,
     isMine: false,
+    tokens: [{ Text: "This is a test message being replied to" }],
     event: {
         id: "test_event_id",
         pubkey: "test_pubkey",
@@ -64,7 +65,7 @@ const mockReplyMessage = {
     },
 };
 
-function handleNewMessage(message: NEvent) {
+function handleNewMessage(message: Message) {
     console.log("New message:", message);
 }
 </script>

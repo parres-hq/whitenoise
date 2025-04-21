@@ -1,44 +1,44 @@
 import type {
-    CachedMessage,
+    ChatMessage,
+    ChatMessagesMap,
     ChatState,
-    DeletionsMap,
+    DeletionMessagesMap,
     Message,
-    MessagesMap,
-    Reaction,
+    ReactionMessage,
+    ReactionMessagesMap,
     ReactionSummary,
-    ReactionsMap,
 } from "$lib/types/chat";
 import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { derived, get, writable } from "svelte/store";
 import { activeAccount } from "./accounts";
 
-import { eventToDeletion } from "$lib/utils/deletion";
-import { cachedMessageToMessage } from "$lib/utils/message";
-import { eventToReaction } from "$lib/utils/reaction";
+import { messageToDeletionMessage } from "$lib/utils/deletion";
+import { messageToChatMessage } from "$lib/utils/message";
+import { messageToReactionMessage } from "$lib/utils/reaction";
 
 /**
- * Creates a chat store to manage messages, reactions, and deletions.
- * @returns {Object} A Svelte store wrapping ChatState with methods to interact with messages, reactions, and deletions
+ * Creates a chat store to manage chat messages, reaction messages, and deletion messages.
+ * @returns {Object} A Svelte store wrapping ChatState with methods to interact with messages, reactionMessages, and deletions
  */
 export function createChatStore() {
-    const messagesMap = writable<MessagesMap>(new Map());
-    const reactionsMap = writable<ReactionsMap>(new Map());
-    const deletionsMap = writable<DeletionsMap>(new Map());
+    const chatMessagesMap = writable<ChatMessagesMap>(new Map());
+    const reactionMessagesMap = writable<ReactionMessagesMap>(new Map());
+    const deletionMessagesMap = writable<DeletionMessagesMap>(new Map());
     const currentPubkey = get(activeAccount)?.pubkey;
 
-    const messages = derived(messagesMap, ($messagesMap) => {
-        return Array.from($messagesMap.values()).sort((a, b) => a.createdAt - b.createdAt);
+    const chatMessages = derived(chatMessagesMap, ($chatMessagesMap) => {
+        return Array.from($chatMessagesMap.values()).sort((a, b) => a.createdAt - b.createdAt);
     });
 
     const { subscribe, update } = writable<ChatState>({
-        messages: get(messages),
-        handleCachedMessage,
-        handleCachedMessages,
+        chatMessages: get(chatMessages),
+        handleMessage,
+        handleMessages,
         clear,
-        findMessage,
-        findReaction,
-        findReplyToMessage,
+        findChatMessage,
+        findReactionMessage,
+        findReplyToChatMessage,
         isDeleted,
         getMessageReactionsSummary,
         hasReactions,
@@ -49,19 +49,19 @@ export function createChatStore() {
         isMessageCopyable,
     });
 
-    messages.subscribe((sorted) => {
+    chatMessages.subscribe((sortedChatMessages) => {
         update((state) => ({
             ...state,
-            messages: sorted,
+            chatMessages: sortedChatMessages,
         }));
     });
 
     const eventHandlers = {
-        handleChatEvent: (cachedMessage: CachedMessage) => {
-            const newMessage = cachedMessageToMessage(cachedMessage, currentPubkey);
+        handleChatMessage: (message: Message) => {
+            const newMessage = messageToChatMessage(message, currentPubkey);
             const messagesToUpdate = [newMessage];
             const replyToMessage = newMessage.replyToId
-                ? findMessage(newMessage.replyToId)
+                ? findChatMessage(newMessage.replyToId)
                 : undefined;
 
             if (replyToMessage?.lightningInvoice && newMessage.lightningPayment) {
@@ -70,75 +70,75 @@ export function createChatStore() {
                 messagesToUpdate.push(replyToMessage);
             }
 
-            messagesMap.update((messages) => {
+            chatMessagesMap.update((chatMessages) => {
                 for (const message of messagesToUpdate) {
-                    messages.set(message.id, message);
+                    chatMessages.set(message.id, message);
                 }
-                return messages;
+                return chatMessages;
             });
         },
-        handleDeletionEvent: (cachedMessage: CachedMessage) => {
-            const deletion = eventToDeletion(cachedMessage.event);
-            if (!deletion) return;
-            deletionsMap.update((deletions) => {
-                deletions.set(deletion.targetId, deletion);
-                return deletions;
+        handleDeletionMessage: (message: Message) => {
+            const deletionMessage = messageToDeletionMessage(message);
+            if (!deletionMessage) return;
+            deletionMessagesMap.update((deletionMessages) => {
+                deletionMessages.set(deletionMessage.targetId, deletionMessage);
+                return deletionMessages;
             });
         },
-        handleReactionEvent: (cachedMessage: CachedMessage) => {
-            const reaction = eventToReaction(cachedMessage.event, currentPubkey);
-            if (!reaction) return;
-            reactionsMap.update((reactions) => {
-                reactions.set(reaction.id, reaction);
-                return reactions;
+        handleReactionMessage: (message: Message) => {
+            const reactionMessage = messageToReactionMessage(message, currentPubkey);
+            if (!reactionMessage) return;
+            reactionMessagesMap.update((reactionMessages) => {
+                reactionMessages.set(reactionMessage.id, reactionMessage);
+                return reactionMessages;
             });
 
-            const message = findMessage(reaction.targetId);
-            if (!message) return;
-            message.reactions = [...message.reactions, reaction];
-            messagesMap.update((messages) => {
-                messages.set(message.id, message);
-                return messages;
+            const chatMessage = findChatMessage(reactionMessage.targetId);
+            if (!chatMessage) return;
+            chatMessage.reactions = [...chatMessage.reactions, reactionMessage];
+            chatMessagesMap.update((chatMessages) => {
+                chatMessages.set(chatMessage.id, chatMessage);
+                return chatMessages;
             });
         },
     };
 
-    const eventHandlerMap: Record<number, (cachedMessage: CachedMessage) => void> = {
-        5: eventHandlers.handleDeletionEvent,
-        7: eventHandlers.handleReactionEvent,
-        9: eventHandlers.handleChatEvent,
+    const messageHandlerMap: Record<number, (message: Message) => void> = {
+        5: eventHandlers.handleDeletionMessage,
+        7: eventHandlers.handleReactionMessage,
+        9: eventHandlers.handleChatMessage,
     };
 
     /**
-     * Deletes temporary events from the message and reaction maps
+     * Deletes temporary messages from the chat messages and reaction messages maps
      */
-    function deleteTempEvents() {
-        messagesMap.update((messages) => {
-            messages.delete("temp");
-            return messages;
+    function deleteTempMessages() {
+        chatMessagesMap.update((chatMessages) => {
+            chatMessages.delete("temp");
+            return chatMessages;
         });
-        reactionsMap.update((reactions) => {
-            reactions.delete("temp");
-            return reactions;
+        reactionMessagesMap.update((reactionMessages) => {
+            reactionMessages.delete("temp");
+            return reactionMessages;
         });
     }
 
-    function handleCachedMessage(cachedMessage: CachedMessage, deleteTemp = true) {
-        if (deleteTemp) deleteTempEvents();
+    function handleMessage(message: Message, deleteTemp = true) {
+        if (deleteTemp) deleteTempMessages();
 
-        const handler = eventHandlerMap[cachedMessage.event_kind];
-        if (handler) handler(cachedMessage);
+        const handler = messageHandlerMap[message.event_kind];
+        if (handler) handler(message);
     }
 
     /**
      * Handles multiple Nostr events and their tokens, sorting them by creation time and updating the chat store state
      * @param {EventAndTokens[]} eventsAndTokens - Array of Nostr events and tokens to handle
      */
-    function handleCachedMessages(cachedMessages: CachedMessage[]) {
-        deleteTempEvents();
-        const sortedEvents = cachedMessages.sort((a, b) => a.created_at - b.created_at);
-        for (const cachedMessage of sortedEvents) {
-            handleCachedMessage(cachedMessage, false);
+    function handleMessages(messages: Message[]) {
+        deleteTempMessages();
+        const sortedEvents = messages.sort((a, b) => a.created_at - b.created_at);
+        for (const message of sortedEvents) {
+            handleMessage(message, false);
         }
     }
 
@@ -146,50 +146,53 @@ export function createChatStore() {
      * Clears all messages and deletions from the chatstore
      */
     function clear() {
-        messagesMap.set(new Map());
-        deletionsMap.set(new Map());
-        reactionsMap.set(new Map());
+        chatMessagesMap.set(new Map());
+        deletionMessagesMap.set(new Map());
+        reactionMessagesMap.set(new Map());
     }
 
     /**
      * Finds a message by its ID
      * @param {string} id - The ID of the message to find
-     * @returns {Message | undefined} The found message or undefined
+     * @returns {ChatMessage | undefined} The found message or undefined
      */
-    function findMessage(id: string): Message | undefined {
-        const messages = get(messagesMap);
-        return messages.get(id);
+    function findChatMessage(id: string): ChatMessage | undefined {
+        const chatMessages = get(chatMessagesMap);
+        return chatMessages.get(id);
     }
     /**
      * Finds a reaction by its ID
      * @param {string} id - The ID of the reaction to find
-     * @returns {Reaction | undefined} The found reaction or undefined
+     * @returns {ReactionMessage | undefined} The found reaction message or undefined
      */
-    function findReaction(id: string): Reaction | undefined {
-        const reactions = get(reactionsMap);
-        return reactions.get(id);
+    function findReactionMessage(id: string): ReactionMessage | undefined {
+        const reactionMessages = get(reactionMessagesMap);
+        return reactionMessages.get(id);
     }
 
     /**
      * Finds a user's reaction to a message with specific content
-     * @param {Message} message - The message to search reactions for
+     * @param {ChatMessage} message - The message to search reactionMessages for
      * @param {string} content - The reaction content to find
-     * @returns {Reaction | undefined} The found reaction or undefined
+     * @returns {ReactionMessage | undefined} The found reaction message or undefined
      */
-    function findMyMessageReaction(message: Message, content: string): Reaction | undefined {
-        return message.reactions.find(
+    function findMyMessageReaction(
+        chatMessage: ChatMessage,
+        content: string
+    ): ReactionMessage | undefined {
+        return chatMessage.reactions.find(
             (reaction) => reaction.content === content && reaction.isMine && !isDeleted(reaction.id)
         );
     }
 
     /**
      * Finds the message that a given message is replying to
-     * @param {Message} message - The message to find the reply-to message for
-     * @returns {Message | undefined} The message being replied to, or undefined
+     * @param {ChatMessage} message - The message to find the reply-to message for
+     * @returns {ChatMessage | undefined} The message being replied to, or undefined
      */
-    function findReplyToMessage(message: Message): Message | undefined {
-        const replyToId = message.replyToId;
-        if (replyToId) return findMessage(replyToId);
+    function findReplyToChatMessage(chatMessage: ChatMessage): ChatMessage | undefined {
+        const replyToId = chatMessage.replyToId;
+        if (replyToId) return findChatMessage(replyToId);
     }
 
     /**
@@ -198,35 +201,36 @@ export function createChatStore() {
      * @returns {boolean} True if the event has been deleted, false otherwise
      */
     function isDeleted(eventId: string): boolean {
-        const deletions = get(deletionsMap);
+        const deletions = get(deletionMessagesMap);
         return deletions.has(eventId);
     }
 
     /**
-     * Gets a summary of reactions for a message
-     * @param {string} messageId - The ID of the message to get reactions for
+     * Gets a summary of reactionMessages for a message
+     * @param {string} messageId - The ID of the message to get reactionMessages for
      * @returns {ReactionSummary[]} Array of reaction summaries (emoji and count)
      */
     function getMessageReactionsSummary(messageId: string): ReactionSummary[] {
-        const message = findMessage(messageId);
-        const reactions = message?.reactions || [];
-        const reactionsCounter: { [key: string]: number } = {};
-        for (const reaction of reactions) {
+        const message = findChatMessage(messageId);
+        const reactionMessages = message?.reactions || [];
+        const reactionMessagesCounter: { [key: string]: number } = {};
+        for (const reaction of reactionMessages) {
             if (!isDeleted(reaction.id)) {
-                reactionsCounter[reaction.content] = (reactionsCounter[reaction.content] || 0) + 1;
+                reactionMessagesCounter[reaction.content] =
+                    (reactionMessagesCounter[reaction.content] || 0) + 1;
             }
         }
-        return Object.entries(reactionsCounter).map(([emoji, count]) => ({ emoji, count }));
+        return Object.entries(reactionMessagesCounter).map(([emoji, count]) => ({ emoji, count }));
     }
 
     /**
-     * Checks if a message has any reactions
-     * @param {Message} message - The message to check for reactions
-     * @returns {boolean} True if the message has reactions, false otherwise
+     * Checks if a message has any reactionMessages
+     * @param {ChatMessage} message - The message to check for reactionMessages
+     * @returns {boolean} True if the message has reactionMessages, false otherwise
      */
-    function hasReactions(message: Message): boolean {
-        const reactionsSummary = getMessageReactionsSummary(message.id);
-        return reactionsSummary.length > 0;
+    function hasReactions(chatMessage: ChatMessage): boolean {
+        const reactionMessagesummary = getMessageReactionsSummary(chatMessage.id);
+        return reactionMessagesummary.length > 0;
     }
 
     /**
@@ -235,7 +239,7 @@ export function createChatStore() {
      * @returns {boolean} True if the message can be deleted, false otherwise
      */
     function isMessageDeletable(messageId: string): boolean {
-        const message = findMessage(messageId);
+        const message = findChatMessage(messageId);
         if (!message || message.lightningPayment || isDeleted(messageId)) return false;
         return message.isMine;
     }
@@ -246,7 +250,7 @@ export function createChatStore() {
      * @returns {boolean} True if the message can be copied, false otherwise
      */
     function isMessageCopyable(messageId: string): boolean {
-        const message = findMessage(messageId);
+        const message = findChatMessage(messageId);
         if (!message) return false;
         return !isDeleted(message.id);
     }
@@ -256,22 +260,22 @@ export function createChatStore() {
      * @param {NostrMlsGroup} group - The group the message belongs to
      * @param {string} content - The reaction content (emoji)
      * @param {string} messageId - The ID of the message to react to
-     * @returns {Promise<CachedMessage | null>} The created event or null if operation failed
+     * @returns {Promise<Message | null>} The created event or null if operation failed
      */
     async function clickReaction(
         group: NostrMlsGroup,
         content: string,
         messageId: string
-    ): Promise<CachedMessage | null> {
-        const message = findMessage(messageId);
-        if (!message) return null;
+    ): Promise<Message | null> {
+        const chatMessage = findChatMessage(messageId);
+        if (!chatMessage) return null;
 
-        const existingReaction = findMyMessageReaction(message, content);
+        const existingReaction = findMyMessageReaction(chatMessage, content);
 
         if (existingReaction) {
             return await deleteEvent(group, existingReaction.pubkey, existingReaction.id);
         }
-        return await addReaction(group, message, content);
+        return await addReaction(group, chatMessage, content);
     }
 
     /**
@@ -279,25 +283,25 @@ export function createChatStore() {
      * @param {NostrMlsGroup} group - The group the message belongs to
      * @param {Message} message - The message to react to
      * @param {string} content - The reaction content (emoji)
-     * @returns {Promise<CachedMessage | null>} The created event or null if operation failed
+     * @returns {Promise<Message | null>} The created event or null if operation failed
      */
     async function addReaction(
         group: NostrMlsGroup,
-        message: Message,
+        chatMessage: ChatMessage,
         content: string
-    ): Promise<CachedMessage | null> {
+    ): Promise<Message | null> {
         const tags = [
-            ["e", message.id],
-            ["p", message.pubkey],
+            ["e", chatMessage.id],
+            ["p", chatMessage.pubkey],
         ];
         try {
-            const reactionMessage = await invoke<CachedMessage>("send_mls_message", {
+            const reactionMessage = await invoke<Message>("send_mls_message", {
                 group,
                 message: content,
                 kind: 7,
                 tags,
             });
-            handleCachedMessage(reactionMessage);
+            handleMessage(reactionMessage);
             return reactionMessage;
         } catch (error) {
             console.error("Error sending reaction:", error);
@@ -309,13 +313,10 @@ export function createChatStore() {
      * Deletes a message
      * @param {NostrMlsGroup} group - The group the message belongs to
      * @param {string} messageId - The ID of the message to delete
-     * @returns {Promise<CachedMessage | null>} The deletion event or null if deletion fails
+     * @returns {Promise<Message | null>} The deletion event or null if deletion fails
      */
-    async function deleteMessage(
-        group: NostrMlsGroup,
-        messageId: string
-    ): Promise<CachedMessage | null> {
-        const message = findMessage(messageId);
+    async function deleteMessage(group: NostrMlsGroup, messageId: string): Promise<Message | null> {
+        const message = findChatMessage(messageId);
         if (!message) return null;
 
         return deleteEvent(group, message.pubkey, message.id);
@@ -326,22 +327,22 @@ export function createChatStore() {
      * @param {NostrMlsGroup} group - The group the event belongs to
      * @param {string} pubkey - The public key of the event author
      * @param {string} eventId - The ID of the event to delete
-     * @returns {Promise<CachedMessage | null>} The deletion event or null if deletion fails
+     * @returns {Promise<Message | null>} The deletion event or null if deletion fails
      */
     async function deleteEvent(
         group: NostrMlsGroup,
         pubkey: string,
         eventId: string
-    ): Promise<CachedMessage | null> {
+    ): Promise<Message | null> {
         if (pubkey !== currentPubkey) return null;
 
         try {
-            const deletionMessage = await invoke<CachedMessage>("delete_message", {
+            const deletionMessage = await invoke<Message>("delete_message", {
                 group,
                 messageId: eventId,
             });
             if (deletionMessage) {
-                handleCachedMessage(deletionMessage);
+                handleMessage(deletionMessage);
             }
             return deletionMessage;
         } catch (error) {
@@ -354,36 +355,36 @@ export function createChatStore() {
      * Pays a lightning invoice attached to a message
      * @param {NostrMlsGroupWithRelays} groupWithRelays - The group with relay information
      * @param {Message} message - The message with the lightning invoice to pay
-     * @returns {Promise<CachedMessage | null>} The payment event or null if operation failed
+     * @returns {Promise<Message | null>} The payment event or null if operation failed
      */
     async function payLightningInvoice(
         groupWithRelays: NostrMlsGroupWithRelays,
-        message: Message
-    ): Promise<CachedMessage | null> {
-        if (!message.lightningInvoice) {
+        chatMessage: ChatMessage
+    ): Promise<Message | null> {
+        if (!chatMessage.lightningInvoice) {
             console.error("Message does not have a lightning invoice");
             return null;
         }
 
-        const tags = [["q", message.id, groupWithRelays.relays[0], message.pubkey]];
+        const tags = [["q", chatMessage.id, groupWithRelays.relays[0], chatMessage.pubkey]];
 
-        const paymentMessage = await invoke<CachedMessage>("pay_invoice", {
+        const paymentMessage = await invoke<Message>("pay_invoice", {
             group: groupWithRelays.group,
             tags: tags,
-            bolt11: message.lightningInvoice.invoice,
+            bolt11: chatMessage.lightningInvoice.invoice,
         });
-        handleCachedMessage(paymentMessage);
+        handleMessage(paymentMessage);
         return paymentMessage;
     }
 
     return {
         subscribe,
-        handleCachedMessage,
-        handleCachedMessages,
+        handleMessage,
+        handleMessages,
         clear,
-        findMessage,
-        findReaction,
-        findReplyToMessage,
+        findChatMessage,
+        findReactionMessage,
+        findReplyToChatMessage,
         isDeleted,
         getMessageReactionsSummary,
         hasReactions,

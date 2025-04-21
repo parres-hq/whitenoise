@@ -1,6 +1,6 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
-import { type Message } from "$lib/types/chat";
+import { type ChatMessage } from "$lib/types/chat";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import { _ as t } from "svelte-i18n";
 import Name from "./Name.svelte";
@@ -9,7 +9,7 @@ let {
     message,
     isDeleted = $bindable(false),
 }: {
-    message: Message | undefined;
+    message: ChatMessage | undefined;
     isDeleted?: boolean;
 } = $props();
 </script>

@@ -1,5 +1,5 @@
-import type { CachedMessage, ChatState } from "$lib/types/chat";
-import type { NEvent, NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
+import type { ChatState, Message } from "$lib/types/chat";
+import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { NostrMlsGroupType } from "$lib/types/nostr";
 import * as tauri from "@tauri-apps/api/core";
 import { get } from "svelte/store";
@@ -39,7 +39,7 @@ const createMessageEvent = (
     content: string,
     createdAt: number,
     replyToId?: string
-): CachedMessage => {
+): Message => {
     const tags: string[][] = [];
     if (replyToId) {
         tags.push(["q", replyToId]);
@@ -73,7 +73,7 @@ const createReactionEvent = (
     createdAt: number,
     targetId: string,
     pubkey = "user-pubkey"
-): CachedMessage => {
+): Message => {
     return {
         event_id: id,
         account_pubkey: pubkey,
@@ -99,7 +99,7 @@ const createReactionEvent = (
     };
 };
 
-const createDeletionEvent = (id: string, targetId: string, createdAt: number): CachedMessage => {
+const createDeletionMessage = (id: string, targetId: string, createdAt: number): Message => {
     return {
         event_id: id,
         account_pubkey: "user-pubkey",
@@ -152,15 +152,15 @@ describe("Chat Store", () => {
         vi.restoreAllMocks();
     });
 
-    describe("handleCachedMessage", () => {
+    describe("handleMessage", () => {
         describe("with message event", () => {
             it("saves the message", () => {
                 const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
 
-                chatStore.handleCachedMessage(messageEvent);
+                chatStore.handleMessage(messageEvent);
 
                 const state = get(chatStore) as ChatState;
-                expect(state.messages).toEqual([
+                expect(state.chatMessages).toEqual([
                     {
                         id: "msg-1",
                         pubkey: "user-pubkey",
@@ -187,9 +187,9 @@ describe("Chat Store", () => {
                         "21000",
                         "Bitdevs pizza",
                     ]);
-                    chatStore.handleCachedMessage(messageEvent);
+                    chatStore.handleMessage(messageEvent);
                     const state = get(chatStore) as ChatState;
-                    expect(state.messages).toEqual([
+                    expect(state.chatMessages).toEqual([
                         {
                             id: "msg-1",
                             pubkey: "user-pubkey",
@@ -228,11 +228,11 @@ describe("Chat Store", () => {
                             "21000",
                             "Bitdevs pizza",
                         ]);
-                        chatStore.handleCachedMessage(invoiceMessageEvent);
+                        chatStore.handleMessage(invoiceMessageEvent);
                         const paymentMessageEvent = createMessageEvent("msg-2", "", 2000, "msg-1");
                         paymentMessageEvent.event.tags.push(["preimage", "preimage-1"]);
-                        chatStore.handleCachedMessage(paymentMessageEvent);
-                        const paymentMessage = chatStore.findMessage("msg-2");
+                        chatStore.handleMessage(paymentMessageEvent);
+                        const paymentMessage = chatStore.findChatMessage("msg-2");
 
                         expect(paymentMessage).toEqual({
                             id: "msg-2",
@@ -264,11 +264,11 @@ describe("Chat Store", () => {
                             "21000",
                             "Bitdevs pizza",
                         ]);
-                        chatStore.handleCachedMessage(invoiceMessageEvent);
+                        chatStore.handleMessage(invoiceMessageEvent);
                         const paymentMessageEvent = createMessageEvent("msg-2", "", 2000, "msg-1");
                         paymentMessageEvent.event.tags.push(["preimage", "preimage-1"]);
-                        chatStore.handleCachedMessage(paymentMessageEvent);
-                        const invoiceMessage = chatStore.findMessage("msg-1");
+                        chatStore.handleMessage(paymentMessageEvent);
+                        const invoiceMessage = chatStore.findChatMessage("msg-1");
                         expect(invoiceMessage).toEqual({
                             id: "msg-1",
                             pubkey: "user-pubkey",
@@ -299,8 +299,8 @@ describe("Chat Store", () => {
                             "non-existent"
                         );
                         paymentMessageEvent.event.tags.push(["preimage", "preimage-1"]);
-                        chatStore.handleCachedMessage(paymentMessageEvent);
-                        const paymentMessage = chatStore.findMessage("msg-2");
+                        chatStore.handleMessage(paymentMessageEvent);
+                        const paymentMessage = chatStore.findChatMessage("msg-2");
 
                         expect(paymentMessage).toEqual({
                             id: "msg-2",
@@ -325,9 +325,9 @@ describe("Chat Store", () => {
                     it("saves message with lightning payment but not paid", () => {
                         const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
                         messageEvent.event.tags.push(["preimage", "preimage-1"]);
-                        chatStore.handleCachedMessage(messageEvent);
+                        chatStore.handleMessage(messageEvent);
                         const state = get(chatStore) as ChatState;
-                        expect(state.messages).toEqual([
+                        expect(state.chatMessages).toEqual([
                             {
                                 id: "msg-1",
                                 pubkey: "user-pubkey",
@@ -354,7 +354,7 @@ describe("Chat Store", () => {
         describe("with reaction event", () => {
             it("saves the reaction in target message", () => {
                 const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                chatStore.handleCachedMessage(messageEvent);
+                chatStore.handleMessage(messageEvent);
                 const reactionEvent = createReactionEvent(
                     "reaction-1",
                     "👍",
@@ -362,8 +362,8 @@ describe("Chat Store", () => {
                     "msg-1",
                     "other-pubkey"
                 );
-                chatStore.handleCachedMessage(reactionEvent);
-                const message = chatStore.findMessage("msg-1");
+                chatStore.handleMessage(reactionEvent);
+                const message = chatStore.findChatMessage("msg-1");
                 expect(message?.reactions).toEqual([
                     {
                         id: "reaction-1",
@@ -378,13 +378,13 @@ describe("Chat Store", () => {
             });
         });
 
-        describe("with deletion event", () => {
+        describe("with deletion message", () => {
             describe("when deleting a message", () => {
-                it("saves deletion", () => {
+                it("saves deletion message", () => {
                     const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                    chatStore.handleCachedMessage(messageEvent);
-                    const deletionEvent = createDeletionEvent("deletion-1", "msg-1", 2000);
-                    chatStore.handleCachedMessage(deletionEvent);
+                    chatStore.handleMessage(messageEvent);
+                    const deletionMessage = createDeletionMessage("deletion-1", "msg-1", 2000);
+                    chatStore.handleMessage(deletionMessage);
                     expect(chatStore.isDeleted("msg-1")).toBe(true);
                 });
             });
@@ -392,7 +392,7 @@ describe("Chat Store", () => {
             describe("when deleting a reaction", () => {
                 it("saves deletion", () => {
                     const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                    chatStore.handleCachedMessage(messageEvent);
+                    chatStore.handleMessage(messageEvent);
                     const reactionEvent = createReactionEvent(
                         "reaction-1",
                         "👍",
@@ -400,16 +400,16 @@ describe("Chat Store", () => {
                         "msg-1",
                         "other-pubkey"
                     );
-                    chatStore.handleCachedMessage(reactionEvent);
-                    const deletionEvent = createDeletionEvent("deletion-2", "reaction-1", 3000);
-                    chatStore.handleCachedMessage(deletionEvent);
+                    chatStore.handleMessage(reactionEvent);
+                    const message = createDeletionMessage("deletion-2", "reaction-1", 3000);
+                    chatStore.handleMessage(message);
                     expect(chatStore.isDeleted("reaction-1")).toBe(true);
                 });
             });
         });
     });
 
-    describe("handleCachedMessages", () => {
+    describe("handleMessages", () => {
         it("handles multiple events in the correct order", () => {
             const firstMessageEvent = createMessageEvent("msg-1", "First message", 1000);
             const reactionEvent = createReactionEvent(
@@ -419,18 +419,18 @@ describe("Chat Store", () => {
                 "msg-1",
                 "other-pubkey"
             );
-            const deletionEvent = createDeletionEvent("deletion-1", "msg-1", 2000);
+            const message = createDeletionMessage("deletion-1", "msg-1", 2000);
             const secondMessageEvent = createMessageEvent("msg-2", "Second message", 2500);
-            const events: CachedMessage[] = [
+            const events: Message[] = [
                 firstMessageEvent,
                 reactionEvent,
-                deletionEvent,
+                message,
                 secondMessageEvent,
             ];
-            chatStore.handleCachedMessages(events);
+            chatStore.handleMessages(events);
 
             const state = get(chatStore) as ChatState;
-            expect(state.messages).toEqual([
+            expect(state.chatMessages).toEqual([
                 {
                     id: "msg-1",
                     pubkey: "user-pubkey",
@@ -477,15 +477,15 @@ describe("Chat Store", () => {
     describe("clear", () => {
         it("clears messages", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
-            expect(get(chatStore).messages).toHaveLength(1);
+            chatStore.handleMessage(messageEvent);
+            expect(get(chatStore).chatMessages).toHaveLength(1);
             chatStore.clear();
-            expect(get(chatStore).messages).toHaveLength(0);
+            expect(get(chatStore).chatMessages).toHaveLength(0);
         });
 
         it("clears messages reactions", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             const reactionEvent = createReactionEvent(
                 "reaction-1",
                 "👍",
@@ -493,18 +493,18 @@ describe("Chat Store", () => {
                 "msg-1",
                 "other-pubkey"
             );
-            chatStore.handleCachedMessage(reactionEvent);
-            const oldMessage = chatStore.findMessage("msg-1");
+            chatStore.handleMessage(reactionEvent);
+            const oldMessage = chatStore.findChatMessage("msg-1");
             expect(oldMessage?.reactions).toHaveLength(1);
             chatStore.clear();
-            chatStore.handleCachedMessage(messageEvent);
-            const newMessage = chatStore.findMessage("msg-1");
+            chatStore.handleMessage(messageEvent);
+            const newMessage = chatStore.findChatMessage("msg-1");
             expect(newMessage?.reactions).toEqual([]);
         });
 
         it("clears reactions", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             const reactionEvent = createReactionEvent(
                 "reaction-1",
                 "👍",
@@ -512,31 +512,31 @@ describe("Chat Store", () => {
                 "msg-1",
                 "other-pubkey"
             );
-            chatStore.handleCachedMessage(reactionEvent);
-            const oldMessage = chatStore.findMessage("msg-1");
+            chatStore.handleMessage(reactionEvent);
+            const oldMessage = chatStore.findChatMessage("msg-1");
             expect(oldMessage?.reactions).toHaveLength(1);
             chatStore.clear();
-            chatStore.handleCachedMessage(messageEvent);
-            expect(chatStore.findReaction("reaction-1")).toBeUndefined();
+            chatStore.handleMessage(messageEvent);
+            expect(chatStore.findReactionMessage("reaction-1")).toBeUndefined();
         });
 
         it("clears deletions", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
-            const deletionEvent = createDeletionEvent("deletion-1", "msg-1", 2000);
-            chatStore.handleCachedMessage(deletionEvent);
+            chatStore.handleMessage(messageEvent);
+            const message = createDeletionMessage("deletion-1", "msg-1", 2000);
+            chatStore.handleMessage(message);
             expect(chatStore.isDeleted("msg-1")).toBe(true);
             chatStore.clear();
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             expect(chatStore.isDeleted("msg-1")).toBe(false);
         });
     });
 
-    describe("findMessage", () => {
+    describe("findChatMessage", () => {
         it("finds a message by id", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
-            const message = chatStore.findMessage("msg-1");
+            chatStore.handleMessage(messageEvent);
+            const message = chatStore.findChatMessage("msg-1");
             expect(message).toEqual({
                 id: "msg-1",
                 pubkey: "user-pubkey",
@@ -554,20 +554,20 @@ describe("Chat Store", () => {
         });
 
         it("returns undefined for a non-existent message", () => {
-            const message = chatStore.findMessage("non-existent");
+            const message = chatStore.findChatMessage("non-existent");
 
             expect(message).toBeUndefined();
         });
     });
 
-    describe("findReaction", () => {
+    describe("findReactionMessage", () => {
         it("finds a reaction by its ID", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             const reactionEvent = createReactionEvent("reaction-1", "👍", 1001, "msg-1");
-            chatStore.handleCachedMessage(reactionEvent);
+            chatStore.handleMessage(reactionEvent);
 
-            const reaction = chatStore.findReaction("reaction-1");
+            const reaction = chatStore.findReactionMessage("reaction-1");
 
             expect(reaction).toEqual({
                 id: "reaction-1",
@@ -581,26 +581,26 @@ describe("Chat Store", () => {
         });
 
         it("returns undefined for a non-existent reaction", () => {
-            const reaction = chatStore.findReaction("non-existent");
+            const reaction = chatStore.findReactionMessage("non-existent");
 
             expect(reaction).toBeUndefined();
         });
     });
 
-    describe("findReplyToMessage", () => {
+    describe("findReplyToChatMessage", () => {
         it("finds the parent message of a reply", () => {
             const parentMessageEvent = createMessageEvent("parent-msg", "Parent message", 1000);
-            chatStore.handleCachedMessage(parentMessageEvent);
+            chatStore.handleMessage(parentMessageEvent);
             const replyMessageEvent = createMessageEvent(
                 "reply-msg",
                 "Reply message",
                 1100,
                 "parent-msg"
             );
-            chatStore.handleCachedMessage(replyMessageEvent);
-            const replyMessage = chatStore.findMessage("reply-msg");
+            chatStore.handleMessage(replyMessageEvent);
+            const replyMessage = chatStore.findChatMessage("reply-msg");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            const parentMessage = chatStore.findReplyToMessage(replyMessage!);
+            const parentMessage = chatStore.findReplyToChatMessage(replyMessage!);
 
             expect(parentMessage).toEqual({
                 id: "parent-msg",
@@ -620,10 +620,10 @@ describe("Chat Store", () => {
 
         it("returns undefined if the message has no reply-to", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
-            const message = chatStore.findMessage("msg-1");
+            chatStore.handleMessage(messageEvent);
+            const message = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            const replyToMessage = chatStore.findReplyToMessage(message!);
+            const replyToMessage = chatStore.findReplyToChatMessage(message!);
 
             expect(replyToMessage).toBeUndefined();
         });
@@ -635,20 +635,20 @@ describe("Chat Store", () => {
                 1100,
                 "non-existent-parent"
             );
-            chatStore.handleCachedMessage(replyMessageEvent);
-            const replyMessage = chatStore.findMessage("reply-msg");
+            chatStore.handleMessage(replyMessageEvent);
+            const replyMessage = chatStore.findChatMessage("reply-msg");
 
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            expect(chatStore.findReplyToMessage(replyMessage!)).toBeUndefined();
+            expect(chatStore.findReplyToChatMessage(replyMessage!)).toBeUndefined();
         });
     });
 
     describe("getMessageReactionsSummary", () => {
         it("returns a summary of reactions for a message", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
 
-            chatStore.handleCachedMessages([
+            chatStore.handleMessages([
                 createReactionEvent("reaction-1", "👍", 1000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-2", "👍", 2000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-3", "❤️", 3000, "msg-1", "other-pubkey"),
@@ -668,12 +668,12 @@ describe("Chat Store", () => {
         });
 
         it("excludes deleted reactions from the summary", () => {
-            chatStore.handleCachedMessages([
+            chatStore.handleMessages([
                 createMessageEvent("msg-1", "Hello world", 1000),
                 createReactionEvent("reaction-1", "👍", 1000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-2", "👍", 2000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-3", "❤️", 3000, "msg-1", "other-pubkey"),
-                createDeletionEvent("deletion-1", "reaction-1", 3000),
+                createDeletionMessage("deletion-1", "reaction-1", 3000),
             ]);
             const summary = chatStore.getMessageReactionsSummary("msg-1");
 
@@ -690,14 +690,14 @@ describe("Chat Store", () => {
         });
 
         it("when all reactions are deleted, returns an empty array", () => {
-            chatStore.handleCachedMessages([
+            chatStore.handleMessages([
                 createMessageEvent("msg-1", "Hello world", 1000),
                 createReactionEvent("reaction-1", "👍", 1000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-2", "👍", 2000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-3", "❤️", 3000, "msg-1", "other-pubkey"),
-                createDeletionEvent("deletion-1", "reaction-1", 3000),
-                createDeletionEvent("deletion-2", "reaction-2", 3500),
-                createDeletionEvent("deletion-3", "reaction-3", 4000),
+                createDeletionMessage("deletion-1", "reaction-1", 3000),
+                createDeletionMessage("deletion-2", "reaction-2", 3500),
+                createDeletionMessage("deletion-3", "reaction-3", 4000),
             ]);
             const summary = chatStore.getMessageReactionsSummary("msg-1");
             expect(summary).toEqual([]);
@@ -707,7 +707,7 @@ describe("Chat Store", () => {
     describe("hasReactions", () => {
         it("returns true for a message with active reactions", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             const reactionEvent = createReactionEvent(
                 "reaction-1",
                 "👍",
@@ -715,43 +715,43 @@ describe("Chat Store", () => {
                 "msg-1",
                 "other-pubkey"
             );
-            chatStore.handleCachedMessage(reactionEvent);
+            chatStore.handleMessage(reactionEvent);
 
-            const message = chatStore.findMessage("msg-1");
+            const message = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
             expect(chatStore.hasReactions(message!)).toBe(true);
         });
 
         it("returns false for a message with no reactions", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
 
-            const message = chatStore.findMessage("msg-1");
+            const message = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
             expect(chatStore.hasReactions(message!)).toBe(false);
         });
 
         it("returns false when all reactions are deleted", () => {
-            chatStore.handleCachedMessages([
+            chatStore.handleMessages([
                 createMessageEvent("msg-1", "Hello world", 1000),
                 createReactionEvent("reaction-1", "👍", 2000, "msg-1", "other-pubkey"),
-                createDeletionEvent("deletion-1", "reaction-1", 3000),
+                createDeletionMessage("deletion-1", "reaction-1", 3000),
             ]);
 
-            const message = chatStore.findMessage("msg-1");
+            const message = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
             expect(chatStore.hasReactions(message!)).toBe(false);
         });
 
         it("returns true when some reactions remain after deletions", () => {
-            chatStore.handleCachedMessages([
+            chatStore.handleMessages([
                 createMessageEvent("msg-1", "Hello world", 1000),
                 createReactionEvent("reaction-1", "👍", 2000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-2", "❤️", 3000, "msg-1", "other-pubkey"),
-                createDeletionEvent("deletion-1", "reaction-1", 4000),
+                createDeletionMessage("deletion-1", "reaction-1", 4000),
             ]);
 
-            const message = chatStore.findMessage("msg-1");
+            const message = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
             expect(chatStore.hasReactions(message!)).toBe(true);
         });
@@ -769,8 +769,8 @@ describe("Chat Store", () => {
         describe("without user reaction", () => {
             beforeEach(() => {
                 const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                chatStore.handleCachedMessage(messageEvent);
-                const reactionResponse: CachedMessage = {
+                chatStore.handleMessage(messageEvent);
+                const reactionResponse: Message = {
                     event_id: "reaction-1",
                     account_pubkey: "user-pubkey",
                     event_kind: 7,
@@ -840,15 +840,15 @@ describe("Chat Store", () => {
 
         describe("with different user reaction with same content", () => {
             let group: NostrMlsGroup;
-            let messageEvent: CachedMessage;
-            let firstReactionResponse: CachedMessage;
+            let messageEvent: Message;
+            let firstReactionResponse: Message;
             const otherUserAccount: Account = { ...userAccount, pubkey: "other-pubkey" };
             let otherUserChatStore: ReturnType<typeof createChatStore>;
 
             beforeEach(async () => {
                 group = createTestGroup();
                 messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                chatStore.handleCachedMessage(messageEvent);
+                chatStore.handleMessage(messageEvent);
                 firstReactionResponse = {
                     event_id: "reaction-1",
                     account_pubkey: "user-pubkey",
@@ -877,10 +877,10 @@ describe("Chat Store", () => {
                 await chatStore.clickReaction(group, "👍", "msg-1");
                 activeAccount.set(otherUserAccount);
                 otherUserChatStore = createChatStore();
-                otherUserChatStore.handleCachedMessage(messageEvent);
-                otherUserChatStore.handleCachedMessage(firstReactionResponse);
+                otherUserChatStore.handleMessage(messageEvent);
+                otherUserChatStore.handleMessage(firstReactionResponse);
 
-                const secondReactionResponse: CachedMessage = {
+                const secondReactionResponse: Message = {
                     event_id: "reaction-2",
                     account_pubkey: "other-pubkey",
                     event_kind: 7,
@@ -949,13 +949,13 @@ describe("Chat Store", () => {
 
         describe("with deleted user reaction with same content", () => {
             let group: NostrMlsGroup;
-            let messageEvent: CachedMessage;
+            let messageEvent: Message;
 
             beforeEach(async () => {
                 group = createTestGroup();
                 messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                chatStore.handleCachedMessage(messageEvent);
-                const firstReactionResponse: CachedMessage = {
+                chatStore.handleMessage(messageEvent);
+                const firstReactionResponse: Message = {
                     event_id: "reaction-1",
                     account_pubkey: "user-pubkey",
                     event_kind: 7,
@@ -980,7 +980,7 @@ describe("Chat Store", () => {
                 };
                 vi.spyOn(tauri, "invoke").mockResolvedValueOnce(firstReactionResponse);
                 await chatStore.clickReaction(group, "👍", "msg-1");
-                const deletionResponse: CachedMessage = {
+                const deletionResponse: Message = {
                     event_id: "deletion-1",
                     account_pubkey: "user-pubkey",
                     event_kind: 5,
@@ -1003,7 +1003,7 @@ describe("Chat Store", () => {
 
                 vi.spyOn(tauri, "invoke").mockImplementation(async () => deletionResponse);
                 await chatStore.clickReaction(group, "👍", "msg-1");
-                const secondReactionResponse: CachedMessage = {
+                const secondReactionResponse: Message = {
                     event_id: "reaction-2",
                     account_pubkey: "user-pubkey",
                     event_kind: 7,
@@ -1084,8 +1084,8 @@ describe("Chat Store", () => {
     describe("deleteMessage", () => {
         it("calls the expected tauri command and handles the response", async () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
-            const deletionResponse: CachedMessage = {
+            chatStore.handleMessage(messageEvent);
+            const deletionResponse: Message = {
                 event_id: "deletion-1",
                 account_pubkey: "user-pubkey",
                 event_kind: 5,
@@ -1126,7 +1126,7 @@ describe("Chat Store", () => {
         });
 
         it("returns null if message is not mine", async () => {
-            const messageEvent: CachedMessage = {
+            const messageEvent: Message = {
                 event_id: "msg-1",
                 account_pubkey: "other-pubkey",
                 event_kind: 9,
@@ -1146,7 +1146,7 @@ describe("Chat Store", () => {
                     sig: "test-sig",
                 },
             };
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
 
             const group = createTestGroup();
             const result = await chatStore.deleteMessage(group, "msg-1");
@@ -1165,8 +1165,8 @@ describe("Chat Store", () => {
                 "21000",
                 "Bitdevs pizza",
             ]);
-            chatStore.handleCachedMessage(invoiceMessageEvent);
-            const invoiceMessage = chatStore.findMessage("msg-1");
+            chatStore.handleMessage(invoiceMessageEvent);
+            const invoiceMessage = chatStore.findChatMessage("msg-1");
             expect(invoiceMessage?.lightningInvoice).toEqual({
                 invoice:
                     "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
@@ -1174,7 +1174,7 @@ describe("Chat Store", () => {
                 description: "Bitdevs pizza",
                 isPaid: false,
             });
-            const paymentResponse: CachedMessage = {
+            const paymentResponse: Message = {
                 event_id: "payment-1",
                 account_pubkey: "user-pubkey",
                 event_kind: 9,
@@ -1219,16 +1219,16 @@ describe("Chat Store", () => {
 
         it("returns null if message has no lightning invoice", async () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
 
             const groupWithRelays = {
                 group: createTestGroup(),
                 relays: ["test-relay"],
             };
 
-            const message = chatStore.findMessage("msg-1");
+            const chatMessage = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            const result = await chatStore.payLightningInvoice(groupWithRelays, message!);
+            const result = await chatStore.payLightningInvoice(groupWithRelays, chatMessage!);
 
             expect(result).toBeNull();
             expect(tauri.invoke).not.toHaveBeenCalled();
@@ -1237,9 +1237,9 @@ describe("Chat Store", () => {
         it("updates lightning invoice to paid after successful payment", async () => {
             const messageEvent = createMessageEvent("msg-1", "Please pay me", 1000);
             messageEvent.event.tags.push(["bolt11", "lnbc123456789", "21000", "Test payment"]);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
 
-            const paymentResponse: CachedMessage = {
+            const paymentResponse: Message = {
                 event_id: "payment-1",
                 account_pubkey: "user-pubkey",
                 event_kind: 9,
@@ -1270,18 +1270,18 @@ describe("Chat Store", () => {
                 relays: ["test-relay"],
             };
 
-            const message = chatStore.findMessage("msg-1");
+            const chatMessage = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            await chatStore.payLightningInvoice(groupWithRelays, message!);
-            const updatedMessage = chatStore.findMessage("msg-1");
-            expect(updatedMessage?.lightningInvoice?.isPaid).toBe(true);
+            await chatStore.payLightningInvoice(groupWithRelays, chatMessage!);
+            const updatedChatMessage = chatStore.findChatMessage("msg-1");
+            expect(updatedChatMessage?.lightningInvoice?.isPaid).toBe(true);
         });
     });
 
     describe("isMessageDeletable", () => {
         it("returns true for message that is mine and not deleted", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             expect(chatStore.isMessageDeletable("msg-1")).toBe(true);
         });
 
@@ -1291,14 +1291,14 @@ describe("Chat Store", () => {
 
         it("returns false for a message that is already deleted", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
-            const deletionEvent = createDeletionEvent("deletion-1", "msg-1", 2000);
-            chatStore.handleCachedMessage(deletionEvent);
+            chatStore.handleMessage(messageEvent);
+            const message = createDeletionMessage("deletion-1", "msg-1", 2000);
+            chatStore.handleMessage(message);
             expect(chatStore.isMessageDeletable("msg-1")).toBe(false);
         });
 
         it("returns false for a message that is not mine", () => {
-            const messageEvent: CachedMessage = {
+            const messageEvent: Message = {
                 event_id: "msg-1",
                 account_pubkey: "other-pubkey",
                 event_kind: 9,
@@ -1319,7 +1319,7 @@ describe("Chat Store", () => {
                 },
             };
 
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             expect(chatStore.isMessageDeletable("msg-1")).toBe(false);
         });
     });
@@ -1327,7 +1327,7 @@ describe("Chat Store", () => {
     describe("isMessageCopyable", () => {
         it("returns true for an existing message", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
+            chatStore.handleMessage(messageEvent);
             expect(chatStore.isMessageCopyable("msg-1")).toBe(true);
         });
 
@@ -1337,9 +1337,9 @@ describe("Chat Store", () => {
 
         it("returns false for a deleted message", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleCachedMessage(messageEvent);
-            const deletionEvent = createDeletionEvent("deletion-1", "msg-1", 2000);
-            chatStore.handleCachedMessage(deletionEvent);
+            chatStore.handleMessage(messageEvent);
+            const message = createDeletionMessage("deletion-1", "msg-1", 2000);
+            chatStore.handleMessage(message);
             expect(chatStore.isMessageCopyable("msg-1")).toBe(false);
         });
     });

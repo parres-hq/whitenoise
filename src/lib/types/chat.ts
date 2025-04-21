@@ -19,7 +19,7 @@ import type {
  * @property {SerializableToken[]} tokens - The tokenized message content
  * @property {string} outer_event_id - The ID of the outer event, if applicable
  */
-export type CachedMessage = {
+export type Message = {
     event_id: string;
     account_pubkey: string;
     author_pubkey: string;
@@ -39,7 +39,7 @@ export type CachedMessage = {
  * @property {string} content - Text content of the message
  * @property {number} createdAt - Unix timestamp when the message was created
  * @property {string} [replyToId] - ID of the message this is replying to, if applicable
- * @property {Reaction[]} reactions - Array of reactions to this message
+ * @property {ReactionMessage[]} reactions - Array of reactions to this message
  * @property {LightningInvoice} [lightningInvoice] - Lightning invoice details if message contains one
  * @property {LightningPayment} [lightningPayment] - Lightning payment details if message is a payment
  * @property {boolean} isSingleEmoji - Whether the message consists of only a single emoji
@@ -47,13 +47,13 @@ export type CachedMessage = {
  * @property {NEvent} event - The original Nostr event data
  * @property {SerializableToken[]} tokens - The tokenized message content
  */
-export type Message = {
+export type ChatMessage = {
     id: string;
     pubkey: string;
     content: string;
     createdAt: number;
     replyToId?: string;
-    reactions: Reaction[];
+    reactions: ReactionMessage[];
     lightningInvoice?: LightningInvoice;
     lightningPayment?: LightningPayment;
     isSingleEmoji: boolean;
@@ -72,7 +72,7 @@ export type Message = {
  * @property {boolean} isMine - Whether the current user is the author of this reaction
  * @property {NEvent} event - The original Nostr event data
  */
-export type Reaction = {
+export type ReactionMessage = {
     id: string;
     pubkey: string;
     content: string;
@@ -127,13 +127,13 @@ export type LightningPayment = {
 };
 
 /**
- * Represents a message deletion event
+ * Represents the deletion of a message
  * @property {string} id - Unique identifier for the deletion event
  * @property {string} pubkey - Public key of the user who deleted the message
  * @property {string} targetId - ID of the message that was deleted
  * @property {NEvent} event - The original Nostr event data
  */
-export type Deletion = {
+export type DeletionMessage = {
     id: string;
     pubkey: string;
     targetId: string;
@@ -141,29 +141,29 @@ export type Deletion = {
 };
 
 /**
- * Map of message IDs to Message objects for efficient lookup
+ * Map of message IDs to ChatMessage objects for efficient lookup
  */
-export type MessagesMap = Map<string, Message>;
+export type ChatMessagesMap = Map<string, ChatMessage>;
 
 /**
- * Map of reaction IDs to Reaction objects for efficient lookup
+ * Map of reaction IDs to ReactionMessage objects for efficient lookup
  */
-export type ReactionsMap = Map<string, Reaction>;
+export type ReactionMessagesMap = Map<string, ReactionMessage>;
 
 /**
- * Map of deletion target IDs to Deletion objects for efficient lookup
+ * Map of deletion target IDs to DeletionMessage objects for efficient lookup
  */
-export type DeletionsMap = Map<string, Deletion>;
+export type DeletionMessagesMap = Map<string, DeletionMessage>;
 
 /**
  * State and methods for managing a chat conversation
- * @property {Message[]} messages - Array of messages in the chat, sorted by creation time
+ * @property {ChatMessage[]} messages - Array of messages in the chat, sorted by creation time
  * @property {function} handleEvent - Processes a single Nostr event and updates state
  * @property {function} handleEvents - Processes multiple Nostr events and updates state
  * @property {function} clear - Clears all messages and state
- * @property {function} findMessage - Finds a message by its ID
- * @property {function} findReaction - Finds a reaction by its ID
- * @property {function} findReplyToMessage - Finds the message that another message is replying to
+ * @property {function} findChatMessage - Finds a chat message by its ID
+ * @property {function} findReactionMessage - Finds a reaction message by its ID
+ * @property {function} findReplyToChatMessage - Finds the message that another message is replying to
  * @property {function} isDeleted - Checks if a message has been deleted
  * @property {function} getMessageReactionsSummary - Gets a summary of reactions for a message
  * @property {function} hasReactions - Checks if a message has any reactions
@@ -174,26 +174,26 @@ export type DeletionsMap = Map<string, Deletion>;
  * @property {function} isMessageCopyable - Checks if a message content can be copied
  */
 export type ChatState = {
-    messages: Message[];
-    handleCachedMessage: (cachedMessage: CachedMessage) => void;
-    handleCachedMessages: (cachedMessages: CachedMessage[]) => void;
+    chatMessages: ChatMessage[];
+    handleMessage: (message: Message) => void;
+    handleMessages: (messages: Message[]) => void;
     clear: () => void;
-    findMessage: (id: string) => Message | undefined;
-    findReaction: (id: string) => Reaction | undefined;
-    findReplyToMessage: (message: Message) => Message | undefined;
+    findChatMessage: (id: string) => ChatMessage | undefined;
+    findReactionMessage: (id: string) => ReactionMessage | undefined;
+    findReplyToChatMessage: (chatMessage: ChatMessage) => ChatMessage | undefined;
     isDeleted: (eventId: string) => boolean;
     getMessageReactionsSummary: (messageId: string) => ReactionSummary[];
-    hasReactions: (message: Message) => boolean;
+    hasReactions: (message: ChatMessage) => boolean;
     clickReaction: (
         group: NostrMlsGroup,
         reaction: string,
         messageId: string
-    ) => Promise<CachedMessage | null>;
-    deleteMessage: (group: NostrMlsGroup, messageId: string) => Promise<CachedMessage | null>;
+    ) => Promise<Message | null>;
+    deleteMessage: (group: NostrMlsGroup, messageId: string) => Promise<Message | null>;
     payLightningInvoice: (
         groupWithRelays: NostrMlsGroupWithRelays,
-        message: Message
-    ) => Promise<CachedMessage | null>;
+        message: ChatMessage
+    ) => Promise<Message | null>;
     isMessageDeletable: (messageId: string) => boolean;
     isMessageCopyable: (messageId: string) => boolean;
 };
