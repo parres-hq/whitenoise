@@ -425,20 +425,23 @@ function navigateToInfo() {
                         <OverflowMenuHorizontal size={24} />
                     </button>
                     <div
-                        use:press={()=>({ triggerBeforeFinished: true, timeframe: 100 })}
-                        onpress={handlePress}
                         data-message-container
                         data-message-id={chatMessage.id}
                         data-is-current-user={chatMessage.isMine}
                         class={`font-normal text-base relative rounded-md max-w-[70%] ${chatMessage.lightningPayment ? "bg-opacity-10" : ""} ${!chatMessage.isSingleEmoji ? `${chatMessage.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && chatMessage.id === selectedMessageId ? 'relative z-20' : ''}`}
+                        id={chatMessage.id}
                     >
-                        {#if chatMessage.replyToId }
+                        {#if chatMessage.replyToId && !chatStore.isDeleted(chatMessage.id) }
                             <RepliedTo
                                 message={chatStore.findReplyToChatMessage(chatMessage)}
                                 isDeleted={chatStore.isDeleted(chatMessage.replyToId)}
                             />
                         {/if}
-                        <div class="flex {chatMessage.content.trim().length < 50 && !chatMessage.isSingleEmoji ? "flex-row gap-6" : "flex-col gap-2"} w-full {chatMessage.lightningPayment ? "items-center justify-center" : "items-end"}  {chatMessage.isSingleEmoji ? 'mb-4 my-6' : ''}">
+                        <div
+                            use:press={()=>({ triggerBeforeFinished: true, timeframe: 100 })}
+                            onpress={handlePress}
+                            class="flex {chatMessage.content.trim().length < 50 && !chatMessage.isSingleEmoji ? "flex-row gap-6" : "flex-col gap-2"} w-full {chatMessage.lightningPayment ? "items-center justify-center" : "items-end"}  {chatMessage.isSingleEmoji ? 'mb-4 my-6' : ''}"
+                        >
                             <div class="w-full {chatMessage.lightningPayment ? 'flex justify-center' : ''} {chatMessage.isSingleEmoji ? 'text-7xl leading-none' : ''}">
                                 {#if chatStore.isDeleted(chatMessage.id)}
                                     <div class="inline-flex flex-row items-center gap-2 px-3 py-1 w-fit text-muted-foreground">

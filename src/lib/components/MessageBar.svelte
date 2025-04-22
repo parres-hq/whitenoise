@@ -1,4 +1,5 @@
 <script lang="ts">
+import MessageTokens from "$lib/components/MessageTokens.svelte";
 import { activeAccount } from "$lib/stores/accounts";
 import type { ChatMessage, Message } from "$lib/types/chat";
 import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
@@ -205,7 +206,8 @@ onMount(() => {
                     <TrashCan size={20} /><span class="italic opacity-60">{$t("chats.messageDeleted")}</span>
                 </div>
             {:else}
-                <span>{replyToMessage.content}</span>
+               <MessageTokens tokens={replyToMessage.tokens} reply={true} />
+
             {/if}
             <button onclick={() => replyToMessage = undefined} class="p-1 bg-primary hover:bg-primary/80 rounded-full mr-0">
                 <CloseLarge size={16} class="text-primary-foreground" />
