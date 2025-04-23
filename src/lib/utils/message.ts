@@ -1,5 +1,5 @@
-import type { CachedMessage, Message } from "$lib/types/chat";
-import type { NEvent, SerializableToken } from "$lib/types/nostr";
+import type { ChatMessage, Message } from "$lib/types/chat";
+import type { SerializableToken } from "$lib/types/nostr";
 import { eventToLightningInvoice, eventToLightningPayment } from "./lightning";
 import { findReplyToId } from "./tags";
 
@@ -33,21 +33,23 @@ function contentToShow({ content, invoice }: { content: string; invoice: string 
 }
 
 /**
- * Converts a Nostr event to a Message object.
- * Processes the event to extract relevant information and format it appropriately,
- * including handling lightning invoices/payments and emoji detection.
+ * Converts a Message object to a Message object.
  *
- * @param event - The Nostr event to convert
+ * @param message - The Message object to convert
  * @param currentPubkey - The current user's public key, used to determine if the message belongs to the current user
  * @returns A formatted Message object
  */
-export function eventToMessage(event: NEvent, currentPubkey: string | undefined): Message {
+export function messageToChatMessage(
+    message: Message,
+    currentPubkey: string | undefined
+): ChatMessage {
+    const event = message.event;
     const replyToId = findReplyToId(event);
     const isMine = currentPubkey === event.pubkey;
     const lightningInvoice = eventToLightningInvoice(event);
     const lightningPayment = eventToLightningPayment(event);
     const content = contentToShow({ content: event.content, invoice: lightningInvoice?.invoice });
-    const tokens: SerializableToken[] = [];
+    const tokens: SerializableToken[] = message.tokens;
 
     return {
         id: event.id,
@@ -63,22 +65,4 @@ export function eventToMessage(event: NEvent, currentPubkey: string | undefined)
         event,
         tokens,
     };
-}
-
-/**
- * Converts a CachedMessage object to a Message object.
- *
- * @param cachedMessage - The CachedMessage object to convert
- * @param currentPubkey - The current user's public key, used to determine if the message belongs to the current user
- * @returns A formatted Message object
- */
-export function cachedMessageToMessage(
-    cachedMessage: CachedMessage,
-    currentPubkey: string | undefined
-): Message {
-    const message = eventToMessage(cachedMessage.event, currentPubkey);
-    if (cachedMessage.tokens.length > 0) {
-        message.tokens = cachedMessage.tokens;
-    }
-    return message;
 }

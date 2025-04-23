@@ -1,7 +1,8 @@
 {
     "shared": {
         "cancel": "Abbrechen",
-        "loading": "Laden..."
+        "loading": "Laden...",
+        "notImplementedYet": "Noch nicht implementiert"
     },
     "settings": {
         "title": "Einstellungen",
@@ -116,9 +117,9 @@
         "unknownError": "Unbekannter Fehler",
         "contacts": "Kontakte",
         "noContactsFound": "Keine Kontakte gefunden",
-        "searching": "Suche läuft",
+        "searching": "Suche läuft...",
         "searchResults": "Suchergebnisse",
-        "searchPlaceholder": "Kontakte oder Chats suchen",
+        "searchPlaceholder": "Kontakte oder Chats suchen...",
         "noChatSelected": "Hast du heute das Gras berührt?",
         "startSecureChat": "Sicheren Chat starten",
         "contactNotSetUp": "ist noch nicht für sichere Nachrichten eingerichtet",
@@ -151,7 +152,8 @@
         "acceptInvite": "Einladung annehmen",
         "acceptingInvite": "Einladung wird angenommen...",
         "inviteAccepted": "Du hast eine Einladung zu einem sicheren Chat mit {name} angenommen",
-        "inviteDeclined": "Du hast eine Einladung zu einem sicheren Chat mit {name} abgelehnt"
+        "inviteDeclined": "Du hast eine Einladung zu einem sicheren Chat mit {name} abgelehnt",
+        "waitMediaUpload": "Bitte warten Sie auf den Abschluss des Uploads"
     },
     "login": {
         "signInWithNostrKey": "Mit Nostr-Schlüssel anmelden",

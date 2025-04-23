@@ -1,7 +1,8 @@
 {
     "shared": {
         "cancel": "Annulla",
-        "loading": "Caricamento..."
+        "loading": "Caricamento...",
+        "notImplementedYet": "Non ancora implementato"
     },
     "settings": {
         "title": "Impostazioni",
@@ -116,9 +117,9 @@
         "unknownError": "Errore sconosciuto",
         "contacts": "Contatti",
         "noContactsFound": "Nessun contatto trovato",
-        "searching": "Ricerca in corso",
+        "searching": "Ricerca in corso...",
         "searchResults": "Risultati ricerca",
-        "searchPlaceholder": "Cerca contatti o chat",
+        "searchPlaceholder": "Cerca contatti o chat...",
         "noChatSelected": "Hai toccato l'erba oggi?",
         "startSecureChat": "Inizia chat sicura",
         "contactNotSetUp": "non è ancora configurato per utilizzare la messaggistica sicura",
@@ -151,7 +152,8 @@
         "acceptInvite": "Accetta invito",
         "acceptingInvite": "Accettazione invito in corso...",
         "inviteAccepted": "Hai accettato un invito a partecipare a una chat sicura con {name}",
-        "inviteDeclined": "Hai rifiutato un invito a partecipare a una chat sicura con {name}"
+        "inviteDeclined": "Hai rifiutato un invito a partecipare a una chat sicura con {name}",
+        "waitMediaUpload": "Attendere il completamento del caricamento"
     },
     "login": {
         "signInWithNostrKey": "Accedi con chiave Nostr",

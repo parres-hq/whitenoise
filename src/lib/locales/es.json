@@ -1,7 +1,8 @@
 {
     "shared": {
         "cancel": "Cancelar",
-        "loading": "Cargando..."
+        "loading": "Cargando...",
+        "notImplementedYet": "Estamos trabajando en ello"
     },
     "settings": {
         "title": "Configuración",
@@ -116,9 +117,9 @@
         "unknownError": "Error desconocido",
         "contacts": "Contactos",
         "noContactsFound": "No se encontraron contactos",
-        "searching": "Buscando",
+        "searching": "Buscando...",
         "searchResults": "Resultados de la búsqueda",
-        "searchPlaceholder": "Buscar contactos o conversaciones",
+        "searchPlaceholder": "Buscar contactos o conversaciones...",
         "noChatSelected": "¿Has salido a tomar aire hoy?",
         "startSecureChat": "Iniciar conversación segura",
         "contactNotSetUp": "no puede usar mensajería segura",
@@ -151,14 +152,15 @@
         "acceptInvite": "Aceptar invitación",
         "acceptingInvite": "Aceptando invitación...",
         "inviteAccepted": "Has aceptado una invitación para unirte a un chat seguro con {name}",
-        "inviteDeclined": "Has rechazado una invitación para unirte a un chat seguro con {name}"
+        "inviteDeclined": "Has rechazado una invitación para unirte a un chat seguro con {name}",
+        "waitMediaUpload": "Por favor, espera a que terminen de subir los archivos"
     },
     "login": {
         "signInWithNostrKey": "Iniciar sesión con tu llave de Nostr",
         "createNewNostrKey": "Crear una nueva llave de Nostr",
         "signInDescription": "Tu llave será cifrada y almacenada únicamente en tu dispositivo.",
         "logIn": "Iniciar sesión",
-        "welcomeTo": "Bienvenido a {appName}",
+        "welcomeTo": "Bienvenido a",
         "slogan": "Seguro. Distribuido. Incensurable."
     },
     "clipboard": {

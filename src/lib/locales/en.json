@@ -1,7 +1,8 @@
 {
     "shared": {
         "cancel": "Cancel",
-        "loading": "Loading..."
+        "loading": "Loading...",
+        "notImplementedYet": "Not implemented yet"
     },
     "settings": {
         "title": "Settings",
@@ -116,9 +117,9 @@
         "unknownError": "Unknown error",
         "contacts": "Contacts",
         "noContactsFound": "No contacts found",
-        "searching": "Searching",
+        "searching": "Searching...",
         "searchResults": "Search results",
-        "searchPlaceholder": "Search contacts or chats",
+        "searchPlaceholder": "Search contacts or chats...",
         "noChatSelected": "Have you touched grass today?",
         "startSecureChat": "Start secure chat",
         "contactNotSetUp": "is not yet set up to use secure messaging",
@@ -151,7 +152,8 @@
         "acceptInvite": "Accept invite",
         "acceptingInvite": "Accepting invite...",
         "inviteAccepted": "You've accepted an invite to join a secure chat with {name}",
-        "inviteDeclined": "You've declined an invite to join a secure chat with {name}"
+        "inviteDeclined": "You've declined an invite to join a secure chat with {name}",
+        "waitMediaUpload": "Please wait for uploads to complete"
     },
     "login": {
         "signInWithNostrKey": "Sign in with Nostr key",

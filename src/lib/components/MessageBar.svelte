@@ -1,6 +1,7 @@
 <script lang="ts">
+import MessageTokens from "$lib/components/MessageTokens.svelte";
 import { activeAccount } from "$lib/stores/accounts";
-import type { CachedMessage, Message } from "$lib/types/chat";
+import type { ChatMessage, Message } from "$lib/types/chat";
 import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { invoke } from "@tauri-apps/api/core";
@@ -15,8 +16,6 @@ import { onMount } from "svelte";
 import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 import Loader from "./Loader.svelte";
-import Button from "./ui/button/button.svelte";
-import Textarea from "./ui/textarea/textarea.svelte";
 let {
     group,
     replyToMessage = $bindable(),
@@ -24,8 +23,8 @@ let {
     isReplyToMessageDeleted = $bindable(false),
 }: {
     group: NostrMlsGroup;
-    replyToMessage?: Message;
-    handleNewMessage: (message: CachedMessage) => void;
+    replyToMessage?: ChatMessage;
+    handleNewMessage: (message: Message) => void;
     isReplyToMessageDeleted?: boolean;
 } = $props();
 
@@ -53,7 +52,7 @@ async function sendMessage() {
 
     // Check if any uploads are still in progress
     if (media.some((item) => item.status === "uploading")) {
-        toast.info("Please wait for uploads to complete");
+        toast.info($t("chats.waitMediaUpload"));
         return;
     }
 
@@ -75,7 +74,7 @@ async function sendMessage() {
         tags,
     };
 
-    handleNewMessage(tmpMessage as unknown as CachedMessage);
+    handleNewMessage(tmpMessage as unknown as Message);
     sendingMessage = true;
 
     await invoke("send_mls_message", {
@@ -96,8 +95,8 @@ async function sendMessage() {
                 })
         ),
     })
-        .then((cachedMessage) => {
-            handleNewMessage(cachedMessage as CachedMessage);
+        .then((tmpMessage: Message) => {
+            handleNewMessage(tmpMessage);
             message = "";
             media = []; // Clear media after successful send
             setTimeout(adjustTextareaHeight, 0);
@@ -207,7 +206,8 @@ onMount(() => {
                     <TrashCan size={20} /><span class="italic opacity-60">{$t("chats.messageDeleted")}</span>
                 </div>
             {:else}
-                <span>{replyToMessage.content}</span>
+               <MessageTokens tokens={replyToMessage.tokens} reply={true} />
+
             {/if}
             <button onclick={() => replyToMessage = undefined} class="p-1 bg-primary hover:bg-primary/80 rounded-full mr-0">
                 <CloseLarge size={16} class="text-primary-foreground" />
