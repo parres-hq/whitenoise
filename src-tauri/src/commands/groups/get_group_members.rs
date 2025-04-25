@@ -36,6 +36,6 @@ pub async fn get_group_members(
             .map_err(|e| e.to_string())?;
         Ok(members)
     } else {
-        return Err("Nostr MLS not initialized".to_string());
+        Err("Nostr MLS not initialized".to_string())
     }
 }

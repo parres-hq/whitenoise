@@ -76,7 +76,7 @@ pub async fn delete_message(
         )
         .await
     } else {
-        return Err("Failed to fetch messages: No Nostr MLS instance".to_string());
+        Err("Failed to fetch messages: No Nostr MLS instance".to_string())
     }
 }
 
@@ -158,7 +158,7 @@ mod tests {
         message_types::Message {
             id: message_id,
             pubkey: author_pubkey,
-            kind: event.kind.into(),
+            kind: event.kind,
             mls_group_id: GroupId::from_slice(&[0; 32]),
             created_at: Timestamp::now(),
             content: "Test message".to_string(),

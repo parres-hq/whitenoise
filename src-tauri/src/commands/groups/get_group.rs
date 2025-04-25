@@ -49,11 +49,11 @@ pub async fn get_group(
                     return Err(format!("Error fetching group relays: {}", e));
                 }
             };
-            return Ok(GroupWithRelays { group, relays });
+            Ok(GroupWithRelays { group, relays })
         } else {
-            return Err("Group not found".to_string());
+            Err("Group not found".to_string())
         }
     } else {
-        return Err("Nostr MLS not initialized".to_string());
+        Err("Nostr MLS not initialized".to_string())
     }
 }

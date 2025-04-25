@@ -67,9 +67,9 @@ pub async fn get_group_and_messages(
 
             Ok(GroupAndMessages { group, messages })
         } else {
-            return Err("Group not found".to_string());
+            Err("Group not found".to_string())
         }
     } else {
-        return Err("Nostr MLS not initialized".to_string());
+        Err("Nostr MLS not initialized".to_string())
     }
 }

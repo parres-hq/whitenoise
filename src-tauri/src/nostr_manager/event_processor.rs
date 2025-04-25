@@ -319,12 +319,12 @@ impl EventProcessor {
                 Err(e) => {
                     // TODO: Need to figure out how to reprocess events that fail because a commit arrives out of order
                     tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Error processing MLS message: {}", e);
-                    return Err(EventProcessorError::NostrMlsError(e));
+                    Err(EventProcessorError::NostrMlsError(e))
                 }
             }
         } else {
             tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Nostr MLS not initialized");
-            return Err(EventProcessorError::NostrMlsNotInitialized);
+            Err(EventProcessorError::NostrMlsNotInitialized)
         }
     }
 }
