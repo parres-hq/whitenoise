@@ -1,9 +1,8 @@
+use nostr_mls::prelude::*;
+
 use crate::accounts::Account;
-use crate::groups::Group;
-use crate::messages::Message;
 use crate::send_mls_message;
 use crate::whitenoise::Whitenoise;
-use nostr_sdk::prelude::*;
 
 /// Deletes a message from an MLS group by creating and sending a deletion event
 ///
@@ -29,18 +28,11 @@ use nostr_sdk::prelude::*;
 /// * Sending the deletion event fails
 #[tauri::command]
 pub async fn delete_message(
-    group: Group,
+    group: group_types::Group,
     message_id: String,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<Message, String> {
-    tracing::debug!(
-        target: "whitenoise::commands::groups::delete_message",
-        "Attempting to delete message with ID: {} from group: {}",
-        message_id,
-        hex::encode(&group.mls_group_id)
-    );
-
+) -> Result<(), String> {
     let active_account = Account::get_active(wn.clone())
         .await
         .map_err(|e| format!("Failed to get active account: {}", e))?;
@@ -52,59 +44,40 @@ pub async fn delete_message(
         message_id
     );
 
-    let group_messages = group
-        .messages(wn.clone())
-        .await
-        .map_err(|e| format!("Failed to fetch messages: {}", e))?;
+    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        let group_messages = nostr_mls
+            .get_messages(&group.mls_group_id)
+            .map_err(|e| format!("Failed to fetch messages: {}", e))?;
 
-    // Validate inputs and permissions
-    let message_event_id =
-        validate_deletion_request(&message_id, &group_messages, &active_account).await?;
+        // Validate inputs and permissions
+        let message_event_id =
+            validate_deletion_request(&message_id, &group_messages, &active_account).await?;
 
-    // Create deletion event with "e" tag (NIP-09)
-    let deletion_tags = vec![Tag::event(message_event_id)];
-    let deletion_reason = "Message deleted by user";
+        // Create deletion event with "e" tag (NIP-09)
+        let deletion_tags = vec![Tag::event(message_event_id)];
+        let deletion_reason = "Message deleted by user";
 
-    tracing::debug!(
-        target: "whitenoise::commands::groups::delete_message",
-        "Creating deletion event for message ID: {}, from user: {}",
-        message_id,
-        active_account.pubkey.to_hex()
-    );
-
-    // Send the deletion event
-    let result = send_mls_message(
-        group,
-        deletion_reason.to_string(),
-        5, // Kind 5 for deletion events as per NIP-09
-        Some(deletion_tags),
-        None,
-        wn,
-        app_handle,
-    )
-    .await
-    .map_err(|e| format!("Failed to send deletion event: {}", e));
-
-    match &result {
-        Ok(message) => {
-            let id_str = match &message.event.id {
-                Some(id) => id.to_hex(),
-                None => "unknown".to_string(),
-            };
-            tracing::debug!(
-                target: "whitenoise::commands::groups::delete_message",
-                "Successfully created deletion event with ID: {}",
-                id_str
-            )
-        }
-        Err(e) => tracing::error!(
+        tracing::debug!(
             target: "whitenoise::commands::groups::delete_message",
-            "Failed to delete message: {}",
-            e
-        ),
+            "Creating deletion event for message ID: {}, from user: {}",
+            message_id,
+            active_account.pubkey.to_hex()
+        );
+        // Send the deletion event
+        send_mls_message(
+            group,
+            deletion_reason.to_string(),
+            5, // Kind 5 for deletion events as per NIP-09
+            Some(deletion_tags),
+            None,
+            wn.clone(),
+            app_handle,
+        )
+        .await
+    } else {
+        return Err("Failed to fetch messages: No Nostr MLS instance".to_string());
     }
-
-    result
 }
 
 /// Validates a message deletion request
@@ -119,7 +92,7 @@ pub async fn delete_message(
 /// * `Err(String)` - Error message if validation fails
 async fn validate_deletion_request(
     message_id: &str,
-    group_messages: &[Message],
+    group_messages: &[message_types::Message],
     active_account: &Account,
 ) -> Result<EventId, String> {
     // Parse and validate message ID
@@ -129,17 +102,17 @@ async fn validate_deletion_request(
     // Find the target message
     let message = group_messages
         .iter()
-        .find(|m| m.event_id == message_event_id)
+        .find(|m| m.id == message_event_id)
         .ok_or_else(|| format!("Message with ID {} not found in this group", message_id))?;
 
     // Verify ownership
-    if message.author_pubkey != active_account.pubkey {
+    if message.pubkey != active_account.pubkey {
         tracing::warn!(
             target: "whitenoise::commands::groups::validate_deletion_request",
             "Permission denied: User {} attempted to delete message {} created by {}",
             active_account.pubkey.to_hex(),
             message_id,
-            message.author_pubkey.to_hex()
+            message.pubkey.to_hex()
         );
         return Err(format!(
             "Permission denied: Cannot delete message {}. Only the message creator can delete it.",
@@ -172,7 +145,7 @@ mod tests {
         }
     }
 
-    fn create_test_message(event_id_str: &str, author_pubkey: PublicKey) -> Message {
+    fn create_test_message(event_id_str: &str, author_pubkey: PublicKey) -> message_types::Message {
         let message_id = EventId::from_hex(event_id_str).unwrap();
         let event = UnsignedEvent {
             id: Some(message_id),
@@ -182,21 +155,20 @@ mod tests {
             tags: Tags::new(),
             content: "Test message".to_string(),
         };
-        Message {
-            event_id: message_id,
-            account_pubkey: author_pubkey,
-            author_pubkey,
-            mls_group_id: vec![],
-            event_kind: event.kind.into(),
+        message_types::Message {
+            id: message_id,
+            pubkey: author_pubkey,
+            kind: event.kind.into(),
+            mls_group_id: GroupId::from_slice(&[0; 32]),
             created_at: Timestamp::now(),
             content: "Test message".to_string(),
             tags: Tags::new(),
             event,
-            outer_event_id: EventId::from_hex(
+            wrapper_event_id: EventId::from_hex(
                 "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             )
             .unwrap(),
-            tokens: vec![],
+            state: message_types::MessageState::Created,
         }
     }
 

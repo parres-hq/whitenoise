@@ -469,7 +469,7 @@ impl Account {
         let groups = self.groups(wn).await?;
         Ok(groups
             .iter()
-            .map(|g| g.nostr_group_id.clone())
+            .map(|g| hex::encode(g.nostr_group_id))
             .collect::<Vec<_>>())
     }
 

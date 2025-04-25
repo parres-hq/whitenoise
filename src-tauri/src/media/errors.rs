@@ -30,4 +30,13 @@ pub enum MediaError {
 
     #[error("Database operation failed: {0}")]
     Database(#[from] sqlx::Error),
+
+    #[error("Nostr MLS error: {0}")]
+    NostrMLS(String),
+
+    #[error("Nostr MLS not initialized")]
+    NostrMLSNotInitialized,
+
+    #[error("No Active Account")]
+    NoActiveAccount,
 }

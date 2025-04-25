@@ -1,17 +1,17 @@
-use crate::accounts::Account;
-use crate::media::{add_media_file, FileUpload};
-use crate::secrets_store;
-use crate::whitenoise::Whitenoise;
-use lightning_invoice::SignedRawBolt11Invoice;
-use nostr_sdk::prelude::*;
-use nostr_sdk::NostrSigner;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use lightning_invoice::SignedRawBolt11Invoice;
+use nostr_mls::prelude::*;
+use nostr_sdk::prelude::*;
 use tauri::Emitter;
+
+use crate::media::{add_media_file, FileUpload};
+use crate::whitenoise::Whitenoise;
 
 #[tauri::command]
 pub async fn send_mls_message(
-    mls_group_id: String,
+    group: group_types::Group,
     message: String,
     kind: u16,
     tags: Option<Vec<Tag>>,
@@ -23,11 +23,7 @@ pub async fn send_mls_message(
     let mut final_tags = tags.unwrap_or_default();
     let mut final_content = message;
 
-    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Sending MLSMessage event to group: {:?}", mls_group_id);
-
-    let active_account = Account::get_active(wn.clone())
-        .await
-        .map_err(|e| e.to_string())?;
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Sending MLSMessage event to group: {:?}", group);
 
     // Process media files if present
     if let Some(uploaded_files) = uploaded_files {
@@ -36,17 +32,7 @@ pub async fn send_mls_message(
 
         // Process files sequentially
         for file in uploaded_files {
-            match add_media_file(
-                &group.mls_group_id,
-                &active_account.pubkey.to_string(),
-                file,
-                &export_secret_hex,
-                wn.data_dir.to_str().unwrap(),
-                &wn.database,
-                &wn.nostr.blossom,
-            )
-            .await
-            {
+            match add_media_file(&group, file, wn.clone()).await {
                 Ok(media) => uploaded_media.push(media),
                 Err(e) => {
                     tracing::error!(
@@ -91,62 +77,28 @@ pub async fn send_mls_message(
         inner_event.clone()
     );
 
-    let json_event_string = serde_json::to_string(&inner_event).map_err(|e| e.to_string())?;
-
-    let serialized_message;
-    {
-        let nostr_mls = wn.nostr_mls.lock().await;
-        serialized_message = nostr_mls
-            .create_message_for_group(group.mls_group_id.clone(), json_event_string)
-            .map_err(|e| e.to_string())?;
+    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        match nostr_mls
+            .create_message(&group.mls_group_id, inner_event.clone())
+            .map_err(|e| e.to_string())
+        {
+            Ok(_) => {
+                app_handle
+                    .emit("mls_message_sent", (group.clone(), inner_event))
+                    .expect("Couldn't emit event");
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "whitenoise::commands::groups::send_mls_message",
+                    "Error creating message: {}",
+                    e
+                );
+            }
+        }
+    } else {
+        return Err("Nostr MLS not initialized".to_string());
     }
-
-    let encrypted_content = nip44::encrypt(
-        export_nostr_keys.secret_key(),
-        &export_nostr_keys.public_key(),
-        &serialized_message,
-        nip44::Version::V2,
-    )
-    .map_err(|e| e.to_string())?;
-
-    let ephemeral_nostr_keys = Keys::generate();
-
-    let published_message_event = EventBuilder::new(Kind::MlsGroupMessage, encrypted_content)
-        .tags(vec![Tag::custom(
-            TagKind::h(),
-            vec![group.nostr_group_id.clone()],
-        )])
-        .sign(&ephemeral_nostr_keys)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    tracing::debug!(
-        target: "whitenoise::commands::groups::send_mls_message",
-        "Publishing MLSMessage event to group relays"
-    );
-
-    let relays = group.relays(wn.clone()).await.map_err(|e| e.to_string())?;
-    let outer_event_id = wn
-        .nostr
-        .client
-        .send_event_to(relays, &published_message_event)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let message = group
-        .add_message(
-            outer_event_id.id().to_string(),
-            inner_event.clone(),
-            wn.clone(),
-            app_handle.clone(),
-            None,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    app_handle
-        .emit("mls_message_sent", (group.clone(), message.clone()))
-        .expect("Couldn't emit event");
 
     Ok(())
 }

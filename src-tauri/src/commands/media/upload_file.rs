@@ -1,14 +1,11 @@
-use crate::accounts::Account;
-use crate::media::{add_media_file, FileUpload, UploadedMedia};
-use crate::secrets_store;
-use crate::whitenoise::Whitenoise;
 use nostr_mls::prelude::*;
-use nostr_sdk::prelude::*;
-use std::time::Duration;
 use tauri::Emitter;
 
+use crate::media::{add_media_file, FileUpload, UploadedMedia};
+use crate::whitenoise::Whitenoise;
+
 /// Maximum number of retry attempts for file upload operations
-const MAX_RETRIES: u32 = 3;
+const MAX_RETRIES: u8 = 3;
 
 // TODO: FIX https://github.com/parres-hq/whitenoise/issues/138
 
@@ -41,84 +38,25 @@ const MAX_RETRIES: u32 = 3;
 /// * `file_upload_error` - When all retry attempts fail
 #[tauri::command]
 pub async fn upload_file(
-    group_id: Vec<u8>,
+    group: group_types::Group,
     file: FileUpload,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
 ) -> Result<UploadedMedia, String> {
-    let export_secret_hex;
-    let epoch;
-
-    {
-        let nostr_mls =
-            match tokio::time::timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
-                Ok(guard) => guard,
-                Err(_) => {
-                    let error_msg = "Timeout waiting for nostr_mls lock".to_string();
-                    tracing::error!(
-                        target: "whitenoise::commands::media::upload_file",
-                        "{}",
-                        error_msg
-                    );
-                    return Err(error_msg);
-                }
-            };
-
-        match nostr_mls.as_ref() {
-            Some(instance) => {
-                // Use the unwrapped NostrMls instance
-                let result = instance
-                    .export_secret(&GroupId::from_slice(&group_id))
-                    .map_err(|e| e.to_string())?;
-                export_secret_hex = result.secret_key.to_secret_hex();
-                epoch = result.epoch;
-            }
-            None => {
-                let error_msg = "NostrMls instance not initialized".to_string();
-                tracing::error!(
-                    target: "whitenoise::commands::media::upload_file",
-                    "{}",
-                    error_msg
-                );
-                return Err(error_msg);
-            }
-        };
-    }
-
-    // Store the export secret key in the secrets store
-    secrets_store::store_mls_export_secret(
-        group_id.clone(),
-        epoch,
-        export_secret_hex.clone(),
-        wn.data_dir.as_path(),
-    )
-    .map_err(|e| e.to_string())?;
-
     let mut retries = 0;
     let mut last_error = None;
 
-    let active_account = Account::get_active(wn.clone())
-        .await
-        .map_err(|e| e.to_string())?;
-
     while retries < MAX_RETRIES {
-        match add_media_file(
-            &group_id,
-            &active_account.pubkey.to_string(),
-            file.clone(),
-            &export_secret_hex,
-            wn.data_dir.to_str().unwrap(),
-            &wn.database,
-            &wn.nostr.blossom,
-        )
-        .await
-        {
+        match add_media_file(&group, file.clone(), wn.clone()).await {
             Ok(media) => {
                 // Emit success event
                 app_handle
                     .emit(
                         "file_upload_success",
-                        (group_id.clone(), media.blob_descriptor.url.clone()),
+                        (
+                            hex::encode(group.mls_group_id.as_slice()),
+                            media.blob_descriptor.url.clone(),
+                        ),
                     )
                     .expect("Couldn't emit event");
                 return Ok(media);
@@ -131,7 +69,11 @@ pub async fn upload_file(
                     app_handle
                         .emit(
                             "file_upload_retry",
-                            (group_id.clone(), retries, MAX_RETRIES),
+                            (
+                                hex::encode(group.mls_group_id.as_slice()),
+                                retries,
+                                MAX_RETRIES,
+                            ),
                         )
                         .expect("Couldn't emit event");
                 }
@@ -144,7 +86,10 @@ pub async fn upload_file(
 
     // Emit error event
     app_handle
-        .emit("file_upload_error", (group_id.clone(), error.clone()))
+        .emit(
+            "file_upload_error",
+            (hex::encode(group.mls_group_id.as_slice()), error.clone()),
+        )
         .expect("Couldn't emit event");
 
     Err(error)

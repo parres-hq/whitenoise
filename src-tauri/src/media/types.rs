@@ -1,6 +1,6 @@
 use crate::media::blossom::BlobDescriptor;
 use crate::media::sanitizer::SafeMediaMetadata;
-use nostr_sdk::prelude::*;
+use nostr_mls::prelude::*;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row};
 
@@ -21,7 +21,7 @@ pub struct MediaFile {
     /// The ID of the media_file row
     pub id: i64,
     /// The MLS group ID
-    pub mls_group_id: Vec<u8>,
+    pub mls_group_id: GroupId,
     /// The path to the file on the local filesystem
     pub file_path: String,
     /// The URL of the file on Blossom
@@ -48,7 +48,7 @@ impl<'r> FromRow<'r, sqlx::sqlite::SqliteRow> for MediaFile {
 
         Ok(MediaFile {
             id: row.try_get("id")?,
-            mls_group_id: row.try_get("mls_group_id")?,
+            mls_group_id: GroupId::from_slice(&row.try_get::<Vec<u8>, _>("mls_group_id")?),
             file_path: row.try_get("file_path")?,
             blossom_url: row.try_get("blossom_url")?,
             file_hash: row.try_get("file_hash")?,
