@@ -11,9 +11,6 @@ pub enum MediaError {
     #[error("Delete error: {0}")]
     Delete(String),
 
-    #[error("Export secret error: {0}")]
-    ExportSecret(String),
-
     #[error("Metadata error: {0}")]
     Metadata(String),
 

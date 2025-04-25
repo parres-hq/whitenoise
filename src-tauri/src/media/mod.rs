@@ -111,7 +111,7 @@ pub async fn add_media_file(
     // Add the file to the local cache
     let media_file = cache::add_to_cache(
         &uploaded_file.data,
-        &group,
+        group,
         &active_account.pubkey.to_string(),
         Some(blob_descriptor.url.clone()),
         Some(keys.secret_key().to_secret_hex()),

@@ -396,19 +396,6 @@ impl Account {
         // Validate the active state as a safeguard
         Self::validate_active_state(wn.clone()).await?;
 
-        // If the database operation is successful, update Nostr client
-        wn.nostr
-            .set_nostr_identity(self, wn.clone(), app_handle)
-            .await?;
-
-        tracing::debug!(
-            target: "whitenoise::accounts::set_active",
-            "Nostr identity set for: {}",
-            self.pubkey.to_hex()
-        );
-
-        app_handle.emit("nostr_ready", ())?;
-
         // Then update Nostr MLS instance
         {
             let mut nostr_mls =
@@ -439,6 +426,19 @@ impl Account {
             self.pubkey.to_hex()
         );
 
+        // If the database operation is successful, update Nostr client
+        wn.nostr
+            .set_nostr_identity(self, wn.clone(), app_handle)
+            .await?;
+
+        tracing::debug!(
+            target: "whitenoise::accounts::set_active",
+            "Nostr identity set for: {}",
+            self.pubkey.to_hex()
+        );
+
+        app_handle.emit("nostr_ready", ())?;
+
         app_handle.emit("account_changed", ())?;
 
         tracing::debug!(
@@ -457,9 +457,7 @@ impl Account {
     ) -> Result<Vec<group_types::Group>> {
         let nostr_mls_guard = wn.nostr_mls.lock().await;
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            nostr_mls
-                .get_groups()
-                .map_err(|e| AccountError::NostrMlsError(e))
+            nostr_mls.get_groups().map_err(AccountError::NostrMlsError)
         } else {
             Err(AccountError::NostrMlsNotInitialized)
         }
@@ -642,7 +640,7 @@ impl Account {
                         ));
                     }
                 };
-            let storage_dir = wn.data_dir.join("mls").join(&account.pubkey.to_hex());
+            let storage_dir = wn.data_dir.join("mls").join(account.pubkey.to_hex());
             let storage = NostrMlsSqliteStorage::new(storage_dir)?;
             *nostr_mls = Some(NostrMls::new(storage));
         }

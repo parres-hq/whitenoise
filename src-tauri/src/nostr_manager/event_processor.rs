@@ -1,17 +1,20 @@
-use crate::accounts::{Account, AccountError};
-use crate::key_packages;
-use crate::nostr_manager::parser::{parse, SerializableToken};
-use crate::nostr_manager::NostrManagerError;
-use crate::relays::RelayType;
-use crate::secrets_store;
-use crate::Whitenoise;
+//! Event processor for the Nostr manager
+//!
+//! This module is responsible for processing events from the Nostr manager
+
 use nostr_mls::prelude::*;
-use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+
+use crate::accounts::{Account, AccountError};
+use crate::key_packages;
+use crate::nostr_manager::NostrManagerError;
+use crate::relays::RelayType;
+use crate::secrets_store;
+use crate::Whitenoise;
 
 #[derive(Error, Debug)]
 pub enum EventProcessorError {

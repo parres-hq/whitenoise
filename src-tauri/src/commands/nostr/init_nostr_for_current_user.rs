@@ -13,12 +13,6 @@ pub async fn init_nostr_for_current_user(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Update Nostr identity and connect relays
-    wn.nostr
-        .set_nostr_identity(&current_account, wn.clone(), &app_handle)
-        .await
-        .map_err(|e| e.to_string())?;
-
     // Then update Nostr MLS instance
     {
         let mut nostr_mls = match tokio::time::timeout(
@@ -45,6 +39,12 @@ pub async fn init_nostr_for_current_user(
             NostrMlsSqliteStorage::new(storage_dir).map_err(|e| e.to_string())?,
         ));
     }
+
+    // Update Nostr identity and connect relays
+    wn.nostr
+        .set_nostr_identity(&current_account, wn.clone(), &app_handle)
+        .await
+        .map_err(|e| e.to_string())?;
 
     tracing::debug!(
         target: "whitenoise::commands::nostr::init_nostr_for_current_user",

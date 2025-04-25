@@ -26,8 +26,6 @@ pub enum KeyPackageError {
     NostrMlsError(#[from] nostr_mls::error::Error),
     #[error("Nostr MLS Not Initialized")]
     NostrMlsNotInitialized,
-    #[error("Lock error: {0}")]
-    LockError(String),
     #[error("Join error: {0}")]
     JoinError(#[from] tokio::task::JoinError),
 }
@@ -103,7 +101,7 @@ pub async fn fetch_key_package_for_pubkey(
         let mut valid_key_packages: Vec<(EventId, KeyPackage)> = Vec::new();
         for event in key_package_events.iter() {
             let key_package = nostr_mls
-                .parse_key_package(&event)
+                .parse_key_package(event)
                 .map_err(KeyPackageError::NostrMlsError)?;
             if key_package.ciphersuite() == nostr_mls.ciphersuite
                 && key_package.last_resort()
@@ -141,9 +139,9 @@ pub async fn fetch_key_package_for_pubkey(
             }
         }
     } else {
-        return Err(KeyPackageError::NostrMlsError(
+        Err(KeyPackageError::NostrMlsError(
             nostr_mls::error::Error::KeyPackage("NostrMls instance is not initialized".to_string()),
-        ));
+        ))
     }
 }
 
@@ -197,7 +195,7 @@ pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()>
                 }
             };
 
-            result.map_err(|e| KeyPackageError::NostrMlsError(e))
+            result.map_err(KeyPackageError::NostrMlsError)
         })
     })
     .await
@@ -210,7 +208,7 @@ pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()>
                 .client
                 .send_event_to(&key_package_relays, &key_package_result)
                 .await
-                .map_err(|e| KeyPackageError::NostrClientError(e))?;
+                .map_err(KeyPackageError::NostrClientError)?;
 
             tracing::debug!(
                 target: "whitenoise::key_packages::publish_new_key_package",
@@ -276,7 +274,7 @@ pub async fn delete_key_package_from_relays(
             // Make sure we delete the private key material from MLS storage if requested
             if delete_mls_stored_keys {
                 let key_package = nostr_mls
-                    .parse_key_package(&event)
+                    .parse_key_package(event)
                     .map_err(KeyPackageError::NostrMlsError)?;
 
                 nostr_mls

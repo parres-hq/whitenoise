@@ -1,5 +1,5 @@
 //! This module contains functions for managing cached media files.
-use std::collections::BTreeSet;
+
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -164,10 +164,13 @@ pub async fn delete_cached_file(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::database::Database;
+    use std::collections::BTreeSet;
+
     use sqlx::sqlite::SqlitePoolOptions;
     use tempfile::tempdir;
+
+    use super::*;
+    use crate::database::Database;
 
     async fn setup_test_db() -> (Database, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();

@@ -29,6 +29,6 @@ pub async fn get_welcome(
             Err("Welcome not found".to_string())
         }
     } else {
-        return Err("Nostr MLS not initialized".to_string());
+        Err("Nostr MLS not initialized".to_string())
     }
 }

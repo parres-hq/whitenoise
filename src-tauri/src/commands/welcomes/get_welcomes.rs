@@ -15,6 +15,6 @@ pub async fn get_welcomes(
         tracing::debug!(target: "whitenoise::commands::welcomes::get_welcomes", "Pending welcomes: {:?}", pending_welcomes);
         Ok(pending_welcomes)
     } else {
-        return Err("Nostr MLS not initialized".to_string());
+        Err("Nostr MLS not initialized".to_string())
     }
 }

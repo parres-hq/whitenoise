@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 // use keyring::Entry;
-use nostr_sdk::{util::hex, Keys};
+use nostr_sdk::Keys;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -235,110 +235,6 @@ pub fn remove_private_key_for_pubkey(pubkey: &str, data_dir: &Path) -> Result<()
     Ok(())
 }
 
-/// Stores the MLS export secret for a specific group and epoch in the system's keyring.
-///
-/// This function creates a unique key by combining the group ID and epoch, then stores
-/// the provided secret in the system's keyring using this key.
-///
-/// # Arguments
-///
-/// * `mls_group_id` - A vector of bytes containing the ID of the MLS group.
-/// * `epoch` - The epoch number as a u64.
-/// * `secret` - A string slice containing the export secret to be stored.
-/// * `file_path` - The path to the secrets file.
-///
-/// # Returns
-///
-/// * `Result<()>` - Ok(()) if the operation was successful, or an error if it fails.
-///
-/// # Errors
-///
-/// This function will return an error if:
-/// * The Entry creation fails
-/// * Setting the password in the keyring fails
-pub fn store_mls_export_secret(
-    mls_group_id: Vec<u8>,
-    epoch: u64,
-    secret: String,
-    data_dir: &Path,
-) -> Result<()> {
-    let mls_group_id_hex = hex::encode(&mls_group_id);
-    let key = format!("{mls_group_id_hex}:{epoch}");
-
-    let mut secrets = read_secrets_file(data_dir).unwrap_or(json!({}));
-    let obfuscated_secret = obfuscate(&secret, data_dir);
-    secrets[key] = json!(obfuscated_secret);
-    write_secrets_file(data_dir, &secrets)?;
-
-    // if cfg!(target_os = "android") {
-    //     let mut secrets = read_secrets_file(data_dir).unwrap_or(json!({}));
-    //     let obfuscated_secret = obfuscate(&secret, data_dir);
-    //     secrets[key] = json!(obfuscated_secret);
-    //     write_secrets_file(data_dir, &secrets)?;
-    // } else {
-    // let service = get_service_name();
-    //     let entry = Entry::new(service.as_str(), key.as_str())?;
-    //     entry.set_password(&secret)?;
-    // }
-    Ok(())
-}
-
-/// Retrieves the export secret keys for a specific MLS group and epoch from the system's keyring.
-///
-/// This function constructs a unique key by combining the group ID and epoch, then retrieves
-/// the corresponding secret from the system's keyring. It then parses this secret into Keys.
-///
-/// # Arguments
-///
-/// * `mls_group_id` - A vector of bytes containing the ID of the MLS group.
-/// * `epoch` - The epoch number as a u64.
-/// * `file_path` - The path to the secrets file.
-///
-/// # Returns
-///
-/// * `Result<Keys>` - Ok(Keys) if the operation was successful, or an error if it fails.
-///
-/// # Errors
-///
-/// This function will return an error if:
-/// * The Entry creation fails
-/// * Retrieving the password from the keyring fails
-/// * Parsing the secret into Keys fails
-pub fn get_export_secret_keys_for_group(
-    mls_group_id: Vec<u8>,
-    epoch: u64,
-    data_dir: &Path,
-) -> Result<Keys> {
-    let mls_group_id_hex = hex::encode(&mls_group_id);
-    let key = format!("{mls_group_id_hex}:{epoch}");
-
-    let secrets = read_secrets_file(data_dir)?;
-    let obfuscated_secret = secrets[key]
-        .as_str()
-        .ok_or(SecretsStoreError::KeyNotFound)?;
-    let secret = deobfuscate(obfuscated_secret, data_dir)?;
-    let keys = Keys::parse(&secret).map_err(SecretsStoreError::KeyError)?;
-    Ok(keys)
-
-    // if cfg!(target_os = "android") {
-    //     let secrets = read_secrets_file(data_dir)?;
-    //     let obfuscated_secret = secrets[key]
-    //         .as_str()
-    //         .ok_or(SecretsStoreError::KeyNotFound)?;
-    //     let secret = deobfuscate(obfuscated_secret, data_dir)?;
-    //     let keys = Keys::parse(secret).map_err(SecretsStoreError::KeyError)?;
-    //     Ok(keys)
-    // } else {
-    // let service = get_service_name();
-    //     let entry = Entry::new(service.as_str(), key.as_str())?;
-    //     let secret = entry
-    //         .get_password()
-    //         .map_err(SecretsStoreError::KeyringError)?;
-    //     let keys = Keys::parse(secret).map_err(SecretsStoreError::KeyError)?;
-    //     Ok(keys)
-    // }
-}
-
 /// Stores the NWC (Nostr Wallet Connect) URI for a specific public key in the secrets store.
 ///
 /// # Arguments
@@ -461,42 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn test_store_and_retrieve_mls_export_secret() -> Result<()> {
-        let temp_dir = setup_temp_dir();
-        let group_id = vec![0u8; 32];
-        let epoch = 42;
-        let secret =
-            String::from("9b9da9c6ee9a62016ab2db1a3397d267a575c02266c6ca9b5ec8e015db67c30e");
-
-        // Store the MLS export secret
-        store_mls_export_secret(group_id.clone(), epoch, secret.clone(), temp_dir.path())?;
-
-        // Retrieve the keys
-        let retrieved_keys =
-            get_export_secret_keys_for_group(group_id.clone(), epoch, temp_dir.path())?;
-
-        // Verify that the retrieved keys match the original secret
-        assert_eq!(retrieved_keys.secret_key().to_secret_hex(), secret);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_nonexistent_mls_export_secret() {
-        let temp_dir = setup_temp_dir();
-        let nonexistent_group_id = vec![0u8; 32];
-        let nonexistent_epoch = 999;
-
-        let result = get_export_secret_keys_for_group(
-            nonexistent_group_id,
-            nonexistent_epoch,
-            temp_dir.path(),
-        );
-
-        assert!(result.is_err());
-    }
-
-    #[test]
     #[cfg(target_os = "android")]
     fn test_android_store_and_retrieve_private_key() -> Result<()> {
         let temp_dir = setup_temp_dir();
@@ -522,31 +382,6 @@ mod tests {
         // Verify that the key is removed from the file
         let secrets = read_secrets_file(temp_dir.path())?;
         assert!(secrets.get(&pubkey).is_none());
-
-        Ok(())
-    }
-
-    #[test]
-    #[cfg(target_os = "android")]
-    fn test_android_store_and_retrieve_mls_export_secret() -> Result<()> {
-        let temp_dir = setup_temp_dir();
-        let group_id = "test_group";
-        let epoch = 42;
-        let secret = "9b9da9c6ee9a62016ab2db1a3397d267a575c02266c6ca9b5ec8e015db67c30e";
-
-        // Store the MLS export secret
-        store_mls_export_secret(group_id, epoch, secret, temp_dir.path())?;
-
-        // Retrieve the keys
-        let retrieved_keys = get_export_secret_keys_for_group(group_id, epoch, temp_dir.path())?;
-
-        // Verify that the retrieved keys match the original secret
-        assert_eq!(retrieved_keys.secret_key().to_secret_hex(), secret);
-
-        // Verify that the secret is stored in the file
-        let secrets = read_secrets_file(temp_dir.path())?;
-        let key = format!("{group_id}:{epoch}");
-        assert!(secrets.get(&key).is_some());
 
         Ok(())
     }
