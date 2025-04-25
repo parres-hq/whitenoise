@@ -23,7 +23,6 @@ base64 = "0.22"
 blurhash = "0.1"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4.40", features = ["serde"] }
-futures = "0.3"
 hex = "0.4"
 image = "0.24"
 keyring = { version = "3.6", features = [
