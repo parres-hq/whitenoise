@@ -1,12 +1,13 @@
+use std::ops::Add;
+
+use nostr_mls::prelude::*;
+use nostr_sdk::NostrSigner;
+use tauri::Emitter;
+
 use crate::accounts::Account;
 use crate::fetch_enriched_contact;
-use crate::groups::{Group, GroupType};
 use crate::key_packages::fetch_key_packages_for_members;
 use crate::whitenoise::Whitenoise;
-use nostr_sdk::prelude::*;
-use nostr_sdk::NostrSigner;
-use std::ops::Add;
-use tauri::Emitter;
 
 /// Creates a new MLS group with the specified members and settings
 ///
@@ -50,7 +51,7 @@ pub async fn create_group(
     description: String,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<Group, String> {
+) -> Result<group_types::Group, String> {
     let active_account = Account::get_active(wn.clone())
         .await
         .map_err(|e| e.to_string())?;
@@ -68,14 +69,19 @@ pub async fn create_group(
         return Err("You cannot create a group for another account".to_string());
     }
 
-    // Run various checks on the group members
-    Group::validate_group_members(&creator_pubkey, &member_pubkeys, &admin_pubkeys)
-        .map_err(|e| e.to_string())?;
-
     // Fetch key packages for all members
     let member_key_packages = fetch_key_packages_for_members(&member_pubkeys, wn.clone())
         .await
         .map_err(|e| e.to_string())?;
+    let member_pubkeys = member_pubkeys
+        .iter()
+        .map(|pk| PublicKey::from_hex(pk).unwrap())
+        .collect::<Vec<_>>();
+    let admin_pubkeys = admin_pubkeys
+        .iter()
+        .map(|pk| PublicKey::from_hex(pk).unwrap())
+        .collect::<Vec<_>>();
+    let creator_pubkey = PublicKey::from_hex(&creator_pubkey).unwrap();
 
     tracing::debug!(
         target: "whitenoise::groups::create_group",
@@ -84,30 +90,48 @@ pub async fn create_group(
     );
 
     // TODO: Add ability to specify relays for the group
-    let group_relays = wn.nostr.relays().await.unwrap();
+    let group_relays = wn
+        .nostr
+        .relays()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| RelayUrl::parse(&r).unwrap())
+        .collect::<Vec<_>>();
 
-    let create_group_result;
-    {
-        let nostr_mls = wn.nostr_mls.lock().await;
+    let group: group_types::Group;
+    let serialized_welcome_message: Vec<u8>;
+    let group_ids: Vec<String>;
 
-        create_group_result = nostr_mls
+    let nostr_mls_guard = wn.nostr_mls.lock().await;
+
+    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        let create_group_result = nostr_mls
             .create_group(
                 group_name,
                 description,
+                &creator_pubkey,
+                member_pubkeys,
                 member_key_packages
                     .iter()
                     .map(|kp| kp.key_package.clone())
                     .collect(),
                 admin_pubkeys,
-                creator_pubkey,
                 group_relays,
             )
             .map_err(|e| e.to_string())?;
-    }
 
-    let mls_group = create_group_result.mls_group;
-    let serialized_welcome_message = create_group_result.serialized_welcome_message;
-    let group_data = create_group_result.nostr_group_data;
+        group = create_group_result.group;
+        serialized_welcome_message = create_group_result.serialized_welcome_message;
+        group_ids = nostr_mls
+            .get_groups()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|g| g.nostr_group_id)
+            .collect::<Vec<_>>();
+    } else {
+        return Err("Nostr MLS not initialized".to_string());
+    }
 
     // Fan out the welcome message to all members
     for member in member_key_packages {
@@ -230,9 +254,9 @@ pub async fn create_group(
 
         if retry_count == max_retries {
             return Err(format!(
-                "Failed to send welcome message to {:?} on {:?} after {} attempts. Last error: {:?}",
-                &member_pubkey, &relay_urls, max_retries, last_error
-            ));
+            "Failed to send welcome message to {:?} on {:?} after {} attempts. Last error: {:?}",
+            &member_pubkey, &relay_urls, max_retries, last_error
+        ));
         }
 
         tracing::debug!(
@@ -252,49 +276,14 @@ pub async fn create_group(
         }
     }
 
-    let group_type = if mls_group.members().count() == 2 {
-        GroupType::DirectMessage
-    } else {
-        GroupType::Group
-    };
-
-    let group_id = mls_group.group_id().to_vec();
-
-    // Create the group and save it to the database
-    let nostr_group = Group::new(
-        group_id.clone(),
-        mls_group.epoch().as_u64(),
-        group_type,
-        group_data,
-        wn.clone(),
-        &app_handle,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    tracing::debug!(
-        target: "whitenoise::groups::create_group",
-        "Added group to database: {:?}",
-        nostr_group
-    );
-
-    // Update the subscription for MLS group messages to include the new group
-    let group_ids = active_account
-        .groups(wn.clone())
-        .await
-        .map_err(|e| format!("Failed to get groups: {}", e))?
-        .into_iter()
-        .map(|group| group.nostr_group_id)
-        .collect::<Vec<_>>();
-
     wn.nostr
         .subscribe_mls_group_messages(group_ids.clone())
         .await
         .map_err(|e| format!("Failed to update MLS group subscription: {}", e))?;
 
     app_handle
-        .emit("group_added", nostr_group.clone())
+        .emit("group_added", group.clone())
         .map_err(|e| e.to_string())?;
 
-    Ok(nostr_group)
+    Ok(group)
 }

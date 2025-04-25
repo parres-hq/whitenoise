@@ -2,7 +2,9 @@ use crate::accounts::Account;
 use crate::media::{add_media_file, FileUpload, UploadedMedia};
 use crate::secrets_store;
 use crate::whitenoise::Whitenoise;
+use nostr_mls::prelude::*;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 use tauri::Emitter;
 
 /// Maximum number of retry attempts for file upload operations
@@ -48,10 +50,39 @@ pub async fn upload_file(
     let epoch;
 
     {
-        let nostr_mls = wn.nostr_mls.lock().await;
-        (export_secret_hex, epoch) = nostr_mls
-            .export_secret_as_hex_secret_key_and_epoch(group_id.clone())
-            .map_err(|e| e.to_string())?;
+        let nostr_mls =
+            match tokio::time::timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+                Ok(guard) => guard,
+                Err(_) => {
+                    let error_msg = "Timeout waiting for nostr_mls lock".to_string();
+                    tracing::error!(
+                        target: "whitenoise::commands::media::upload_file",
+                        "{}",
+                        error_msg
+                    );
+                    return Err(error_msg);
+                }
+            };
+
+        match nostr_mls.as_ref() {
+            Some(instance) => {
+                // Use the unwrapped NostrMls instance
+                let result = instance
+                    .export_secret(&GroupId::from_slice(&group_id))
+                    .map_err(|e| e.to_string())?;
+                export_secret_hex = result.secret_key.to_secret_hex();
+                epoch = result.epoch;
+            }
+            None => {
+                let error_msg = "NostrMls instance not initialized".to_string();
+                tracing::error!(
+                    target: "whitenoise::commands::media::upload_file",
+                    "{}",
+                    error_msg
+                );
+                return Err(error_msg);
+            }
+        };
     }
 
     // Store the export secret key in the secrets store

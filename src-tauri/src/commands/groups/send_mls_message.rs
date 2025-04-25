@@ -1,7 +1,5 @@
 use crate::accounts::Account;
-use crate::groups::Group;
 use crate::media::{add_media_file, FileUpload};
-use crate::messages::Message;
 use crate::secrets_store;
 use crate::whitenoise::Whitenoise;
 use lightning_invoice::SignedRawBolt11Invoice;
@@ -13,52 +11,19 @@ use tauri::Emitter;
 
 #[tauri::command]
 pub async fn send_mls_message(
-    group: Group,
+    mls_group_id: String,
     message: String,
     kind: u16,
     tags: Option<Vec<Tag>>,
     uploaded_files: Option<Vec<FileUpload>>,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<Message, String> {
+) -> Result<(), String> {
     let nostr_keys = wn.nostr.client.signer().await.map_err(|e| e.to_string())?;
     let mut final_tags = tags.unwrap_or_default();
     let mut final_content = message;
 
-    // Get export secret early as we need it for file encryption
-    let export_secret_hex;
-    let epoch;
-    {
-        let nostr_mls = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            wn.nostr_mls.lock(),
-        )
-        .await
-        {
-            Ok(guard) => guard,
-            Err(_) => {
-                tracing::error!(
-                    target: "whitenoise::commands::groups::send_mls_message",
-                    "Timeout waiting for nostr_mls lock"
-                );
-                return Err("Timeout waiting for nostr_mls lock".to_string());
-            }
-        };
-        (export_secret_hex, epoch) = nostr_mls
-            .export_secret_as_hex_secret_key_and_epoch(group.mls_group_id.clone())
-            .map_err(|e| e.to_string())?;
-    }
-
-    // Store the export secret key in the secrets store
-    secrets_store::store_mls_export_secret(
-        group.mls_group_id.clone(),
-        epoch,
-        export_secret_hex.clone(),
-        wn.data_dir.as_path(),
-    )
-    .map_err(|e| e.to_string())?;
-
-    let export_nostr_keys = Keys::parse(&export_secret_hex).map_err(|e| e.to_string())?;
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Sending MLSMessage event to group: {:?}", mls_group_id);
 
     let active_account = Account::get_active(wn.clone())
         .await
@@ -183,7 +148,7 @@ pub async fn send_mls_message(
         .emit("mls_message_sent", (group.clone(), message.clone()))
         .expect("Couldn't emit event");
 
-    Ok(message)
+    Ok(())
 }
 
 /// Creates an unsigned nostr event with the given parameters

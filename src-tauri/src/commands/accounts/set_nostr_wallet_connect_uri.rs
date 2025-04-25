@@ -1,6 +1,5 @@
 use crate::accounts::Account;
 use crate::whitenoise::Whitenoise;
-use nostr_sdk::prelude::*;
 use nwc::prelude::*;
 
 /// Sets the Nostr Wallet Connect URI for the active account.

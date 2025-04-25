@@ -1,6 +1,7 @@
 use crate::accounts::Account;
 use crate::whitenoise::Whitenoise;
-use nostr_openmls::NostrMls;
+use nostr_mls::NostrMls;
+use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
 
 #[tauri::command]
@@ -35,7 +36,14 @@ pub async fn init_nostr_for_current_user(
                 return Err("Timeout waiting for nostr_mls lock".to_string());
             }
         };
-        *nostr_mls = NostrMls::new(wn.data_dir.clone(), Some(current_account.pubkey.to_hex()));
+        // Create the nostr-mls instance at the data_dir/mls/pubkey directory to partition data between users
+        let storage_dir = wn
+            .data_dir
+            .join("mls")
+            .join(current_account.pubkey.to_hex());
+        *nostr_mls = Some(NostrMls::new(
+            NostrMlsSqliteStorage::new(storage_dir).map_err(|e| e.to_string())?,
+        ));
     }
 
     tracing::debug!(

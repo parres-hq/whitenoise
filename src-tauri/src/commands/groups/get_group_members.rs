@@ -1,6 +1,8 @@
-use crate::groups::Group;
+use std::collections::BTreeSet;
+
+use nostr_mls::prelude::*;
+
 use crate::whitenoise::Whitenoise;
-use nostr_sdk::prelude::*;
 
 /// Gets the list of members in an MLS group
 ///
@@ -21,12 +23,19 @@ use nostr_sdk::prelude::*;
 pub async fn get_group_members(
     group_id: &str,
     wn: tauri::State<'_, Whitenoise>,
-) -> Result<Vec<PublicKey>, String> {
-    let mls_group_id =
-        hex::decode(group_id).map_err(|e| format!("Error decoding group id: {}", e))?;
-    let group = Group::find_by_mls_group_id(&mls_group_id, wn.clone())
-        .await
-        .map_err(|e| format!("Error fetching group: {}", e))?;
-    let members = group.members(wn.clone()).await.map_err(|e| e.to_string())?;
-    Ok(members)
+) -> Result<BTreeSet<PublicKey>, String> {
+    let mls_group_id = GroupId::from_slice(
+        &hex::decode(group_id).map_err(|e| format!("Error decoding group id: {}", e))?,
+    );
+
+    let nostr_mls_guard = wn.nostr_mls.lock().await;
+
+    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        let members = nostr_mls
+            .get_members(&mls_group_id)
+            .map_err(|e| e.to_string())?;
+        Ok(members)
+    } else {
+        return Err("Nostr MLS not initialized".to_string());
+    }
 }

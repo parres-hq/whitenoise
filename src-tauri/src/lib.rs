@@ -1,27 +1,23 @@
 mod accounts;
 mod commands;
 mod database;
-mod groups;
-mod invites;
 mod key_packages;
 mod media;
-mod messages;
 mod nostr_manager;
 mod payments;
 mod relays;
 mod secrets_store;
 mod types;
-mod utils;
 mod whitenoise;
 
 use crate::commands::accounts::*;
 use crate::commands::groups::*;
-use crate::commands::invites::*;
 use crate::commands::key_packages::*;
 use crate::commands::media::*;
 use crate::commands::messages::*;
 use crate::commands::nostr::*;
 use crate::commands::payments::*;
+use crate::commands::welcomes::*;
 use crate::commands::{delete_all_data, is_mobile, is_platform};
 use crate::whitenoise::Whitenoise;
 use once_cell::sync::Lazy;
@@ -85,55 +81,55 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            create_identity,
-            get_accounts,
-            set_active_account,
-            login,
-            logout,
-            init_nostr_for_current_user,
-            fetch_contacts_with_metadata,
-            query_contacts_with_metadata,
-            fetch_enriched_contact,
-            query_enriched_contact,
-            fetch_enriched_contacts,
-            query_enriched_contacts,
-            fetch_relays,
-            fetch_relays_list,
-            encrypt_content,
-            decrypt_content,
+            accept_welcome,
             create_group,
-            get_groups,
-            get_invites,
-            publish_new_key_package,
+            create_identity,
+            decline_welcome,
+            decrypt_content,
+            delete_all_data,
             delete_all_key_packages,
-            valid_key_package_exists_for_user,
-            publish_relay_list,
-            update_account_onboarding,
-            has_nostr_wallet_connect_uri,
-            set_nostr_wallet_connect_uri,
-            remove_nostr_wallet_connect_uri,
-            get_nostr_wallet_connect_balance,
-            get_group,
+            delete_message,
+            encrypt_content,
+            export_nsec,
+            fetch_contacts_with_metadata,
+            fetch_enriched_contact,
+            fetch_enriched_contacts,
+            fetch_relays_list,
+            fetch_relays,
+            get_accounts,
+            get_group_admins,
             get_group_and_messages,
             get_group_members,
-            get_group_admins,
-            rotate_key_in_group,
-            get_invite,
-            accept_invite,
-            decline_invite,
-            pay_invoice,
-            send_mls_message,
-            delete_message,
-            delete_all_data,
-            search_for_enriched_contacts,
+            get_group,
+            get_groups,
+            get_nostr_wallet_connect_balance,
+            get_welcome,
+            get_welcomes,
+            has_nostr_wallet_connect_uri,
+            init_nostr_for_current_user,
             invite_to_white_noise,
-            query_message,
-            export_nsec,
-            upload_file,
-            upload_media,
-            publish_metadata_event,
             is_mobile,
             is_platform,
+            login,
+            logout,
+            pay_invoice,
+            publish_metadata_event,
+            publish_new_key_package,
+            publish_relay_list,
+            query_contacts_with_metadata,
+            query_enriched_contact,
+            query_enriched_contacts,
+            query_message,
+            remove_nostr_wallet_connect_uri,
+            rotate_key_in_group,
+            search_for_enriched_contacts,
+            send_mls_message,
+            set_active_account,
+            set_nostr_wallet_connect_uri,
+            update_account_onboarding,
+            upload_file,
+            upload_media,
+            valid_key_package_exists_for_user,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

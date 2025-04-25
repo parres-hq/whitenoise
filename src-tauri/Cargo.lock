@@ -53,6 +53,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahash"
+version = "0.8.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
+dependencies = [
+ "cfg-if",
+ "once_cell",
+ "version_check",
+ "zerocopy 0.7.35",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -167,7 +179,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.1",
- "parking_lot 0.12.3",
+ "parking_lot",
  "percent-encoding",
  "windows-sys 0.59.0",
  "wl-clipboard-rs",
@@ -487,15 +499,6 @@ name = "bech32"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
-
-[[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bindgen"
@@ -1691,6 +1694,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1817,16 +1832,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "futf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1886,7 +1891,7 @@ checksum = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f"
 dependencies = [
  "futures-core",
  "lock_api",
- "parking_lot 0.12.3",
+ "parking_lot",
 ]
 
 [[package]]
@@ -2367,6 +2372,15 @@ checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
@@ -2374,6 +2388,15 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
+dependencies = [
+ "hashbrown 0.14.5",
 ]
 
 [[package]]
@@ -2442,9 +2465,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "hex-conservative"
@@ -3323,6 +3343,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "227748d55f2f0ab4735d87fd623798cb6b664512fe979705f829c9f81c934465"
 
 [[package]]
+name = "lru"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
+
+[[package]]
 name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3585,62 +3611,108 @@ dependencies = [
 ]
 
 [[package]]
+name = "nostr"
+version = "0.41.0"
+dependencies = [
+ "aes",
+ "base64 0.22.1",
+ "bech32",
+ "bip39",
+ "bitcoin_hashes 0.14.0",
+ "cbc",
+ "chacha20",
+ "chacha20poly1305",
+ "getrandom 0.2.16",
+ "instant",
+ "regex",
+ "scrypt",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+ "url",
+]
+
+[[package]]
 name = "nostr-database"
 version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "714512e4653f4e7c4f4abb50a0ac82257541b22087dee780b9e3d787276e88d4"
 dependencies = [
+ "lru 0.13.0",
+ "nostr 0.40.0",
+ "tokio",
+]
+
+[[package]]
+name = "nostr-database"
+version = "0.41.0"
+dependencies = [
  "flatbuffers",
- "lru",
- "nostr",
+ "lru 0.14.0",
+ "nostr 0.41.0",
  "tokio",
 ]
 
 [[package]]
 name = "nostr-lmdb"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca52683835f416e5d4699f19eb616a622de54b75adb954430b1190e94f4e5ca"
+version = "0.41.0"
 dependencies = [
  "async-utility",
  "heed",
- "nostr",
- "nostr-database",
+ "nostr 0.41.0",
+ "nostr-database 0.41.0",
  "tokio",
  "tracing",
 ]
 
 [[package]]
-name = "nostr-ndb"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d05c90621b2f12b0561ae8a307663c402cfdc863f10b4630b7b7644d1c3d19b1"
+name = "nostr-mls"
+version = "0.41.0"
 dependencies = [
- "nostr",
- "nostr-database",
- "nostrdb",
-]
-
-[[package]]
-name = "nostr-openmls"
-version = "0.1.0"
-source = "git+https://github.com/erskingardner/nostr-openmls?branch=master#94e4612963b4c3b1f1f0332c7142620ee771ddc3"
-dependencies = [
- "bincode",
- "ed25519-dalek",
- "hex",
- "libc",
+ "nostr 0.41.0",
+ "nostr-mls-storage",
  "openmls",
- "openmls-sled-storage",
  "openmls_basic_credential",
  "openmls_rust_crypto",
  "openmls_traits",
- "p256",
- "rand 0.8.5",
- "serde",
- "thiserror 1.0.69",
  "tls_codec",
  "tracing",
+]
+
+[[package]]
+name = "nostr-mls-sqlite-storage"
+version = "0.41.0"
+dependencies = [
+ "nostr 0.41.0",
+ "nostr-mls-storage",
+ "openmls",
+ "openmls_sqlite_storage",
+ "refinery",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "nostr-mls-storage"
+version = "0.41.0"
+dependencies = [
+ "nostr 0.41.0",
+ "openmls",
+ "openmls_traits",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nostr-ndb"
+version = "0.41.0"
+dependencies = [
+ "nostr 0.41.0",
+ "nostr-database 0.41.0",
+ "nostrdb",
 ]
 
 [[package]]
@@ -3652,36 +3724,50 @@ dependencies = [
  "async-utility",
  "async-wsocket",
  "atomic-destructor",
- "lru",
+ "lru 0.13.0",
  "negentropy 0.3.1",
  "negentropy 0.5.0",
- "nostr",
- "nostr-database",
+ "nostr 0.40.0",
+ "nostr-database 0.40.0",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "nostr-relay-pool"
+version = "0.41.0"
+dependencies = [
+ "async-utility",
+ "async-wsocket",
+ "atomic-destructor",
+ "lru 0.14.0",
+ "negentropy 0.3.1",
+ "negentropy 0.5.0",
+ "nostr 0.41.0",
+ "nostr-database 0.41.0",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "nostr-sdk"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26238eee805d7dc3abcc8d570068c81cb4285b08e9db4d7999e54e20748c472e"
+version = "0.41.0"
 dependencies = [
  "async-utility",
- "nostr",
- "nostr-database",
+ "nostr 0.41.0",
+ "nostr-database 0.41.0",
  "nostr-lmdb",
  "nostr-ndb",
- "nostr-relay-pool",
+ "nostr-relay-pool 0.41.0",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "nostrdb"
-version = "0.5.2"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "775484658a10d646c5e835fb9132a7528d1bf546a791d1176b052f1be69c04b2"
+checksum = "593e342d6df5ea9ea74de29f484cc77377a4f1d4d6322c741fc465699ee76809"
 dependencies = [
  "bindgen",
  "cc",
@@ -3691,7 +3777,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3799,8 +3884,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a17ecafa5837b3eddf23a5872800e14f203ed9a22fc6ab0e674f8fd016a6893"
 dependencies = [
  "async-utility",
- "nostr",
- "nostr-relay-pool",
+ "nostr 0.40.0",
+ "nostr-relay-pool 0.40.1",
 ]
 
 [[package]]
@@ -4053,36 +4138,20 @@ dependencies = [
 [[package]]
 name = "openmls"
 version = "0.6.1"
-source = "git+https://github.com/openmls/openmls?rev=e2fc5e1#e2fc5e1d6250b294d6a786618f01e70139651bd3"
+source = "git+https://github.com/openmls/openmls?rev=4cc0f594b11262083ad9827b3b2033052c6ef99f#4cc0f594b11262083ad9827b3b2033052c6ef99f"
 dependencies = [
  "log",
  "openmls_traits",
  "rayon",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tls_codec",
-]
-
-[[package]]
-name = "openmls-sled-storage"
-version = "0.1.0"
-source = "git+https://github.com/erskingardner/openmls-sled-storage?branch=master#13500a1444f6b55760b2c66c7365204d30810a77"
-dependencies = [
- "hex",
- "log",
- "openmls_traits",
- "serde",
- "serde_json",
- "sled",
- "thiserror 1.0.69",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
 name = "openmls_basic_credential"
 version = "0.3.0"
-source = "git+https://github.com/openmls/openmls?rev=e2fc5e1#e2fc5e1d6250b294d6a786618f01e70139651bd3"
+source = "git+https://github.com/openmls/openmls?rev=4cc0f594b11262083ad9827b3b2033052c6ef99f#4cc0f594b11262083ad9827b3b2033052c6ef99f"
 dependencies = [
  "ed25519-dalek",
  "openmls_traits",
@@ -4095,19 +4164,19 @@ dependencies = [
 [[package]]
 name = "openmls_memory_storage"
 version = "0.3.0"
-source = "git+https://github.com/openmls/openmls?rev=e2fc5e1#e2fc5e1d6250b294d6a786618f01e70139651bd3"
+source = "git+https://github.com/openmls/openmls?rev=4cc0f594b11262083ad9827b3b2033052c6ef99f#4cc0f594b11262083ad9827b3b2033052c6ef99f"
 dependencies = [
  "log",
  "openmls_traits",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "openmls_rust_crypto"
 version = "0.3.0"
-source = "git+https://github.com/openmls/openmls?rev=e2fc5e1#e2fc5e1d6250b294d6a786618f01e70139651bd3"
+source = "git+https://github.com/openmls/openmls?rev=4cc0f594b11262083ad9827b3b2033052c6ef99f#4cc0f594b11262083ad9827b3b2033052c6ef99f"
 dependencies = [
  "aes-gcm",
  "chacha20poly1305",
@@ -4124,14 +4193,27 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tls_codec",
+]
+
+[[package]]
+name = "openmls_sqlite_storage"
+version = "0.1.0"
+source = "git+https://github.com/openmls/openmls?rev=4cc0f594b11262083ad9827b3b2033052c6ef99f#4cc0f594b11262083ad9827b3b2033052c6ef99f"
+dependencies = [
+ "log",
+ "openmls_traits",
+ "refinery",
+ "rusqlite",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "openmls_traits"
 version = "0.3.0"
-source = "git+https://github.com/openmls/openmls?rev=e2fc5e1#e2fc5e1d6250b294d6a786618f01e70139651bd3"
+source = "git+https://github.com/openmls/openmls?rev=4cc0f594b11262083ad9827b3b2033052c6ef99f#4cc0f594b11262083ad9827b3b2033052c6ef99f"
 dependencies = [
  "serde",
  "tls_codec",
@@ -4234,37 +4316,12 @@ checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
 
 [[package]]
 name = "parking_lot"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
-dependencies = [
- "instant",
- "lock_api",
- "parking_lot_core 0.8.6",
-]
-
-[[package]]
-name = "parking_lot"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
 dependencies = [
  "lock_api",
- "parking_lot_core 0.9.10",
-]
-
-[[package]]
-name = "parking_lot_core"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60a2cfe6f0ad2bfc16aefa463b497d5c7a5ecd44a23efa72aa342d90177356dc"
-dependencies = [
- "cfg-if",
- "instant",
- "libc",
- "redox_syscall 0.2.16",
- "smallvec",
- "winapi",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -4275,7 +4332,7 @@ checksum = "1e401f977ab385c9e4e3ab30627d6f26d00e2c73eef317493c4ec6d468726cf8"
 dependencies = [
  "cfg-if",
  "libc",
- "redox_syscall 0.5.11",
+ "redox_syscall",
  "smallvec",
  "windows-targets 0.52.6",
 ]
@@ -4606,7 +4663,7 @@ version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
- "zerocopy",
+ "zerocopy 0.8.25",
 ]
 
 [[package]]
@@ -4881,15 +4938,6 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb5a58c1855b4b6819d59012155603f0b22ad30cad752600aadfcb695265519a"
-dependencies = [
- "bitflags 1.3.2",
-]
-
-[[package]]
-name = "redox_syscall"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f103c6d277498fbceb16e84d317e2a400f160f46904d5f5410848c829511a3"
@@ -4906,6 +4954,50 @@ dependencies = [
  "getrandom 0.2.16",
  "libredox",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "refinery"
+version = "0.8.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ba5d693abf62492c37268512ff35b77655d2e957ca53dab85bf993fe9172d15"
+dependencies = [
+ "refinery-core",
+ "refinery-macros",
+]
+
+[[package]]
+name = "refinery-core"
+version = "0.8.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a83581f18c1a4c3a6ebd7a174bdc665f17f618d79f7edccb6a0ac67e660b319"
+dependencies = [
+ "async-trait",
+ "cfg-if",
+ "log",
+ "regex",
+ "rusqlite",
+ "serde",
+ "siphasher 1.0.1",
+ "thiserror 1.0.69",
+ "time",
+ "toml",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "refinery-macros"
+version = "0.8.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72c225407d8e52ef8cf094393781ecda9a99d6544ec28d90a6915751de259264"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "refinery-core",
+ "regex",
+ "syn 2.0.101",
 ]
 
 [[package]]
@@ -5099,6 +5191,20 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7753b721174eb8ff87a9a0e799e2d7bc3749323e773db92e0984debb00019d6e"
+dependencies = [
+ "bitflags 2.9.0",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink 0.9.1",
+ "libsqlite3-sys",
+ "smallvec",
 ]
 
 [[package]]
@@ -5643,22 +5749,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sled"
-version = "0.34.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f96b4737c2ce5987354855aed3797279def4ebf734436c6aa4552cf8e169935"
-dependencies = [
- "crc32fast",
- "crossbeam-epoch",
- "crossbeam-utils",
- "fs2",
- "fxhash",
- "libc",
- "log",
- "parking_lot 0.11.2",
-]
-
-[[package]]
 name = "smallvec"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5693,7 +5783,7 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "objc2-quartz-core 0.2.2",
  "raw-window-handle",
- "redox_syscall 0.5.11",
+ "redox_syscall",
  "wasm-bindgen",
  "web-sys",
  "windows-sys 0.59.0",
@@ -5775,7 +5865,7 @@ dependencies = [
  "futures-io",
  "futures-util",
  "hashbrown 0.15.2",
- "hashlink",
+ "hashlink 0.10.0",
  "indexmap 2.9.0",
  "log",
  "memchr",
@@ -5956,7 +6046,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf776ba3fa74f83bf4b63c3dcbbf82173db2632ed8452cb2d891d33f459de70f"
 dependencies = [
  "new_debug_unreachable",
- "parking_lot 0.12.3",
+ "parking_lot",
  "phf_shared 0.11.3",
  "precomputed-hash",
  "serde",
@@ -6126,7 +6216,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation 0.3.1",
  "once_cell",
- "parking_lot 0.12.3",
+ "parking_lot",
  "raw-window-handle",
  "scopeguard",
  "tao-macros",
@@ -6685,7 +6775,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot 0.12.3",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -7554,13 +7644,15 @@ dependencies = [
  "blurhash",
  "chacha20poly1305",
  "chrono",
+ "futures",
  "hex",
  "image 0.24.9",
  "keyring",
  "lightning-invoice",
  "mockito",
- "nostr",
- "nostr-openmls",
+ "nostr 0.41.0",
+ "nostr-mls",
+ "nostr-mls-sqlite-storage",
  "nostr-sdk",
  "nwc",
  "once_cell",
@@ -7594,7 +7686,7 @@ version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6994d13118ab492c3c80c1f81928718159254c53c472bf9ce36f8dae4add02a7"
 dependencies = [
- "redox_syscall 0.5.11",
+ "redox_syscall",
  "wasite",
 ]
 
@@ -8324,11 +8416,31 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
+version = "0.7.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
+dependencies = [
+ "zerocopy-derive 0.7.35",
+]
+
+[[package]]
+name = "zerocopy"
 version = "0.8.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1702d9583232ddb9174e01bb7c15a2ab8fb1bc6f227aa1233858c351a3ba0cb"
 dependencies = [
- "zerocopy-derive",
+ "zerocopy-derive 0.8.25",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.7.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
 ]
 
 [[package]]

@@ -1,14 +1,11 @@
 use crate::accounts::{Account, AccountError};
-use crate::groups::{Group, GroupError};
-use crate::invites::{Invite, InviteError, InviteState, ProcessedInvite, ProcessedInviteState};
 use crate::key_packages;
-use crate::messages::{MessageError, ProcessedMessage, ProcessedMessageState};
 use crate::nostr_manager::parser::{parse, SerializableToken};
 use crate::nostr_manager::NostrManagerError;
 use crate::relays::RelayType;
 use crate::secrets_store;
 use crate::Whitenoise;
-use nostr_openmls::groups::GroupError as NostrOpenmlsGroupError;
+use nostr_mls::prelude::*;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -26,24 +23,20 @@ pub enum EventProcessorError {
     NoAccount(#[from] AccountError),
     #[error("Error decoding hex")]
     UndecodableHex(#[from] nostr_sdk::util::hex::Error),
-    #[error("Error saving invite: {0}")]
-    BadInvite(#[from] InviteError),
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
     #[error("Key package error: {0}")]
     KeyPackageError(#[from] key_packages::KeyPackageError),
-    #[error("Group error: {0}")]
-    GroupError(#[from] GroupError),
     #[error("NIP44 encryption error: {0}")]
     EncryptionError(#[from] nostr_sdk::nips::nip44::Error),
-    #[error("OpenMLS group error: {0}")]
-    OpenMlsGroupNotFound(#[from] nostr_openmls::groups::GroupError),
     #[error("Secrets store error: {0}")]
     SecretsStoreError(#[from] secrets_store::SecretsStoreError),
     #[error("Key parsing error: {0}")]
     UnparseableKey(#[from] nostr_sdk::key::Error),
-    #[error("Message error: {0}")]
-    MessageError(#[from] MessageError),
+    #[error("Nostr MLS error: {0}")]
+    NostrMlsError(#[from] nostr_mls::Error),
+    #[error("Nostr MLS not initialized")]
+    NostrMlsNotInitialized,
 }
 
 pub type Result<T> = std::result::Result<T, EventProcessorError>;
@@ -232,7 +225,7 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn process_invite(
+    async fn process_welcome(
         app_handle: &AppHandle,
         account: Account,
         outer_event: Event,
@@ -240,11 +233,14 @@ impl EventProcessor {
     ) -> Result<()> {
         let wn = app_handle.state::<Whitenoise>();
 
-        // Check to see if the invite has already been processed
-        let processed_invite =
-            ProcessedInvite::find_by_invite_event_id(outer_event.id, wn.clone()).await?;
-        if processed_invite.is_some() {
-            return Ok(());
+        let nostr_mls_guard = wn.nostr_mls.lock().await;
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            // Check to see if the invite has already been processed
+            if nostr_mls.is_welcome_processed(&outer_event.id)? {
+                return Ok(());
+            }
+        } else {
+            return Err(EventProcessorError::NostrMlsNotInitialized);
         }
 
         let welcome_preview;

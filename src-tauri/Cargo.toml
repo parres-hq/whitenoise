@@ -23,6 +23,7 @@ base64 = "0.22"
 blurhash = "0.1"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4.40", features = ["serde"] }
+futures = "0.3"
 hex = "0.4"
 image = "0.24"
 keyring = { version = "3.6", features = [
@@ -31,8 +32,9 @@ keyring = { version = "3.6", features = [
     "linux-native",
 ] }
 lightning-invoice = "0.33.1"
-nostr = { version = "0.40", features = [ "parser" ] }
-nostr-openmls = { version = "0.1.0", git="https://github.com/erskingardner/nostr-openmls", branch="master" }
+nostr = { version = "0.41", path = "../../rust-nostr/crates/nostr", features = [ "std", "parser" ] }
+nostr-mls = { version = "0.41", path = "../../rust-nostr/crates/nostr-mls" }
+nostr-mls-sqlite-storage = { version = "0.41", path = "../../rust-nostr/crates/nostr-mls-sqlite-storage" }
 nwc = { version = "0.40" }
 once_cell = "1.21"
 petname = "2.0.2"
@@ -56,7 +58,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.16.0", features = ["v4"] }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-nostr-sdk = { version = "0.40", features = [
+nostr-sdk = { version = "0.41", path = "../../rust-nostr/crates/nostr-sdk", features = [
     "ndb",  # Use NDB for macOS and iOS
     "nip04",
     "nip44",
@@ -65,7 +67,7 @@ nostr-sdk = { version = "0.40", features = [
 ] }
 
 [target.'cfg(not(any(target_os = "ios", target_os = "macos")))'.dependencies]
-nostr-sdk = { version = "0.40", features = [
+nostr-sdk = { version = "0.41", path = "../../rust-nostr/crates/nostr-sdk", features = [
     "lmdb",  # Use LMDB for all other platforms
     "nip04",
     "nip44",

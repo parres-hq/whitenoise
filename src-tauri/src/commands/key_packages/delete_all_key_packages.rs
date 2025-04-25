@@ -5,16 +5,6 @@ use nostr_sdk::event::EventBuilder;
 use nostr_sdk::nips::nip09::EventDeletionRequest;
 #[tauri::command]
 pub async fn delete_all_key_packages(wn: tauri::State<'_, Whitenoise>) -> Result<(), String> {
-    let pubkey = wn
-        .nostr
-        .client
-        .signer()
-        .await
-        .map_err(|e| e.to_string())?
-        .get_public_key()
-        .await
-        .map_err(|e| e.to_string())?;
-
     let active_account = Account::get_active(wn.clone())
         .await
         .map_err(|e| e.to_string())?;
@@ -33,7 +23,7 @@ pub async fn delete_all_key_packages(wn: tauri::State<'_, Whitenoise>) -> Result
 
     let key_package_events = wn
         .nostr
-        .query_user_key_packages(pubkey)
+        .query_user_key_packages(active_account.pubkey)
         .await
         .map_err(|e| e.to_string())?;
 
