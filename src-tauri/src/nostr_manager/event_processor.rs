@@ -233,21 +233,25 @@ impl EventProcessor {
         account: Account,
         outer_event: Event,
         rumor_event: UnsignedEvent,
-    ) -> Result<()> {
+    ) -> Result<welcome_types::Welcome> {
         let wn = app_handle.state::<Whitenoise>();
 
         let nostr_mls_guard = wn.nostr_mls.lock().await;
+        let welcome: welcome_types::Welcome;
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             match nostr_mls.process_welcome(&outer_event.id, &rumor_event) {
                 Ok(result) => {
                     tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Processed welcome event");
-                    result
+                    welcome = result;
                 }
                 Err(e) => {
                     tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Error processing welcome event: {}", e);
                     return Err(EventProcessorError::NostrMlsError(e));
                 }
             }
+        } else {
+            tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Nostr MLS not initialized");
+            return Err(EventProcessorError::NostrMlsNotInitialized);
         }
 
         let key_package_event_id = rumor_event
@@ -259,7 +263,7 @@ impl EventProcessor {
             .and_then(|tag| tag.content());
 
         app_handle
-            .emit("welcome_processed", ())
+            .emit("mls_welcome_received", &welcome)
             .map_err(NostrManagerError::TauriError)?;
 
         let key_package_relays: Vec<String> = if cfg!(dev) {
@@ -285,7 +289,7 @@ impl EventProcessor {
             tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Published new key package");
         }
 
-        Ok(())
+        Ok(welcome)
     }
 
     // TODO: Implement private direct message processing, maybe...
@@ -303,18 +307,22 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn process_mls_message(app_handle: &AppHandle, event: Event) -> Result<()> {
+    async fn process_mls_message(
+        app_handle: &AppHandle,
+        event: Event,
+    ) -> Result<Option<message_types::Message>> {
         let wn = app_handle.state::<Whitenoise>();
 
         let nostr_mls_guard = wn.nostr_mls.lock().await;
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             match nostr_mls.process_message(&event) {
-                Ok(_) => {
+                Ok(message) => {
+                    // TODO: Need to handle proposals and commits
                     tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Processed MLS message");
                     app_handle
-                        .emit("mls_message_received", ())
+                        .emit("mls_message_received", &message)
                         .map_err(NostrManagerError::TauriError)?;
-                    Ok(())
+                    Ok(message)
                 }
                 Err(e) => {
                     // TODO: Need to figure out how to reprocess events that fail because a commit arrives out of order

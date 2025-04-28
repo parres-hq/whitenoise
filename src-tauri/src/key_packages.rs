@@ -1,4 +1,10 @@
-use std::sync::Arc;
+//! Key package management
+//!
+//! This module provides shared functionality for managing key packages, which are used to authenticate and
+//! establish secure communication channels between peers.
+//!
+//! It includes functions for fetching key packages from Nostr relays, publishing new key packages,
+//! and deleting key packages from relays.
 
 use nostr_mls::prelude::*;
 use thiserror::Error;
@@ -148,7 +154,6 @@ pub async fn fetch_key_package_for_pubkey(
 /// Publishes a new key package to relays
 pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()> {
     let active_account = Account::get_active(wn.clone()).await?;
-    let signer = wn.nostr.client.signer().await?;
 
     let key_package_relays: Vec<RelayUrl> = active_account
         .relays(RelayType::KeyPackage, wn.clone())
@@ -157,68 +162,27 @@ pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()>
         .map(|r| RelayUrl::parse(&r).expect("Invalid relay URL"))
         .collect();
 
-    // Clone the values we need to avoid borrowing across await points
-    let signer_clone = signer.clone();
-    let key_package_relays_clone = key_package_relays.clone();
-    let nostr_mls_arc_clone = Arc::clone(&wn.nostr_mls);
-
-    // Check if NostrMls is initialized before spawning the blocking task
-    {
-        let is_initialized = nostr_mls_arc_clone
-            .try_lock()
-            .map(|guard| guard.is_some())
-            .unwrap_or(false);
-        if !is_initialized {
-            return Err(KeyPackageError::NostrMlsNotInitialized);
-        }
+    let encoded_key_package: String;
+    let tags: [Tag; 5];
+    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        (encoded_key_package, tags) = nostr_mls
+            .create_key_package_for_event(&active_account.pubkey, key_package_relays.clone())
+            .map_err(KeyPackageError::NostrMlsError)?;
+    } else {
+        return Err(KeyPackageError::NostrMlsNotInitialized);
     }
 
-    // Now spawn the blocking task, knowing that nostr_mls exists
-    let result = tokio::task::spawn_blocking(move || {
-        // Take a focused lock only for the operation we need
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime");
+    let key_package_event_builder =
+        EventBuilder::new(Kind::MlsKeyPackage, &encoded_key_package).tags(tags);
 
-        rt.block_on(async {
-            // Only acquire the lock when absolutely needed and release it immediately
-            let result = {
-                // Use a scoped block to limit the lifetime of the lock
-                let guard = nostr_mls_arc_clone.blocking_lock();
-                if let Some(nostr_mls) = guard.as_ref() {
-                    nostr_mls
-                        .create_key_package(&signer_clone, key_package_relays_clone)
-                        .await
-                } else {
-                    return Err(KeyPackageError::NostrMlsNotInitialized);
-                }
-            };
+    wn.nostr
+        .client
+        .send_event_builder_to(key_package_relays, key_package_event_builder)
+        .await?;
 
-            result.map_err(KeyPackageError::NostrMlsError)
-        })
-    })
-    .await
-    .unwrap_or_else(|e| Err(KeyPackageError::JoinError(e)));
-
-    // Process the result outside the blocking thread
-    match result {
-        Ok(key_package_result) => {
-            wn.nostr
-                .client
-                .send_event_to(&key_package_relays, &key_package_result)
-                .await
-                .map_err(KeyPackageError::NostrClientError)?;
-
-            tracing::debug!(
-                target: "whitenoise::key_packages::publish_new_key_package",
-                "Key package published: {:?}",
-                key_package_result
-            );
-            Ok(())
-        }
-        Err(e) => Err(e),
-    }
+    tracing::debug!(target: "whitenoise::key_packages::publish_new_key_package", "Key package published");
+    Ok(())
 }
 
 /// Deletes a specific key package event from Nostr relays.

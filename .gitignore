@@ -19,3 +19,6 @@ vite.config.ts.timestamp-*
 .repomix-*.txt
 vibe-tools.config.json
 .cursor/rules/vibe-tools.mdc
+
+# Docker
+/target
