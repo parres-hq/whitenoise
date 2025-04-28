@@ -1,5 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
 
 use lightning_invoice::SignedRawBolt11Invoice;
 use nostr_mls::prelude::*;
@@ -77,7 +79,18 @@ pub async fn send_mls_message(
         inner_event.clone()
     );
 
-    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::commands::groups::send_mls_message", "Timeout waiting for nostr_mls lock");
+            return Err("Timeout waiting for nostr_mls lock".to_string());
+        }
+    };
+
     if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
         match nostr_mls
             .create_message(&group.mls_group_id, inner_event.clone())
@@ -99,6 +112,8 @@ pub async fn send_mls_message(
     } else {
         return Err("Nostr MLS not initialized".to_string());
     }
+
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "nostr_mls lock released");
 
     Ok(())
 }

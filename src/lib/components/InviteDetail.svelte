@@ -36,7 +36,7 @@ async function acceptInvite() {
         return;
     }
     isAcceptingInvite = true;
-    invoke("accept_invite", { invite })
+    invoke("accept_welcome", { welcome_event_id: invite.event.id })
         .then(() => {
             const event = new CustomEvent("inviteAccepted", { detail: invite.mls_group_id });
             window.dispatchEvent(event);
@@ -62,7 +62,7 @@ async function declineInvite() {
         return;
     }
     isDecliningInvite = true;
-    invoke("decline_invite", { invite })
+    invoke("decline_welcome", { welcome_event_id: invite.event.id })
         .then(() => {
             toast.info(
                 $t("chats.inviteDeclined", {

@@ -1,5 +1,7 @@
 use nostr_mls::prelude::*;
+use std::time::Duration;
 use tauri::Emitter;
+use tokio::time::timeout;
 
 use crate::whitenoise::Whitenoise;
 
@@ -24,7 +26,18 @@ pub async fn decline_welcome(
 ) -> Result<(), String> {
     let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|e| e.to_string())?;
 
-    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    tracing::debug!(target: "whitenoise::commands::welcomes::decline_welcome", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::commands::welcomes::decline_welcome", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::commands::welcomes::decline_welcome", "Timeout waiting for nostr_mls lock");
+            return Err("Timeout waiting for nostr_mls lock".to_string());
+        }
+    };
+
     if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
         let welcome = nostr_mls
             .get_welcome(&welcome_event_id)
@@ -40,6 +53,8 @@ pub async fn decline_welcome(
     } else {
         return Err("Nostr MLS not initialized".to_string());
     }
+
+    tracing::debug!(target: "whitenoise::commands::welcomes::decline_welcome", "nostr_mls lock released");
 
     app_handle
         .emit("welcome_declined", welcome_event_id)

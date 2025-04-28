@@ -398,26 +398,33 @@ impl Account {
 
         // Then update Nostr MLS instance
         {
-            let mut nostr_mls =
-                match tokio::time::timeout(std::time::Duration::from_secs(5), wn.nostr_mls.lock())
-                    .await
-                {
-                    Ok(guard) => guard,
-                    Err(_) => {
-                        tracing::error!(
-                            target: "whitenoise::accounts::set_active",
-                            "Timeout waiting for nostr_mls lock"
-                        );
-                        return Err(AccountError::NostrManagerError(
-                            nostr_manager::NostrManagerError::AccountError(
-                                "Timeout waiting for nostr_mls lock".to_string(),
-                            ),
-                        ));
-                    }
-                };
+            tracing::debug!(target: "whitenoise::accounts::set_active", "Attempting to acquire nostr_mls lock");
+            let mut nostr_mls = match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                wn.nostr_mls.lock(),
+            )
+            .await
+            {
+                Ok(guard) => {
+                    tracing::debug!(target: "whitenoise::accounts::set_active", "nostr_mls lock acquired");
+                    guard
+                }
+                Err(_) => {
+                    tracing::error!(
+                        target: "whitenoise::accounts::set_active",
+                        "Timeout waiting for nostr_mls lock"
+                    );
+                    return Err(AccountError::NostrManagerError(
+                        nostr_manager::NostrManagerError::AccountError(
+                            "Timeout waiting for nostr_mls lock".to_string(),
+                        ),
+                    ));
+                }
+            };
             let storage_dir = wn.data_dir.join("mls").join(self.pubkey.to_hex());
             let storage = NostrMlsSqliteStorage::new(storage_dir)?;
             *nostr_mls = Some(NostrMls::new(storage));
+            tracing::debug!(target: "whitenoise::accounts::set_active", "nostr_mls lock released");
         }
 
         tracing::debug!(
@@ -455,12 +462,33 @@ impl Account {
         &self,
         wn: tauri::State<'_, Whitenoise>,
     ) -> Result<Vec<group_types::Group>> {
-        let nostr_mls_guard = wn.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        tracing::debug!(target: "whitenoise::accounts::groups", "Attempting to acquire nostr_mls lock");
+        let nostr_mls_guard = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            wn.nostr_mls.lock(),
+        )
+        .await
+        {
+            Ok(guard) => {
+                tracing::debug!(target: "whitenoise::accounts::groups", "nostr_mls lock acquired");
+                guard
+            }
+            Err(_) => {
+                tracing::error!(target: "whitenoise::accounts::groups", "Timeout waiting for nostr_mls lock");
+                return Err(AccountError::NostrManagerError(
+                    nostr_manager::NostrManagerError::AccountError(
+                        "Timeout waiting for nostr_mls lock".to_string(),
+                    ),
+                ));
+            }
+        };
+        let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             nostr_mls.get_groups().map_err(AccountError::NostrMlsError)
         } else {
             Err(AccountError::NostrMlsNotInitialized)
-        }
+        };
+        tracing::debug!(target: "whitenoise::accounts::groups", "nostr_mls lock released");
+        result
     }
 
     pub async fn nostr_group_ids(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<String>> {

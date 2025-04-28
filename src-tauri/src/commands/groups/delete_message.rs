@@ -1,4 +1,6 @@
 use nostr_mls::prelude::*;
+use std::time::Duration;
+use tokio::time::timeout;
 
 use crate::accounts::Account;
 use crate::send_mls_message;
@@ -44,7 +46,18 @@ pub async fn delete_message(
         message_id
     );
 
-    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    tracing::debug!(target: "whitenoise::commands::groups::delete_message", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::commands::groups::delete_message", "Timeout waiting for nostr_mls lock");
+            return Err("Timeout waiting for nostr_mls lock".to_string());
+        }
+    };
+
     if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
         let group_messages = nostr_mls
             .get_messages(&group.mls_group_id)
@@ -65,7 +78,7 @@ pub async fn delete_message(
             active_account.pubkey.to_hex()
         );
         // Send the deletion event
-        send_mls_message(
+        let result = send_mls_message(
             group,
             deletion_reason.to_string(),
             5, // Kind 5 for deletion events as per NIP-09
@@ -74,8 +87,11 @@ pub async fn delete_message(
             wn.clone(),
             app_handle,
         )
-        .await
+        .await;
+        tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock released");
+        result
     } else {
+        tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock released");
         Err("Failed to fetch messages: No Nostr MLS instance".to_string())
     }
 }

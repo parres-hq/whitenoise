@@ -102,8 +102,27 @@ pub async fn fetch_key_package_for_pubkey(
         .await
         .expect("Error fetching key_package events");
 
-    let nostr_mls_guard = wn.nostr_mls.lock().await;
-    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+    tracing::debug!(target: "whitenoise::key_packages::fetch_key_package_for_pubkey", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        wn.nostr_mls.lock(),
+    )
+    .await
+    {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::key_packages::fetch_key_package_for_pubkey", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::key_packages::fetch_key_package_for_pubkey", "Timeout waiting for nostr_mls lock");
+            return Err(KeyPackageError::NostrMlsError(
+                nostr_mls::error::Error::KeyPackage(
+                    "Timeout waiting for nostr_mls lock".to_string(),
+                ),
+            ));
+        }
+    };
+    let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
         let mut valid_key_packages: Vec<(EventId, KeyPackage)> = Vec::new();
         for event in key_package_events.iter() {
             let key_package = nostr_mls
@@ -148,7 +167,9 @@ pub async fn fetch_key_package_for_pubkey(
         Err(KeyPackageError::NostrMlsError(
             nostr_mls::error::Error::KeyPackage("NostrMls instance is not initialized".to_string()),
         ))
-    }
+    };
+    tracing::debug!(target: "whitenoise::key_packages::fetch_key_package_for_pubkey", "nostr_mls lock released");
+    result
 }
 
 /// Publishes a new key package to relays
@@ -162,26 +183,51 @@ pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()>
         .map(|r| RelayUrl::parse(&r).expect("Invalid relay URL"))
         .collect();
 
-    let encoded_key_package: String;
-    let tags: [Tag; 5];
-    let nostr_mls_guard = wn.nostr_mls.lock().await;
-    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-        (encoded_key_package, tags) = nostr_mls
+    let mut encoded_key_package: Option<String> = None;
+    let mut tags: Option<[Tag; 5]> = None;
+    tracing::debug!(target: "whitenoise::key_packages::publish_key_package", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        wn.nostr_mls.lock(),
+    )
+    .await
+    {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::key_packages::publish_key_package", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::key_packages::publish_key_package", "Timeout waiting for nostr_mls lock");
+            return Err(KeyPackageError::NostrMlsError(
+                nostr_mls::error::Error::KeyPackage(
+                    "Timeout waiting for nostr_mls lock".to_string(),
+                ),
+            ));
+        }
+    };
+    let _result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        let (encoded_key_package_value, tags_value) = nostr_mls
             .create_key_package_for_event(&active_account.pubkey, key_package_relays.clone())
             .map_err(KeyPackageError::NostrMlsError)?;
+        encoded_key_package = Some(encoded_key_package_value);
+        tags = Some(tags_value);
+        Ok(())
     } else {
-        return Err(KeyPackageError::NostrMlsNotInitialized);
+        Err(KeyPackageError::NostrMlsNotInitialized)
+    };
+    tracing::debug!(target: "whitenoise::key_packages::publish_key_package", "nostr_mls lock released");
+
+    if encoded_key_package.is_some() && tags.is_some() {
+        let key_package_event_builder =
+            EventBuilder::new(Kind::MlsKeyPackage, &encoded_key_package.unwrap())
+                .tags(tags.unwrap());
+
+        wn.nostr
+            .client
+            .send_event_builder_to(key_package_relays, key_package_event_builder)
+            .await?;
     }
 
-    let key_package_event_builder =
-        EventBuilder::new(Kind::MlsKeyPackage, &encoded_key_package).tags(tags);
-
-    wn.nostr
-        .client
-        .send_event_builder_to(key_package_relays, key_package_event_builder)
-        .await?;
-
-    tracing::debug!(target: "whitenoise::key_packages::publish_new_key_package", "Key package published");
     Ok(())
 }
 
@@ -233,8 +279,27 @@ pub async fn delete_key_package_from_relays(
         .await?;
 
     if let Some(event) = key_package_events.first() {
-        let nostr_mls_guard = wn.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        tracing::debug!(target: "whitenoise::key_packages::delete_key_package_from_relays", "Attempting to acquire nostr_mls lock");
+        let nostr_mls_guard = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            wn.nostr_mls.lock(),
+        )
+        .await
+        {
+            Ok(guard) => {
+                tracing::debug!(target: "whitenoise::key_packages::delete_key_package_from_relays", "nostr_mls lock acquired");
+                guard
+            }
+            Err(_) => {
+                tracing::error!(target: "whitenoise::key_packages::delete_key_package_from_relays", "Timeout waiting for nostr_mls lock");
+                return Err(KeyPackageError::NostrMlsError(
+                    nostr_mls::error::Error::KeyPackage(
+                        "Timeout waiting for nostr_mls lock".to_string(),
+                    ),
+                ));
+            }
+        };
+        let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             // Make sure we delete the private key material from MLS storage if requested
             if delete_mls_stored_keys {
                 let key_package = nostr_mls
@@ -251,9 +316,13 @@ pub async fn delete_key_package_from_relays(
                 .client
                 .send_event_builder_to(key_package_relays, builder)
                 .await?;
+            Ok(())
         } else {
-            return Err(KeyPackageError::NostrMlsNotInitialized);
-        }
+            Err(KeyPackageError::NostrMlsNotInitialized)
+        };
+        tracing::debug!(target: "whitenoise::key_packages::delete_key_package_from_relays", "nostr_mls lock released");
+        result
+    } else {
+        Ok(())
     }
-    Ok(())
 }

@@ -3,6 +3,8 @@ use crate::whitenoise::Whitenoise;
 use nostr_mls::NostrMls;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
+use tokio::time::timeout;
 
 #[tauri::command]
 pub async fn init_nostr_for_current_user(
@@ -15,18 +17,14 @@ pub async fn init_nostr_for_current_user(
 
     // Then update Nostr MLS instance
     {
-        let mut nostr_mls = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            wn.nostr_mls.lock(),
-        )
-        .await
-        {
-            Ok(guard) => guard,
+        tracing::debug!(target: "whitenoise::commands::nostr::init_nostr_for_current_user", "Attempting to acquire nostr_mls lock");
+        let mut nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+            Ok(guard) => {
+                tracing::debug!(target: "whitenoise::commands::nostr::init_nostr_for_current_user", "nostr_mls lock acquired");
+                guard
+            }
             Err(_) => {
-                tracing::error!(
-                    target: "whitenoise::commands::nostr::init_nostr_for_current_user",
-                    "Timeout waiting for nostr_mls lock"
-                );
+                tracing::error!(target: "whitenoise::commands::nostr::init_nostr_for_current_user", "Timeout waiting for nostr_mls lock");
                 return Err("Timeout waiting for nostr_mls lock".to_string());
             }
         };
@@ -35,9 +33,10 @@ pub async fn init_nostr_for_current_user(
             .data_dir
             .join("mls")
             .join(current_account.pubkey.to_hex());
-        *nostr_mls = Some(NostrMls::new(
-            NostrMlsSqliteStorage::new(storage_dir).map_err(|e| e.to_string())?,
-        ));
+        let nostr_mls =
+            NostrMls::new(NostrMlsSqliteStorage::new(storage_dir).map_err(|e| e.to_string())?);
+        *nostr_mls_guard = Some(nostr_mls);
+        tracing::debug!(target: "whitenoise::commands::nostr::init_nostr_for_current_user", "nostr_mls lock released");
     }
 
     // Update Nostr identity and connect relays

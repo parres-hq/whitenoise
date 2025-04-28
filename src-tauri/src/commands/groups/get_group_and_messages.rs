@@ -1,5 +1,7 @@
 use nostr_mls::prelude::*;
 use serde::Serialize;
+use std::time::Duration;
+use tokio::time::timeout;
 
 use crate::whitenoise::Whitenoise;
 
@@ -41,7 +43,17 @@ pub async fn get_group_and_messages(
         mls_group_id
     );
 
-    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    tracing::debug!(target: "whitenoise::commands::groups::get_group_and_messages", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::commands::groups::get_group_and_messages", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::commands::groups::get_group_and_messages", "Timeout waiting for nostr_mls lock");
+            return Err("Timeout waiting for nostr_mls lock".to_string());
+        }
+    };
 
     if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
         let group = nostr_mls
@@ -65,6 +77,7 @@ pub async fn get_group_and_messages(
                 messages
             );
 
+            tracing::debug!(target: "whitenoise::commands::groups::get_group_and_messages", "nostr_mls lock released");
             Ok(GroupAndMessages { group, messages })
         } else {
             Err("Group not found".to_string())

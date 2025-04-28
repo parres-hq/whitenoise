@@ -1,4 +1,6 @@
 use std::ops::Add;
+use std::time::Duration;
+use tokio::time::timeout;
 
 use nostr_mls::prelude::*;
 use nostr_sdk::NostrSigner;
@@ -103,7 +105,17 @@ pub async fn create_group(
     let serialized_welcome_message: Vec<u8>;
     let group_ids: Vec<String>;
 
-    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    tracing::debug!(target: "whitenoise::commands::groups::create_group", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::commands::groups::create_group", "Timeout waiting for nostr_mls lock");
+            return Err("Timeout waiting for nostr_mls lock".to_string());
+        }
+    };
 
     if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
         let create_group_result = nostr_mls
@@ -132,6 +144,8 @@ pub async fn create_group(
     } else {
         return Err("Nostr MLS not initialized".to_string());
     }
+
+    tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
 
     // Fan out the welcome message to all members
     for member in member_key_packages {

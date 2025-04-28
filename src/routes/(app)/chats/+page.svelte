@@ -31,25 +31,32 @@ let invites: Invite[] = $state([]);
 let failures: [string, string | undefined][] = $state([]);
 
 async function loadEvents() {
+    console.log("Loading events");
     isLoading = true;
     try {
-        const [groupsResponse, invitesResponse] = await Promise.all([
-            invoke("get_groups"),
-            invoke("get_invites"),
-        ]);
-        groups = (groupsResponse as NostrMlsGroup[]).sort(
-            (a, b) => b.last_message_at - a.last_message_at
-        );
-
-        invites = (invitesResponse as InvitesWithFailures).invites;
-        failures = (invitesResponse as InvitesWithFailures).failures;
+        let groupsResponse = await invoke("get_groups");
+        let invitesResponse = await invoke("get_welcomes");
+        // const [groupsResponse, invitesResponse] = await Promise.all([
+        //     invoke("get_groups"),
+        //     invoke("get_welcomes"),
+        // ]);
+        console.log("groupsResponse", groupsResponse);
+        console.log("invitesResponse", invitesResponse);
+        // groups = (groupsResponse as NostrMlsGroup[]).sort(
+        //     (a, b) => b.last_message_at - a.last_message_at
+        // );
+        // invites = invitesResponse as Invite[];
     } catch (error) {
         loadingError = error as string;
         console.log(error);
     } finally {
         isLoading = false;
+        console.log("done");
     }
 }
+
+$inspect(invites);
+$inspect(groups);
 
 onMount(async () => {
     if ($activeAccount) {
@@ -89,7 +96,7 @@ onMount(async () => {
     }
 
     if (!unlistenInviteAccepted) {
-        unlistenInviteAccepted = await listen<Invite>("invite_accepted", (event) => {
+        unlistenInviteAccepted = await listen<Invite>("welcome_accepted", (event) => {
             const acceptedInvite = event.payload as Invite;
             console.log("Event received on chats page: invite_accepted", acceptedInvite);
             invites = invites.filter((invite) => invite.event.id !== acceptedInvite.event.id);
@@ -97,18 +104,17 @@ onMount(async () => {
     }
 
     if (!unlistenInviteDeclined) {
-        unlistenInviteDeclined = await listen<Invite>("invite_declined", (event) => {
+        unlistenInviteDeclined = await listen<Invite>("welcome_declined", (event) => {
             const declinedInvite = event.payload as Invite;
             console.log("Event received on chats page: invite_declined", declinedInvite);
-            invites = invites.filter((invite) => invite.event.id !== declinedInvite.event.id);
+            invites = invites.filter((welcome) => welcome.event.id !== declinedInvite.event.id);
         });
     }
 
     if (!unlistenInviteProcessed) {
-        unlistenInviteProcessed = await listen<Invite>("invite_processed", async (_event) => {
-            let invitesResponse = await invoke("get_invites");
-            invites = (invitesResponse as InvitesWithFailures).invites;
-            failures = (invitesResponse as InvitesWithFailures).failures;
+        unlistenInviteProcessed = await listen<Invite>("welcome_processed", async (_event) => {
+            let welcomesResponse = await invoke("get_welcomes");
+            invites = welcomesResponse as Invite[];
         });
     }
 
