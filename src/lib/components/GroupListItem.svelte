@@ -81,8 +81,6 @@ $effect(() => {
 
 function handleClick(e: MouseEvent) {
     const groupId = hexMlsGroupId(group.mls_group_id);
-    console.log("group", group.mls_group_id.value);
-    console.log("groupId", groupId);
     // On desktop, update selectedChatId instead of navigating
     if (window.innerWidth >= 768) {
         e.preventDefault();
