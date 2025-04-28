@@ -160,3 +160,9 @@ export function hexKeyFromNpub(npub: string): string {
     }
     return decoded.data;
 }
+
+export function pubkeyFromBytes(bytes: Uint8Array): string {
+    return Array.from(bytes)
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+}

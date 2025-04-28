@@ -4,7 +4,7 @@ import { page } from "$app/stores";
 import ChatsList from "$lib/components/ChatsList.svelte";
 import * as Resizable from "$lib/components/ui/resizable";
 import { activeAccount } from "$lib/stores/accounts";
-import type { Invite, InvitesWithFailures, NostrMlsGroup, ProcessedInvite } from "$lib/types/nostr";
+import type { NGroup, NWelcome } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import Tree from "carbon-icons-svelte/lib/Tree.svelte";
@@ -20,32 +20,28 @@ let unlistenGroupAdded: UnlistenFn;
 let unlistenInviteAccepted: UnlistenFn;
 let unlistenInviteDeclined: UnlistenFn;
 let unlistenInviteProcessed: UnlistenFn;
-let unlistenInviteFailedToProcess: UnlistenFn;
 
 let selectedChatId: string | null = $state(null);
 let showInfoPage: boolean = $state(false);
 let isLoading = $state(true);
 let loadingError: string | null = $state(null);
-let groups: NostrMlsGroup[] = $state([]);
-let invites: Invite[] = $state([]);
-let failures: [string, string | undefined][] = $state([]);
+let groups: NGroup[] = $state([]);
+let welcomes: NWelcome[] = $state([]);
 
 async function loadEvents() {
     console.log("Loading events");
     isLoading = true;
     try {
-        let groupsResponse = await invoke("get_groups");
-        let invitesResponse = await invoke("get_welcomes");
-        // const [groupsResponse, invitesResponse] = await Promise.all([
-        //     invoke("get_groups"),
-        //     invoke("get_welcomes"),
-        // ]);
+        const [groupsResponse, welcomesResponse] = await Promise.all([
+            invoke("get_groups"),
+            invoke("get_welcomes"),
+        ]);
         console.log("groupsResponse", groupsResponse);
-        console.log("invitesResponse", invitesResponse);
-        // groups = (groupsResponse as NostrMlsGroup[]).sort(
-        //     (a, b) => b.last_message_at - a.last_message_at
-        // );
-        // invites = invitesResponse as Invite[];
+        console.log("welcomesResponse", welcomesResponse);
+        groups = (groupsResponse as NGroup[]).sort(
+            (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0)
+        );
+        welcomes = welcomesResponse as NWelcome[];
     } catch (error) {
         loadingError = error as string;
         console.log(error);
@@ -55,7 +51,7 @@ async function loadEvents() {
     }
 }
 
-$inspect(invites);
+$inspect(welcomes);
 $inspect(groups);
 
 onMount(async () => {
@@ -68,7 +64,7 @@ onMount(async () => {
             console.log("Event received on chats page: account_changing");
             isLoading = true;
             groups = [];
-            invites = [];
+            welcomes = [];
         });
     }
 
@@ -88,45 +84,34 @@ onMount(async () => {
     }
 
     if (!unlistenGroupAdded) {
-        unlistenGroupAdded = await listen<NostrMlsGroup>("group_added", (event) => {
-            const addedGroup = event.payload as NostrMlsGroup;
+        unlistenGroupAdded = await listen<NGroup>("group_added", (event) => {
+            const addedGroup = event.payload as NGroup;
             console.log("Event received on chats page: group_added", addedGroup);
             groups = [...groups, addedGroup];
         });
     }
 
     if (!unlistenInviteAccepted) {
-        unlistenInviteAccepted = await listen<Invite>("welcome_accepted", (event) => {
-            const acceptedInvite = event.payload as Invite;
+        unlistenInviteAccepted = await listen<NWelcome>("welcome_accepted", (event) => {
+            const acceptedInvite = event.payload as NWelcome;
             console.log("Event received on chats page: invite_accepted", acceptedInvite);
-            invites = invites.filter((invite) => invite.event.id !== acceptedInvite.event.id);
+            welcomes = welcomes.filter((welcome) => welcome.event.id !== acceptedInvite.event.id);
         });
     }
 
     if (!unlistenInviteDeclined) {
-        unlistenInviteDeclined = await listen<Invite>("welcome_declined", (event) => {
-            const declinedInvite = event.payload as Invite;
+        unlistenInviteDeclined = await listen<NWelcome>("welcome_declined", (event) => {
+            const declinedInvite = event.payload as NWelcome;
             console.log("Event received on chats page: invite_declined", declinedInvite);
-            invites = invites.filter((welcome) => welcome.event.id !== declinedInvite.event.id);
+            welcomes = welcomes.filter((welcome) => welcome.event.id !== declinedInvite.event.id);
         });
     }
 
     if (!unlistenInviteProcessed) {
-        unlistenInviteProcessed = await listen<Invite>("welcome_processed", async (_event) => {
+        unlistenInviteProcessed = await listen<NWelcome>("welcome_processed", async (_event) => {
             let welcomesResponse = await invoke("get_welcomes");
-            invites = welcomesResponse as Invite[];
+            welcomes = welcomesResponse as NWelcome[];
         });
-    }
-
-    if (!unlistenInviteFailedToProcess) {
-        unlistenInviteFailedToProcess = await listen<ProcessedInvite>(
-            "invite_failed_to_process",
-            (event) => {
-                const failedInvite = event.payload as ProcessedInvite;
-                console.log("Event received on chats page: invite_failed_to_process", failedInvite);
-                failures = [...failures, [failedInvite.event_id, failedInvite.failure_reason]];
-            }
-        );
     }
 });
 
@@ -138,7 +123,6 @@ onDestroy(() => {
     unlistenInviteAccepted?.();
     unlistenInviteDeclined?.();
     unlistenInviteProcessed?.();
-    unlistenInviteFailedToProcess?.();
 });
 
 $effect(() => {
@@ -161,7 +145,7 @@ $effect(() => {
             <div class="flex w-full h-svh">
                 <div class="w-full overflow-y-auto overscroll-none">
                     <div class="max-w-full">
-                        <ChatsList bind:invites bind:groups bind:selectedChatId />
+                        <ChatsList bind:welcomes bind:groups bind:selectedChatId />
                     </div>
                 </div>
             </div>
@@ -192,6 +176,6 @@ $effect(() => {
 <!-- On mobile, show just the chats list -->
 <div class="md:hidden">
     <div class="max-w-full">
-        <ChatsList bind:invites bind:groups />
+        <ChatsList bind:welcomes bind:groups />
     </div>
 </div>

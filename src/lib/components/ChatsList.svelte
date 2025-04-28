@@ -1,6 +1,6 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
-import type { EnrichedContact, EnrichedContactsMap, Invite, NostrMlsGroup } from "$lib/types/nostr";
+import type { EnrichedContact, EnrichedContactsMap, NGroup, NWelcome } from "$lib/types/nostr";
 import { hexKeyFromNpub, isValidHexKey, isValidNpub, npubFromPubkey } from "$lib/utils/nostr";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
@@ -25,15 +25,15 @@ import * as Sheet from "./ui/sheet";
 type ChatsListProps = {
     isLoading?: boolean;
     loadingError?: string | null;
-    invites?: Invite[];
-    groups?: NostrMlsGroup[];
+    welcomes?: NWelcome[];
+    groups?: NGroup[];
     selectedChatId?: string | null;
 };
 
 let {
     isLoading = $bindable(false),
     loadingError = $bindable(null),
-    invites = $bindable([]),
+    welcomes = $bindable([]),
     groups = $bindable([]),
     selectedChatId = $bindable(null),
 }: ChatsListProps = $props();
@@ -383,15 +383,15 @@ $effect(() => {
     </div>
 {:else}
     <div class="flex flex-col gap-2">
-        {#if invites.length === 0 && groups.length === 0}
+        {#if welcomes.length === 0 && groups.length === 0}
             <div class="flex flex-col gap-2 items-center justify-center flex-1 pt-40 text-muted-foreground">
                 <Chat size={32} />
                 <span>{$t("chats.noChatsFound")}</span>
                 <span>{$t("chats.startNewChat")}</span>
             </div>
         {/if}
-        {#each invites as invite}
-            <InviteListItem {invite} />
+        {#each welcomes as welcome}
+            <InviteListItem {welcome} />
         {/each}
         {#each groups as group}
             <GroupListItem {group} bind:selectedChatId />
