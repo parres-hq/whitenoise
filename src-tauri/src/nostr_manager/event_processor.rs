@@ -285,7 +285,7 @@ impl EventProcessor {
             .and_then(|tag| tag.content());
 
         app_handle
-            .emit("mls_welcome_received", &welcome)
+            .emit("mls_welcome_processed", &welcome)
             .map_err(NostrManagerError::TauriError)?;
 
         let key_package_relays: Vec<String> = if cfg!(dev) {

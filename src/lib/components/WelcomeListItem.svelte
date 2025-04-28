@@ -3,16 +3,16 @@ import type { EnrichedContact, NWelcome } from "$lib/types/nostr";
 import { NostrMlsGroupType } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { _ as t } from "svelte-i18n";
-import { nameFromMetadata, pubkeyFromBytes } from "../utils/nostr";
+import { nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
-import InviteDetail from "./InviteDetail.svelte";
+import InviteDetail from "./WelcomeDetail.svelte";
 import Button from "./ui/button/button.svelte";
 import * as Sheet from "./ui/sheet";
 
 let { welcome }: { welcome: NWelcome } = $props();
 
 let showSheet = $state(false);
-let counterpartyPubkey = $derived(pubkeyFromBytes(welcome.welcomer));
+let counterpartyPubkey = $derived(welcome.welcomer);
 let enrichedInviter: EnrichedContact | undefined = $state(undefined);
 let groupName = $state("");
 let groupType = $state(

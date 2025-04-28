@@ -70,7 +70,7 @@ export type NGroup = {
 };
 
 export type MlsGroupId = {
-    value: Uint8Array;
+    value: { vec: Uint8Array };
 };
 
 export enum NostrMlsGroupType {
@@ -90,7 +90,7 @@ export type NGroupRelay = {
 };
 
 export type NWelcome = {
-    id: Uint8Array;
+    id: string;
     event: NEvent;
     mls_group_id: MlsGroupId;
     nostr_group_id: Uint8Array;
@@ -98,10 +98,10 @@ export type NWelcome = {
     group_description: string;
     group_admin_pubkeys: string[];
     group_relays: NGroupRelay[];
-    welcomer: Uint8Array;
+    welcomer: string;
     member_count: number;
     state: NWelcomeState;
-    wrapper_event_id: Uint8Array;
+    wrapper_event_id: string;
 };
 
 export enum NWelcomeState {

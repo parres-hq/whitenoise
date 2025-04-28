@@ -15,9 +15,9 @@ import Avatar from "./Avatar.svelte";
 import FormattedNpub from "./FormattedNpub.svelte";
 import GroupListItem from "./GroupListItem.svelte";
 import Header from "./Header.svelte";
-import InviteListItem from "./InviteListItem.svelte";
 import Loader from "./Loader.svelte";
 import StartSecureChat from "./StartSecureChat.svelte";
+import WelcomeListItem from "./WelcomeListItem.svelte";
 import Button from "./ui/button/button.svelte";
 import Input from "./ui/input/input.svelte";
 import * as Sheet from "./ui/sheet";
@@ -391,7 +391,7 @@ $effect(() => {
             </div>
         {/if}
         {#each welcomes as welcome}
-            <InviteListItem {welcome} />
+            <WelcomeListItem {welcome} />
         {/each}
         {#each groups as group}
             <GroupListItem {group} bind:selectedChatId />

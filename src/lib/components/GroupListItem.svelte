@@ -1,6 +1,6 @@
 <script lang="ts">
 import { activeAccount } from "$lib/stores/accounts";
-import { type NostrMlsGroup, NostrMlsGroupType } from "$lib/types/nostr";
+import { type NGroup, NostrMlsGroupType } from "$lib/types/nostr";
 import type { EnrichedContact } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { formatMessageTime } from "$lib/utils/time";
@@ -10,10 +10,8 @@ import { latestMessagePreview, nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
 import Button from "./ui/button/button.svelte";
 
-let {
-    group,
-    selectedChatId = $bindable(null),
-}: { group: NostrMlsGroup; selectedChatId?: string | null } = $props();
+let { group, selectedChatId = $bindable(null) }: { group: NGroup; selectedChatId?: string | null } =
+    $props();
 
 let counterpartyPubkey: string | undefined = $state(undefined);
 let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
@@ -83,7 +81,8 @@ $effect(() => {
 
 function handleClick(e: MouseEvent) {
     const groupId = hexMlsGroupId(group.mls_group_id);
-
+    console.log("group", group.mls_group_id.value);
+    console.log("groupId", groupId);
     // On desktop, update selectedChatId instead of navigating
     if (window.innerWidth >= 768) {
         e.preventDefault();

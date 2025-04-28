@@ -19,7 +19,7 @@ use crate::whitenoise::Whitenoise;
 /// - No active account found
 /// - Database error occurs retrieving groups
 #[tauri::command]
-pub async fn get_groups(
+pub async fn get_active_groups(
     wn: tauri::State<'_, Whitenoise>,
 ) -> Result<Vec<group_types::Group>, String> {
     tracing::debug!(target: "whitenoise::commands::groups::get_groups", "Attempting to acquire nostr_mls lock");
@@ -40,7 +40,10 @@ pub async fn get_groups(
         tracing::debug!(target: "whitenoise::commands::groups::get_groups", "Fetching groups");
         let groups = nostr_mls
             .get_groups()
-            .map_err(|e| format!("Error fetching groups for account: {}", e))?;
+            .map_err(|e| format!("Error fetching groups for account: {}", e))?
+            .into_iter()
+            .filter(|group| group.state == group_types::GroupState::Active)
+            .collect();
         tracing::debug!(target: "whitenoise::commands::groups::get_groups", "nostr_mls lock released");
         Ok(groups)
     } else {

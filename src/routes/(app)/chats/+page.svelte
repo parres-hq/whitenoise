@@ -1,6 +1,6 @@
 <script lang="ts">
 import { pushState } from "$app/navigation";
-import { page } from "$app/stores";
+import { page } from "$app/state";
 import ChatsList from "$lib/components/ChatsList.svelte";
 import * as Resizable from "$lib/components/ui/resizable";
 import { activeAccount } from "$lib/stores/accounts";
@@ -17,9 +17,9 @@ let unlistenAccountChanging: UnlistenFn;
 let unlistenAccountChanged: UnlistenFn;
 let unlistenNostrReady: UnlistenFn;
 let unlistenGroupAdded: UnlistenFn;
-let unlistenInviteAccepted: UnlistenFn;
-let unlistenInviteDeclined: UnlistenFn;
-let unlistenInviteProcessed: UnlistenFn;
+let unlistenWelcomeAccepted: UnlistenFn;
+let unlistenWelcomeDeclined: UnlistenFn;
+let unlistenWelcomeProcessed: UnlistenFn;
 
 let selectedChatId: string | null = $state(null);
 let showInfoPage: boolean = $state(false);
@@ -29,15 +29,12 @@ let groups: NGroup[] = $state([]);
 let welcomes: NWelcome[] = $state([]);
 
 async function loadEvents() {
-    console.log("Loading events");
     isLoading = true;
     try {
         const [groupsResponse, welcomesResponse] = await Promise.all([
-            invoke("get_groups"),
+            invoke("get_active_groups"),
             invoke("get_welcomes"),
         ]);
-        console.log("groupsResponse", groupsResponse);
-        console.log("welcomesResponse", welcomesResponse);
         groups = (groupsResponse as NGroup[]).sort(
             (a, b) => (b.last_message_at ?? 0) - (a.last_message_at ?? 0)
         );
@@ -47,12 +44,8 @@ async function loadEvents() {
         console.log(error);
     } finally {
         isLoading = false;
-        console.log("done");
     }
 }
-
-$inspect(welcomes);
-$inspect(groups);
 
 onMount(async () => {
     if ($activeAccount) {
@@ -91,27 +84,30 @@ onMount(async () => {
         });
     }
 
-    if (!unlistenInviteAccepted) {
-        unlistenInviteAccepted = await listen<NWelcome>("welcome_accepted", (event) => {
-            const acceptedInvite = event.payload as NWelcome;
-            console.log("Event received on chats page: invite_accepted", acceptedInvite);
-            welcomes = welcomes.filter((welcome) => welcome.event.id !== acceptedInvite.event.id);
+    if (!unlistenWelcomeAccepted) {
+        unlistenWelcomeAccepted = await listen<string>("welcome_accepted", (event) => {
+            const acceptedWelcomeId = event.payload as string;
+            console.log("Event received on chats page: welcome_accepted", acceptedWelcomeId);
+            welcomes = welcomes.filter((welcome) => welcome.event.id !== acceptedWelcomeId);
         });
     }
 
-    if (!unlistenInviteDeclined) {
-        unlistenInviteDeclined = await listen<NWelcome>("welcome_declined", (event) => {
-            const declinedInvite = event.payload as NWelcome;
-            console.log("Event received on chats page: invite_declined", declinedInvite);
-            welcomes = welcomes.filter((welcome) => welcome.event.id !== declinedInvite.event.id);
+    if (!unlistenWelcomeDeclined) {
+        unlistenWelcomeDeclined = await listen<string>("welcome_declined", (event) => {
+            const declinedWelcomeId = event.payload as string;
+            console.log("Event received on chats page: welcome_declined", declinedWelcomeId);
+            welcomes = welcomes.filter((welcome) => welcome.event.id !== declinedWelcomeId);
         });
     }
 
-    if (!unlistenInviteProcessed) {
-        unlistenInviteProcessed = await listen<NWelcome>("welcome_processed", async (_event) => {
-            let welcomesResponse = await invoke("get_welcomes");
-            welcomes = welcomesResponse as NWelcome[];
-        });
+    if (!unlistenWelcomeProcessed) {
+        unlistenWelcomeProcessed = await listen<NWelcome>(
+            "mls_welcome_processed",
+            async (_event) => {
+                let welcomesResponse = await invoke("get_welcomes");
+                welcomes = welcomesResponse as NWelcome[];
+            }
+        );
     }
 });
 
@@ -120,13 +116,13 @@ onDestroy(() => {
     unlistenAccountChanged?.();
     unlistenNostrReady?.();
     unlistenGroupAdded?.();
-    unlistenInviteAccepted?.();
-    unlistenInviteDeclined?.();
-    unlistenInviteProcessed?.();
+    unlistenWelcomeAccepted?.();
+    unlistenWelcomeDeclined?.();
+    unlistenWelcomeProcessed?.();
 });
 
 $effect(() => {
-    if (selectedChatId && $page.state.selectedChatId !== selectedChatId) {
+    if (selectedChatId && page.state.selectedChatId !== selectedChatId) {
         // Update URL without navigation on desktop
         if (window.innerWidth >= 768) {
             // md breakpoint
@@ -135,6 +131,8 @@ $effect(() => {
         }
     }
 });
+
+$inspect(selectedChatId);
 </script>
 
 

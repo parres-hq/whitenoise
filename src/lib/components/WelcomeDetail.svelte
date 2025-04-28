@@ -5,7 +5,7 @@ import KeyboardAvoidingView from "$lib/components/keyboard-avoiding-view";
 import Button from "$lib/components/ui/button/button.svelte";
 import * as Sheet from "$lib/components/ui/sheet";
 import type { EnrichedContact, NWelcome } from "$lib/types/nostr";
-import { nameFromMetadata, npubFromPubkey, pubkeyFromBytes } from "$lib/utils/nostr";
+import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
@@ -25,7 +25,7 @@ let {
 let isAcceptingInvite = $state(false);
 let isDecliningInvite = $state(false);
 
-let welcomerPubkey = $derived(pubkeyFromBytes(welcome.welcomer));
+let welcomerPubkey = $derived(welcome.welcomer);
 
 let subhead = $derived(
     welcome.member_count === 2
@@ -38,7 +38,7 @@ async function acceptInvite() {
         return;
     }
     isAcceptingInvite = true;
-    invoke("accept_welcome", { welcome_event_id: welcome.event.id })
+    invoke("accept_welcome", { welcomeEventId: welcome.event.id })
         .then(() => {
             const event = new CustomEvent("inviteAccepted", { detail: welcome.mls_group_id });
             window.dispatchEvent(event);
@@ -64,7 +64,7 @@ async function declineInvite() {
         return;
     }
     isDecliningInvite = true;
-    invoke("decline_welcome", { welcome_event_id: welcome.event.id })
+    invoke("decline_welcome", { welcomeEventId: welcome.event.id })
         .then(() => {
             toast.info(
                 $t("chats.inviteDeclined", {
