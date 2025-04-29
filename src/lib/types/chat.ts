@@ -1,10 +1,11 @@
 import type {
+    MessageWithTokens,
+    MlsGroupId,
     NEvent,
-    NostrMlsGroup,
-    NostrMlsGroupWithRelays,
+    NGroup,
+    NMessageState,
     SerializableToken,
 } from "$lib/types/nostr";
-
 /**
  * Represents a cached message from the local database.
  * We get these back from invoke calls and events emitted from the backend.
@@ -21,15 +22,15 @@ import type {
  */
 export type Message = {
     event_id: string;
-    account_pubkey: string;
-    author_pubkey: string;
-    mls_group_id: string;
-    event_kind: number;
+    pubkey: string;
+    kind: number;
+    mls_group_id: MlsGroupId;
     created_at: number;
     content: string;
+    tags: string[][];
     event: NEvent;
-    tokens: SerializableToken[];
-    outer_event_id: string;
+    wrapper_event_id: string;
+    state: NMessageState;
 };
 
 /**
@@ -175,8 +176,8 @@ export type DeletionMessagesMap = Map<string, DeletionMessage>;
  */
 export type ChatState = {
     chatMessages: ChatMessage[];
-    handleMessage: (message: Message) => void;
-    handleMessages: (messages: Message[]) => void;
+    handleMessage: (message: MessageWithTokens) => void;
+    handleMessages: (messages: MessageWithTokens[]) => void;
     clear: () => void;
     findChatMessage: (id: string) => ChatMessage | undefined;
     findReactionMessage: (id: string) => ReactionMessage | undefined;
@@ -185,15 +186,12 @@ export type ChatState = {
     getMessageReactionsSummary: (messageId: string) => ReactionSummary[];
     hasReactions: (message: ChatMessage) => boolean;
     clickReaction: (
-        group: NostrMlsGroup,
+        group: NGroup,
         reaction: string,
         messageId: string
-    ) => Promise<Message | null>;
-    deleteMessage: (group: NostrMlsGroup, messageId: string) => Promise<Message | null>;
-    payLightningInvoice: (
-        groupWithRelays: NostrMlsGroupWithRelays,
-        message: ChatMessage
-    ) => Promise<Message | null>;
+    ) => Promise<MessageWithTokens | null>;
+    deleteMessage: (group: NGroup, messageId: string) => Promise<MessageWithTokens | null>;
+    payLightningInvoice: (group: NGroup, message: ChatMessage) => Promise<MessageWithTokens | null>;
     isMessageDeletable: (messageId: string) => boolean;
     isMessageCopyable: (messageId: string) => boolean;
 };

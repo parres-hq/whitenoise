@@ -2,7 +2,8 @@
 import MessageTokens from "$lib/components/MessageTokens.svelte";
 import { activeAccount } from "$lib/stores/accounts";
 import type { ChatMessage, Message } from "$lib/types/chat";
-import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
+import type { NGroup } from "$lib/types/nostr";
+import { NMessageState } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -22,9 +23,9 @@ let {
     handleNewMessage,
     isReplyToMessageDeleted = $bindable(false),
 }: {
-    group: NostrMlsGroup;
+    group: NGroup;
     replyToMessage?: ChatMessage;
-    handleNewMessage: (message: Message) => void;
+    handleNewMessage: (message: Message | import("$lib/types/nostr").MessageWithTokens) => void;
     isReplyToMessageDeleted?: boolean;
 } = $props();
 
@@ -57,24 +58,38 @@ async function sendMessage() {
     }
 
     let kind = 9;
-    let tags = [];
+    let tags: string[][] = [];
+    // Only add a 'q' tag if replying to a message, otherwise ensure no 'q' tag is present
     if (replyToMessage) {
-        let groupWithRelays: NostrMlsGroupWithRelays = await invoke("get_group", {
+        let relays: string[] = await invoke("get_group_relays", {
             groupId: hexMlsGroupId(group.mls_group_id),
         });
-        tags.push(["q", replyToMessage.id, groupWithRelays.relays[0], replyToMessage.pubkey]);
+        // Format: ["q", replyToId, relay, pubkey]
+        tags.push(["q", replyToMessage.id, relays[0] ?? "", replyToMessage.pubkey]);
     }
 
-    let tmpMessage = {
-        id: "temp",
-        content: message,
-        created_at: Math.floor(Date.now() / 1000),
-        pubkey: $activeAccount?.pubkey,
+    let tmpMessage: Message = {
+        event_id: "temp",
+        pubkey: $activeAccount?.pubkey ?? "",
         kind,
+        mls_group_id: group.mls_group_id,
+        created_at: Math.floor(Date.now() / 1000),
+        content: message,
         tags,
+        event: {
+            id: "temp",
+            pubkey: $activeAccount?.pubkey ?? "",
+            created_at: Math.floor(Date.now() / 1000),
+            kind,
+            tags,
+            content: message,
+            sig: "",
+        },
+        wrapper_event_id: "temp-wrapper",
+        state: NMessageState.Created,
     };
 
-    handleNewMessage(tmpMessage as unknown as Message);
+    handleNewMessage(tmpMessage);
     sendingMessage = true;
 
     await invoke("send_mls_message", {
@@ -95,8 +110,8 @@ async function sendMessage() {
                 })
         ),
     })
-        .then((tmpMessage: Message) => {
-            handleNewMessage(tmpMessage);
+        .then((tmpMessage) => {
+            handleNewMessage(tmpMessage as import("$lib/types/nostr").MessageWithTokens);
             message = "";
             media = []; // Clear media after successful send
             setTimeout(adjustTextareaHeight, 0);

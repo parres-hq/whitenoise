@@ -1,15 +1,10 @@
 use nostr_mls::prelude::*;
-use serde::Serialize;
 use std::time::Duration;
 use tokio::time::timeout;
 
+use super::{GroupAndMessages, MessageWithTokens};
+use crate::nostr_manager::parser::parse;
 use crate::whitenoise::Whitenoise;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct GroupAndMessages {
-    group: group_types::Group,
-    messages: Vec<message_types::Message>,
-}
 
 /// Gets a single MLS group and its messages by group ID
 ///
@@ -78,7 +73,17 @@ pub async fn get_group_and_messages(
             );
 
             tracing::debug!(target: "whitenoise::commands::groups::get_group_and_messages", "nostr_mls lock released");
-            Ok(GroupAndMessages { group, messages })
+            let messages_with_tokens = messages
+                .iter()
+                .map(|message| MessageWithTokens {
+                    message: message.clone(),
+                    tokens: parse(&message.content),
+                })
+                .collect::<Vec<MessageWithTokens>>();
+            Ok(GroupAndMessages {
+                group,
+                messages: messages_with_tokens,
+            })
         } else {
             Err("Group not found".to_string())
         }

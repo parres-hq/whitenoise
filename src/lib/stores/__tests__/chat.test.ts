@@ -1,6 +1,7 @@
 import type { ChatState, Message } from "$lib/types/chat";
-import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
-import { NostrMlsGroupType } from "$lib/types/nostr";
+import { NostrMlsGroupState, NostrMlsGroupType } from "$lib/types/nostr";
+import { NMessageState } from "$lib/types/nostr";
+import type { NGroup } from "$lib/types/nostr";
 import * as tauri from "@tauri-apps/api/core";
 import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,27 +35,34 @@ const userAccount: Account = {
     active: true,
 };
 
+// Helper to create a dummy MlsGroupId for tests
+function createTestMlsGroupId(): import("$lib/types/nostr").MlsGroupId {
+    return { value: { vec: new Uint8Array([1, 2, 3, 4]) } };
+}
+
+// Updated helpers to return MessageWithTokens
 const createMessageEvent = (
     id: string,
     content: string,
     createdAt: number,
     replyToId?: string
-): Message => {
+): import("$lib/types/nostr").MessageWithTokens => {
     const tags: string[][] = [];
     if (replyToId) {
-        tags.push(["q", replyToId]);
+        // For tests, use dummy relay and pubkey values
+        tags.push(["q", replyToId, "test-relay", "user-pubkey"]);
     }
 
-    return {
+    const message: Message = {
         event_id: id,
-        account_pubkey: "user-pubkey",
-        event_kind: 9,
+        kind: 9,
         content,
         created_at: createdAt,
-        outer_event_id: "random-outer-event-id",
-        tokens: [{ Text: content }],
-        author_pubkey: "user-pubkey",
-        mls_group_id: "test-group-id",
+        mls_group_id: createTestMlsGroupId(),
+        pubkey: "user-pubkey",
+        tags,
+        wrapper_event_id: "test-wrapper-id",
+        state: NMessageState.Created,
         event: {
             id,
             kind: 9,
@@ -65,6 +73,10 @@ const createMessageEvent = (
             sig: "test-sig",
         },
     };
+    return {
+        message,
+        tokens: [{ Text: content }],
+    };
 };
 
 const createReactionEvent = (
@@ -73,17 +85,20 @@ const createReactionEvent = (
     createdAt: number,
     targetId: string,
     pubkey = "user-pubkey"
-): Message => {
-    return {
+): import("$lib/types/nostr").MessageWithTokens => {
+    const message: Message = {
         event_id: id,
-        account_pubkey: pubkey,
-        event_kind: 7,
+        kind: 7,
         content,
         created_at: createdAt,
-        outer_event_id: "random-outer-event-id",
-        tokens: [],
-        author_pubkey: pubkey,
-        mls_group_id: "test-group-id",
+        mls_group_id: createTestMlsGroupId(),
+        pubkey,
+        tags: [
+            ["e", targetId],
+            ["p", "user-pubkey"],
+        ],
+        wrapper_event_id: "test-wrapper-id",
+        state: NMessageState.Created,
         event: {
             id,
             kind: 7,
@@ -97,19 +112,27 @@ const createReactionEvent = (
             sig: "test-sig",
         },
     };
+    return {
+        message,
+        tokens: [{ Text: content }],
+    };
 };
 
-const createDeletionMessage = (id: string, targetId: string, createdAt: number): Message => {
-    return {
+const createDeletionMessage = (
+    id: string,
+    targetId: string,
+    createdAt: number
+): import("$lib/types/nostr").MessageWithTokens => {
+    const message: Message = {
         event_id: id,
-        account_pubkey: "user-pubkey",
-        event_kind: 5,
+        kind: 5,
         content: "",
         created_at: createdAt,
-        outer_event_id: "random-outer-event-id",
-        tokens: [],
-        author_pubkey: "user-pubkey",
-        mls_group_id: "test-group-id",
+        mls_group_id: createTestMlsGroupId(),
+        pubkey: "user-pubkey",
+        tags: [["e", targetId]],
+        wrapper_event_id: "test-wrapper-id",
+        state: NMessageState.Created,
         event: {
             id,
             kind: 5,
@@ -120,18 +143,24 @@ const createDeletionMessage = (id: string, targetId: string, createdAt: number):
             sig: "test-sig",
         },
     };
+    return {
+        message,
+        tokens: [{ Text: "" }],
+    };
 };
 
-const createTestGroup = (): NostrMlsGroup => {
+const createTestGroup = (): NGroup => {
     return {
-        mls_group_id: new Uint8Array([1, 2, 3, 4]),
-        nostr_group_id: "test-group-id",
+        mls_group_id: createTestMlsGroupId(),
+        nostr_group_id: new Uint8Array([5, 6, 7, 8]),
         name: "Test Group",
         description: "A test group",
         admin_pubkeys: ["user-pubkey"],
         last_message_at: Date.now(),
         last_message_id: "last-message-id",
         group_type: NostrMlsGroupType.Group,
+        epoch: 0,
+        state: NostrMlsGroupState.Active,
     };
 };
 
@@ -172,7 +201,7 @@ describe("Chat Store", () => {
                         isSingleEmoji: false,
                         lightningInvoice: undefined,
                         lightningPayment: undefined,
-                        event: messageEvent.event,
+                        event: messageEvent.message.event,
                         tokens: [{ Text: "Hello world" }],
                     },
                 ]);
@@ -181,7 +210,7 @@ describe("Chat Store", () => {
             describe("when event has bolt 11 tag", () => {
                 it("saves message with lightning invoice", () => {
                     const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                    messageEvent.event.tags.push([
+                    messageEvent.message.tags.push([
                         "bolt11",
                         "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
                         "21000",
@@ -207,7 +236,7 @@ describe("Chat Store", () => {
                                 isPaid: false,
                             },
                             lightningPayment: undefined,
-                            event: messageEvent.event,
+                            event: messageEvent.message.event,
                             tokens: [{ Text: "Hello world" }],
                         },
                     ]);
@@ -222,7 +251,7 @@ describe("Chat Store", () => {
                             "Hello world",
                             1000
                         );
-                        invoiceMessageEvent.event.tags.push([
+                        invoiceMessageEvent.message.tags.push([
                             "bolt11",
                             "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
                             "21000",
@@ -230,7 +259,7 @@ describe("Chat Store", () => {
                         ]);
                         chatStore.handleMessage(invoiceMessageEvent);
                         const paymentMessageEvent = createMessageEvent("msg-2", "", 2000, "msg-1");
-                        paymentMessageEvent.event.tags.push(["preimage", "preimage-1"]);
+                        paymentMessageEvent.message.tags.push(["preimage", "preimage-1"]);
                         chatStore.handleMessage(paymentMessageEvent);
                         const paymentMessage = chatStore.findChatMessage("msg-2");
 
@@ -248,7 +277,7 @@ describe("Chat Store", () => {
                                 preimage: "preimage-1",
                                 isPaid: true,
                             },
-                            event: paymentMessageEvent.event,
+                            event: paymentMessageEvent.message.event,
                             tokens: [{ Text: "" }],
                         });
                     });
@@ -258,7 +287,7 @@ describe("Chat Store", () => {
                             "Hello world",
                             1000
                         );
-                        invoiceMessageEvent.event.tags.push([
+                        invoiceMessageEvent.message.tags.push([
                             "bolt11",
                             "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
                             "21000",
@@ -266,7 +295,7 @@ describe("Chat Store", () => {
                         ]);
                         chatStore.handleMessage(invoiceMessageEvent);
                         const paymentMessageEvent = createMessageEvent("msg-2", "", 2000, "msg-1");
-                        paymentMessageEvent.event.tags.push(["preimage", "preimage-1"]);
+                        paymentMessageEvent.message.tags.push(["preimage", "preimage-1"]);
                         chatStore.handleMessage(paymentMessageEvent);
                         const invoiceMessage = chatStore.findChatMessage("msg-1");
                         expect(invoiceMessage).toEqual({
@@ -286,7 +315,7 @@ describe("Chat Store", () => {
                                 isPaid: true,
                             },
                             lightningPayment: undefined,
-                            event: invoiceMessageEvent.event,
+                            event: invoiceMessageEvent.message.event,
                             tokens: [{ Text: "Hello world" }],
                         });
                     });
@@ -298,7 +327,7 @@ describe("Chat Store", () => {
                             2000,
                             "non-existent"
                         );
-                        paymentMessageEvent.event.tags.push(["preimage", "preimage-1"]);
+                        paymentMessageEvent.message.tags.push(["preimage", "preimage-1"]);
                         chatStore.handleMessage(paymentMessageEvent);
                         const paymentMessage = chatStore.findChatMessage("msg-2");
 
@@ -316,7 +345,7 @@ describe("Chat Store", () => {
                                 preimage: "preimage-1",
                                 isPaid: false,
                             },
-                            event: paymentMessageEvent.event,
+                            event: paymentMessageEvent.message.event,
                             tokens: [{ Text: "" }],
                         });
                     });
@@ -324,7 +353,7 @@ describe("Chat Store", () => {
                 describe("without reply to lightning invoice", () => {
                     it("saves message with lightning payment but not paid", () => {
                         const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-                        messageEvent.event.tags.push(["preimage", "preimage-1"]);
+                        messageEvent.message.tags.push(["preimage", "preimage-1"]);
                         chatStore.handleMessage(messageEvent);
                         const state = get(chatStore) as ChatState;
                         expect(state.chatMessages).toEqual([
@@ -342,7 +371,7 @@ describe("Chat Store", () => {
                                     preimage: "preimage-1",
                                     isPaid: false,
                                 },
-                                event: messageEvent.event,
+                                event: messageEvent.message.event,
                                 tokens: [{ Text: "Hello world" }],
                             },
                         ]);
@@ -372,7 +401,7 @@ describe("Chat Store", () => {
                         targetId: "msg-1",
                         createdAt: 1000,
                         isMine: false,
-                        event: reactionEvent.event,
+                        event: reactionEvent.message.event,
                     },
                 ]);
             });
@@ -421,7 +450,7 @@ describe("Chat Store", () => {
             );
             const message = createDeletionMessage("deletion-1", "msg-1", 2000);
             const secondMessageEvent = createMessageEvent("msg-2", "Second message", 2500);
-            const events: Message[] = [
+            const events: import("$lib/types/nostr").MessageWithTokens[] = [
                 firstMessageEvent,
                 reactionEvent,
                 message,
@@ -445,7 +474,7 @@ describe("Chat Store", () => {
                             targetId: "msg-1",
                             createdAt: 1500,
                             isMine: false,
-                            event: reactionEvent.event,
+                            event: reactionEvent.message.event,
                         },
                     ],
                     isMine: true,
@@ -453,7 +482,7 @@ describe("Chat Store", () => {
                     isSingleEmoji: false,
                     lightningInvoice: undefined,
                     lightningPayment: undefined,
-                    event: firstMessageEvent.event,
+                    event: firstMessageEvent.message.event,
                 },
                 {
                     id: "msg-2",
@@ -466,7 +495,7 @@ describe("Chat Store", () => {
                     isSingleEmoji: false,
                     lightningInvoice: undefined,
                     lightningPayment: undefined,
-                    event: secondMessageEvent.event,
+                    event: secondMessageEvent.message.event,
                     tokens: [{ Text: "Second message" }],
                 },
             ]);
@@ -547,7 +576,7 @@ describe("Chat Store", () => {
                 isSingleEmoji: false,
                 lightningInvoice: undefined,
                 lightningPayment: undefined,
-                event: messageEvent.event,
+                event: messageEvent.message.event,
                 reactions: [],
                 tokens: [{ Text: "Hello world" }],
             });
@@ -576,7 +605,7 @@ describe("Chat Store", () => {
                 content: "👍",
                 createdAt: 1001,
                 isMine: true,
-                event: reactionEvent.event,
+                event: reactionEvent.message.event,
             });
         });
 
@@ -612,7 +641,7 @@ describe("Chat Store", () => {
                 isSingleEmoji: false,
                 lightningInvoice: undefined,
                 lightningPayment: undefined,
-                event: parentMessageEvent.event,
+                event: parentMessageEvent.message.event,
                 reactions: [],
                 tokens: [{ Text: "Parent message" }],
             });
@@ -770,28 +799,31 @@ describe("Chat Store", () => {
             beforeEach(() => {
                 const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
                 chatStore.handleMessage(messageEvent);
-                const reactionResponse: Message = {
-                    event_id: "reaction-1",
-                    account_pubkey: "user-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1001,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "user-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-1",
+                const reactionResponse: import("$lib/types/nostr").MessageWithTokens = {
+                    message: {
+                        event_id: "reaction-1",
                         kind: 7,
-                        pubkey: "user-pubkey",
                         content: "👍",
                         created_at: 1001,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "user-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-1",
+                            kind: 7,
+                            pubkey: "user-pubkey",
+                            content: "👍",
+                            created_at: 1001,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 };
 
                 vi.spyOn(tauri, "invoke").mockResolvedValueOnce(reactionResponse);
@@ -813,35 +845,38 @@ describe("Chat Store", () => {
                 const group = createTestGroup();
                 const result = await chatStore.clickReaction(group, "👍", "msg-1");
                 expect(result).toEqual({
-                    event_id: "reaction-1",
-                    account_pubkey: "user-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1001,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "user-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-1",
+                    message: {
+                        event_id: "reaction-1",
                         kind: 7,
-                        pubkey: "user-pubkey",
                         content: "👍",
                         created_at: 1001,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "user-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-1",
+                            kind: 7,
+                            pubkey: "user-pubkey",
+                            content: "👍",
+                            created_at: 1001,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 });
             });
         });
 
         describe("with different user reaction with same content", () => {
-            let group: NostrMlsGroup;
-            let messageEvent: Message;
-            let firstReactionResponse: Message;
+            let group: NGroup;
+            let messageEvent: import("$lib/types/nostr").MessageWithTokens;
+            let firstReactionResponse: import("$lib/types/nostr").MessageWithTokens;
             const otherUserAccount: Account = { ...userAccount, pubkey: "other-pubkey" };
             let otherUserChatStore: ReturnType<typeof createChatStore>;
 
@@ -850,27 +885,30 @@ describe("Chat Store", () => {
                 messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
                 chatStore.handleMessage(messageEvent);
                 firstReactionResponse = {
-                    event_id: "reaction-1",
-                    account_pubkey: "user-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1001,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "user-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-1",
+                    message: {
+                        event_id: "reaction-1",
                         kind: 7,
-                        pubkey: "user-pubkey",
                         content: "👍",
-                        created_at: 1000,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        created_at: 1001,
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "user-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-1",
+                            kind: 7,
+                            pubkey: "user-pubkey",
+                            content: "👍",
+                            created_at: 1000,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 };
 
                 vi.spyOn(tauri, "invoke").mockResolvedValueOnce(firstReactionResponse);
@@ -880,28 +918,31 @@ describe("Chat Store", () => {
                 otherUserChatStore.handleMessage(messageEvent);
                 otherUserChatStore.handleMessage(firstReactionResponse);
 
-                const secondReactionResponse: Message = {
-                    event_id: "reaction-2",
-                    account_pubkey: "other-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1002,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "other-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-2",
+                const secondReactionResponse: import("$lib/types/nostr").MessageWithTokens = {
+                    message: {
+                        event_id: "reaction-2",
                         kind: 7,
-                        pubkey: "other-pubkey",
                         content: "👍",
                         created_at: 1002,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "other-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-2",
+                            kind: 7,
+                            pubkey: "other-pubkey",
+                            content: "👍",
+                            created_at: 1002,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 };
                 vi.spyOn(tauri, "invoke").mockResolvedValueOnce(secondReactionResponse);
             });
@@ -922,109 +963,121 @@ describe("Chat Store", () => {
             it("returns the new reaction response", async () => {
                 const result = await otherUserChatStore.clickReaction(group, "👍", "msg-1");
                 expect(result).toEqual({
-                    event_id: "reaction-2",
-                    account_pubkey: "other-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1002,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "other-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-2",
+                    message: {
+                        event_id: "reaction-2",
                         kind: 7,
-                        pubkey: "other-pubkey",
                         content: "👍",
                         created_at: 1002,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "other-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-2",
+                            kind: 7,
+                            pubkey: "other-pubkey",
+                            content: "👍",
+                            created_at: 1002,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 });
             });
         });
 
         describe("with deleted user reaction with same content", () => {
-            let group: NostrMlsGroup;
-            let messageEvent: Message;
+            let group: NGroup;
+            let messageEvent: import("$lib/types/nostr").MessageWithTokens;
 
             beforeEach(async () => {
                 group = createTestGroup();
                 messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
                 chatStore.handleMessage(messageEvent);
-                const firstReactionResponse: Message = {
-                    event_id: "reaction-1",
-                    account_pubkey: "user-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1001,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "user-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-1",
+                const firstReactionResponse: import("$lib/types/nostr").MessageWithTokens = {
+                    message: {
+                        event_id: "reaction-1",
                         kind: 7,
-                        pubkey: "user-pubkey",
                         content: "👍",
-                        created_at: 1000,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        created_at: 1001,
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "user-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-1",
+                            kind: 7,
+                            pubkey: "user-pubkey",
+                            content: "👍",
+                            created_at: 1000,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 };
                 vi.spyOn(tauri, "invoke").mockResolvedValueOnce(firstReactionResponse);
                 await chatStore.clickReaction(group, "👍", "msg-1");
-                const deletionResponse: Message = {
-                    event_id: "deletion-1",
-                    account_pubkey: "user-pubkey",
-                    event_kind: 5,
-                    content: "",
-                    created_at: 1002,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [],
-                    author_pubkey: "user-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "deletion-1",
+                const deletionResponse: import("$lib/types/nostr").MessageWithTokens = {
+                    message: {
+                        event_id: "deletion-1",
                         kind: 5,
-                        pubkey: "user-pubkey",
                         content: "",
                         created_at: 1002,
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "user-pubkey",
                         tags: [["e", "reaction-1"]],
-                        sig: "test-sig",
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "deletion-1",
+                            kind: 5,
+                            pubkey: "user-pubkey",
+                            content: "",
+                            created_at: 1002,
+                            tags: [["e", "reaction-1"]],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "" }],
                 };
 
                 vi.spyOn(tauri, "invoke").mockImplementation(async () => deletionResponse);
                 await chatStore.clickReaction(group, "👍", "msg-1");
-                const secondReactionResponse: Message = {
-                    event_id: "reaction-2",
-                    account_pubkey: "user-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1003,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "user-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-2",
+                const secondReactionResponse: import("$lib/types/nostr").MessageWithTokens = {
+                    message: {
+                        event_id: "reaction-2",
                         kind: 7,
-                        pubkey: "user-pubkey",
                         content: "👍",
                         created_at: 1003,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "user-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-2",
+                            kind: 7,
+                            pubkey: "user-pubkey",
+                            content: "👍",
+                            created_at: 1003,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 };
                 vi.spyOn(tauri, "invoke").mockResolvedValueOnce(secondReactionResponse);
             });
@@ -1045,27 +1098,30 @@ describe("Chat Store", () => {
             it("returns the new reaction response", async () => {
                 const result = await chatStore.clickReaction(group, "👍", "msg-1");
                 expect(result).toEqual({
-                    event_id: "reaction-2",
-                    account_pubkey: "user-pubkey",
-                    event_kind: 7,
-                    content: "👍",
-                    created_at: 1003,
-                    outer_event_id: "random-outer-event-id",
-                    tokens: [{ Text: "👍" }],
-                    author_pubkey: "user-pubkey",
-                    mls_group_id: "test-group-id",
-                    event: {
-                        id: "reaction-2",
+                    message: {
+                        event_id: "reaction-2",
                         kind: 7,
-                        pubkey: "user-pubkey",
                         content: "👍",
                         created_at: 1003,
-                        tags: [
-                            ["e", "msg-1"],
-                            ["p", "user-pubkey"],
-                        ],
-                        sig: "test-sig",
+                        mls_group_id: createTestMlsGroupId(),
+                        pubkey: "user-pubkey",
+                        tags: [],
+                        wrapper_event_id: "test-wrapper-id",
+                        state: NMessageState.Created,
+                        event: {
+                            id: "reaction-2",
+                            kind: 7,
+                            pubkey: "user-pubkey",
+                            content: "👍",
+                            created_at: 1003,
+                            tags: [
+                                ["e", "msg-1"],
+                                ["p", "user-pubkey"],
+                            ],
+                            sig: "test-sig",
+                        },
                     },
+                    tokens: [{ Text: "👍" }],
                 });
             });
 
@@ -1085,25 +1141,28 @@ describe("Chat Store", () => {
         it("calls the expected tauri command and handles the response", async () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
             chatStore.handleMessage(messageEvent);
-            const deletionResponse: Message = {
-                event_id: "deletion-1",
-                account_pubkey: "user-pubkey",
-                event_kind: 5,
-                content: "",
-                created_at: 1000,
-                outer_event_id: "random-outer-event-id",
-                tokens: [],
-                author_pubkey: "user-pubkey",
-                mls_group_id: "test-group-id",
-                event: {
-                    id: "deletion-1",
+            const deletionResponse: import("$lib/types/nostr").MessageWithTokens = {
+                message: {
+                    event_id: "deletion-1",
                     kind: 5,
-                    pubkey: "user-pubkey",
                     content: "",
                     created_at: 1000,
+                    mls_group_id: createTestMlsGroupId(),
+                    pubkey: "user-pubkey",
                     tags: [["e", "msg-1"]],
-                    sig: "test-sig",
+                    wrapper_event_id: "test-wrapper-id",
+                    state: NMessageState.Created,
+                    event: {
+                        id: "deletion-1",
+                        kind: 5,
+                        pubkey: "user-pubkey",
+                        content: "",
+                        created_at: 1000,
+                        tags: [["e", "msg-1"]],
+                        sig: "test-sig",
+                    },
                 },
+                tokens: [{ Text: "" }],
             };
 
             vi.spyOn(tauri, "invoke").mockImplementation(async () => deletionResponse);
@@ -1126,25 +1185,28 @@ describe("Chat Store", () => {
         });
 
         it("returns null if message is not mine", async () => {
-            const messageEvent: Message = {
-                event_id: "msg-1",
-                account_pubkey: "other-pubkey",
-                event_kind: 9,
-                content: "Hello world",
-                created_at: 1000,
-                outer_event_id: "random-outer-event-id",
-                tokens: [],
-                author_pubkey: "other-pubkey",
-                mls_group_id: "test-group-id",
-                event: {
-                    id: "msg-1",
+            const messageEvent: import("$lib/types/nostr").MessageWithTokens = {
+                message: {
+                    event_id: "msg-1",
                     kind: 9,
-                    pubkey: "other-pubkey",
                     content: "Hello world",
                     created_at: 1000,
+                    mls_group_id: createTestMlsGroupId(),
+                    pubkey: "other-pubkey",
                     tags: [],
-                    sig: "test-sig",
+                    wrapper_event_id: "test-wrapper-id",
+                    state: NMessageState.Created,
+                    event: {
+                        id: "msg-1",
+                        kind: 9,
+                        pubkey: "other-pubkey",
+                        content: "Hello world",
+                        created_at: 1000,
+                        tags: [],
+                        sig: "test-sig",
+                    },
                 },
+                tokens: [{ Text: "Hello world" }],
             };
             chatStore.handleMessage(messageEvent);
 
@@ -1159,7 +1221,7 @@ describe("Chat Store", () => {
     describe("payLightningInvoice", () => {
         it("calls the expected tauri command and handles the payment response", async () => {
             const invoiceMessageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            invoiceMessageEvent.event.tags.push([
+            invoiceMessageEvent.message.tags.push([
                 "bolt11",
                 "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
                 "21000",
@@ -1174,42 +1236,44 @@ describe("Chat Store", () => {
                 description: "Bitdevs pizza",
                 isPaid: false,
             });
-            const paymentResponse: Message = {
-                event_id: "payment-1",
-                account_pubkey: "user-pubkey",
-                event_kind: 9,
-                content: "Payment sent",
-                created_at: 1000,
-                outer_event_id: "random-outer-event-id",
-                tokens: [],
-                author_pubkey: "user-pubkey",
-                mls_group_id: "test-group-id",
-                event: {
-                    id: "payment-1",
+            const paymentResponse: import("$lib/types/nostr").MessageWithTokens = {
+                message: {
+                    event_id: "payment-1",
                     kind: 9,
-                    pubkey: "user-pubkey",
                     content: "Payment sent",
                     created_at: 1000,
-                    tags: [
-                        ["q", "msg-1", "test-relay", "user-pubkey"],
-                        ["preimage", "test-preimage"],
-                    ],
-                    sig: "test-sig",
+                    mls_group_id: createTestMlsGroupId(),
+                    pubkey: "user-pubkey",
+                    tags: [],
+                    wrapper_event_id: "test-wrapper-id",
+                    state: NMessageState.Created,
+                    event: {
+                        id: "payment-1",
+                        kind: 9,
+                        pubkey: "user-pubkey",
+                        content: "Payment sent",
+                        created_at: 1000,
+                        tags: [
+                            ["q", "msg-1", "test-relay", "user-pubkey"],
+                            ["preimage", "test-preimage"],
+                        ],
+                        sig: "test-sig",
+                    },
                 },
+                tokens: [{ Text: "Payment sent" }],
             };
 
-            vi.spyOn(tauri, "invoke").mockImplementation(async () => paymentResponse);
+            vi.spyOn(tauri, "invoke")
+                .mockResolvedValueOnce(["test-relay"]) // for get_group_relays
+                .mockResolvedValueOnce(paymentResponse); // for pay_invoice
 
-            const groupWithRelays: NostrMlsGroupWithRelays = {
-                group: createTestGroup(),
-                relays: ["test-relay"],
-            };
-
+            const group = createTestGroup();
+            const chatMessage = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            const result = await chatStore.payLightningInvoice(groupWithRelays, invoiceMessage!);
+            const result = await chatStore.payLightningInvoice(group, chatMessage!);
 
             expect(tauri.invoke).toHaveBeenCalledWith("pay_invoice", {
-                group: groupWithRelays.group,
+                group,
                 tags: [["q", "msg-1", "test-relay", "user-pubkey"]],
                 bolt11: "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
             });
@@ -1221,14 +1285,10 @@ describe("Chat Store", () => {
             const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
             chatStore.handleMessage(messageEvent);
 
-            const groupWithRelays = {
-                group: createTestGroup(),
-                relays: ["test-relay"],
-            };
-
+            const group = createTestGroup();
             const chatMessage = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            const result = await chatStore.payLightningInvoice(groupWithRelays, chatMessage!);
+            const result = await chatStore.payLightningInvoice(group, chatMessage!);
 
             expect(result).toBeNull();
             expect(tauri.invoke).not.toHaveBeenCalled();
@@ -1236,43 +1296,44 @@ describe("Chat Store", () => {
 
         it("updates lightning invoice to paid after successful payment", async () => {
             const messageEvent = createMessageEvent("msg-1", "Please pay me", 1000);
-            messageEvent.event.tags.push(["bolt11", "lnbc123456789", "21000", "Test payment"]);
+            messageEvent.message.tags.push(["bolt11", "lnbc123456789", "21000", "Test payment"]);
             chatStore.handleMessage(messageEvent);
 
-            const paymentResponse: Message = {
-                event_id: "payment-1",
-                account_pubkey: "user-pubkey",
-                event_kind: 9,
-                content: "Payment sent",
-                created_at: 1000,
-                outer_event_id: "random-outer-event-id",
-                tokens: [],
-                author_pubkey: "user-pubkey",
-                mls_group_id: "test-group-id",
-                event: {
-                    id: "payment-1",
+            const paymentResponse: import("$lib/types/nostr").MessageWithTokens = {
+                message: {
+                    event_id: "payment-1",
                     kind: 9,
-                    pubkey: "user-pubkey",
                     content: "Payment sent",
                     created_at: 1000,
-                    tags: [
-                        ["q", "msg-1", "test-relay", "user-pubkey"],
-                        ["preimage", "test-preimage"],
-                    ],
-                    sig: "test-sig",
+                    mls_group_id: createTestMlsGroupId(),
+                    pubkey: "user-pubkey",
+                    tags: [],
+                    wrapper_event_id: "test-wrapper-id",
+                    state: NMessageState.Created,
+                    event: {
+                        id: "payment-1",
+                        kind: 9,
+                        pubkey: "user-pubkey",
+                        content: "Payment sent",
+                        created_at: 1000,
+                        tags: [
+                            ["q", "msg-1", "test-relay", "user-pubkey"],
+                            ["preimage", "test-preimage"],
+                        ],
+                        sig: "test-sig",
+                    },
                 },
+                tokens: [{ Text: "Payment sent" }],
             };
 
-            vi.spyOn(tauri, "invoke").mockImplementation(async () => paymentResponse);
+            vi.spyOn(tauri, "invoke")
+                .mockResolvedValueOnce(["test-relay"]) // for get_group_relays
+                .mockResolvedValueOnce(paymentResponse); // for pay_invoice
 
-            const groupWithRelays = {
-                group: createTestGroup(),
-                relays: ["test-relay"],
-            };
-
+            const group = createTestGroup();
             const chatMessage = chatStore.findChatMessage("msg-1");
             // biome-ignore lint/style/noNonNullAssertion: This is a test file where we control the data
-            await chatStore.payLightningInvoice(groupWithRelays, chatMessage!);
+            await chatStore.payLightningInvoice(group, chatMessage!);
             const updatedChatMessage = chatStore.findChatMessage("msg-1");
             expect(updatedChatMessage?.lightningInvoice?.isPaid).toBe(true);
         });
@@ -1298,25 +1359,28 @@ describe("Chat Store", () => {
         });
 
         it("returns false for a message that is not mine", () => {
-            const messageEvent: Message = {
-                event_id: "msg-1",
-                account_pubkey: "other-pubkey",
-                event_kind: 9,
-                content: "Hello world",
-                created_at: 1000,
-                outer_event_id: "random-outer-event-id",
-                tokens: [],
-                author_pubkey: "other-pubkey",
-                mls_group_id: "test-group-id",
-                event: {
-                    id: "msg-1",
+            const messageEvent: import("$lib/types/nostr").MessageWithTokens = {
+                message: {
+                    event_id: "msg-1",
                     kind: 9,
-                    pubkey: "other-pubkey",
                     content: "Hello world",
                     created_at: 1000,
+                    mls_group_id: createTestMlsGroupId(),
+                    pubkey: "other-pubkey",
                     tags: [],
-                    sig: "test-sig",
+                    wrapper_event_id: "test-wrapper-id",
+                    state: NMessageState.Created,
+                    event: {
+                        id: "msg-1",
+                        kind: 9,
+                        pubkey: "other-pubkey",
+                        content: "Hello world",
+                        created_at: 1000,
+                        tags: [],
+                        sig: "test-sig",
+                    },
                 },
+                tokens: [{ Text: "Hello world" }],
             };
 
             chatStore.handleMessage(messageEvent);

@@ -1,4 +1,5 @@
 import type { Message } from "$lib/types/chat";
+import { NMessageState as NMessageStateEnum } from "$lib/types/nostr";
 import { describe, expect, it } from "vitest";
 import { messageToDeletionMessage } from "../deletion";
 
@@ -6,14 +7,9 @@ describe("messageToDeletionMessage", () => {
     describe("with valid target id in e tag", () => {
         const message: Message = {
             event_id: "deletion-event-id",
-            account_pubkey: "author-pubkey",
-            author_pubkey: "author-pubkey",
-            mls_group_id: "mls_group_id",
+            mls_group_id: { value: { vec: new Uint8Array([1, 2, 3, 4]) } },
             created_at: 1234567890,
-            event_kind: 5,
             content: "Delete this event",
-            outer_event_id: "outer_event_id",
-            tokens: [{ Text: "Delete this event" }],
             event: {
                 id: "deletion-event-id",
                 pubkey: "author-pubkey",
@@ -27,9 +23,15 @@ describe("messageToDeletionMessage", () => {
                 content: "Delete this event",
                 sig: "signature",
             },
+            pubkey: "author-pubkey",
+            kind: 5,
+            tags: [],
+            wrapper_event_id: "test-wrapper-id",
+            state: NMessageStateEnum.Created,
         };
+        const tokens = [{ Text: "Delete this event" }];
         it("returns a valid Deletion object", () => {
-            const deletion = messageToDeletionMessage(message);
+            const deletion = messageToDeletionMessage({ message, tokens });
             expect(deletion).toEqual({
                 id: "deletion-event-id",
                 pubkey: "author-pubkey",
@@ -54,14 +56,9 @@ describe("messageToDeletionMessage", () => {
     describe("without e tag", () => {
         const message: Message = {
             event_id: "deletion-event-id",
-            account_pubkey: "author-pubkey",
-            author_pubkey: "author-pubkey",
-            mls_group_id: "mls_group_id",
+            mls_group_id: { value: { vec: new Uint8Array([1, 2, 3, 4]) } },
             created_at: 1234567890,
-            event_kind: 5,
             content: "Delete this event",
-            outer_event_id: "outer_event_id",
-            tokens: [{ Text: "Delete this event" }],
             event: {
                 id: "deletion-event-id",
                 pubkey: "author-pubkey",
@@ -74,10 +71,15 @@ describe("messageToDeletionMessage", () => {
                 content: "Delete this event",
                 sig: "signature",
             },
+            pubkey: "author-pubkey",
+            kind: 5,
+            tags: [],
+            wrapper_event_id: "test-wrapper-id",
+            state: NMessageStateEnum.Created,
         };
-
+        const tokens = [{ Text: "Delete this event" }];
         it("returns null", () => {
-            const deletion = messageToDeletionMessage(message);
+            const deletion = messageToDeletionMessage({ message, tokens });
             expect(deletion).toBeNull();
         });
     });
@@ -85,14 +87,9 @@ describe("messageToDeletionMessage", () => {
     describe("with empty e tag", () => {
         const message: Message = {
             event_id: "deletion-event-id",
-            account_pubkey: "author-pubkey",
-            author_pubkey: "author-pubkey",
-            mls_group_id: "mls_group_id",
+            mls_group_id: { value: { vec: new Uint8Array([1, 2, 3, 4]) } },
             created_at: 1234567890,
-            event_kind: 5,
             content: "Delete this event",
-            outer_event_id: "outer_event_id",
-            tokens: [{ Text: "Delete this event" }],
             event: {
                 id: "deletion-event-id",
                 pubkey: "author-pubkey",
@@ -102,10 +99,15 @@ describe("messageToDeletionMessage", () => {
                 content: "Delete this event",
                 sig: "signature",
             },
+            pubkey: "author-pubkey",
+            kind: 5,
+            tags: [],
+            wrapper_event_id: "test-wrapper-id",
+            state: NMessageStateEnum.Created,
         };
-
+        const tokens = [{ Text: "Delete this event" }];
         it("returns null", () => {
-            const deletion = messageToDeletionMessage(message);
+            const deletion = messageToDeletionMessage({ message, tokens });
             expect(deletion).toBeNull();
         });
     });

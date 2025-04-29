@@ -1,3 +1,5 @@
+import type { Message } from "./chat";
+
 // These are types that map to the rust-nostr types from the rust backend
 export type HexPubkey = string & { readonly __brand: unique symbol };
 export type Npub = string & { readonly __brand: unique symbol };
@@ -111,6 +113,12 @@ export enum NWelcomeState {
     Ignored = "ignored",
 }
 
+export enum NMessageState {
+    Created = "created",
+    Processed = "processed",
+    Deleted = "deleted",
+}
+
 export type SerializableToken =
     | { Nostr: string }
     | { Url: string }
@@ -118,3 +126,13 @@ export type SerializableToken =
     | { Text: string }
     | { LineBreak: null }
     | { Whitespace: null };
+
+export type GroupAndMessages = {
+    group: NGroup;
+    messages: MessageWithTokens[];
+};
+
+export type MessageWithTokens = {
+    message: Message;
+    tokens: SerializableToken[];
+};

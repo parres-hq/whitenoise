@@ -219,7 +219,7 @@ pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()>
 
     if encoded_key_package.is_some() && tags.is_some() {
         let key_package_event_builder =
-            EventBuilder::new(Kind::MlsKeyPackage, &encoded_key_package.unwrap())
+            EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package.unwrap())
                 .tags(tags.unwrap());
 
         wn.nostr

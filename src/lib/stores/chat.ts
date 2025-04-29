@@ -8,7 +8,7 @@ import type {
     ReactionMessagesMap,
     ReactionSummary,
 } from "$lib/types/chat";
-import type { NostrMlsGroup, NostrMlsGroupWithRelays } from "$lib/types/nostr";
+import type { MessageWithTokens, NGroup } from "$lib/types/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { derived, get, writable } from "svelte/store";
 import { activeAccount } from "./accounts";
@@ -57,8 +57,8 @@ export function createChatStore() {
     });
 
     const eventHandlers = {
-        handleChatMessage: (message: Message) => {
-            const newMessage = messageToChatMessage(message, currentPubkey);
+        handleChatMessage: (messageAndTokens: MessageWithTokens) => {
+            const newMessage = messageToChatMessage(messageAndTokens, currentPubkey);
             const messagesToUpdate = [newMessage];
             const replyToMessage = newMessage.replyToId
                 ? findChatMessage(newMessage.replyToId)
@@ -77,16 +77,16 @@ export function createChatStore() {
                 return chatMessages;
             });
         },
-        handleDeletionMessage: (message: Message) => {
-            const deletionMessage = messageToDeletionMessage(message);
+        handleDeletionMessage: (messageAndTokens: MessageWithTokens) => {
+            const deletionMessage = messageToDeletionMessage(messageAndTokens);
             if (!deletionMessage) return;
             deletionMessagesMap.update((deletionMessages) => {
                 deletionMessages.set(deletionMessage.targetId, deletionMessage);
                 return deletionMessages;
             });
         },
-        handleReactionMessage: (message: Message) => {
-            const reactionMessage = messageToReactionMessage(message, currentPubkey);
+        handleReactionMessage: (messageAndTokens: MessageWithTokens) => {
+            const reactionMessage = messageToReactionMessage(messageAndTokens, currentPubkey);
             if (!reactionMessage) return;
             reactionMessagesMap.update((reactionMessages) => {
                 reactionMessages.set(reactionMessage.id, reactionMessage);
@@ -103,7 +103,7 @@ export function createChatStore() {
         },
     };
 
-    const messageHandlerMap: Record<number, (message: Message) => void> = {
+    const messageHandlerMap: Record<number, (messageAndTokens: MessageWithTokens) => void> = {
         5: eventHandlers.handleDeletionMessage,
         7: eventHandlers.handleReactionMessage,
         9: eventHandlers.handleChatMessage,
@@ -123,20 +123,22 @@ export function createChatStore() {
         });
     }
 
-    function handleMessage(message: Message, deleteTemp = true) {
+    function handleMessage(messageAndTokens: MessageWithTokens, deleteTemp = true) {
         if (deleteTemp) deleteTempMessages();
 
-        const handler = messageHandlerMap[message.event_kind];
-        if (handler) handler(message);
+        const handler = messageHandlerMap[messageAndTokens.message.kind];
+        if (handler) handler(messageAndTokens);
     }
 
     /**
      * Handles multiple Nostr events and their tokens, sorting them by creation time and updating the chat store state
      * @param {EventAndTokens[]} eventsAndTokens - Array of Nostr events and tokens to handle
      */
-    function handleMessages(messages: Message[]) {
+    function handleMessages(messagesAndTokens: MessageWithTokens[]) {
         deleteTempMessages();
-        const sortedEvents = messages.sort((a, b) => a.created_at - b.created_at);
+        const sortedEvents = messagesAndTokens.sort(
+            (a, b) => a.message.created_at - b.message.created_at
+        );
         for (const message of sortedEvents) {
             handleMessage(message, false);
         }
@@ -257,16 +259,16 @@ export function createChatStore() {
 
     /**
      * Adds a reaction to a message if current user hasn't reacted with same emoji, otherwise deletes the reaction
-     * @param {NostrMlsGroup} group - The group the message belongs to
+     * @param {NGroup} group - The group the message belongs to
      * @param {string} content - The reaction content (emoji)
      * @param {string} messageId - The ID of the message to react to
-     * @returns {Promise<Message | null>} The created event or null if operation failed
+     * @returns {Promise<MessageWithTokens | null>} The created event or null if operation failed
      */
     async function clickReaction(
-        group: NostrMlsGroup,
+        group: NGroup,
         content: string,
         messageId: string
-    ): Promise<Message | null> {
+    ): Promise<MessageWithTokens | null> {
         const chatMessage = findChatMessage(messageId);
         if (!chatMessage) return null;
 
@@ -280,22 +282,22 @@ export function createChatStore() {
 
     /**
      * Adds a reaction to a message
-     * @param {NostrMlsGroup} group - The group the message belongs to
-     * @param {Message} message - The message to react to
+     * @param {NGroup} group - The group the message belongs to
+     * @param {ChatMessage} chatMessage - The message to react to
      * @param {string} content - The reaction content (emoji)
-     * @returns {Promise<Message | null>} The created event or null if operation failed
+     * @returns {Promise<MessageWithTokens | null>} The created event or null if operation failed
      */
     async function addReaction(
-        group: NostrMlsGroup,
+        group: NGroup,
         chatMessage: ChatMessage,
         content: string
-    ): Promise<Message | null> {
+    ): Promise<MessageWithTokens | null> {
         const tags = [
             ["e", chatMessage.id],
             ["p", chatMessage.pubkey],
         ];
         try {
-            const reactionMessage = await invoke<Message>("send_mls_message", {
+            const reactionMessage = await invoke<MessageWithTokens>("send_mls_message", {
                 group,
                 message: content,
                 kind: 7,
@@ -311,11 +313,14 @@ export function createChatStore() {
 
     /**
      * Deletes a message
-     * @param {NostrMlsGroup} group - The group the message belongs to
+     * @param {NGroup} group - The group the message belongs to
      * @param {string} messageId - The ID of the message to delete
      * @returns {Promise<Message | null>} The deletion event or null if deletion fails
      */
-    async function deleteMessage(group: NostrMlsGroup, messageId: string): Promise<Message | null> {
+    async function deleteMessage(
+        group: NGroup,
+        messageId: string
+    ): Promise<MessageWithTokens | null> {
         const message = findChatMessage(messageId);
         if (!message) return null;
 
@@ -324,20 +329,20 @@ export function createChatStore() {
 
     /**
      * Deletes an event (message or reaction)
-     * @param {NostrMlsGroup} group - The group the event belongs to
+     * @param {NGroup} group - The group the event belongs to
      * @param {string} pubkey - The public key of the event author
      * @param {string} eventId - The ID of the event to delete
      * @returns {Promise<Message | null>} The deletion event or null if deletion fails
      */
     async function deleteEvent(
-        group: NostrMlsGroup,
+        group: NGroup,
         pubkey: string,
         eventId: string
-    ): Promise<Message | null> {
+    ): Promise<MessageWithTokens | null> {
         if (pubkey !== currentPubkey) return null;
 
         try {
-            const deletionMessage = await invoke<Message>("delete_message", {
+            const deletionMessage = await invoke<MessageWithTokens>("delete_message", {
                 group,
                 messageId: eventId,
             });
@@ -353,23 +358,27 @@ export function createChatStore() {
 
     /**
      * Pays a lightning invoice attached to a message
-     * @param {NostrMlsGroupWithRelays} groupWithRelays - The group with relay information
-     * @param {Message} message - The message with the lightning invoice to pay
-     * @returns {Promise<Message | null>} The payment event or null if operation failed
+     * @param {NGroup} group - The group with relay information
+     * @param {ChatMessage} chatMessage - The message with the lightning invoice to pay
+     * @returns {Promise<MessageWithTokens | null>} The payment event or null if operation failed
      */
     async function payLightningInvoice(
-        groupWithRelays: NostrMlsGroupWithRelays,
+        group: NGroup,
         chatMessage: ChatMessage
-    ): Promise<Message | null> {
+    ): Promise<MessageWithTokens | null> {
         if (!chatMessage.lightningInvoice) {
             console.error("Message does not have a lightning invoice");
             return null;
         }
 
-        const tags = [["q", chatMessage.id, groupWithRelays.relays[0], chatMessage.pubkey]];
+        const relays: string[] = await invoke("get_group_relays", {
+            mlsGroupId: group.mls_group_id,
+        });
 
-        const paymentMessage = await invoke<Message>("pay_invoice", {
-            group: groupWithRelays.group,
+        const tags = [["q", chatMessage.id, relays[0], chatMessage.pubkey]];
+
+        const paymentMessage: MessageWithTokens = await invoke("pay_invoice", {
+            group: group,
             tags: tags,
             bolt11: chatMessage.lightningInvoice.invoice,
         });

@@ -1,4 +1,5 @@
-import type { DeletionMessage, Message } from "$lib/types/chat";
+import type { DeletionMessage } from "$lib/types/chat";
+import type { MessageWithTokens } from "$lib/types/nostr";
 import { findTargetId } from "./tags";
 
 /**
@@ -7,8 +8,10 @@ import { findTargetId } from "./tags";
  * @param message - The Message to convert
  * @returns A DeletionMessage object or null if the message's event doesn't have a valid target ID
  */
-export function messageToDeletionMessage(message: Message): DeletionMessage | null {
-    const event = message.event;
+export function messageToDeletionMessage(
+    messageAndTokens: MessageWithTokens
+): DeletionMessage | null {
+    const event = messageAndTokens.message.event;
     const targetId = findTargetId(event);
     if (!targetId) return null;
 

@@ -101,6 +101,7 @@ pub fn run() {
             get_group_and_messages,
             get_group_members,
             get_group,
+            get_group_relays,
             get_active_groups,
             get_nostr_wallet_connect_balance,
             get_welcome,

@@ -2,6 +2,7 @@ use nostr_mls::prelude::*;
 use std::time::Duration;
 use tokio::time::timeout;
 
+use super::MessageWithTokens;
 use crate::accounts::Account;
 use crate::send_mls_message;
 use crate::whitenoise::Whitenoise;
@@ -34,7 +35,7 @@ pub async fn delete_message(
     message_id: String,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<MessageWithTokens, String> {
     let active_account = Account::get_active(wn.clone())
         .await
         .map_err(|e| format!("Failed to get active account: {}", e))?;
@@ -77,6 +78,7 @@ pub async fn delete_message(
             message_id,
             active_account.pubkey.to_hex()
         );
+
         // Send the deletion event
         let result = send_mls_message(
             group,

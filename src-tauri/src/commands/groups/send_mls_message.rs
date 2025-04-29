@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,7 +9,9 @@ use nostr_mls::prelude::*;
 use nostr_sdk::prelude::*;
 use tauri::Emitter;
 
+use super::MessageWithTokens;
 use crate::media::{add_media_file, FileUpload};
+use crate::nostr_manager::parser::parse;
 use crate::whitenoise::Whitenoise;
 
 #[tauri::command]
@@ -20,7 +23,7 @@ pub async fn send_mls_message(
     uploaded_files: Option<Vec<FileUpload>>,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<MessageWithTokens, String> {
     let nostr_keys = wn.nostr.client.signer().await.map_err(|e| e.to_string())?;
     let mut final_tags = tags.unwrap_or_default();
     let mut final_content = message;
@@ -69,64 +72,93 @@ pub async fn send_mls_message(
     }
 
     let inner_event =
-        create_unsigned_nostr_event(&nostr_keys, final_content, kind, Some(final_tags))
+        create_unsigned_nostr_event(&nostr_keys, &final_content, kind, Some(final_tags))
             .await
             .map_err(|e| e.to_string())?;
 
-    tracing::debug!(
-        target: "whitenoise::commands::groups::send_mls_message",
-        "Sending MLSMessage event to group relays: {:?}",
-        inner_event.clone()
-    );
-
     tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Attempting to acquire nostr_mls lock");
-    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
-        Ok(guard) => {
-            tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "nostr_mls lock acquired");
-            guard
-        }
-        Err(_) => {
-            tracing::error!(target: "whitenoise::commands::groups::send_mls_message", "Timeout waiting for nostr_mls lock");
-            return Err("Timeout waiting for nostr_mls lock".to_string());
-        }
-    };
+    let mut event_to_publish: Option<Event> = None;
+    let mut relays: Option<BTreeSet<RelayUrl>> = None;
+    #[allow(unused_assignments)]
+    let mut message: Option<message_types::Message> = None;
+    {
+        let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+            Ok(guard) => {
+                tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "nostr_mls lock acquired");
+                guard
+            }
+            Err(_) => {
+                tracing::error!(target: "whitenoise::commands::groups::send_mls_message", "Timeout waiting for nostr_mls lock");
+                return Err("Timeout waiting for nostr_mls lock".to_string());
+            }
+        };
 
-    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-        match nostr_mls
-            .create_message(&group.mls_group_id, inner_event.clone())
-            .map_err(|e| e.to_string())
-        {
-            Ok(_) => {
-                app_handle
-                    .emit("mls_message_sent", (group.clone(), inner_event))
-                    .expect("Couldn't emit event");
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            match nostr_mls
+                .create_message(&group.mls_group_id, inner_event.clone())
+                .map_err(|e| e.to_string())
+            {
+                Ok(event) => {
+                    // Get group relays
+                    relays = Some(
+                        nostr_mls
+                            .get_relays(&group.mls_group_id)
+                            .map_err(|e| e.to_string())?,
+                    );
+                    event_to_publish = Some(event);
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::commands::groups::send_mls_message",
+                        "Error creating message: {}",
+                        e
+                    );
+                }
             }
-            Err(e) => {
-                tracing::error!(
-                    target: "whitenoise::commands::groups::send_mls_message",
-                    "Error creating message: {}",
-                    e
-                );
+
+            if let Some(message_id) = inner_event.id {
+                message = nostr_mls
+                    .get_message(&message_id)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                return Err("Message ID not found".to_string());
             }
+        } else {
+            return Err("Nostr MLS not initialized".to_string());
         }
-    } else {
-        return Err("Nostr MLS not initialized".to_string());
     }
-
     tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "nostr_mls lock released");
 
-    Ok(())
+    if let Some(relays) = relays {
+        if let Some(event_to_publish) = event_to_publish {
+            let _result = wn
+                .nostr
+                .client
+                .send_event_to(relays, &event_to_publish)
+                .await;
+        }
+    }
+
+    if let Some(message) = message {
+        let tokens = parse(&message.content);
+        app_handle
+            .emit("mls_message_sent", (&group, &message))
+            .expect("Couldn't emit event");
+        Ok(MessageWithTokens { message, tokens })
+    } else {
+        Err("Message not found".to_string())
+    }
 }
 
 /// Creates an unsigned nostr event with the given parameters
 async fn create_unsigned_nostr_event(
     nostr_keys: &Arc<dyn NostrSigner>,
-    message: String,
+    message: &String,
     kind: u16,
     tags: Option<Vec<Tag>>,
 ) -> Result<UnsignedEvent, Error> {
     let mut final_tags = tags.unwrap_or_default();
-    final_tags.extend(bolt11_invoice_tags(&message));
+    final_tags.extend(bolt11_invoice_tags(message));
 
     let mut inner_event = UnsignedEvent::new(
         nostr_keys.get_public_key().await?,
@@ -191,7 +223,7 @@ mod tests {
         let kind = 1;
         let tags = None;
 
-        let result = create_unsigned_nostr_event(&signer, message.clone(), kind, tags).await;
+        let result = create_unsigned_nostr_event(&signer, &message, kind, tags).await;
 
         assert!(result.is_ok());
         let event = result.unwrap();
@@ -211,8 +243,7 @@ mod tests {
         let kind = 1;
         let tags = vec![Tag::reference("test_id")];
 
-        let result =
-            create_unsigned_nostr_event(&signer, message.clone(), kind, Some(tags.clone())).await;
+        let result = create_unsigned_nostr_event(&signer, &message, kind, Some(tags.clone())).await;
 
         assert!(result.is_ok());
         let event = result.unwrap();
@@ -234,7 +265,7 @@ mod tests {
         let message: String = format!("Please pay me here: {}", invoice);
         let existing_tag = Tag::reference("test_id");
         let result =
-            create_unsigned_nostr_event(&signer, message, 1, Some(vec![existing_tag.clone()]))
+            create_unsigned_nostr_event(&signer, &message, 1, Some(vec![existing_tag.clone()]))
                 .await;
 
         assert!(result.is_ok());
@@ -261,7 +292,7 @@ mod tests {
         // Test case 2: Regular message with tags
         let result = create_unsigned_nostr_event(
             &signer,
-            "Just a regular message".to_string(),
+            &"Just a regular message".to_string(),
             1,
             Some(vec![existing_tag.clone()]),
         )
@@ -276,7 +307,7 @@ mod tests {
         // Test case 3: Invalid invoice
         let result = create_unsigned_nostr_event(
             &signer,
-            "lnbc1invalid".to_string(),
+            &"lnbc1invalid".to_string(),
             1,
             Some(vec![existing_tag.clone()]),
         )
@@ -312,7 +343,7 @@ mod tests {
         for invoice in test_cases {
             let message = format!("Please pay me here: {}", invoice);
             let result =
-                create_unsigned_nostr_event(&signer, message, 1, Some(vec![existing_tag.clone()]))
+                create_unsigned_nostr_event(&signer, &message, 1, Some(vec![existing_tag.clone()]))
                     .await;
 
             assert!(result.is_ok());
