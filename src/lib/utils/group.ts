@@ -8,7 +8,6 @@ import type { MlsGroupId } from "$lib/types/nostr";
  * @returns A string containing the hexadecimal representation of the group ID
  */
 export function hexMlsGroupId(mlsGroupId: MlsGroupId): string {
-    console.log("mlsGroupId", mlsGroupId);
     const bytes = mlsGroupId.value.vec;
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

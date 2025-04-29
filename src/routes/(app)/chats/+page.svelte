@@ -80,7 +80,7 @@ onMount(async () => {
         unlistenGroupAdded = await listen<NGroup>("group_added", (event) => {
             const addedGroup = event.payload as NGroup;
             console.log("Event received on chats page: group_added", addedGroup);
-            groups = [...groups, addedGroup];
+            loadEvents();
         });
     }
 
@@ -88,7 +88,7 @@ onMount(async () => {
         unlistenWelcomeAccepted = await listen<string>("welcome_accepted", (event) => {
             const acceptedWelcomeId = event.payload as string;
             console.log("Event received on chats page: welcome_accepted", acceptedWelcomeId);
-            welcomes = welcomes.filter((welcome) => welcome.event.id !== acceptedWelcomeId);
+            loadEvents();
         });
     }
 
@@ -96,18 +96,15 @@ onMount(async () => {
         unlistenWelcomeDeclined = await listen<string>("welcome_declined", (event) => {
             const declinedWelcomeId = event.payload as string;
             console.log("Event received on chats page: welcome_declined", declinedWelcomeId);
-            welcomes = welcomes.filter((welcome) => welcome.event.id !== declinedWelcomeId);
+            loadEvents();
         });
     }
 
     if (!unlistenWelcomeProcessed) {
-        unlistenWelcomeProcessed = await listen<NWelcome>(
-            "mls_welcome_processed",
-            async (_event) => {
-                let welcomesResponse = await invoke("get_welcomes");
-                welcomes = welcomesResponse as NWelcome[];
-            }
-        );
+        unlistenWelcomeProcessed = await listen<NWelcome>("mls_welcome_processed", (event) => {
+            console.log("Event received on chats page: mls_welcome_processed", event.payload.event);
+            loadEvents();
+        });
     }
 });
 

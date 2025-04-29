@@ -167,7 +167,7 @@ async function uploadFile(file: File) {
         };
 
         await invoke("upload_file", {
-            groupId: group.mls_group_id,
+            group: group,
             file: fileData,
         });
 

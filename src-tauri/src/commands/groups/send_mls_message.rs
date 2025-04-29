@@ -129,13 +129,21 @@ pub async fn send_mls_message(
     }
     tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "nostr_mls lock released");
 
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Sending event to relays");
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Relays: {:?}", relays);
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Event: {:?}", event_to_publish);
+    tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Message: {:?}", message);
+
     if let Some(relays) = relays {
         if let Some(event_to_publish) = event_to_publish {
-            let _result = wn
+            let result = wn
                 .nostr
                 .client
                 .send_event_to(relays, &event_to_publish)
-                .await;
+                .await
+                .map_err(|e| e.to_string())?;
+
+            tracing::debug!(target: "whitenoise::commands::groups::send_mls_message", "Event sent to relays: {:?}", result);
         }
     }
 

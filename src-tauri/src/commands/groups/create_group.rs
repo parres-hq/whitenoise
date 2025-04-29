@@ -139,7 +139,7 @@ pub async fn create_group(
             .get_groups()
             .map_err(|e| e.to_string())?
             .into_iter()
-            .map(|g| hex::encode(g.mls_group_id.as_slice()))
+            .map(|g| hex::encode(g.nostr_group_id))
             .collect::<Vec<_>>();
     } else {
         return Err("Nostr MLS not initialized".to_string());
