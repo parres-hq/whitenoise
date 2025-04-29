@@ -222,7 +222,8 @@ fn generate_imeta_tag_values(
 
                 // Calculate blurhash
                 let rgb_img = img.to_rgba8().into_vec();
-                let blurhash = blurhash::encode(4, 3, width, height, &rgb_img);
+                let blurhash = blurhash::encode(4, 3, width, height, &rgb_img)
+                    .map_err(|e| format!("Failed to calculate blurhash: {}", e))?;
                 imeta_values.push(format!("blurhash {}", blurhash));
             }
             Err(e) => {
