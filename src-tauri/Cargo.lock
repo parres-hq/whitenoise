@@ -3534,12 +3534,6 @@ dependencies = [
 
 [[package]]
 name = "negentropy"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e664971378a3987224f7a0e10059782035e89899ae403718ee07de85bec42afe"
-
-[[package]]
-name = "negentropy"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
@@ -3582,6 +3576,7 @@ dependencies = [
 [[package]]
 name = "nostr"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -3605,6 +3600,7 @@ dependencies = [
 [[package]]
 name = "nostr-database"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "flatbuffers",
  "lru",
@@ -3615,6 +3611,7 @@ dependencies = [
 [[package]]
 name = "nostr-lmdb"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "async-utility",
  "heed",
@@ -3627,6 +3624,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -3641,6 +3639,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls-sqlite-storage"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -3656,6 +3655,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls-storage"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "nostr",
  "openmls",
@@ -3667,6 +3667,7 @@ dependencies = [
 [[package]]
 name = "nostr-ndb"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "nostr",
  "nostr-database",
@@ -3676,13 +3677,13 @@ dependencies = [
 [[package]]
 name = "nostr-relay-pool"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "async-utility",
  "async-wsocket",
  "atomic-destructor",
  "lru",
- "negentropy 0.3.1",
- "negentropy 0.5.0",
+ "negentropy",
  "nostr",
  "nostr-database",
  "tokio",
@@ -3692,6 +3693,7 @@ dependencies = [
 [[package]]
 name = "nostr-sdk"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "async-utility",
  "nostr",
@@ -3820,6 +3822,7 @@ dependencies = [
 [[package]]
 name = "nwc"
 version = "0.41.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90#5a2e66874c6e6cb0f5b8bcb50c1d37aecd7a5d90"
 dependencies = [
  "async-utility",
  "nostr",
