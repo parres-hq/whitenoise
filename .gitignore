@@ -13,3 +13,12 @@ upload-keystore.jks
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 *storybook.log
+
+
+# AI stuff
+.repomix-*.txt
+vibe-tools.config.json
+.cursor/rules/vibe-tools.mdc
+
+# Docker
+/target

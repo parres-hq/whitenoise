@@ -8,7 +8,7 @@ CREATE TABLE media_files (
     nostr_key TEXT,
     created_at INTEGER NOT NULL,
     file_metadata JSONB,
-    FOREIGN KEY (mls_group_id, account_pubkey) REFERENCES groups(mls_group_id, account_pubkey) ON DELETE CASCADE
+    FOREIGN KEY (account_pubkey) REFERENCES accounts(pubkey) ON DELETE CASCADE
 );
 
 -- Create indexes for faster lookups

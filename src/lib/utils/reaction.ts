@@ -1,4 +1,5 @@
-import type { Message, ReactionMessage } from "$lib/types/chat";
+import type { ReactionMessage } from "$lib/types/chat";
+import type { MessageWithTokens } from "$lib/types/nostr";
 import { findTargetId } from "./tags";
 
 /**
@@ -9,10 +10,10 @@ import { findTargetId } from "./tags";
  * @returns A ReactionMessage object or null if the event doesn't have a valid target ID
  */
 export function messageToReactionMessage(
-    message: Message,
+    messageAndTokens: MessageWithTokens,
     currentPubkey: string | undefined
 ): ReactionMessage | null {
-    const event = message.event;
+    const event = messageAndTokens.message.event;
     const targetId = findTargetId(event);
     if (!targetId) return null;
     const isMine = currentPubkey === event.pubkey;

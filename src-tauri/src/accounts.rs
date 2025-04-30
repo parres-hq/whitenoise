@@ -1,11 +1,10 @@
 use crate::database::DatabaseError;
-use crate::groups::{Group, GroupRow};
-use crate::invites::{Invite, InviteRow};
 use crate::nostr_manager;
 use crate::relays::RelayType;
 use crate::secrets_store;
 use crate::Whitenoise;
-use nostr_openmls::NostrMls;
+use nostr_mls::prelude::*;
+use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
@@ -36,6 +35,15 @@ pub enum AccountError {
 
     #[error("SQLx error: {0}")]
     SqlxError(#[from] sqlx::Error),
+
+    #[error("Nostr MLS error: {0}")]
+    NostrMlsError(#[from] nostr_mls::Error),
+
+    #[error("Nostr MLS SQLite storage error: {0}")]
+    NostrMlsSqliteStorageError(#[from] nostr_mls_sqlite_storage::error::Error),
+
+    #[error("Nostr MLS not initialized")]
+    NostrMlsNotInitialized,
 }
 
 pub type Result<T> = std::result::Result<T, AccountError>;
@@ -388,6 +396,43 @@ impl Account {
         // Validate the active state as a safeguard
         Self::validate_active_state(wn.clone()).await?;
 
+        // Then update Nostr MLS instance
+        {
+            tracing::debug!(target: "whitenoise::accounts::set_active", "Attempting to acquire nostr_mls lock");
+            let mut nostr_mls = match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                wn.nostr_mls.lock(),
+            )
+            .await
+            {
+                Ok(guard) => {
+                    tracing::debug!(target: "whitenoise::accounts::set_active", "nostr_mls lock acquired");
+                    guard
+                }
+                Err(_) => {
+                    tracing::error!(
+                        target: "whitenoise::accounts::set_active",
+                        "Timeout waiting for nostr_mls lock"
+                    );
+                    return Err(AccountError::NostrManagerError(
+                        nostr_manager::NostrManagerError::AccountError(
+                            "Timeout waiting for nostr_mls lock".to_string(),
+                        ),
+                    ));
+                }
+            };
+            let storage_dir = wn.data_dir.join("mls").join(self.pubkey.to_hex());
+            let storage = NostrMlsSqliteStorage::new(storage_dir)?;
+            *nostr_mls = Some(NostrMls::new(storage));
+            tracing::debug!(target: "whitenoise::accounts::set_active", "nostr_mls lock released");
+        }
+
+        tracing::debug!(
+            target: "whitenoise::accounts::set_active",
+            "Nostr MLS updated for: {}",
+            self.pubkey.to_hex()
+        );
+
         // If the database operation is successful, update Nostr client
         wn.nostr
             .set_nostr_identity(self, wn.clone(), app_handle)
@@ -401,34 +446,6 @@ impl Account {
 
         app_handle.emit("nostr_ready", ())?;
 
-        // Then update Nostr MLS instance
-        {
-            let mut nostr_mls =
-                match tokio::time::timeout(std::time::Duration::from_secs(5), wn.nostr_mls.lock())
-                    .await
-                {
-                    Ok(guard) => guard,
-                    Err(_) => {
-                        tracing::error!(
-                            target: "whitenoise::accounts::set_active",
-                            "Timeout waiting for nostr_mls lock"
-                        );
-                        return Err(AccountError::NostrManagerError(
-                            nostr_manager::NostrManagerError::AccountError(
-                                "Timeout waiting for nostr_mls lock".to_string(),
-                            ),
-                        ));
-                    }
-                };
-            *nostr_mls = NostrMls::new(wn.data_dir.clone(), Some(self.pubkey.to_hex()));
-        }
-
-        tracing::debug!(
-            target: "whitenoise::accounts::set_active",
-            "Nostr MLS updated for: {}",
-            self.pubkey.to_hex()
-        );
-
         app_handle.emit("account_changed", ())?;
 
         tracing::debug!(
@@ -441,83 +458,45 @@ impl Account {
     }
 
     /// Returns the groups the account is a member of
-    pub async fn groups(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Group>> {
-        let mut txn = wn.database.pool.begin().await?;
-
-        let iter = sqlx::query_as::<_, GroupRow>("SELECT * FROM groups WHERE account_pubkey = ?")
-            .bind(self.pubkey.to_hex().as_str())
-            .fetch_all(&mut *txn)
-            .await?;
-
-        iter.into_iter()
-            .map(|row| -> Result<Group> {
-                Ok(Group {
-                    mls_group_id: row.mls_group_id,
-                    account_pubkey: PublicKey::parse(row.account_pubkey.as_str())?,
-                    nostr_group_id: row.nostr_group_id,
-                    name: row.name,
-                    description: row.description,
-                    admin_pubkeys: serde_json::from_str(&row.admin_pubkeys)?,
-                    last_message_id: row.last_message_id,
-                    last_message_at: row.last_message_at.map(Timestamp::from),
-                    group_type: row.group_type.into(),
-                    epoch: row.epoch,
-                    state: row.state.into(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()
-    }
-
-    /// Returns the invites the account has received
-    #[allow(dead_code)]
-    pub async fn invites(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Invite>> {
-        let mut txn = wn.database.pool.begin().await?;
-
-        let invite_rows =
-            sqlx::query_as::<_, InviteRow>("SELECT * FROM invites WHERE account_pubkey = ?")
-                .bind(self.pubkey.to_hex().as_str())
-                .fetch_all(&mut *txn)
-                .await?;
-
-        invite_rows
-            .into_iter()
-            .map(|row| -> Result<Invite> {
-                Ok(Invite {
-                    event_id: row.event_id,
-                    account_pubkey: row.account_pubkey,
-                    event: serde_json::from_str(&row.event)?,
-                    mls_group_id: row.mls_group_id,
-                    nostr_group_id: row.nostr_group_id,
-                    group_name: row.group_name,
-                    group_description: row.group_description,
-                    group_admin_pubkeys: serde_json::from_str(&row.group_admin_pubkeys)?,
-                    group_relays: serde_json::from_str(&row.group_relays)?,
-                    inviter: row.inviter,
-                    member_count: row.member_count,
-                    state: row.state.into(),
-                    outer_event_id: row.outer_event_id,
-                })
-            })
-            .collect::<Result<Vec<_>>>()
+    pub async fn groups(
+        &self,
+        wn: tauri::State<'_, Whitenoise>,
+    ) -> Result<Vec<group_types::Group>> {
+        tracing::debug!(target: "whitenoise::accounts::groups", "Attempting to acquire nostr_mls lock");
+        let nostr_mls_guard = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            wn.nostr_mls.lock(),
+        )
+        .await
+        {
+            Ok(guard) => {
+                tracing::debug!(target: "whitenoise::accounts::groups", "nostr_mls lock acquired");
+                guard
+            }
+            Err(_) => {
+                tracing::error!(target: "whitenoise::accounts::groups", "Timeout waiting for nostr_mls lock");
+                return Err(AccountError::NostrManagerError(
+                    nostr_manager::NostrManagerError::AccountError(
+                        "Timeout waiting for nostr_mls lock".to_string(),
+                    ),
+                ));
+            }
+        };
+        let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            nostr_mls.get_groups().map_err(AccountError::NostrMlsError)
+        } else {
+            Err(AccountError::NostrMlsNotInitialized)
+        };
+        tracing::debug!(target: "whitenoise::accounts::groups", "nostr_mls lock released");
+        result
     }
 
     pub async fn nostr_group_ids(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<String>> {
-        Ok(self
-            .groups(wn)
-            .await?
+        let groups = self.groups(wn).await?;
+        Ok(groups
             .iter()
-            .map(|g| g.nostr_group_id.clone())
-            .collect())
-    }
-
-    #[allow(dead_code)]
-    pub async fn mls_group_ids(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Vec<u8>>> {
-        Ok(self
-            .groups(wn)
-            .await?
-            .iter()
-            .map(|g| g.mls_group_id.clone())
-            .collect())
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect::<Vec<_>>())
     }
 
     pub fn keys(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Keys> {
@@ -689,7 +668,9 @@ impl Account {
                         ));
                     }
                 };
-            *nostr_mls = NostrMls::new(wn.data_dir.clone(), Some(hex_pubkey));
+            let storage_dir = wn.data_dir.join("mls").join(account.pubkey.to_hex());
+            let storage = NostrMlsSqliteStorage::new(storage_dir)?;
+            *nostr_mls = Some(NostrMls::new(storage));
         }
 
         app_handle.emit("account_changed", ())?;
@@ -800,7 +781,6 @@ impl Account {
             RelayType::Nostr => Kind::RelayList,
             RelayType::Inbox => Kind::InboxRelays,
             RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
-            _ => return Ok(()),
         };
 
         let event = EventBuilder::new(relay_event_kind, "").tags(tags);

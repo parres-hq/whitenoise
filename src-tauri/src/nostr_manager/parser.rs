@@ -109,6 +109,7 @@ impl<'a> From<Token<'a>> for SerializableToken {
 ///
 /// # Returns
 /// A vector of `SerializableToken`s representing the parsed content
+#[allow(dead_code)]
 pub fn parse(content: &str) -> Vec<SerializableToken> {
     let parser = NostrParser::new();
     parser.parse(content).map(SerializableToken::from).collect()

@@ -1,13 +1,16 @@
 //! This module contains functions for managing cached media files.
-use crate::database::Database;
-use crate::media::errors::MediaError;
-use crate::media::types::{CachedMediaFile, MediaFile};
-use sha2::{Digest, Sha256};
+
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use nostr_mls::prelude::*;
+use sha2::{Digest, Sha256};
+
 use super::sanitizer::SafeMediaMetadata;
+use crate::database::Database;
+use crate::media::errors::MediaError;
+use crate::media::types::{CachedMediaFile, MediaFile};
 
 const MEDIA_CACHE_DIR: &str = "media_cache";
 
@@ -15,7 +18,7 @@ const MEDIA_CACHE_DIR: &str = "media_cache";
 ///
 /// # Arguments
 /// * `data` - The file data to cache
-/// * `mls_group_id` - The MLS group ID
+/// * `group` - The MLS group that the media file belongs to
 /// * `blossom_url` - Optional URL of the file on Blossom
 /// * `nostr_key` - Optional nostr key used for upload
 /// * `file_metadata` - Optional JSON metadata for the file
@@ -28,7 +31,7 @@ const MEDIA_CACHE_DIR: &str = "media_cache";
 #[allow(clippy::too_many_arguments)]
 pub async fn add_to_cache(
     data: &[u8],
-    mls_group_id: &Vec<u8>,
+    group: &group_types::Group,
     account_pubkey: &str,
     blossom_url: Option<String>,
     nostr_key: Option<String>,
@@ -46,7 +49,7 @@ pub async fn add_to_cache(
         "{}/{}/{}/{}",
         data_dir,
         MEDIA_CACHE_DIR,
-        hex::encode(mls_group_id),
+        hex::encode(group.mls_group_id.as_slice()),
         file_hash
     );
 
@@ -73,7 +76,7 @@ pub async fn add_to_cache(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *",
     )
-    .bind(mls_group_id)
+    .bind(group.mls_group_id.as_slice())
     .bind(account_pubkey)
     .bind(&file_path)
     .bind(blossom_url)
@@ -98,14 +101,14 @@ pub async fn add_to_cache(
 /// * `Ok(Option<CachedMediaFile>)` - The cached media file if found
 /// * `Err(MediaError)` - Error if fetch fails or file not found
 pub async fn fetch_cached_file(
-    mls_group_id: &Vec<u8>,
+    group: &group_types::Group,
     file_hash: &str,
     db: &Database,
 ) -> Result<Option<CachedMediaFile>, MediaError> {
     let media_file = sqlx::query_as::<_, MediaFile>(
         "SELECT * FROM media_files WHERE mls_group_id = ? AND file_hash = ?",
     )
-    .bind(mls_group_id)
+    .bind(group.mls_group_id.as_slice())
     .bind(file_hash)
     .fetch_optional(&db.pool)
     .await
@@ -134,12 +137,12 @@ pub async fn fetch_cached_file(
 /// * `Ok(())` - Success
 /// * `Err(MediaError)` - Error if deletion fails
 pub async fn delete_cached_file(
-    mls_group_id: &Vec<u8>,
+    group: &group_types::Group,
     file_hash: &str,
     db: &Database,
 ) -> Result<(), MediaError> {
     // First get the file path
-    let cached_media_file = fetch_cached_file(mls_group_id, file_hash, db).await?;
+    let cached_media_file = fetch_cached_file(group, file_hash, db).await?;
 
     if let Some(cached_media_file) = cached_media_file {
         // Delete from disk
@@ -150,7 +153,7 @@ pub async fn delete_cached_file(
 
         // Delete from database (cascade will handle this)
         sqlx::query("DELETE FROM media_files WHERE mls_group_id = ? AND file_hash = ?")
-            .bind(mls_group_id)
+            .bind(group.mls_group_id.as_slice())
             .bind(file_hash)
             .execute(&db.pool)
             .await?;
@@ -161,10 +164,13 @@ pub async fn delete_cached_file(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::database::Database;
+    use std::collections::BTreeSet;
+
     use sqlx::sqlite::SqlitePoolOptions;
     use tempfile::tempdir;
+
+    use super::*;
+    use crate::database::Database;
 
     async fn setup_test_db() -> (Database, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
@@ -214,7 +220,18 @@ mod tests {
     async fn test_add_and_fetch_cache() {
         let (db, temp_dir) = setup_test_db().await;
         let test_data = b"test file content";
-        let mls_group_id = vec![1, 2, 3];
+        let group = group_types::Group {
+            mls_group_id: GroupId::from_slice(&[1, 2, 3]),
+            nostr_group_id: [0u8; 32],
+            name: "test_group".to_string(),
+            description: "test_description".to_string(),
+            admin_pubkeys: BTreeSet::new(),
+            last_message_id: None,
+            last_message_at: None,
+            group_type: group_types::GroupType::DirectMessage,
+            epoch: 0,
+            state: group_types::GroupState::Active,
+        };
         let data_dir = temp_dir.path().to_str().unwrap();
         let account_pubkey = "test_pubkey";
         // Calculate expected file hash
@@ -247,7 +264,7 @@ mod tests {
 
         let media_file = add_to_cache(
             test_data,
-            &mls_group_id,
+            &group,
             account_pubkey,
             Some("https://example.com/test.txt".to_string()),
             Some("nostr_key".to_string()),
@@ -259,7 +276,7 @@ mod tests {
         .unwrap();
 
         // Verify database entry
-        assert_eq!(media_file.mls_group_id, mls_group_id);
+        assert_eq!(media_file.mls_group_id, group.mls_group_id);
         assert_eq!(media_file.file_hash, expected_hash);
         assert_eq!(
             media_file.blossom_url,
@@ -278,13 +295,13 @@ mod tests {
             "{}/{}/{}/{}",
             data_dir,
             MEDIA_CACHE_DIR,
-            hex::encode(&mls_group_id),
+            hex::encode(group.mls_group_id.as_slice()),
             expected_hash
         );
         assert_eq!(media_file.file_path, expected_path);
 
         // Fetch file
-        let fetched = fetch_cached_file(&mls_group_id, &expected_hash, &db)
+        let fetched = fetch_cached_file(&group, &expected_hash, &db)
             .await
             .unwrap()
             .unwrap();
@@ -302,7 +319,18 @@ mod tests {
     async fn test_delete_cache() {
         let (db, temp_dir) = setup_test_db().await;
         let test_data = b"test file content";
-        let mls_group_id = vec![1, 2, 3];
+        let group = group_types::Group {
+            mls_group_id: GroupId::from_slice(&[1, 2, 3]),
+            nostr_group_id: [0u8; 32],
+            name: "test_group".to_string(),
+            description: "test_description".to_string(),
+            admin_pubkeys: BTreeSet::new(),
+            last_message_id: None,
+            last_message_at: None,
+            group_type: group_types::GroupType::DirectMessage,
+            epoch: 0,
+            state: group_types::GroupState::Active,
+        };
         let data_dir = temp_dir.path().to_str().unwrap();
 
         // Calculate expected file hash
@@ -313,7 +341,7 @@ mod tests {
         // Add file to cache
         let _media_file = add_to_cache(
             test_data,
-            &mls_group_id,
+            &group,
             "test_pubkey",
             None,
             None,
@@ -329,23 +357,23 @@ mod tests {
             "{}/{}/{}/{}",
             data_dir,
             MEDIA_CACHE_DIR,
-            hex::encode(&mls_group_id),
+            hex::encode(group.mls_group_id.as_slice()),
             expected_hash
         );
         assert!(Path::new(&expected_path).exists());
-        assert!(fetch_cached_file(&mls_group_id, &expected_hash, &db)
+        assert!(fetch_cached_file(&group, &expected_hash, &db)
             .await
             .unwrap()
             .is_some());
 
         // Delete file
-        delete_cached_file(&mls_group_id, &expected_hash, &db)
+        delete_cached_file(&group, &expected_hash, &db)
             .await
             .unwrap();
 
         // Verify file is deleted
         assert!(!Path::new(&expected_path).exists());
-        assert!(fetch_cached_file(&mls_group_id, &expected_hash, &db)
+        assert!(fetch_cached_file(&group, &expected_hash, &db)
             .await
             .unwrap()
             .is_none());

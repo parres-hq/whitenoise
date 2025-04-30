@@ -1,5 +1,5 @@
 import type { ChatMessage, Message } from "$lib/types/chat";
-import type { SerializableToken } from "$lib/types/nostr";
+import type { MessageWithTokens, SerializableToken } from "$lib/types/nostr";
 import { eventToLightningInvoice, eventToLightningPayment } from "./lightning";
 import { findReplyToId } from "./tags";
 
@@ -40,16 +40,16 @@ function contentToShow({ content, invoice }: { content: string; invoice: string 
  * @returns A formatted Message object
  */
 export function messageToChatMessage(
-    message: Message,
+    messageAndTokens: MessageWithTokens,
     currentPubkey: string | undefined
 ): ChatMessage {
-    const event = message.event;
+    const event = messageAndTokens.message.event;
     const replyToId = findReplyToId(event);
     const isMine = currentPubkey === event.pubkey;
     const lightningInvoice = eventToLightningInvoice(event);
     const lightningPayment = eventToLightningPayment(event);
     const content = contentToShow({ content: event.content, invoice: lightningInvoice?.invoice });
-    const tokens: SerializableToken[] = message.tokens;
+    const tokens: SerializableToken[] = messageAndTokens.tokens;
 
     return {
         id: event.id,

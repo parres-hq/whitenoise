@@ -1,14 +1,10 @@
-use crate::groups::Group;
-use crate::messages::Message;
-use crate::whitenoise::Whitenoise;
-use nostr_sdk::prelude::*;
-use serde::Serialize;
+use nostr_mls::prelude::*;
+use std::time::Duration;
+use tokio::time::timeout;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct GroupAndMessages {
-    group: Group,
-    messages: Vec<Message>,
-}
+use super::{GroupAndMessages, MessageWithTokens};
+use crate::nostr_manager::parser::parse;
+use crate::whitenoise::Whitenoise;
 
 /// Gets a single MLS group and its messages by group ID
 ///
@@ -32,30 +28,66 @@ pub async fn get_group_and_messages(
     group_id: &str,
     wn: tauri::State<'_, Whitenoise>,
 ) -> Result<GroupAndMessages, String> {
-    let mls_group_id =
-        hex::decode(group_id).map_err(|e| format!("Error decoding group id: {}", e))?;
+    let mls_group_id = GroupId::from_slice(
+        &hex::decode(group_id).map_err(|e| format!("Error decoding group id: {}", e))?,
+    );
+
     tracing::debug!(
         target: "whitenoise::commands::groups::get_group_and_messages",
         "Getting group and messages for group ID: {:?}",
         mls_group_id
     );
-    let group = Group::find_by_mls_group_id(&mls_group_id, wn.clone())
-        .await
-        .map_err(|e| format!("Error fetching group: {}", e))?;
-    tracing::debug!(
-        target: "whitenoise::commands::groups::get_group_and_messages",
-        "Group: {:?}",
-        group
-    );
-    let messages = group
-        .messages(wn.clone())
-        .await
-        .map_err(|e| format!("Error fetching messages: {}", e))?;
 
-    tracing::debug!(
-        target: "whitenoise::commands::groups::get_group_and_messages",
-        "Messages: {:?}",
-        messages
-    );
-    Ok(GroupAndMessages { group, messages })
+    tracing::debug!(target: "whitenoise::commands::groups::get_group_and_messages", "Attempting to acquire nostr_mls lock");
+    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+        Ok(guard) => {
+            tracing::debug!(target: "whitenoise::commands::groups::get_group_and_messages", "nostr_mls lock acquired");
+            guard
+        }
+        Err(_) => {
+            tracing::error!(target: "whitenoise::commands::groups::get_group_and_messages", "Timeout waiting for nostr_mls lock");
+            return Err("Timeout waiting for nostr_mls lock".to_string());
+        }
+    };
+
+    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        let group = nostr_mls
+            .get_group(&mls_group_id)
+            .map_err(|e| format!("Error fetching group: {}", e))?;
+
+        if let Some(group) = group {
+            tracing::debug!(
+                target: "whitenoise::commands::groups::get_group_and_messages",
+                "Group: {:?}",
+                group
+            );
+
+            let messages = nostr_mls
+                .get_messages(&mls_group_id)
+                .map_err(|e| format!("Error fetching messages: {}", e))?;
+
+            tracing::debug!(
+                target: "whitenoise::commands::groups::get_group_and_messages",
+                "Messages: {:?}",
+                messages
+            );
+
+            tracing::debug!(target: "whitenoise::commands::groups::get_group_and_messages", "nostr_mls lock released");
+            let messages_with_tokens = messages
+                .iter()
+                .map(|message| MessageWithTokens {
+                    message: message.clone(),
+                    tokens: parse(&message.content),
+                })
+                .collect::<Vec<MessageWithTokens>>();
+            Ok(GroupAndMessages {
+                group,
+                messages: messages_with_tokens,
+            })
+        } else {
+            Err("Group not found".to_string())
+        }
+    } else {
+        Err("Nostr MLS not initialized".to_string())
+    }
 }

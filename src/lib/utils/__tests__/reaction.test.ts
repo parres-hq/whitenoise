@@ -1,5 +1,6 @@
 import type { Message } from "$lib/types/chat";
-import type { NEvent } from "$lib/types/nostr";
+import type { NEvent, NMessageState } from "$lib/types/nostr";
+import { NMessageState as NMessageStateEnum } from "$lib/types/nostr";
 import { describe, expect, it } from "vitest";
 import { messageToReactionMessage } from "../reaction";
 
@@ -9,7 +10,7 @@ describe("messageToReactionMessage", () => {
             event_id: "test-id",
             account_pubkey: "test-pubkey",
             author_pubkey: "test-pubkey",
-            mls_group_id: "mls_group_id",
+            mls_group_id: { value: { vec: new Uint8Array([1, 2, 3, 4]) } },
             created_at: 1234567890,
             event_kind: 7,
             content: "👍",
@@ -28,10 +29,18 @@ describe("messageToReactionMessage", () => {
                 content: "👍",
                 sig: "signature",
             },
+            pubkey: "test-pubkey",
+            kind: 7,
+            tags: [],
+            wrapper_event_id: "test-wrapper-id",
+            state: NMessageStateEnum.Created,
         };
 
         it("returns a Reaction object", () => {
-            const result = messageToReactionMessage(message, "test-pubkey");
+            const result = messageToReactionMessage(
+                { message, tokens: message.tokens },
+                "test-pubkey"
+            );
             expect(result).toEqual({
                 id: "test-id",
                 pubkey: "test-pubkey",
@@ -57,7 +66,10 @@ describe("messageToReactionMessage", () => {
 
         describe("with a different pubkey", () => {
             it("isMine of reaction is false", () => {
-                const result = messageToReactionMessage(message, "other-pubkey");
+                const result = messageToReactionMessage(
+                    { message, tokens: message.tokens },
+                    "other-pubkey"
+                );
                 expect(result).toEqual({
                     id: "test-id",
                     pubkey: "test-pubkey",
@@ -100,7 +112,7 @@ describe("messageToReactionMessage", () => {
             event_id: "test-id",
             account_pubkey: "test-pubkey",
             author_pubkey: "test-pubkey",
-            mls_group_id: "mls_group_id",
+            mls_group_id: { value: { vec: new Uint8Array([1, 2, 3, 4]) } },
             created_at: 1234567890,
             event_kind: 7,
             content: "👍",
@@ -118,9 +130,16 @@ describe("messageToReactionMessage", () => {
                 content: "👍",
                 sig: "signature",
             },
+            pubkey: "test-pubkey",
+            kind: 7,
+            tags: [],
+            wrapper_event_id: "test-wrapper-id",
+            state: NMessageStateEnum.Created,
         };
         it("returns null", () => {
-            expect(messageToReactionMessage(message, "test-pubkey")).toBeNull();
+            expect(
+                messageToReactionMessage({ message, tokens: message.tokens }, "test-pubkey")
+            ).toBeNull();
         });
     });
 
@@ -129,7 +148,7 @@ describe("messageToReactionMessage", () => {
             event_id: "test-id",
             account_pubkey: "test-pubkey",
             author_pubkey: "test-pubkey",
-            mls_group_id: "mls_group_id",
+            mls_group_id: { value: { vec: new Uint8Array([1, 2, 3, 4]) } },
             created_at: 1234567890,
             event_kind: 7,
             content: "👍",
@@ -144,10 +163,17 @@ describe("messageToReactionMessage", () => {
                 content: "👍",
                 sig: "signature",
             },
+            pubkey: "test-pubkey",
+            kind: 7,
+            tags: [],
+            wrapper_event_id: "test-wrapper-id",
+            state: NMessageStateEnum.Created,
         };
 
         it("returns null", () => {
-            expect(messageToReactionMessage(message, "test-pubkey")).toBeNull();
+            expect(
+                messageToReactionMessage({ message, tokens: message.tokens }, "test-pubkey")
+            ).toBeNull();
         });
     });
 });

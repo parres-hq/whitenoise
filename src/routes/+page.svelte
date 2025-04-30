@@ -19,7 +19,7 @@ onMount(async () => {
             console.log("Initialized Nostr for current user");
             setTimeout(() => {
                 goto("/chats");
-            }, 1500);
+            }, 500);
         } else {
             goto("/login");
         }

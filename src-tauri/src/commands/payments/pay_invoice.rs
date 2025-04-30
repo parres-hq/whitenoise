@@ -1,10 +1,8 @@
 use crate::accounts::Account;
 use crate::commands::groups::send_mls_message;
-use crate::groups::Group;
-use crate::messages::Message;
 use crate::payments::{self, PaymentError};
 use crate::whitenoise::Whitenoise;
-use nostr_sdk::prelude::*;
+use nostr_mls::prelude::*;
 use serde::Serialize;
 
 #[derive(Debug, thiserror::Error, Serialize)]
@@ -27,12 +25,12 @@ impl From<PaymentError> for CommandError {
 
 #[tauri::command]
 pub async fn pay_invoice(
-    group: Group,
+    group: group_types::Group,
     tags: Option<Vec<Tag>>,
     bolt11: String,
     wn: tauri::State<'_, Whitenoise>,
     app_handle: tauri::AppHandle,
-) -> Result<Message, CommandError> {
+) -> Result<(), CommandError> {
     let active_account = Account::get_active(wn.clone())
         .await
         .map_err(|_| CommandError::NoActiveAccount)?;
@@ -47,7 +45,7 @@ pub async fn pay_invoice(
         .await
         .map_err(|_| CommandError::MessageError)?;
 
-    let message = send_mls_message(
+    send_mls_message(
         group,
         message_params.message,
         message_params.kind,
@@ -59,7 +57,7 @@ pub async fn pay_invoice(
     .await
     .map_err(|_| CommandError::MessageError)?;
 
-    Ok(message)
+    Ok(())
 }
 
 struct MlsMessageParams {

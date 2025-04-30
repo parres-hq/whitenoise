@@ -1,20 +1,20 @@
-use crate::accounts::{Account, AccountError};
-use crate::groups::{Group, GroupError};
-use crate::invites::{Invite, InviteError, InviteState, ProcessedInvite, ProcessedInviteState};
-use crate::key_packages;
-use crate::messages::{MessageError, ProcessedMessage, ProcessedMessageState};
-use crate::nostr_manager::parser::{parse, SerializableToken};
-use crate::nostr_manager::NostrManagerError;
-use crate::relays::RelayType;
-use crate::secrets_store;
-use crate::Whitenoise;
-use nostr_openmls::groups::GroupError as NostrOpenmlsGroupError;
-use nostr_sdk::prelude::*;
+//! Event processor for the Nostr manager
+//!
+//! This module is responsible for processing events from the Nostr manager
+
+use nostr_mls::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+
+use crate::accounts::{Account, AccountError};
+use crate::key_packages;
+use crate::nostr_manager::NostrManagerError;
+use crate::relays::RelayType;
+use crate::secrets_store;
+use crate::Whitenoise;
 
 #[derive(Error, Debug)]
 pub enum EventProcessorError {
@@ -26,24 +26,20 @@ pub enum EventProcessorError {
     NoAccount(#[from] AccountError),
     #[error("Error decoding hex")]
     UndecodableHex(#[from] nostr_sdk::util::hex::Error),
-    #[error("Error saving invite: {0}")]
-    BadInvite(#[from] InviteError),
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
     #[error("Key package error: {0}")]
     KeyPackageError(#[from] key_packages::KeyPackageError),
-    #[error("Group error: {0}")]
-    GroupError(#[from] GroupError),
     #[error("NIP44 encryption error: {0}")]
     EncryptionError(#[from] nostr_sdk::nips::nip44::Error),
-    #[error("OpenMLS group error: {0}")]
-    OpenMlsGroupNotFound(#[from] nostr_openmls::groups::GroupError),
     #[error("Secrets store error: {0}")]
     SecretsStoreError(#[from] secrets_store::SecretsStoreError),
     #[error("Key parsing error: {0}")]
     UnparseableKey(#[from] nostr_sdk::key::Error),
-    #[error("Message error: {0}")]
-    MessageError(#[from] MessageError),
+    #[error("Nostr MLS error: {0}")]
+    NostrMlsError(#[from] nostr_mls::Error),
+    #[error("Nostr MLS not initialized")]
+    NostrMlsNotInitialized,
 }
 
 pub type Result<T> = std::result::Result<T, EventProcessorError>;
@@ -210,7 +206,7 @@ impl EventProcessor {
         if let Ok(unwrapped) = extract_rumor(&keys, &event).await {
             match unwrapped.rumor.kind {
                 Kind::MlsWelcome => {
-                    Self::process_invite(app_handle, active_account, event, unwrapped.rumor)
+                    Self::process_welcome(app_handle, active_account, event, unwrapped.rumor)
                         .await?;
                 }
                 Kind::PrivateDirectMessage => {
@@ -232,103 +228,53 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn process_invite(
+    async fn process_welcome(
         app_handle: &AppHandle,
         account: Account,
         outer_event: Event,
         rumor_event: UnsignedEvent,
-    ) -> Result<()> {
+    ) -> Result<welcome_types::Welcome> {
         let wn = app_handle.state::<Whitenoise>();
-
-        // Check to see if the invite has already been processed
-        let processed_invite =
-            ProcessedInvite::find_by_invite_event_id(outer_event.id, wn.clone()).await?;
-        if processed_invite.is_some() {
-            return Ok(());
-        }
-
-        let welcome_preview;
+        let welcome: welcome_types::Welcome;
+        tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Attempting to acquire nostr_mls lock");
         {
-            let hex_content = hex::decode(&rumor_event.content);
-            if hex_content.is_err() {
-                let error_string = format!(
-                    "Error hex decoding welcome event: {:?}",
-                    hex_content.err().unwrap()
-                );
-                let processed_invite = ProcessedInvite::create_with_state_and_reason(
-                    outer_event.id,
-                    rumor_event.id.unwrap(),
-                    ProcessedInviteState::Failed,
-                    error_string.clone(),
-                    wn.clone(),
-                )
-                .await?;
-                tracing::error!(target: "whitenoise::nostr_manager::event_processor", "{}", error_string);
-                app_handle
-                    .emit("invite_failed_to_process", processed_invite)
-                    .map_err(NostrManagerError::TauriError)?;
-                return Ok(());
-            }
-
+            let nostr_mls_guard = match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                wn.nostr_mls.lock(),
+            )
+            .await
             {
-                let nostr_mls = wn.nostr_mls.lock().await;
-                welcome_preview = nostr_mls.preview_welcome_event(hex_content.unwrap());
-            }
-
-            if welcome_preview.is_err() {
-                let error_string = format!(
-                    "Error decrypting welcome event: {:?}",
-                    welcome_preview.err().unwrap()
-                );
-                let processed_invite = ProcessedInvite::create_with_state_and_reason(
-                    outer_event.id,
-                    rumor_event.id.unwrap(),
-                    ProcessedInviteState::Failed,
-                    error_string.clone(),
-                    wn.clone(),
-                )
-                .await?;
-                tracing::error!(target: "whitenoise::nostr_manager::event_processor", "{}", error_string);
-                app_handle
-                    .emit("invite_failed_to_process", processed_invite)
-                    .map_err(NostrManagerError::TauriError)?;
-                return Ok(());
-            }
+                Ok(guard) => {
+                    tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "nostr_mls lock acquired");
+                    guard
+                }
+                Err(_) => {
+                    tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Timeout waiting for nostr_mls lock");
+                    return Err(EventProcessorError::NostrMlsError(
+                        nostr_mls::Error::KeyPackage(
+                            "Timeout waiting for nostr_mls lock".to_string(),
+                        ),
+                    ));
+                }
+            };
+            let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+                match nostr_mls.process_welcome(&outer_event.id, &rumor_event) {
+                    Ok(result) => {
+                        tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Processed welcome event: {:?}", result);
+                        Ok(result)
+                    }
+                    Err(e) => {
+                        tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Error processing welcome event: {}", e);
+                        Err(EventProcessorError::NostrMlsError(e))
+                    }
+                }
+            } else {
+                tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Nostr MLS not initialized");
+                Err(EventProcessorError::NostrMlsNotInitialized)
+            };
+            welcome = result?;
         }
-
-        let unwrapped_welcome_preview = welcome_preview.unwrap();
-
-        // Create and save invite
-        let invite = Invite {
-            event_id: rumor_event.id.unwrap().to_string(),
-            account_pubkey: account.pubkey.to_hex(),
-            event: rumor_event.clone(),
-            mls_group_id: unwrapped_welcome_preview
-                .staged_welcome
-                .group_context()
-                .group_id()
-                .to_vec(),
-            nostr_group_id: unwrapped_welcome_preview.nostr_group_data.nostr_group_id(),
-            group_name: unwrapped_welcome_preview.nostr_group_data.name(),
-            group_description: unwrapped_welcome_preview.nostr_group_data.description(),
-            group_admin_pubkeys: unwrapped_welcome_preview.nostr_group_data.admin_pubkeys(),
-            group_relays: unwrapped_welcome_preview.nostr_group_data.relays(),
-            inviter: rumor_event.pubkey.to_hex(),
-            member_count: unwrapped_welcome_preview.staged_welcome.members().count() as u32,
-            state: InviteState::Pending,
-            outer_event_id: outer_event.id.to_string(),
-        };
-
-        invite.save(wn.clone()).await?;
-
-        ProcessedInvite::create_with_state_and_reason(
-            outer_event.id,
-            rumor_event.id.unwrap(),
-            ProcessedInviteState::Processed,
-            "".to_string(),
-            wn.clone(),
-        )
-        .await?;
+        tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "nostr_mls lock released");
 
         let key_package_event_id = rumor_event
             .tags
@@ -339,7 +285,7 @@ impl EventProcessor {
             .and_then(|tag| tag.content());
 
         app_handle
-            .emit("invite_processed", invite)
+            .emit("mls_welcome_processed", &welcome)
             .map_err(NostrManagerError::TauriError)?;
 
         let key_package_relays: Vec<String> = if cfg!(dev) {
@@ -359,13 +305,13 @@ impl EventProcessor {
                 wn.clone(),
             )
             .await?;
-            tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Deleted used key package from relays");
+            tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Deleted used key package from relays");
 
             key_packages::publish_key_package(wn.clone()).await?;
-            tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Published new key package");
+            tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Published new key package");
         }
 
-        Ok(())
+        Ok(welcome)
     }
 
     // TODO: Implement private direct message processing, maybe...
@@ -375,7 +321,6 @@ impl EventProcessor {
         _outer_event: Event,
         inner_event: UnsignedEvent,
     ) -> Result<()> {
-        // TODO: Implement private direct message processing
         tracing::debug!(
             target: "whitenoise::event_processor",
             "Received private direct message: {:?}",
@@ -384,243 +329,51 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn process_mls_message(app_handle: &AppHandle, event: Event) -> Result<()> {
+    async fn process_mls_message(
+        app_handle: &AppHandle,
+        event: Event,
+    ) -> Result<Option<message_types::Message>> {
         let wn = app_handle.state::<Whitenoise>();
 
-        // Check to see if the event has already been processed
-        let processed_event = ProcessedMessage::find_by_event_id(event.id, wn.clone()).await?;
-        if processed_event.is_some() {
-            return Ok(());
-        }
-
-        let group_id = event
-            .tags
-            .iter()
-            .find(|tag| tag.kind() == TagKind::h())
-            .and_then(|tag| tag.content())
-            .unwrap();
-
-        let group = Group::get_by_nostr_group_id(group_id, wn.clone()).await?;
-
-        // TODO: Need to figure out how to reprocess events that fail because a commit arrives out of order
-
-        let nostr_keys = match secrets_store::get_export_secret_keys_for_group(
-            group.mls_group_id.clone(),
-            group.epoch,
-            wn.data_dir.as_path(),
-        ) {
-            Ok(keys) => keys,
+        tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Attempting to acquire nostr_mls lock");
+        let nostr_mls_guard = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            wn.nostr_mls.lock(),
+        )
+        .await
+        {
+            Ok(guard) => {
+                tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "nostr_mls lock acquired");
+                guard
+            }
             Err(_) => {
-                tracing::debug!(
-                    target: "whitenoise::commands::groups::fetch_mls_messages",
-                    "No export secret keys found, fetching from nostr_openmls",
-                );
-                // We need to get the export secret for the group from nostr_openmls
-                let nostr_mls = wn.nostr_mls.lock().await;
-                let (export_secret_hex, epoch) = nostr_mls
-                    .export_secret_as_hex_secret_key_and_epoch(group.mls_group_id.clone())?;
-
-                // Store the export secret key in the secrets store
-                secrets_store::store_mls_export_secret(
-                    group.mls_group_id.clone(),
-                    epoch,
-                    export_secret_hex.clone(),
-                    wn.data_dir.as_path(),
-                )?;
-
-                Keys::parse(&export_secret_hex)?
+                tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Timeout waiting for nostr_mls lock");
+                return Err(EventProcessorError::NostrMlsError(
+                    nostr_mls::Error::KeyPackage("Timeout waiting for nostr_mls lock".to_string()),
+                ));
             }
         };
-
-        // Decrypt events using export secret key
-        let decrypted_content = nip44::decrypt_to_bytes(
-            nostr_keys.secret_key(),
-            &nostr_keys.public_key(),
-            &event.content,
-        )?;
-
-        let message_vec;
-        {
-            let nostr_mls = wn.nostr_mls.lock().await;
-
-            // TODO: This only handles application messages for now. We need to handle commits and proposals
-            match nostr_mls
-                .process_message_for_group(group.mls_group_id.clone(), decrypted_content.clone())
-            {
-                Ok(message) => message_vec = message,
+        let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            match nostr_mls.process_message(&event) {
+                Ok(message) => {
+                    // TODO: Need to handle proposals and commits
+                    tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Processed MLS message");
+                    app_handle
+                        .emit("mls_message_received", &message)
+                        .map_err(NostrManagerError::TauriError)?;
+                    Ok(message)
+                }
                 Err(e) => {
-                    match e {
-                        NostrOpenmlsGroupError::ProcessMessageError(e) => {
-                            if !e.to_string().contains("Cannot decrypt own messages") {
-                                tracing::error!(
-                                    target: "whitenoise::commands::groups::fetch_mls_messages",
-                                    "Error processing message for group: {}",
-                                    e
-                                );
-                                ProcessedMessage::create_with_state_and_reason(
-                                    event.id,
-                                    None,
-                                    ProcessedMessageState::Failed,
-                                    "Cannot decrypt own messages".to_string(),
-                                    wn.clone(),
-                                )
-                                .await?;
-                            }
-                        }
-                        _ => {
-                            let error_string =
-                                format!("UNRECOGNIZED ERROR processing message for group: {}", e);
-                            tracing::error!(
-                                target: "whitenoise::commands::groups::fetch_mls_messages",
-                                "{}",
-                                error_string
-                            );
-                            ProcessedMessage::create_with_state_and_reason(
-                                event.id,
-                                None,
-                                ProcessedMessageState::Failed,
-                                error_string,
-                                wn.clone(),
-                            )
-                            .await?;
-                        }
-                    }
                     // TODO: Need to figure out how to reprocess events that fail because a commit arrives out of order
-                    return Ok(());
+                    tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Error processing MLS message: {}", e);
+                    Err(EventProcessorError::NostrMlsError(e))
                 }
             }
-        }
-
-        // This processes an application message into JSON.
-        let mut json_event;
-        match serde_json::from_slice::<serde_json::Value>(&message_vec) {
-            Ok(json_value) => {
-                tracing::debug!(
-                    target: "whitenoise::commands::groups::fetch_mls_messages",
-                    "Deserialized JSON message: {}",
-                    json_value
-                );
-                let json_str = json_value.to_string();
-                json_event = UnsignedEvent::from_json(&json_str).unwrap();
-
-                if !group
-                    .members(wn.clone())
-                    .await?
-                    .contains(&json_event.pubkey)
-                {
-                    tracing::error!(
-                        target: "whitenoise::commands::groups::fetch_mls_messages",
-                        "Message from non-member: {:?}",
-                        json_event.pubkey
-                    );
-                    ProcessedMessage::create_with_state_and_reason(
-                        event.id,
-                        Some(json_event.id.unwrap()),
-                        ProcessedMessageState::Failed,
-                        "Message from non-member".to_string(),
-                        wn.clone(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
-
-                // Parse the content into tokens and ensure it's properly formatted
-                let tokens = parse(&json_event.content);
-                tracing::debug!(
-                    target: "whitenoise::commands::groups::fetch_mls_messages",
-                    "Parsed tokens from content: {:?}",
-                    tokens
-                );
-
-                // Reconstruct the content from tokens to ensure consistent formatting
-                let mut reconstructed_content = String::with_capacity(json_event.content.len());
-                for token in &tokens {
-                    match token {
-                        SerializableToken::Text(s) => reconstructed_content.push_str(s),
-                        SerializableToken::Url(s) => reconstructed_content.push_str(s),
-                        SerializableToken::Hashtag(s) => {
-                            reconstructed_content.push_str(&format!("#{}", s))
-                        }
-                        SerializableToken::Nostr(s) => reconstructed_content.push_str(s),
-                        SerializableToken::LineBreak => reconstructed_content.push('\n'),
-                        SerializableToken::Whitespace => reconstructed_content.push(' '),
-                    }
-                }
-                json_event.content = reconstructed_content;
-
-                let message = group
-                    .add_message(
-                        event.id.to_string(),
-                        json_event.clone(),
-                        wn.clone(),
-                        app_handle.clone(),
-                        Some(tokens),
-                    )
-                    .await?;
-
-                app_handle
-                    .emit("mls_message_processed", (group.clone(), message.clone()))
-                    .expect("Couldn't emit event");
-            }
-            Err(e) => {
-                tracing::error!(
-                    target: "whitenoise::commands::groups::fetch_mls_messages",
-                    "Failed to deserialize message into JSON: {}",
-                    e
-                );
-                let error_string = format!("Failed to deserialize message into JSON: {}", e);
-                ProcessedMessage::create_with_state_and_reason(
-                    event.id,
-                    None,
-                    ProcessedMessageState::Failed,
-                    error_string.clone(),
-                    wn.clone(),
-                )
-                .await?;
-                return Ok(());
-            }
-        }
-
-        app_handle
-            .emit(
-                "mls_message_received",
-                MlsMessageReceivedEvent {
-                    group_id: group.mls_group_id.clone(),
-                    event: json_event.clone(),
-                },
-            )
-            .map_err(NostrManagerError::TauriError)?;
-        Ok(())
+        } else {
+            tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Nostr MLS not initialized");
+            Err(EventProcessorError::NostrMlsNotInitialized)
+        };
+        tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "nostr_mls lock released");
+        result
     }
-
-    // async fn schedule_retry(app_handle: &AppHandle, event: Event, retry_count: u32) -> Result<()> {
-    //     // Give up after 5 retries
-    //     if retry_count >= 5 {
-    //         tracing::error!(
-    //             target: "whitenoise::nostr_manager::event_processor",
-    //             "Failed to process commit after 5 retries: {:?}",
-    //             event
-    //         );
-    //         return Ok(());
-    //     }
-
-    //     let delay = 2u64.pow(retry_count) * 1000; // Exponential backoff in milliseconds
-    //     let event_processor = app_handle.state::<EventProcessor>();
-
-    //     tokio::spawn(async move {
-    //         tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-    //         if let Err(e) = event_processor
-    //             .queue_event(ProcessableEvent::RetryMlsMessage(event, retry_count + 1))
-    //             .await
-    //         {
-    //             tracing::error!(
-    //                 target: "whitenoise::nostr_manager::event_processor",
-    //                 "Failed to schedule retry: {}",
-    //                 e
-    //             );
-    //         }
-    //     });
-
-    //     Ok(())
-    // }
 }

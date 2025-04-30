@@ -1,6 +1,5 @@
 use crate::accounts::Account;
 use crate::whitenoise::Whitenoise;
-use nostr_sdk::prelude::*;
 use nwc::prelude::*;
 
 /// Gets the balance information from the connected Nostr Wallet Connect wallet.

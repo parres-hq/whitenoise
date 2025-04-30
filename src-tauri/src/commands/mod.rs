@@ -2,12 +2,12 @@ use crate::whitenoise::Whitenoise;
 
 pub mod accounts;
 pub mod groups;
-pub mod invites;
 pub mod key_packages;
 pub mod media;
 pub mod messages;
 pub mod nostr;
 pub mod payments;
+pub mod welcomes;
 
 #[tauri::command]
 pub async fn delete_all_data(wn: tauri::State<'_, Whitenoise>) -> Result<(), String> {

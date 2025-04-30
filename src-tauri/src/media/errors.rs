@@ -11,9 +11,6 @@ pub enum MediaError {
     #[error("Delete error: {0}")]
     Delete(String),
 
-    #[error("Export secret error: {0}")]
-    ExportSecret(String),
-
     #[error("Metadata error: {0}")]
     Metadata(String),
 
@@ -30,4 +27,13 @@ pub enum MediaError {
 
     #[error("Database operation failed: {0}")]
     Database(#[from] sqlx::Error),
+
+    #[error("Nostr MLS error: {0}")]
+    NostrMLS(String),
+
+    #[error("Nostr MLS not initialized")]
+    NostrMLSNotInitialized,
+
+    #[error("No Active Account")]
+    NoActiveAccount,
 }

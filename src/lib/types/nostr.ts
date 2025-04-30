@@ -1,3 +1,5 @@
+import type { Message } from "./chat";
+
 // These are types that map to the rust-nostr types from the rust backend
 export type HexPubkey = string & { readonly __brand: unique symbol };
 export type Npub = string & { readonly __brand: unique symbol };
@@ -56,70 +58,65 @@ export type NEvent = {
     sig?: string;
 };
 
-export type Invite = {
-    event: NEvent;
-    mls_group_id: string;
-    group_name: string;
-    group_description: string;
-    group_admin_pubkeys: string[];
-    group_relays: string[];
-    inviter: string;
-    member_count: number;
-    state: InviteState;
-};
-
-export type ProcessedInvite = {
-    event_id: string;
-    invite_event_id: string | undefined;
-    account_pubkey: string;
-    processed_at: number;
-    state: ProcessedInviteState;
-    failure_reason: string | undefined;
-};
-
-export enum InviteState {
-    Pending = "Pending",
-    Accepted = "Accepted",
-    Declined = "Declined",
-}
-
-export enum ProcessedInviteState {
-    Processed = "Processed",
-    Failed = "Failed",
-}
-
-export type InvitesWithFailures = {
-    invites: Invite[];
-    failures: [string, string][];
-};
-
-export type NostrMlsWelcomeGroupData = {
-    mls_group_id: Uint8Array;
+export type NGroup = {
+    mls_group_id: MlsGroupId;
+    nostr_group_id: Uint8Array;
     name: string;
     description: string;
     admin_pubkeys: string[];
-    relays: string[];
-};
-
-export type NostrMlsGroup = {
-    mls_group_id: Uint8Array;
-    nostr_group_id: string;
-    name: string;
-    description: string;
-    admin_pubkeys: string[];
-    last_message_at: number;
-    last_message_id: string;
+    last_message_at: number | undefined;
+    last_message_id: string | undefined;
     group_type: NostrMlsGroupType;
+    epoch: number;
+    state: NostrMlsGroupState;
 };
 
-export type NostrMlsGroupWithRelays = {
-    group: NostrMlsGroup;
-    relays: string[];
+export type MlsGroupId = {
+    value: { vec: Uint8Array };
 };
 
 export enum NostrMlsGroupType {
-    DirectMessage = "DirectMessage",
-    Group = "Group",
+    DirectMessage = "direct_message",
+    Group = "group",
+}
+
+export enum NostrMlsGroupState {
+    Active = "active",
+    Inactive = "inactive",
+    Pending = "pending",
+}
+
+export type NGroupRelay = {
+    relay_url: string;
+    mls_group_id: MlsGroupId;
+};
+
+export type NWelcome = {
+    id: string;
+    event: NEvent;
+    mls_group_id: MlsGroupId;
+    nostr_group_id: Uint8Array;
+    group_name: string;
+    group_description: string;
+    group_admin_pubkeys: string[];
+    group_relays: NGroupRelay[];
+    welcomer: string;
+    member_count: number;
+    state: NWelcomeState;
+    wrapper_event_id: string;
+};
+
+export enum NWelcomeState {
+    Pending = "pending",
+    Accepted = "accepted",
+    Declined = "declined",
+    Ignored = "ignored",
+}
+
+export enum NMessageState {
+    Created = "created",
+    Processed = "processed",
+    Deleted = "deleted",
 }
 
 export type SerializableToken =
@@ -129,3 +126,13 @@ export type SerializableToken =
     | { Text: string }
     | { LineBreak: null }
     | { Whitespace: null };
+
+export type GroupAndMessages = {
+    group: NGroup;
+    messages: MessageWithTokens[];
+};
+
+export type MessageWithTokens = {
+    message: Message;
+    tokens: SerializableToken[];
+};

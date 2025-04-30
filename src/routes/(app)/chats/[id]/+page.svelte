@@ -12,10 +12,12 @@ import { createChatStore } from "$lib/stores/chat";
 import type { ChatMessage, Message } from "$lib/types/chat";
 import {
     type EnrichedContact,
+    type GroupAndMessages,
+    type MessageWithTokens,
     type NEvent,
-    type NostrMlsGroup,
+    type NGroup,
     NostrMlsGroupType,
-    type NostrMlsGroupWithRelays,
+    type SerializableToken,
 } from "$lib/types/nostr";
 import { copyToClipboard } from "$lib/utils/clipboard";
 import { hexMlsGroupId } from "$lib/utils/group";
@@ -47,11 +49,11 @@ let unlistenMlsMessageProcessed: UnlistenFn;
 
 const chatStore = createChatStore();
 
-let group: NostrMlsGroup | undefined = $state(undefined);
+let group: NGroup | undefined = $state(undefined);
 let counterpartyPubkey: string | undefined = $state(undefined);
 let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
 let groupName = $state("");
-let messages: Message[] | undefined = $state(undefined);
+let messages: MessageWithTokens[] | undefined = $state(undefined);
 let showMessageMenu = $state(false);
 let selectedMessageId: string | null | undefined = $state(undefined);
 let messageMenuPosition = $state({ x: 0, y: 0 });
@@ -89,15 +91,12 @@ $effect(() => {
 async function loadGroup() {
     const groupId = selectedChatId || page.params.id;
     invoke("get_group_and_messages", { groupId }).then(async (groupResponse) => {
-        const groupData: NostrMlsGroup = (
-            groupResponse as { group: NostrMlsGroup; messages: Message[] }
-        ).group;
-        const messagesData: Message[] = (
-            groupResponse as { group: NostrMlsGroup; messages: Message[] }
-        ).messages;
+        let data = groupResponse as GroupAndMessages;
+        const groupData: NGroup = data.group;
+        const messagesDataWithTokens: MessageWithTokens[] = data.messages;
 
         group = groupData;
-        messages = messagesData;
+        messages = messagesDataWithTokens;
         // Add messages to the chat store
         chatStore.clear();
         for (const message of messages) {
@@ -137,13 +136,13 @@ async function scrollToBottom() {
 
 onMount(async () => {
     if (!unlistenMlsMessageProcessed) {
-        unlistenMlsMessageProcessed = await listen<[NostrMlsGroup, Message]>(
+        unlistenMlsMessageProcessed = await listen<[NGroup, MessageWithTokens]>(
             "mls_message_processed",
-            ({ payload: [_updatedGroup, message] }) => {
-                const storedMessage = chatStore.findChatMessage(message.event_id);
+            ({ payload: [_updatedGroup, messageWithTokens] }) => {
+                const storedMessage = chatStore.findChatMessage(messageWithTokens.message.event_id);
                 if (!storedMessage) {
                     console.log("pushing message to transcript");
-                    chatStore.handleMessage(message);
+                    chatStore.handleMessage(messageWithTokens);
                 }
                 scrollToBottom();
             }
@@ -163,8 +162,11 @@ onMount(async () => {
     await loadGroup();
 });
 
-function handleNewMessage(message: Message) {
-    chatStore.handleMessage(message);
+function handleNewMessage(message: Message | MessageWithTokens) {
+    // Only handle MessageWithTokens (from backend)
+    if ("message" in message && "tokens" in message) {
+        chatStore.handleMessage(message);
+    }
 }
 
 function handlePress(event: PressCustomEvent | MouseEvent) {
@@ -289,7 +291,7 @@ async function payLightningInvoice(chatMessage: ChatMessage) {
         return;
     }
 
-    let groupWithRelays: NostrMlsGroupWithRelays = await invoke("get_group", {
+    let groupWithRelays: NGroup = await invoke("get_group", {
         groupId: hexMlsGroupId(group.mls_group_id),
     });
 
@@ -301,7 +303,7 @@ async function payLightningInvoice(chatMessage: ChatMessage) {
     chatStore
         .payLightningInvoice(groupWithRelays, chatMessage)
         .then(
-            (_paymentEvent: Message | null) => {
+            (_paymentEvent: MessageWithTokens | null) => {
                 toast.success("Payment success", {
                     description: "Successfully sent payment to invoice",
                 });

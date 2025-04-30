@@ -1,5 +1,6 @@
 import type { Message } from "$lib/types/chat";
-import type { NEvent } from "$lib/types/nostr";
+import type { NEvent, NMessageState } from "$lib/types/nostr";
+import { NMessageState as NMessageStateEnum } from "$lib/types/nostr";
 import { describe, expect, it } from "vitest";
 import { messageToChatMessage } from "../message";
 
@@ -13,21 +14,22 @@ describe("messageToChatMessage", () => {
         content: "Hello world",
         sig: "signature",
     };
+    const testMlsGroupId = { value: { vec: new Uint8Array([1, 2, 3, 4]) } };
     it("converts message to chat message", () => {
+        const tokens = [{ Text: "Hello world" }];
         const message: Message = {
             event: defaultEvent,
             event_id: defaultEvent.id,
-            account_pubkey: defaultEvent.pubkey,
-            author_pubkey: defaultEvent.pubkey,
-            mls_group_id: "mls_group_id",
+            mls_group_id: testMlsGroupId,
             created_at: defaultEvent.created_at,
-            event_kind: defaultEvent.kind,
             content: defaultEvent.content,
-            outer_event_id: "outer_event_id",
-            tokens: [{ Text: "Hello world" }],
+            pubkey: defaultEvent.pubkey,
+            kind: defaultEvent.kind,
+            tags: [],
+            wrapper_event_id: "test-wrapper-id",
+            state: NMessageStateEnum.Created,
         };
-        const chatMessage = messageToChatMessage(message, "some-pubkey");
-
+        const chatMessage = messageToChatMessage({ message, tokens }, "some-pubkey");
         expect(chatMessage).toEqual({
             id: "event123",
             pubkey: "pubkey456",
@@ -40,116 +42,122 @@ describe("messageToChatMessage", () => {
             isSingleEmoji: false,
             isMine: false,
             event: defaultEvent,
-            tokens: [{ Text: "Hello world" }],
+            tokens,
         });
     });
 
     describe("with emojis", () => {
         it("returns isSingleEmoji true for a single basic emoji", () => {
             const event = { ...defaultEvent, content: "😊" };
+            const tokens = [{ Text: "😊" }];
             const message: Message = {
                 event,
                 event_id: event.id,
-                account_pubkey: event.pubkey,
-                author_pubkey: event.pubkey,
-                mls_group_id: "mls_group_id",
+                mls_group_id: testMlsGroupId,
                 created_at: event.created_at,
-                event_kind: event.kind,
                 content: event.content,
-                outer_event_id: "outer_event_id",
-                tokens: [{ Text: "😊" }],
+                pubkey: event.pubkey,
+                kind: event.kind,
+                tags: [],
+                wrapper_event_id: "test-wrapper-id",
+                state: NMessageStateEnum.Created,
             };
-            const chatMessage = messageToChatMessage(message, "some-pubkey");
+            const chatMessage = messageToChatMessage({ message, tokens }, "some-pubkey");
             expect(chatMessage.isSingleEmoji).toEqual(true);
         });
 
         it("returns isSingleEmoji true for a compound emoji", () => {
             const event = { ...defaultEvent, content: "👨‍👩‍👧‍👦" };
+            const tokens = [{ Text: "👨‍👩‍👧‍👦" }];
             const message: Message = {
                 event,
                 event_id: event.id,
-                account_pubkey: event.pubkey,
-                author_pubkey: event.pubkey,
-                mls_group_id: "mls_group_id",
+                mls_group_id: testMlsGroupId,
                 created_at: event.created_at,
-                event_kind: event.kind,
                 content: event.content,
-                outer_event_id: "outer_event_id",
-                tokens: [{ Text: "👨‍👩‍👧‍👦" }],
+                pubkey: event.pubkey,
+                kind: event.kind,
+                tags: [],
+                wrapper_event_id: "test-wrapper-id",
+                state: NMessageStateEnum.Created,
             };
-            const chatMessage = messageToChatMessage(message, "some-pubkey");
+            const chatMessage = messageToChatMessage({ message, tokens }, "some-pubkey");
             expect(chatMessage.isSingleEmoji).toEqual(true);
         });
 
         it("returns isSingleEmoji true for an emoji with skin tone modifier", () => {
             const event = { ...defaultEvent, content: "👍🏽" };
+            const tokens = [{ Text: "👍🏽" }];
             const message: Message = {
                 event,
                 event_id: event.id,
-                account_pubkey: event.pubkey,
-                author_pubkey: event.pubkey,
-                mls_group_id: "mls_group_id",
+                mls_group_id: testMlsGroupId,
                 created_at: event.created_at,
-                event_kind: event.kind,
                 content: event.content,
-                outer_event_id: "outer_event_id",
-                tokens: [{ Text: "👍🏽" }],
+                pubkey: event.pubkey,
+                kind: event.kind,
+                tags: [],
+                wrapper_event_id: "test-wrapper-id",
+                state: NMessageStateEnum.Created,
             };
-            const chatMessage = messageToChatMessage(message, "some-pubkey");
+            const chatMessage = messageToChatMessage({ message, tokens }, "some-pubkey");
             expect(chatMessage.isSingleEmoji).toEqual(true);
         });
 
         it("returns isSingleEmoji true for emoji with whitespace", () => {
             const event = { ...defaultEvent, content: " 🎉 " };
+            const tokens = [{ Text: " 🎉 " }];
             const message: Message = {
                 event,
                 event_id: event.id,
-                account_pubkey: event.pubkey,
-                author_pubkey: event.pubkey,
-                mls_group_id: "mls_group_id",
+                mls_group_id: testMlsGroupId,
                 created_at: event.created_at,
-                event_kind: event.kind,
                 content: event.content,
-                outer_event_id: "outer_event_id",
-                tokens: [{ Text: " 🎉 " }],
+                pubkey: event.pubkey,
+                kind: event.kind,
+                tags: [],
+                wrapper_event_id: "test-wrapper-id",
+                state: NMessageStateEnum.Created,
             };
-            const chatMessage = messageToChatMessage(message, "some-pubkey");
+            const chatMessage = messageToChatMessage({ message, tokens }, "some-pubkey");
             expect(chatMessage.isSingleEmoji).toEqual(true);
         });
 
         it("returns isSingleEmoji false for text with emoji", () => {
             const event = { ...defaultEvent, content: "Hello 👋" };
+            const tokens = [{ Text: "Hello 👋" }];
             const message: Message = {
                 event,
                 event_id: event.id,
-                account_pubkey: event.pubkey,
-                author_pubkey: event.pubkey,
-                mls_group_id: "mls_group_id",
+                mls_group_id: testMlsGroupId,
                 created_at: event.created_at,
-                event_kind: event.kind,
                 content: event.content,
-                outer_event_id: "outer_event_id",
-                tokens: [{ Text: "Hello 👋" }],
+                pubkey: event.pubkey,
+                kind: event.kind,
+                tags: [],
+                wrapper_event_id: "test-wrapper-id",
+                state: NMessageStateEnum.Created,
             };
-            const chatMessage = messageToChatMessage(message, "some-pubkey");
+            const chatMessage = messageToChatMessage({ message, tokens }, "some-pubkey");
             expect(chatMessage.isSingleEmoji).toEqual(false);
         });
 
         it("returns isSingleEmoji false for multiple emojis", () => {
             const event = { ...defaultEvent, content: "😊😎" };
+            const tokens = [{ Text: "😊😎" }];
             const message: Message = {
                 event,
                 event_id: event.id,
-                account_pubkey: event.pubkey,
-                author_pubkey: event.pubkey,
-                mls_group_id: "mls_group_id",
+                mls_group_id: testMlsGroupId,
                 created_at: event.created_at,
-                event_kind: event.kind,
                 content: event.content,
-                outer_event_id: "outer_event_id",
-                tokens: [{ Text: "😊😎" }],
+                pubkey: event.pubkey,
+                kind: event.kind,
+                tags: [],
+                wrapper_event_id: "test-wrapper-id",
+                state: NMessageStateEnum.Created,
             };
-            const chatMessage = messageToChatMessage(message, "some-pubkey");
+            const chatMessage = messageToChatMessage({ message, tokens }, "some-pubkey");
             expect(chatMessage.isSingleEmoji).toEqual(false);
         });
     });

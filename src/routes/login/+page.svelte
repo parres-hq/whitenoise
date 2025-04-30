@@ -54,17 +54,25 @@ async function handleCreateAccount() {
 }
 </script>
 
-<div class="flex flex-col h-dvh items-center justify-between w-screen bg-background pl-safe-left pr-safe-right relative">
-    <div class="relative w-full">
-        <img src="images/login-splash.webp" alt="login splash" class="max-h-[330px] sm:max-h-[400px] md:max-h-[600px] w-full object-cover {loading ? 'animate-pulse' : ''}" />
+<div class="flex flex-col h-dvh items-center justify-start w-screen bg-background pl-safe-left pr-safe-right relative">
+    <div class="relative w-full flex justify-center">
+        <!-- Glitchy background image -->
+        <img src="images/login-splash-bg.webp" alt="login splash" class="absolute inset-0 w-full h-full object-cover pointer-events-none select-none {loading ? 'animate-pulse' : ''}" />
+        <!-- Overlay logo image, centered -->
+        <div class="absolute inset-0 flex items-center justify-center">
+            <img src="images/login-logo.webp" alt="White Noise Logo" class="w-40 md:w-48 drop-shadow-lg" style="max-width: 40vw;" />
+        </div>
+        <!-- Gradient overlay for fade effect -->
         <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent from-10% to-transparent"></div>
+        <!-- Spacer for aspect ratio -->
+        <div class="invisible w-full pt-[120%] sm:pt-[80%] md:pt-[60%] lg:pt-[50%] xl:pt-[40%]"></div>
     </div>
-    <div class="flex flex-col self-start mx-4 text-foreground mb-16">
+    <div class="flex flex-col self-start mx-4 text-foreground">
         <h2 class="text-5xl font-normal">{$t("login.welcomeTo")}</h2>
         <h1 class="text-5xl font-semibold">White Noise</h1>
         <p class="text-xl mt-4 font-normal text-muted-foreground">{$t("login.slogan")}</p>
     </div>
-    <div class="w-full flex flex-col gap-0">
+    <div class="w-full flex flex-col gap-0 mb-0 mt-auto">
         <LoginSheet {loading}>
             <Button variant="ghost" class="w-full h-fit text-base font-medium py-4">{$t("login.signInWithNostrKey")}</Button>
         </LoginSheet>

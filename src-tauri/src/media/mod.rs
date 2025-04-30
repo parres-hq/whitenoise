@@ -48,9 +48,12 @@ pub use errors::MediaError;
 pub use sanitizer::sanitize_media;
 pub use types::*;
 
-use crate::database::Database;
 use ::image::GenericImageView;
-use nostr_sdk::prelude::*;
+use nostr_mls::prelude::*;
+
+use crate::accounts::Account;
+use crate::database::Database;
+use crate::Whitenoise;
 
 /// Adds a media file, ready to be used in a chat.
 ///
@@ -62,38 +65,45 @@ use nostr_sdk::prelude::*;
 ///
 /// # Arguments
 ///
-/// * `mls_group_id` - The MLS group ID that the media file belongs to
+/// * `group` - The MLS group that the media file belongs to
 /// * `uploaded_file` - The file to be added, containing filename, MIME type, and data
-/// * `exporter_secret_hex` - The 32-byte exporter secret in hex format, used for encryption
-/// * `data_dir` - The directory to cache the file in
-/// * `db` - The database connection for storing file metadata
-/// * `blossom_client` - The client for interacting with the Blossom server
+/// * `wn` - The Whitenoise state
 ///
 /// # Returns
 ///
 /// * `Ok(UploadedMedia)` - The uploaded media descriptor and IMETA tag
 /// * `Err(MediaError)` - Error if any step of the process fails
 pub async fn add_media_file(
-    mls_group_id: &Vec<u8>,
-    account_pubkey: &str,
+    group: &group_types::Group,
     uploaded_file: FileUpload,
-    exporter_secret_hex: &str,
-    data_dir: &str,
-    db: &Database,
-    blossom_client: &blossom::BlossomClient,
+    wn: tauri::State<'_, Whitenoise>,
 ) -> Result<UploadedMedia, MediaError> {
+    let active_account = Account::get_active(wn.clone())
+        .await
+        .map_err(|_| MediaError::NoActiveAccount)?;
+
     // Get the raw secret key bytes
-    let secret_key =
-        hex::decode(exporter_secret_hex).map_err(|e| MediaError::ExportSecret(e.to_string()))?;
+    let exporter_secret: group_types::GroupExporterSecret;
+    let nostr_mls_guard = wn.nostr_mls.lock().await;
+    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        exporter_secret = nostr_mls
+            .exporter_secret(&group.mls_group_id)
+            .map_err(|e| MediaError::NostrMLS(e.to_string()))?;
+    } else {
+        return Err(MediaError::NostrMLSNotInitialized);
+    }
 
     // Sanitize the file
     let sanitized_file = sanitize_media(&uploaded_file)?;
 
     // Encrypt the file
-    let (encrypted_file_data, nonce) = encryption::encrypt_file(&sanitized_file.data, &secret_key)?;
+    let (encrypted_file_data, nonce) =
+        encryption::encrypt_file(&sanitized_file.data, &exporter_secret.secret)?;
 
     // Upload encrypted file to Blossom
-    let (blob_descriptor, keys) = blossom_client
+    let (blob_descriptor, keys) = wn
+        .nostr
+        .blossom
         .upload(encrypted_file_data)
         .await
         .map_err(|e| MediaError::Upload(e.to_string()))?;
@@ -101,13 +111,13 @@ pub async fn add_media_file(
     // Add the file to the local cache
     let media_file = cache::add_to_cache(
         &uploaded_file.data,
-        mls_group_id,
-        account_pubkey,
+        group,
+        &active_account.pubkey.to_string(),
         Some(blob_descriptor.url.clone()),
         Some(keys.secret_key().to_secret_hex()),
         Some(sanitized_file.metadata),
-        data_dir,
-        db,
+        wn.data_dir.to_str().unwrap(),
+        &wn.database,
     )
     .await?;
 
@@ -150,13 +160,13 @@ pub async fn add_media_file(
 /// * `Err(MediaError)` - Error if deletion fails or if no Nostr key is found
 #[allow(dead_code)]
 pub async fn delete_media_file(
-    mls_group_id: &Vec<u8>,
+    group: &group_types::Group,
     file_hash: &str,
     db: &Database,
     blossom_client: &blossom::BlossomClient,
 ) -> Result<(), MediaError> {
     // Get the file from the cache
-    let cached_media_file = cache::fetch_cached_file(mls_group_id, file_hash, db).await?;
+    let cached_media_file = cache::fetch_cached_file(group, file_hash, db).await?;
     if let Some(cached_media_file) = cached_media_file {
         // Check that we have a nostr key for deletion
         if cached_media_file.media_file.nostr_key.is_none() {
@@ -173,7 +183,7 @@ pub async fn delete_media_file(
             .await
             .map_err(|e| MediaError::Delete(e.to_string()))?;
         // Delete the file from the cache
-        cache::delete_cached_file(mls_group_id, file_hash, db).await?;
+        cache::delete_cached_file(group, file_hash, db).await?;
     }
     Ok(())
 }
