@@ -704,9 +704,9 @@ checksum = "1628fb46dfa0b37568d12e5edd512553eccf6a22a78e8bde00bb4aed84d5bdbf"
 
 [[package]]
 name = "bytemuck"
-version = "1.22.0"
+version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b1fc10dbac614ebc03540c9dbd60e83887fda27794998c6528f1782047d540"
+checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
 
 [[package]]
 name = "byteorder"
@@ -888,9 +888,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.40"
+version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a7964611d71df112cb1730f2ee67324fcf4d0fc6606acbbe9bfe06df124637c"
+checksum = "c469d952047f47f91b68d1cba3f10d63c11d73e4636f24f08daf0278abf01c4d"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -3338,12 +3338,6 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
 name = "lru"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "227748d55f2f0ab4735d87fd623798cb6b664512fe979705f829c9f81c934465"
-
-[[package]]
-name = "lru"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
@@ -3587,31 +3581,6 @@ dependencies = [
 
 [[package]]
 name = "nostr"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f900ddcdc28395759fcd44b18a03255e7deee8858551bfe5d5d5a07311d82ea"
-dependencies = [
- "aes",
- "base64 0.22.1",
- "bech32",
- "bip39",
- "bitcoin_hashes 0.14.0",
- "cbc",
- "chacha20",
- "chacha20poly1305",
- "getrandom 0.2.16",
- "instant",
- "regex",
- "scrypt",
- "secp256k1",
- "serde",
- "serde_json",
- "unicode-normalization",
- "url",
-]
-
-[[package]]
-name = "nostr"
 version = "0.41.0"
 dependencies = [
  "aes",
@@ -3631,17 +3600,6 @@ dependencies = [
  "serde_json",
  "unicode-normalization",
  "url",
-]
-
-[[package]]
-name = "nostr-database"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "714512e4653f4e7c4f4abb50a0ac82257541b22087dee780b9e3d787276e88d4"
-dependencies = [
- "lru 0.13.0",
- "nostr 0.40.0",
- "tokio",
 ]
 
 [[package]]
@@ -3649,8 +3607,8 @@ name = "nostr-database"
 version = "0.41.0"
 dependencies = [
  "flatbuffers",
- "lru 0.14.0",
- "nostr 0.41.0",
+ "lru",
+ "nostr",
  "tokio",
 ]
 
@@ -3660,8 +3618,8 @@ version = "0.41.0"
 dependencies = [
  "async-utility",
  "heed",
- "nostr 0.41.0",
- "nostr-database 0.41.0",
+ "nostr",
+ "nostr-database",
  "tokio",
  "tracing",
 ]
@@ -3670,7 +3628,7 @@ dependencies = [
 name = "nostr-mls"
 version = "0.41.0"
 dependencies = [
- "nostr 0.41.0",
+ "nostr",
  "nostr-mls-storage",
  "openmls",
  "openmls_basic_credential",
@@ -3684,7 +3642,7 @@ dependencies = [
 name = "nostr-mls-sqlite-storage"
 version = "0.41.0"
 dependencies = [
- "nostr 0.41.0",
+ "nostr",
  "nostr-mls-storage",
  "openmls",
  "openmls_sqlite_storage",
@@ -3699,7 +3657,7 @@ dependencies = [
 name = "nostr-mls-storage"
 version = "0.41.0"
 dependencies = [
- "nostr 0.41.0",
+ "nostr",
  "openmls",
  "openmls_traits",
  "serde",
@@ -3710,27 +3668,9 @@ dependencies = [
 name = "nostr-ndb"
 version = "0.41.0"
 dependencies = [
- "nostr 0.41.0",
- "nostr-database 0.41.0",
+ "nostr",
+ "nostr-database",
  "nostrdb",
-]
-
-[[package]]
-name = "nostr-relay-pool"
-version = "0.40.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bde07a729e0a1b306c9a07da81a0d1d55d0487316017090906f3b6660741b8d"
-dependencies = [
- "async-utility",
- "async-wsocket",
- "atomic-destructor",
- "lru 0.13.0",
- "negentropy 0.3.1",
- "negentropy 0.5.0",
- "nostr 0.40.0",
- "nostr-database 0.40.0",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3740,11 +3680,11 @@ dependencies = [
  "async-utility",
  "async-wsocket",
  "atomic-destructor",
- "lru 0.14.0",
+ "lru",
  "negentropy 0.3.1",
  "negentropy 0.5.0",
- "nostr 0.41.0",
- "nostr-database 0.41.0",
+ "nostr",
+ "nostr-database",
  "tokio",
  "tracing",
 ]
@@ -3754,11 +3694,11 @@ name = "nostr-sdk"
 version = "0.41.0"
 dependencies = [
  "async-utility",
- "nostr 0.41.0",
- "nostr-database 0.41.0",
+ "nostr",
+ "nostr-database",
  "nostr-lmdb",
  "nostr-ndb",
- "nostr-relay-pool 0.41.0",
+ "nostr-relay-pool",
  "tokio",
  "tracing",
 ]
@@ -3879,13 +3819,11 @@ dependencies = [
 
 [[package]]
 name = "nwc"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a17ecafa5837b3eddf23a5872800e14f203ed9a22fc6ab0e674f8fd016a6893"
+version = "0.41.0"
 dependencies = [
  "async-utility",
- "nostr 0.40.0",
- "nostr-relay-pool 0.40.1",
+ "nostr",
+ "nostr-relay-pool",
 ]
 
 [[package]]
@@ -7649,7 +7587,7 @@ dependencies = [
  "keyring",
  "lightning-invoice",
  "mockito",
- "nostr 0.41.0",
+ "nostr",
  "nostr-mls",
  "nostr-mls-sqlite-storage",
  "nostr-sdk",

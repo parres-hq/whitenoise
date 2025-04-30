@@ -34,7 +34,7 @@ lightning-invoice = "0.33.1"
 nostr = { version = "0.41", path = "../../rust-nostr/crates/nostr", features = [ "std", "parser" ] }
 nostr-mls = { version = "0.41", path = "../../rust-nostr/crates/nostr-mls" }
 nostr-mls-sqlite-storage = { version = "0.41", path = "../../rust-nostr/crates/nostr-mls-sqlite-storage" }
-nwc = { version = "0.40" }
+nwc = { version = "0.41", path = "../../rust-nostr/crates/nwc" }
 once_cell = "1.21"
 petname = "2.0.2"
 rand = "0.9"
