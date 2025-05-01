@@ -68,7 +68,7 @@ async function handleSave() {
 <Header backLocation="/settings" title={$t('profile.title')} />
 
 <KeyboardAvoidingView class="h-full">
-    <div class="pb-16 md:pb-6 flex flex-col gap-4">
+    <div class="pb-4 flex flex-col gap-4">
         <div class="relative">
             {#if bannerImage}
                 <img src={bannerImage} alt="Cover" class="w-full h-48 object-cover" />
@@ -116,7 +116,7 @@ async function handleSave() {
             </label>
         </div>
 
-        <div class="flex flex-col gap-6 mt-20 relative overflow-y-auto pb-20">
+        <div class="flex flex-col gap-6 mt-20 relative overflow-y-auto pb-8">
             <div class="flex flex-col gap-2 px-4">
                 <Label for="displayName">{$t('profile.displayName')}</Label>
                 <Input type="text" id="displayName" bind:value={displayName} />
@@ -150,8 +150,8 @@ async function handleSave() {
                 <Input type="text" id="lightningAddress" bind:value={lightningAddress} />
             </div>
         </div>
-        <div class="md:px-4 fixed bottom-0 left-0 right-0 bg-background z-10 w-full md:static">
-            <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit pt-4 pb-[calc(1rem+var(--sab))] md:py-4">{$t('profile.saveChanges')}</Button>
+        <div class="flex flex-col gap-2 w-full px-4 md:px-8 pb-8 bg-background">
+            <Button size="lg" onclick={handleSave} class="text-base font-medium w-full h-fit py-3 px-0 focus-visible:ring-0 disabled:cursor-not-allowed">{$t('profile.saveChanges')}</Button>
         </div>
     </div>
 </KeyboardAvoidingView>

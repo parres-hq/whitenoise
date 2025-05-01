@@ -132,6 +132,12 @@ html {
     .pb-safe-bottom {
         padding-bottom: max(8px, var(--sab, 8px));
     }
+    .top-safe-top {
+        top: max(8px, var(--sat, 8px));
+    }
+    .-top-safe-top {
+        top: calc(-1 * max(8px, var(--sat, 8px)));
+    }
 
     /* Add styles for keyboard adjustments on Android */
     body.keyboard-visible {

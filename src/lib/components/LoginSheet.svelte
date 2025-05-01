@@ -1,12 +1,13 @@
 <script lang="ts">
-import KeyboardAvoidingView from "$lib/components/keyboard-avoiding-view";
+import Sheet from "$lib/components/Sheet.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
 import Input from "$lib/components/ui/input/input.svelte";
-import * as Sheet from "$lib/components/ui/sheet/index.js";
 import { LoginError, createAccount, login } from "$lib/stores/accounts";
 import { readFromClipboard } from "$lib/utils/clipboard";
+import CloseLarge from "carbon-icons-svelte/lib/CloseLarge.svelte";
 import Paste from "carbon-icons-svelte/lib/Paste.svelte";
 import type { Snippet } from "svelte";
+import { onMount } from "svelte";
 import { _ as t } from "svelte-i18n";
 
 let {
@@ -24,6 +25,20 @@ let {
 } = $props();
 let nsecOrHex = $state("");
 let loginError: LoginError | null = $state(null);
+let platform = $state<"ios" | "android" | "desktop">("desktop");
+let isClosing = $state(false);
+let overlayVisible = $state(false);
+let overlayOpacity = $state(0);
+
+onMount(() => {
+    if (typeof navigator !== "undefined") {
+        if (/Android/i.test(navigator.userAgent)) {
+            platform = "android";
+        } else if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+            platform = "ios";
+        }
+    }
+});
 
 async function handlePaste() {
     try {
@@ -72,66 +87,63 @@ async function handleCreateAccount() {
             sheetVisible = false;
         });
 }
+
+$effect(() => {
+    if (sheetVisible) {
+        overlayVisible = true;
+        // Fade in after next tick
+        setTimeout(() => {
+            overlayOpacity = 1;
+        }, 0);
+    } else if (!isClosing) {
+        overlayOpacity = 0;
+        setTimeout(() => {
+            overlayVisible = false;
+        }, 150);
+    }
+});
 </script>
 
-<Sheet.Root
-    bind:open={sheetVisible}
-    onOpenChange={(open) => {
-        if (!open) {
-            loginError = null;
-            nsecOrHex = "";
-        }
-    }}
->
-    <Sheet.Trigger>
-        {@render children()}
-    </Sheet.Trigger>
-    <Sheet.Content side="bottom" class="pb-0 px-0">
-        <KeyboardAvoidingView withSheet={true} bottomOffset={10} strategy="transform">
-            <div class="overflow-y-auto pt-2 {showCreateAccount ? 'pb-32' : 'pb-20'} px-1 relative">
-                <Sheet.Header class="text-left mb-8 px-6">
-                    <Sheet.Title>{title ?? $t("login.signInWithNostrKey")}</Sheet.Title>
-                    <Sheet.Description class="text-lg font-normal">
-                        {$t("login.signInDescription")}
-                    </Sheet.Description>
-                </Sheet.Header>
-                <div class="flex flex-col gap-x-4 relative px-6">
-                    <div class="flex flex-row gap-2">
-                        <Input
-                            bind:value={nsecOrHex}
-                            type="password"
-                            autofocus={false}
-                            placeholder="nsec1..."
-                            autocomplete="off"
-                            autocapitalize="off"
-                            autocorrect="off"
-                            class="mb-1"
-                        />
-                        <Button variant="outline" size="icon" onclick={handlePaste} class="shrink-0">
-                            <Paste size={16}/>
-                        </Button>
-                    </div>
-                    <div class="h-8 text-sm text-destructive ml-1">
-                        {loginError?.message}
-                    </div>
-                </div>
-            </div>
-            <div class="flex flex-col gap-0 w-full px-0 fixed bottom-0 left-0 right-0 bg-background">
-                {#if showCreateAccount}
-                    <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading} class="w-full h-fit text-base font-medium py-4 px-0 focus-visible:ring-0">
-                        {$t("login.createNewNostrKey")}
-                    </Button>
-                {/if}
-                <Button
-                    size="lg"
-                    variant="default"
-                    onclick={handleLogin}
-                    disabled={loading || nsecOrHex.length === 0}
-                    class="text-base font-medium w-full h-fit mx-0 pt-4 pb-[calc(1rem+var(--sab))] focus-visible:ring-0"
-                >
-                    {$t("login.logIn")}
+{@render children()}
+<Sheet bind:open={sheetVisible}>
+    {#snippet title()}{title ?? $t("login.signInWithNostrKey")}{/snippet}
+    {#snippet description()}{$t("login.signInDescription")}{/snippet}
+    <div class="flex flex-col flex-1 mx-4 md:mx-8 pt-4">
+        <div class="flex flex-col relative">
+            <div class="flex flex-row gap-2">
+                <Input
+                    bind:value={nsecOrHex}
+                    type="password"
+                    autofocus={false}
+                    placeholder="nsec1..."
+                    autocomplete="off"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    class="mb-1"
+                />
+                <Button variant="outline" size="icon" onclick={handlePaste} class="shrink-0">
+                    <Paste size={16}/>
                 </Button>
             </div>
-        </KeyboardAvoidingView>
-    </Sheet.Content>
-</Sheet.Root>
+            <div class="h-8 text-sm text-destructive ml-1">
+                {loginError?.message}
+            </div>
+        </div>
+    </div>
+    <div class="flex flex-col gap-2 w-full px-4 md:px-8 pb-8 bg-background">
+        {#if showCreateAccount}
+            <Button size="lg" variant="ghost" onclick={handleCreateAccount} disabled={loading} class="w-full text-base font-medium py-3 px-0 focus-visible:ring-0 disabled:cursor-not-allowed">
+                {$t("login.createNewNostrKey")}
+            </Button>
+        {/if}
+        <Button
+            size="lg"
+            variant="default"
+            onclick={handleLogin}
+            disabled={loading || nsecOrHex.length === 0}
+            class="text-base font-medium w-full py-3 px-0 focus-visible:ring-0 disabled:cursor-not-allowed"
+        >
+            {$t("login.logIn")}
+        </Button>
+    </div>
+</Sheet>

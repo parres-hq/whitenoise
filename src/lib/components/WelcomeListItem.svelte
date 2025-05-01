@@ -5,9 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { _ as t } from "svelte-i18n";
 import { nameFromMetadata } from "../utils/nostr";
 import GroupAvatar from "./GroupAvatar.svelte";
+import Sheet from "./Sheet.svelte";
 import InviteDetail from "./WelcomeDetail.svelte";
 import Button from "./ui/button/button.svelte";
-import * as Sheet from "./ui/sheet";
 
 let { welcome }: { welcome: NWelcome } = $props();
 
@@ -45,27 +45,27 @@ $effect(() => {
 });
 </script>
 
-<Sheet.Root bind:open={showSheet}>
-    <Sheet.Trigger>
-        <Button
-            size="lg"
-            variant="ghost"
-            class="flex flex-row gap-2 items-center justify-start py-10 px-4 w-full"
-        >
-            <GroupAvatar
-                bind:groupType
-                bind:groupName
-                bind:counterpartyPubkey
-                bind:enrichedCounterparty={enrichedInviter}
-                pxSize={56}
-            />
-            <div class="flex flex-col gap-0 items-start">
-                <span class="text-lg font-medium">{groupName}</span>
-                <span class="text-sm text-muted-foreground">{inviteDescription}</span>
-            </div>
-        </Button>
-    </Sheet.Trigger>
-    <Sheet.Content side="bottom" class="pb-0 px-0 h-[90%]">
+<Button
+    size="lg"
+    variant="ghost"
+    class="flex flex-row gap-2 items-center justify-start py-10 px-4 w-full"
+    onclick={() => showSheet = true}
+>
+    <GroupAvatar
+        bind:groupType
+        bind:groupName
+        bind:counterpartyPubkey
+        bind:enrichedCounterparty={enrichedInviter}
+        pxSize={56}
+    />
+    <div class="flex flex-col gap-0 items-start">
+        <span class="text-lg font-medium">{groupName}</span>
+        <span class="text-sm text-muted-foreground">{inviteDescription}</span>
+    </div>
+</Button>
+<Sheet bind:open={showSheet} class="h-[90svh]">
+    {#snippet title()}{$t("chats.invitation")}{/snippet}
+    <div class="pb-0 px-0">
         <InviteDetail {welcome} bind:enrichedInviter bind:showSheet />
-    </Sheet.Content>
-</Sheet.Root>
+    </div>
+</Sheet>

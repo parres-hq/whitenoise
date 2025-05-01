@@ -156,7 +156,7 @@ onMount(async () => {
             size="lg"
             onclick={handleSetWallet}
             disabled={!nwcUri || loading}
-            class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
+            class="text-base font-medium w-full h-fit py-3 px-0 focus-visible:ring-0 disabled:cursor-not-allowed mt-6"
         >
             {$t("wallet.connectWallet")}
         </Button>

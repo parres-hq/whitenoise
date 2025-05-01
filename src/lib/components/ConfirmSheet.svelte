@@ -1,8 +1,7 @@
 <script lang="ts">
-import KeyboardAvoidingView from "$lib/components/keyboard-avoiding-view";
+import Sheet from "$lib/components/Sheet.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
-import * as Sheet from "$lib/components/ui/sheet";
-import type { Snippet } from "svelte";
+import CloseLarge from "carbon-icons-svelte/lib/CloseLarge.svelte";
 
 interface ConfirmSheetProps {
     title: string;
@@ -11,7 +10,6 @@ interface ConfirmSheetProps {
     cancelText: string;
     open: boolean;
     acceptFn: () => void;
-    children: Snippet;
 }
 
 let {
@@ -21,28 +19,14 @@ let {
     cancelText,
     open = $bindable(false),
     acceptFn,
-    children,
 }: ConfirmSheetProps = $props();
 </script>
 
-<Sheet.Root bind:open openFocus={undefined}>
-    <Sheet.Trigger>
-        {@render children()}
-    </Sheet.Trigger>
-    <Sheet.Content side="bottom" class="pb-0 px-0">
-        <KeyboardAvoidingView withSheet={true}>
-            <div class="overflow-y-auto pt-2 pb-16 px-1 relative">
-                <Sheet.Header class="text-left mb-24 px-6">
-                    <Sheet.Title>{title}</Sheet.Title>
-                    <Sheet.Description class="text-base text-muted-foreground whitespace-pre-wrap">{@html description}</Sheet.Description>
-                </Sheet.Header>
-                <div class="flex flex-col gap-0 w-full px-0 fixed bottom-0 left-0 right-0 bg-background">
-                    <Sheet.Close asChild>
-                        <Button variant="ghost" size="lg" class="text-base font-medium w-full py-6 focus-visible:ring-0" onclick={() => open = false}>{cancelText}</Button>
-                    </Sheet.Close>
-                    <Button id="accept-button" variant="default" size="lg" class="text-base font-medium w-full pb-[calc(1.5rem+var(--sab))] pt-6 focus-visible:ring-0" onclick={acceptFn}>{acceptText}</Button>
-                </div>
-            </div>
-        </KeyboardAvoidingView>
-    </Sheet.Content>
-</Sheet.Root>
+<Sheet bind:open={open}>
+    {#snippet title()}{title}{/snippet}
+    {#snippet description()} {@html description} {/snippet}
+    <div class="flex flex-col gap-2 w-full px-4 md:px-8 pb-8 bg-background">
+        <Button variant="ghost" size="lg" class="w-full h-fit text-base font-medium py-4 px-0 focus-visible:ring-0 disabled:cursor-not-allowed" onclick={() => open = false}>{cancelText}</Button>
+        <Button id="accept-button" variant="default" size="lg" class="text-base font-medium w-full h-fit mx-0 py-4 px-1 focus-visible:ring-0 disabled:cursor-not-allowed" onclick={acceptFn}>{acceptText}</Button>
+    </div>
+</Sheet>

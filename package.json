@@ -59,6 +59,7 @@
         "bits-ui": "0.22.0",
         "clsx": "^2.1.1",
         "jsdom": "^26.1.0",
+        "lucide-svelte": "^0.503.0",
         "postcss": "^8.5.3",
         "storybook": "8.6.12",
         "svelte": "^5.28.2",

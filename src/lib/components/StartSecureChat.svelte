@@ -3,7 +3,7 @@ import { goto, pushState } from "$app/navigation";
 import Avatar from "$lib/components/Avatar.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import { activeAccount } from "$lib/stores/accounts";
-import type { EnrichedContact, NostrMlsGroup } from "$lib/types/nostr";
+import type { EnrichedContact, NGroup } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
@@ -13,7 +13,6 @@ import { _ as t } from "svelte-i18n";
 import { toast } from "svelte-sonner";
 import Loader from "./Loader.svelte";
 import Button from "./ui/button/button.svelte";
-import * as Sheet from "./ui/sheet";
 
 let {
     contact = $bindable(null),
@@ -37,7 +36,7 @@ async function startChat() {
 
     try {
         // Create a DM group with just this contact
-        const group: NostrMlsGroup = await invoke("create_group", {
+        const group: NGroup = await invoke("create_group", {
             creatorPubkey: $activeAccount?.pubkey,
             memberPubkeys: [pubkey],
             adminPubkeys: [$activeAccount?.pubkey, pubkey],
@@ -93,13 +92,6 @@ async function inviteContact() {
 </script>
 
 <div class="flex flex-col h-full relative">
-    <Sheet.Header class="text-left flex flex-row items-start gap-x-1 -mt-0.5">
-        <Button variant="link" size="icon" class="p-0 shrink-0" onclick={onBack}>
-            <ChevronLeft size={24} class="shrink-0 !h-6 !w-6" />
-        </Button>
-        <Sheet.Title>{$t("chats.startSecureChat")}</Sheet.Title>
-    </Sheet.Header>
-
     <div class="flex flex-col justify-start items-center pt-40 flex-1 gap-4">
         <Avatar
             pubkey={pubkey}
@@ -132,33 +124,35 @@ async function inviteContact() {
         {/if}
     </div>
 
-    {#if !contact?.nip104}
-        <Button
-            variant="default"
-            size="lg"
-            class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
-            disabled={isInviting}
-            onclick={inviteContact}>
-            {#if isInviting}
-                <Loader size={16} fullscreen={false} />
-                {$t("chats.sendingInvite")}
-            {:else}
-                {$t("chats.sendInvite")}
-            {/if}
-        </Button>
-    {:else}
-        <Button
-            variant="default"
-            size="lg"
-            class="text-base font-medium w-full h-fit absolute bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:relative md:left-auto md:right-auto md:mt-6"
-            disabled={isCreatingChat}
-            onclick={startChat}>
-            {#if isCreatingChat}
-                <Loader size={16} fullscreen={false} />
-                {$t("chats.creatingChat")}
-            {:else}
-                {$t("chats.startChatAndSendInvite")}
-            {/if}
-        </Button>
-    {/if}
+    <div class="flex flex-col gap-2 w-full px-4 md:px-8 pb-8 bg-background">
+        {#if !contact?.nip104}
+            <Button
+                variant="default"
+                size="lg"
+                class="text-base font-medium w-full py-3 px-0 focus-visible:ring-0 disabled:cursor-not-allowed"
+                disabled={isInviting}
+                onclick={inviteContact}>
+                {#if isInviting}
+                    <Loader size={16} fullscreen={false} />
+                    {$t("chats.sendingInvite")}
+                {:else}
+                    {$t("chats.sendInvite")}
+                {/if}
+            </Button>
+        {:else}
+            <Button
+                variant="default"
+                size="lg"
+                class="text-base font-medium w-full py-3 px-0 focus-visible:ring-0 disabled:cursor-not-allowed"
+                disabled={isCreatingChat}
+                onclick={startChat}>
+                {#if isCreatingChat}
+                    <Loader size={16} fullscreen={false} />
+                    {$t("chats.creatingChat")}
+                {:else}
+                    {$t("chats.startChatAndSendInvite")}
+                {/if}
+            </Button>
+        {/if}
+    </div>
 </div>

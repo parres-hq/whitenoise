@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
 import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
 import Chat from "carbon-icons-svelte/lib/Chat.svelte";
+import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
 import Search from "carbon-icons-svelte/lib/Search.svelte";
 import WarningAlt from "carbon-icons-svelte/lib/WarningAlt.svelte";
 import { onDestroy, onMount } from "svelte";
@@ -16,11 +17,11 @@ import FormattedNpub from "./FormattedNpub.svelte";
 import GroupListItem from "./GroupListItem.svelte";
 import Header from "./Header.svelte";
 import Loader from "./Loader.svelte";
+import Sheet from "./Sheet.svelte";
 import StartSecureChat from "./StartSecureChat.svelte";
 import WelcomeListItem from "./WelcomeListItem.svelte";
 import Button from "./ui/button/button.svelte";
 import Input from "./ui/input/input.svelte";
-import * as Sheet from "./ui/sheet";
 
 type ChatsListProps = {
     isLoading?: boolean;
@@ -237,7 +238,7 @@ $effect(() => {
             <Avatar pubkey={$activeAccount!.pubkey} />
         </a>
         <div class="flex flex-row items-center gap-4 md:gap-2">
-            <Sheet.Root>
+            <!-- <Sheet.Root>
                 <Sheet.Trigger>
                     <Button variant="link" size="icon" class="p-2 shrink-0 text-primary-foreground">
                         <Search size={24} class="shrink-0 !h-6 !w-6" />
@@ -252,123 +253,124 @@ $effect(() => {
                     </div>
                     <div class="flex flex-col gap-2 px-6 mt-6 text-destructive">{$t("shared.notImplementedYet")}</div>
                 </Sheet.Content>
-            </Sheet.Root>
+            </Sheet.Root> -->
 
-            <Sheet.Root bind:open={newChatSheetOpen} onOpenChange={() => {
-                if (!newChatSheetOpen) {
-                    resetChatSheet();
-                }
-            }}>
-                <Sheet.Trigger>
-                    <Button variant="link" size="icon" class="p-2 shrink-0 text-primary-foreground">
-                        <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
-                    </Button>
-                </Sheet.Trigger>
-                <Sheet.Content side="bottom" class="pb-0 px-0 h-[90%]">
-                    <div class="flex flex-col h-full relative">
-                        {#if showStartChatView && selectedContactPubkey && selectedContact}
-                            <StartSecureChat
-                                bind:pubkey={selectedContactPubkey}
-                                bind:contact={selectedContact}
-                                onBack={resetChatSheet}
-                                onClose={closeNewChatSheet}
-                            />
-                        {:else}
-                            <div class="sticky top-0">
-                                <Sheet.Header class="text-left mb-6 px-6">
-                                    <Sheet.Title> {$t("chats.newChat")}</Sheet.Title>
-                                </Sheet.Header>
-
-                                <div class="flex flex-row gap-4 px-6 mb-4">
-                                    <form onsubmit={searchRelays} class="flex flex-row gap-2 items-center w-full">
-                                        <Input
-                                            type="search"
-                                            placeholder={$t("chats.searchContactPlaceholder")}
-                                            bind:value={contactsSearch}
-                                            class="focus-visible:ring-0"
-                                        />
-                                        <Button type="submit" variant="outline" size="icon" class="shrink-0">
-                                            <Search size={24} class="shrink-0 !h-6 !w-6" />
-                                        </Button>
-                                    </form>
-                                </div>
-                            </div>
-
-                            <div class="flex flex-col flex-1 overflow-hidden">
-                                <div class="flex flex-col gap-2 overflow-y-auto flex-1">
-                                    {#if contactsLoading}
-                                        <div class="flex justify-center items-center flex-1 py-10">
-                                            <Loader size={40} fullscreen={false} />
-                                        </div>
-                                    {:else if contactsLoadingError}
-                                        <div class="text-destructive font-medium flex flex-col gap-2 px-6">
-                                            <span>{$t("chats.contactsLoadingError")}</span>
-                                            <pre class="font-mono p-2 bg-destructive/10 text-xs">
-                                                {contactsLoadingError || $t("chats.unknownError")}
-                                            </pre>
-                                        </div>
-                                    {:else}
-                                        <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.contacts")}</h2>
-                                        {#if filteredContacts && Object.keys(filteredContacts).length > 0}
-                                            <div class="px-0">
-                                                {#each Object.entries(filteredContacts) as [pubkey, contact] (pubkey)}
-                                                    <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap- px-6 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => startChatWithContact(pubkey, contact)}>
-                                                        <Avatar
-                                                            pubkey={pubkey}
-                                                            picture={contact.metadata?.picture}
-                                                            pxSize={56}
-                                                        />
-                                                        <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate w-full">
-                                                            <div class="truncate text-lg font-medium">
-                                                                {nameFromMetadata(contact.metadata, pubkey)}
-                                                            </div>
-                                                            <div class="flex gap-4 items-center">
-                                                                <FormattedNpub npub={npubFromPubkey(pubkey)} showCopy={false} />
-                                                            </div>
-                                                        </div>
-                                                    </Button>
-                                                {/each}
-                                            </div>
-                                        {:else}
-                                            <span class="text-gray-400 px-6 text-center">{$t("chats.noContactsFound")}</span>
-                                        {/if}
-                                        <div class="mt-4">
-                                            {#if isSearching}
-                                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searching")}</h2>
-                                                <div class="px-6">
-                                                    <Loader size={40} fullscreen={false} />
-                                                </div>
-                                            {:else if searchResults && Object.keys(searchResults).length > 0}
-                                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searchResults")}</h2>
-                                                {#each Object.entries(searchResults) as [pubkey, contact] (pubkey)}
-                                                    <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap-3 px-6 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => startChatWithContact(pubkey, contact)}>
-                                                        <Avatar
-                                                            pubkey={pubkey}
-                                                            picture={contact.metadata?.picture}
-                                                            pxSize={56}
-                                                        />
-                                                        <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate w-full">
-                                                            <div class="truncate text-lg font-medium">
-                                                                {nameFromMetadata(contact.metadata, pubkey)}
-                                                            </div>
-                                                            <div class="flex gap-4 items-center">
-                                                                <FormattedNpub npub={npubFromPubkey(pubkey)} showCopy={false} />
-                                                            </div>
-                                                        </div>
-                                                    </Button>
-                                                {/each}
-                                            {/if}
-                                        </div>
-                                    {/if}
-                                </div>
-                            </div>
-                        {/if}
-                    </div>
-                </Sheet.Content>
-            </Sheet.Root>
+            <!-- New chat sheet trigger -->
+            <Button variant="link" size="icon" class="p-2 shrink-0 text-primary-foreground" onclick={() => newChatSheetOpen = true}>
+                <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
+            </Button>
         </div>
     </div>
 </Header>
+
+<Sheet bind:open={newChatSheetOpen} class="h-[90svh]">
+    {#snippet title()}
+        {#if showStartChatView}
+            <div class="flex flex-row items-center gap-2">
+                <button onclick={resetChatSheet} class="mr-2 flex items-center focus:outline-none">
+                    <ChevronLeft size={24} class="shrink-0 !h-6 !w-6" />
+                </button>
+                <span>{$t("chats.startSecureChat")}</span>
+            </div>
+        {:else}
+            {$t("chats.newChat")}
+        {/if}
+    {/snippet}
+    <div class="flex flex-col h-full relative pt-4">
+        {#if showStartChatView && selectedContactPubkey && selectedContact}
+            <StartSecureChat
+                bind:pubkey={selectedContactPubkey}
+                bind:contact={selectedContact}
+                onBack={resetChatSheet}
+                onClose={closeNewChatSheet}
+            />
+        {:else}
+            <div class="sticky -top-0.5 bg-background z-10">
+                <div class="flex flex-row gap-4 px-8 my-4 bg-background">
+                    <form onsubmit={searchRelays} class="flex flex-row gap-2 items-center w-full bg-background">
+                        <Input
+                            type="search"
+                            placeholder={$t("chats.searchContactPlaceholder")}
+                            bind:value={contactsSearch}
+                            class="focus-visible:ring-0"
+                        />
+                        <Button type="submit" variant="outline" size="icon" class="shrink-0">
+                            <Search size={24} class="shrink-0 !h-6 !w-6" />
+                        </Button>
+                    </form>
+                </div>
+            </div>
+            <div class="flex flex-col flex-1 overflow-hidden">
+                <div class="flex flex-col gap-2 overflow-y-auto flex-1">
+                    {#if contactsLoading}
+                        <div class="flex justify-center items-center flex-1 py-10">
+                            <Loader size={40} fullscreen={false} />
+                        </div>
+                    {:else if contactsLoadingError}
+                        <div class="text-destructive font-medium flex flex-col gap-2 px-6">
+                            <span>{$t("chats.contactsLoadingError")}</span>
+                            <pre class="font-mono p-2 bg-destructive/10 text-xs">
+                                {contactsLoadingError || $t("chats.unknownError")}
+                            </pre>
+                        </div>
+                    {:else}
+                        <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.contacts")}</h2>
+                        {#if filteredContacts && Object.keys(filteredContacts).length > 0}
+                            <div class="px-0">
+                                {#each Object.entries(filteredContacts) as [pubkey, contact] (pubkey)}
+                                    <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap- px-6 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => startChatWithContact(pubkey, contact)}>
+                                        <Avatar
+                                            pubkey={pubkey}
+                                            picture={contact.metadata?.picture}
+                                            pxSize={56}
+                                        />
+                                        <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate w-full">
+                                            <div class="truncate text-lg font-medium">
+                                                {nameFromMetadata(contact.metadata, pubkey)}
+                                            </div>
+                                            <div class="flex gap-4 items-center">
+                                                <FormattedNpub npub={npubFromPubkey(pubkey)} showCopy={false} />
+                                            </div>
+                                        </div>
+                                    </Button>
+                                {/each}
+                            </div>
+                        {:else}
+                            <span class="text-gray-400 px-6 text-center">{$t("chats.noContactsFound")}</span>
+                        {/if}
+                        <div class="mt-4">
+                            {#if isSearching}
+                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searching")}</h2>
+                                <div class="px-6">
+                                    <Loader size={40} fullscreen={false} />
+                                </div>
+                            {:else if searchResults && Object.keys(searchResults).length > 0}
+                                <h2 class="text-xl font-normal mb-2 px-6">{$t("chats.searchResults")}</h2>
+                                {#each Object.entries(searchResults) as [pubkey, contact] (pubkey)}
+                                    <Button variant="ghost" size="lg" class="w-full h-fit flex flex-row gap-3 px-6 items-center min-w-0 w-full py-2 focus-visible:outline-none focus-visible:ring-0" onclick={() => startChatWithContact(pubkey, contact)}>
+                                        <Avatar
+                                            pubkey={pubkey}
+                                            picture={contact.metadata?.picture}
+                                            pxSize={56}
+                                        />
+                                        <div class="flex flex-col gap-0 min-w-0 justify-start text-left truncate w-full">
+                                            <div class="truncate text-lg font-medium">
+                                                {nameFromMetadata(contact.metadata, pubkey)}
+                                            </div>
+                                            <div class="flex gap-4 items-center">
+                                                <FormattedNpub npub={npubFromPubkey(pubkey)} showCopy={false} />
+                                            </div>
+                                        </div>
+                                    </Button>
+                                {/each}
+                            {/if}
+                        </div>
+                    {/if}
+                </div>
+            </div>
+        {/if}
+    </div>
+</Sheet>
 
 <!-- Chat list -->
 {#if isLoading}

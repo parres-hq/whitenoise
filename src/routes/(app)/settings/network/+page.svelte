@@ -1,8 +1,8 @@
 <script lang="ts">
 import Header from "$lib/components/Header.svelte";
+import Sheet from "$lib/components/Sheet.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
 import Input from "$lib/components/ui/input/input.svelte";
-import * as Sheet from "$lib/components/ui/sheet";
 import { activeAccount, colorForRelayStatus } from "$lib/stores/accounts";
 import { readFromClipboard } from "$lib/utils/clipboard";
 import { invoke } from "@tauri-apps/api/core";
@@ -225,29 +225,27 @@ onMount(async () => {
 </main>
 
 <!-- Add Relay Sheet -->
-<Sheet.Root bind:open={showAddRelaySheet}>
-    <Sheet.Content side="bottom" class="pb-20">
-        <Sheet.Header class="text-left mb-8">
-            <Sheet.Title>{$t("network.addNewRelay")}</Sheet.Title>
-        </Sheet.Header>
-        <div class="flex flex-col gap-x-4 relative">
-            <div class="flex flex-col gap-0">
-                <div class="flex flex-row gap-2 pl-1">
-                    <Input
-                        bind:value={newRelayUrl}
-                        placeholder="wss://..."
-                        type="text"
-                        class="w-full focus-visible:ring-0"
-                    />
-                    <Button variant="outline" size="icon" onclick={handlePaste}>
-                        <Paste size={16} />
-                    </Button>
-                </div>
-                <div class="text-destructive text-sm mt-2 min-h-[1.25rem]">
-                    {urlError}
-                </div>
+<Sheet bind:open={showAddRelaySheet}>
+    {#snippet title()}{$t("network.addNewRelay")}{/snippet}
+    <div class="flex flex-col flex-1 mx-4 md:mx-8 pt-4">
+        <div class="flex flex-col relative">
+            <div class="flex flex-row gap-2">
+                <Input
+                    bind:value={newRelayUrl}
+                    placeholder="wss://..."
+                    type="text"
+                    class="w-full focus-visible:ring-0"
+                />
+                <Button variant="outline" size="icon" onclick={handlePaste}>
+                    <Paste size={16} />
+                </Button>
+            </div>
+            <div class="h-8 text-sm text-destructive ml-1">
+                {urlError}
             </div>
         </div>
-        <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit fixed bottom-0 left-0 right-0 mx-0 pt-4 pb-[calc(1rem+var(--sab))] md:mt-6">{$t("network.addRelay")}</Button>
-    </Sheet.Content>
-</Sheet.Root>
+    </div>
+    <div class="flex flex-col gap-2 w-full px-4 md:px-8 pb-8 bg-background">
+        <Button size="lg" onclick={addRelay} disabled={isLoading || !newRelayUrl} class="text-base font-medium w-full h-fit py-3 px-0 focus-visible:ring-0 disabled:cursor-not-allowed">{$t("network.addRelay")}</Button>
+    </div>
+</Sheet>

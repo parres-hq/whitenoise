@@ -22,6 +22,9 @@ dev-and:
 log-and:
     adb logcat | grep -E "RustStdoutStderr|Tauri\/Console|WebView"
 
+# Run the development server on iOS
+dev-ios:
+    bun tauri ios dev --host --open
 
 # Stop any running tmux "whitenoise-dev" session
 stop-tmux:
