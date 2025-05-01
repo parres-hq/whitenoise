@@ -35,4 +35,4 @@ RUN bun install
 COPY . .
 
 # Build the Tauri application
-CMD ["bash", "./linux_build.sh"]
+CMD ["bash", "./scripts/linux_build.sh"]

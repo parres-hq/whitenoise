@@ -10,7 +10,7 @@
         "preview": "vite preview",
         "biome": "biome check .",
         "test": "svelte-kit sync && bunx vitest run --coverage && cd src-tauri && cargo test --tests",
-        "check-migrations": "bash check_migrations.sh",
+        "check-migrations": "bash scripts/check_migrations.sh",
         "clippy": "cd src-tauri && cargo clippy --no-deps --workspace --all-features --all-targets -- -D warnings",
         "rustfmt": "cd src-tauri && cargo fmt -- --check",
         "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
