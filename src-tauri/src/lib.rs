@@ -150,10 +150,23 @@ fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     static GUARDS: Lazy<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = Lazy::new(|| Mutex::new(None));
     *GUARDS.lock().unwrap() = Some((file_guard, stdout_guard));
 
+    // Create a layer for stdout with ANSI color codes enabled
+    let stdout_layer = Layer::new()
+        .with_writer(non_blocking_stdout)
+        .with_ansi(true) // Enable ANSI color codes for stdout
+        .with_target(true); // Include target information in stdout logs
+
+    // Create a layer for file output with ANSI color codes explicitly disabled
+    let file_layer = Layer::new()
+        .with_writer(non_blocking_file)
+        .with_ansi(false) // Disable ANSI color codes for file output
+        .with_target(true); // Include target information in file logs
+
+    // Initialize the tracing subscriber registry
     Registry::default()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
-        .with(Layer::new().with_writer(non_blocking_stdout))
-        .with(Layer::new().with_writer(non_blocking_file))
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
 
     Ok(())
