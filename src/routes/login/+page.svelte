@@ -75,7 +75,7 @@ async function handleCreateAccount() {
         <h1 class="text-5xl font-semibold">White Noise</h1>
         <p class="text-xl mt-4 font-normal text-muted-foreground">{$t("login.slogan")}</p>
     </div>
-    <div class="flex flex-col gap-y-6 mt-16 mx-4">
+    <div class="flex flex-col gap-y-6 mt-10 mx-4">
         <LoginSheet {loading} bind:sheetVisible={sheetVisible}>
             <Button variant="secondary" class="h-fit text-base font-medium py-4" onclick={() => sheetVisible = true}>{$t("login.signInWithNostrKey")}</Button>
         </LoginSheet>

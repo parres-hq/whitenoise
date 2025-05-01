@@ -17,6 +17,7 @@ import { spring } from "svelte/motion";
  *   - "transform": Uses transform to move content (good for sheets)
  * - minKeyboardThreshold: Minimum height difference to consider keyboard visible (default: 100)
  * - adjustmentDelay: Delay before keyboard adjustments take effect (default: 350 for sheets, 0 for non-sheets)
+ * - disableKeyboardAvoidance: If true, the fallback logic in inputFocusHandler and inputBlurHandler should not set keyboardHeight or forceKeyboardHeight. Default to false for backward compatibility.
  */
 interface KeyboardAvoidingViewProps {
     class?: string;
@@ -26,6 +27,7 @@ interface KeyboardAvoidingViewProps {
     minKeyboardThreshold?: number;
     adjustmentDelay?: number;
     children: Snippet;
+    disableKeyboardAvoidance?: boolean;
 }
 
 let {
@@ -36,6 +38,7 @@ let {
     minKeyboardThreshold = 100,
     adjustmentDelay = withSheet ? 50 : 0,
     children,
+    disableKeyboardAvoidance = false,
 }: KeyboardAvoidingViewProps = $props();
 
 let container: HTMLElement;
@@ -46,6 +49,7 @@ let initialWindowHeight = $state(0);
 let previousViewportHeight = $state(0);
 let isAndroid = $state(false);
 let isIOS = $state(false);
+let forceKeyboardHeight = $state(false);
 
 // Spring animation for keyboard height
 // const keyboardSpring = spring(0, {
@@ -78,17 +82,24 @@ function setupViewportListeners() {
     if (!visualViewport) {
         // Fallback to resize events if visual viewport not available
         const resizeHandler = () => {
+            if (forceKeyboardHeight) {
+                console.log("[resizeHandler] Skipping because forceKeyboardHeight is true");
+                return;
+            }
             const currentHeight = window.innerHeight;
+            console.log("resizeHandler fired", { initialWindowHeight, currentHeight });
             if (initialWindowHeight - currentHeight > minKeyboardThreshold) {
                 const newKeyboardHeight = initialWindowHeight - currentHeight + bottomOffset;
                 setTimeout(() => {
-                    // keyboardSpring.set(newKeyboardHeight);
+                    keyboardHeight = newKeyboardHeight;
                     isKeyboardVisible = true;
+                    console.log("[resizeHandler] Setting keyboardHeight:", keyboardHeight);
                 }, adjustmentDelay);
             } else {
                 setTimeout(() => {
-                    // keyboardSpring.set(bottomOffset);
+                    keyboardHeight = bottomOffset;
                     isKeyboardVisible = false;
+                    console.log("[resizeHandler] Resetting keyboardHeight:", keyboardHeight);
                 }, adjustmentDelay);
             }
         };
@@ -103,10 +114,24 @@ function setupViewportListeners() {
     previousViewportHeight = visualViewport.height;
 
     const viewportHandler = () => {
+        if (forceKeyboardHeight) {
+            console.log("[viewportHandler] Skipping because forceKeyboardHeight is true");
+            return;
+        }
         // Current viewport height
         const viewportHeight = visualViewport.height;
         // Full window height
         const windowHeight = window.innerHeight;
+        console.log(
+            "viewportHandler fired",
+            JSON.stringify({
+                viewportHeight,
+                windowHeight,
+                previousViewportHeight,
+                isAndroid,
+                isIOS,
+            })
+        );
 
         // Device-specific adjustments
         if (isAndroid) {
@@ -123,8 +148,12 @@ function setupViewportListeners() {
                 const newKeyboardHeight =
                     Math.max(windowViewportDiff, heightDecrease) + bottomOffset;
                 setTimeout(() => {
-                    // keyboardSpring.set(newKeyboardHeight);
+                    keyboardHeight = newKeyboardHeight;
                     isKeyboardVisible = true;
+                    console.log(
+                        "[viewportHandler-Android] Setting keyboardHeight:",
+                        keyboardHeight
+                    );
                 }, adjustmentDelay);
             } else if (
                 viewportHeight > previousViewportHeight ||
@@ -132,8 +161,12 @@ function setupViewportListeners() {
             ) {
                 // Keyboard likely disappeared
                 setTimeout(() => {
-                    // keyboardSpring.set(bottomOffset);
+                    keyboardHeight = bottomOffset;
                     isKeyboardVisible = false;
+                    console.log(
+                        "[viewportHandler-Android] Resetting keyboardHeight:",
+                        keyboardHeight
+                    );
                 }, adjustmentDelay);
             }
 
@@ -147,13 +180,15 @@ function setupViewportListeners() {
                 const newKeyboardHeight =
                     windowHeight - viewportHeight + bottomOffset + iosExtraOffset;
                 setTimeout(() => {
-                    // keyboardSpring.set(newKeyboardHeight);
+                    keyboardHeight = newKeyboardHeight;
                     isKeyboardVisible = true;
+                    console.log("[viewportHandler-iOS] Setting keyboardHeight:", keyboardHeight);
                 }, adjustmentDelay);
             } else {
                 setTimeout(() => {
-                    // keyboardSpring.set(bottomOffset);
+                    keyboardHeight = bottomOffset;
                     isKeyboardVisible = false;
+                    console.log("[viewportHandler-iOS] Resetting keyboardHeight:", keyboardHeight);
                 }, adjustmentDelay);
             }
         }
@@ -173,13 +208,28 @@ function setupViewportListeners() {
         }
         // Slight delay to ensure keyboard has appeared
         setTimeout(viewportHandler, 300);
+        // Fallback: force keyboardHeight for Android/webview
+        if (disableKeyboardAvoidance) {
+            console.log("[inputFocusHandler] Keyboard avoidance disabled by prop.");
+            return;
+        }
+        keyboardHeight = 300;
+        isKeyboardVisible = true;
+        forceKeyboardHeight = true;
+        console.log("[inputFocusHandler] Forcing keyboardHeight:", keyboardHeight);
     };
 
     const inputBlurHandler = () => {
+        if (disableKeyboardAvoidance) {
+            console.log("[inputBlurHandler] Keyboard avoidance disabled by prop.");
+            return;
+        }
         // Slight delay to ensure keyboard has disappeared
         setTimeout(() => {
-            // keyboardSpring.set(bottomOffset);
+            keyboardHeight = bottomOffset;
             isKeyboardVisible = false;
+            forceKeyboardHeight = false;
+            console.log("[inputBlurHandler] Resetting keyboardHeight:", keyboardHeight);
         }, 100);
     };
 

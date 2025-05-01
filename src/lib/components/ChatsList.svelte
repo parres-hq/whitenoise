@@ -238,23 +238,6 @@ $effect(() => {
             <Avatar pubkey={$activeAccount!.pubkey} />
         </a>
         <div class="flex flex-row items-center gap-4 md:gap-2">
-            <!-- <Sheet.Root>
-                <Sheet.Trigger>
-                    <Button variant="link" size="icon" class="p-2 shrink-0 text-primary-foreground">
-                        <Search size={24} class="shrink-0 !h-6 !w-6" />
-                    </Button>
-                </Sheet.Trigger>
-                <Sheet.Content side="bottom" class="pb-0 px-0 h-[90%]">
-                    <Sheet.Header class="text-left mb-6 px-6">
-                        <Sheet.Title>{$t("chats.search")}</Sheet.Title>
-                    </Sheet.Header>
-                    <div class="flex flex-col gap-2 px-6">
-                        <Input type="search"  placeholder={$t("chats.searchPlaceholder")} class="focus-visible:ring-0" />
-                    </div>
-                    <div class="flex flex-col gap-2 px-6 mt-6 text-destructive">{$t("shared.notImplementedYet")}</div>
-                </Sheet.Content>
-            </Sheet.Root> -->
-
             <!-- New chat sheet trigger -->
             <Button variant="link" size="icon" class="p-2 shrink-0 text-primary-foreground" onclick={() => newChatSheetOpen = true}>
                 <AddLarge size={24} class="shrink-0 !h-6 !w-6" />
@@ -263,7 +246,7 @@ $effect(() => {
     </div>
 </Header>
 
-<Sheet bind:open={newChatSheetOpen} class="h-[90svh]">
+<Sheet bind:open={newChatSheetOpen} class="h-[90svh]" disableKeyboardAvoidance={true}>
     {#snippet title()}
         {#if showStartChatView}
             <div class="flex flex-row items-center gap-2">
@@ -301,7 +284,7 @@ $effect(() => {
                 </div>
             </div>
             <div class="flex flex-col flex-1 overflow-hidden">
-                <div class="flex flex-col gap-2 overflow-y-auto flex-1">
+                <div class="flex flex-col gap-2 overflow-y-auto flex-1 bg-background">
                     {#if contactsLoading}
                         <div class="flex justify-center items-center flex-1 py-10">
                             <Loader size={40} fullscreen={false} />

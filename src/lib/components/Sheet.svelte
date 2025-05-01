@@ -11,6 +11,11 @@ interface SheetProps {
     children: Snippet;
     class?: string;
     style?: string;
+    /**
+     * If true, disables keyboard avoidance (sheet will not move up when keyboard appears).
+     * Useful for tall/scrolling sheets.
+     */
+    disableKeyboardAvoidance?: boolean;
 }
 
 let {
@@ -20,6 +25,7 @@ let {
     children,
     class: sheetClass = "",
     style: sheetStyle = "",
+    disableKeyboardAvoidance = false,
 }: SheetProps = $props();
 
 let isClosing = $state(false);
@@ -132,41 +138,42 @@ $effect(() => {
         aria-modal="true"
         role="dialog"
     >
-        <div
-            class={`w-full bg-background shadow-2xl pointer-events-auto flex flex-col max-h-[85svh] border-t border-secondary ${isClosing ? 'animate-slideDown' : 'animate-slideUp'} ${sheetClass}`}
-            style={`transform: translateY(${dragOffset}px); transition: ${isDragging ? 'none' : 'transform 0.2s cubic-bezier(0.4,0,0.2,1)'};${sheetStyle ? ' ' + sheetStyle : ''}`}
-            role="document"
-            tabindex="-1"
-        >
-            <div class="w-full py-2" onmousedown={onDragStart} ontouchstart={onDragStart} role="button" tabindex="0">
-                <div class="w-12 h-1.5 bg-secondary rounded-full mx-auto mt-3 mb-2 cursor-grab block sm:hidden"></div>
-            </div>
-            {#if title || description}
-                <div class="pt-4 pb-4 flex items-start justify-between mx-4 md:mx-8 shrink-0">
-                    <div class="flex-1 text-left">
-                        {#if title}
-                            <h2 class="text-2xl font-normal">{@render title()}</h2>
-                        {/if}
-                        {#if description}
-                            <p class="text-base text-muted-foreground mt-2">{@render description()}</p>
-                        {/if}
-                    </div>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Close"
-                        onclick={closeSheet}
-                    >
-                        <CloseLarge size={32}/>
-                    </Button>
+        <KeyboardAvoidingView withSheet={true} strategy="transform" disableKeyboardAvoidance={disableKeyboardAvoidance}>
+            <div
+                class={`w-full bg-background shadow-2xl pointer-events-auto flex flex-col max-h-[85svh] border-t border-secondary ${isClosing ? 'animate-slideDown' : 'animate-slideUp'} ${sheetClass}`}
+                style={`transform: translateY(${dragOffset}px); transition: ${isDragging ? 'none' : 'transform 0.2s cubic-bezier(0.4,0,0.2,1)'};${sheetStyle ? ' ' + sheetStyle : ''}`}
+                role="document"
+                tabindex="-1"
+            >
+                <div class="w-full py-2" onmousedown={onDragStart} ontouchstart={onDragStart} role="button" tabindex="0">
+                    <div class="w-12 h-1.5 bg-secondary rounded-full mx-auto mt-3 mb-2 cursor-grab block sm:hidden"></div>
                 </div>
-            {/if}
-            <KeyboardAvoidingView withSheet={true} strategy="transform" class="flex flex-col flex-1 h-full overflow-y-auto">
+                {#if title || description}
+                    <div class="pt-4 pb-4 flex items-start justify-between mx-4 md:mx-8 shrink-0">
+                        <div class="flex-1 text-left">
+                            {#if title}
+                                <h2 class="text-2xl font-normal">{@render title()}</h2>
+                            {/if}
+                            {#if description}
+                                <p class="text-base text-muted-foreground mt-2">{@render description()}</p>
+                            {/if}
+                        </div>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Close"
+                            onclick={closeSheet}
+                        >
+                            <CloseLarge size={32}/>
+                        </Button>
+                    </div>
+                {/if}
+
                 <div class="flex-1">
                     {@render children()}
                 </div>
-            </KeyboardAvoidingView>
-        </div>
+            </div>
+        </KeyboardAvoidingView>
     </div>
 {/if}
 

@@ -63,7 +63,7 @@ $effect(() => {
         <span class="text-sm text-muted-foreground">{inviteDescription}</span>
     </div>
 </Button>
-<Sheet bind:open={showSheet} class="h-[90svh]">
+<Sheet bind:open={showSheet} class="h-[90svh]" disableKeyboardAvoidance={true}>
     {#snippet title()}{$t("chats.invitation")}{/snippet}
     <div class="pb-0 px-0">
         <InviteDetail {welcome} bind:enrichedInviter bind:showSheet />
