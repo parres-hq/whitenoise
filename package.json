@@ -31,7 +31,7 @@
         "@tauri-apps/plugin-shell": "^2.2.1",
         "@types/qrcode": "^1.5.5",
         "carbon-icons-svelte": "^13.3.0",
-        "mode-watcher": "^1.0.2",
+        "mode-watcher": "0.5.1",
         "nostr-tools": "^2.12.0",
         "paneforge": "^0.0.6",
         "qrcode": "^1.5.4",
