@@ -1,3 +1,4 @@
+import type { MediaAttachment } from "$lib/types/media";
 import type {
     MessageWithTokens,
     MlsGroupId,
@@ -61,6 +62,7 @@ export type ChatMessage = {
     isMine: boolean;
     event: NEvent;
     tokens: SerializableToken[];
+    mediaAttachments: MediaAttachment[];
 };
 
 /**
