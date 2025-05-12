@@ -61,6 +61,7 @@ export type ChatMessage = {
     isMine: boolean;
     event: NEvent;
     tokens: SerializableToken[];
+    mediaAttachments: MediaAttachment[];
 };
 
 /**
@@ -139,6 +140,21 @@ export type DeletionMessage = {
     pubkey: string;
     targetId: string;
     event: NEvent;
+};
+
+/**
+ * Represents a media attachment in a message
+ * @property {string} url - The URL to download the file
+ * @property {string} mimeType - The MIME type of the file
+ * @property {string} [blurhash] - The blurhash to show while the file is being loaded
+ * @property {string} [dim] - The dimensions of the file in the form <width>x<height>
+ */
+export type MediaAttachment = {
+    url: string;
+    type: string;
+    blurhashSvg?: string;
+    dim?: string;
+    alt?: string;
 };
 
 /**

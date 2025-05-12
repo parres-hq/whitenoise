@@ -43,3 +43,7 @@ export function findPreimage(event: NEvent): string | undefined {
 export function findReplyToId(event: NEvent): string | undefined {
     return event.tags.find((t) => t[0] === "q")?.[1];
 }
+
+export function findImetaTags(event: NEvent): string[][] {
+    return event.tags.filter((t) => t[0] === "imeta");
+}
