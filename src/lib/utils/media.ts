@@ -3,6 +3,7 @@ import { blurhashToSVG } from "./blurhash";
 import { findImetaTags } from "./tags";
 
 export const ALLOWED_MIME_TYPES = ["image/*", "video/*", "audio/*", "application/pdf"];
+export const MAX_VISIBLE_MEDIA_ATTACHMENTS = 3;
 
 export function getMimeType(filePath: string): string {
     const extension = filePath.split(".").pop()?.toLowerCase();
@@ -44,4 +45,28 @@ function mediaAttachmentFromTag(tag: string[]): MediaAttachment {
 export function findMediaAttachments(message: Message): MediaAttachment[] {
     const imetaTags = findImetaTags(message.event);
     return imetaTags.map((tag) => mediaAttachmentFromTag(tag));
+}
+
+export function calculateGridColumns(visibleCount: number, hasHidden: boolean): number {
+    if (visibleCount === 1) return 1;
+
+    const visibleSquares = hasHidden ? MAX_VISIBLE_MEDIA_ATTACHMENTS : visibleCount;
+
+    return visibleSquares < 6 && visibleSquares % 2 === 0 ? 2 : 3;
+}
+
+export function calculateVisibleAttachments(attachments: MediaAttachment[]) {
+    const visibleCount =
+        attachments.length > MAX_VISIBLE_MEDIA_ATTACHMENTS
+            ? MAX_VISIBLE_MEDIA_ATTACHMENTS - 1
+            : attachments.length;
+
+    const visible = attachments.slice(0, visibleCount);
+    const hiddenCount = attachments.length - visibleCount;
+
+    return {
+        visible,
+        hiddenCount,
+        hasHidden: hiddenCount > 0,
+    };
 }
