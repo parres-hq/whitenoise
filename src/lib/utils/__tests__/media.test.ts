@@ -1,6 +1,12 @@
 import type { Message } from "$lib/types/chat";
 import { describe, expect, it } from "vitest";
-import { findMediaAttachments, getMimeType, getTypeFromMimeType } from "../media";
+import {
+    calculateGridColumns,
+    calculateVisibleAttachments,
+    findMediaAttachments,
+    getMimeType,
+    getTypeFromMimeType,
+} from "../media";
 
 describe("getMimeType", () => {
     it("returns image mime type for jpg", () => {
@@ -99,5 +105,70 @@ describe("findMediaAttachments", () => {
 
         const attachments = findMediaAttachments(message);
         expect(attachments).toHaveLength(0);
+    });
+
+    describe("calculateGridColumns", () => {
+        it("should return 1 column for single visible attachment", () => {
+            expect(calculateGridColumns(1, false)).toBe(1);
+        });
+
+        it("should return 2 columns for even number of visible attachments less than 6", () => {
+            expect(calculateGridColumns(2, false)).toBe(2);
+            expect(calculateGridColumns(4, false)).toBe(2);
+        });
+
+        it("should return 3 columns for odd number of visible attachments less than 6", () => {
+            expect(calculateGridColumns(3, false)).toBe(3);
+            expect(calculateGridColumns(5, false)).toBe(3);
+        });
+
+        it("should return 3 columns when there are hidden attachments", () => {
+            expect(calculateGridColumns(2, true)).toBe(3);
+            expect(calculateGridColumns(4, true)).toBe(3);
+        });
+    });
+
+    describe("calculateVisibleAttachments", () => {
+        const mockAttachments = [
+            { url: "url1", type: "image" },
+            { url: "url2", type: "image" },
+            { url: "url3", type: "image" },
+            { url: "url4", type: "image" },
+            { url: "url5", type: "image" },
+        ];
+
+        it("should show all attachments when count is less than max", () => {
+            const attachments = mockAttachments.slice(0, 2);
+            const result = calculateVisibleAttachments(attachments);
+
+            expect(result.visible).toHaveLength(2);
+            expect(result.hiddenCount).toBe(0);
+            expect(result.hasHidden).toBe(false);
+        });
+
+        it("should show max - 1 when count exceeds max", () => {
+            const result = calculateVisibleAttachments(mockAttachments);
+
+            expect(result.visible).toHaveLength(2);
+            expect(result.hiddenCount).toBe(3);
+            expect(result.hasHidden).toBe(true);
+        });
+
+        it("should handle empty attachments array", () => {
+            const result = calculateVisibleAttachments([]);
+
+            expect(result.visible).toHaveLength(0);
+            expect(result.hiddenCount).toBe(0);
+            expect(result.hasHidden).toBe(false);
+        });
+
+        it("should handle exactly max attachments", () => {
+            const attachments = mockAttachments.slice(0, 3);
+            const result = calculateVisibleAttachments(attachments);
+
+            expect(result.visible).toHaveLength(3);
+            expect(result.hiddenCount).toBe(0);
+            expect(result.hasHidden).toBe(false);
+        });
     });
 });

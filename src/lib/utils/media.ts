@@ -5,6 +5,7 @@ import { blurhashToSVG } from "./blurhash";
 import { findImetaTags } from "./tags";
 
 export const ALLOWED_MIME_TYPES = ["image/*", "video/*", "audio/*", "application/pdf"];
+export const MAX_VISIBLE_MEDIA_ATTACHMENTS = 3;
 
 export function getMimeType(filePath: string): string {
     const extension = filePath.split(".").pop()?.toLowerCase();
