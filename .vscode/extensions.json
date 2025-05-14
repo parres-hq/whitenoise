@@ -1,10 +1,6 @@
 {
     "recommendations": [
-        "svelte.svelte-vscode",
-        "tauri-apps.tauri-vscode",
-        "biomejs.biome",
         "gruntfuggly.todo-tree",
-        "chanzhaoyu.svelte-5-snippets",
         "github.vscode-github-actions",
         "tamasfe.even-better-toml"
     ]
