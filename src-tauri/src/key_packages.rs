@@ -184,7 +184,7 @@ pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()>
         .collect();
 
     let mut encoded_key_package: Option<String> = None;
-    let mut tags: Option<[Tag; 5]> = None;
+    let mut tags: Option<[Tag; 4]> = None;
     tracing::debug!(target: "whitenoise::key_packages::publish_key_package", "Attempting to acquire nostr_mls lock");
     let nostr_mls_guard = match tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -307,7 +307,7 @@ pub async fn delete_key_package_from_relays(
                     .map_err(KeyPackageError::NostrMlsError)?;
 
                 nostr_mls
-                    .delete_key_package_from_storage(key_package)
+                    .delete_key_package_from_storage(&key_package)
                     .map_err(KeyPackageError::NostrMlsError)?;
             }
 

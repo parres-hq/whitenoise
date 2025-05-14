@@ -123,11 +123,12 @@ pub async fn create_group(
                 group_name,
                 description,
                 &creator_pubkey,
-                member_pubkeys,
+                &member_pubkeys,
                 member_key_packages
                     .iter()
                     .map(|kp| kp.key_package.clone())
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .as_slice(),
                 admin_pubkeys,
                 group_relays,
             )

@@ -5,11 +5,7 @@ import GroupAvatar from "$lib/components/GroupAvatar.svelte";
 import Header from "$lib/components/Header.svelte";
 import Name from "$lib/components/Name.svelte";
 import { activeAccount, colorForRelayStatus, fetchRelays, relays } from "$lib/stores/accounts";
-import {
-    type NostrMlsGroup,
-    NostrMlsGroupType,
-    type NostrMlsGroupWithRelays,
-} from "$lib/types/nostr";
+import { type NGroup, type NGroupWithRelays, NostrMlsGroupType } from "$lib/types/nostr";
 import type { EnrichedContact, NEvent } from "$lib/types/nostr";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
@@ -22,8 +18,8 @@ let {
     showInfoPage = $bindable(false),
 }: { selectedChatId?: string; showInfoPage?: boolean } = $props();
 
-let groupWithRelays: NostrMlsGroupWithRelays | undefined = $state(undefined);
-let group: NostrMlsGroup | undefined = $state(undefined);
+let groupWithRelays: NGroupWithRelays | undefined = $state(undefined);
+let group: NGroup | undefined = $state(undefined);
 let groupRelays: string[] = $state([]);
 let groupRelaysWithStatus: Record<string, string> = $state({});
 let counterpartyPubkey: string | undefined = $state(undefined);
@@ -31,7 +27,6 @@ let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
 let groupName = $state("");
 let members: string[] = $state([]);
 let admins: string[] = $state([]);
-let rotatingKey = $state(false);
 
 $effect(() => {
     // Check if selectedChatId is in URL query params
@@ -79,7 +74,7 @@ async function loadGroup() {
         invoke("get_group_admins", { groupId }),
     ]);
     let [groupResponse, membersResponse, adminsResponse] = await groupResponses;
-    groupWithRelays = groupResponse as NostrMlsGroupWithRelays;
+    groupWithRelays = groupResponse as NGroupWithRelays;
     group = groupWithRelays.group;
     groupRelays = groupWithRelays.relays;
 
@@ -168,13 +163,5 @@ function handleBack() {
                 {/each}
             </ul>
         </div>
-        <!-- <h2 class="section-title">Actions</h2>
-        <div class="section">
-            <div class="flex flex-col items-center gap-0">
-                <button class="flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={rotateKey}><Key size={24} class="transition-all duration-300 ease-in-out {rotatingKey ? 'animate-spin': ''}" id="rotate-key-icon" />Rotate Your Key</button>
-                <button class="text-red-500 flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={leaveGroup}><SignOut size={24} />Leave Group</button>
-                <button class="text-red-500 flex flex-row items-center gap-4 py-3 w-full border-b border-gray-700 last:border-b-0" onclick={reportSpam}><WarningOctagon size={24} />Report Spam</button>
-            </div>
-        </div> -->
     </div>
 {/if}

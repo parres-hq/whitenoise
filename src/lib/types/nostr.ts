@@ -71,6 +71,11 @@ export type NGroup = {
     state: NostrMlsGroupState;
 };
 
+export type NGroupWithRelays = {
+    group: NGroup;
+    relays: string[];
+};
+
 export type MlsGroupId = {
     value: { vec: Uint8Array };
 };
