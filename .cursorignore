@@ -3,8 +3,4 @@
 .env
 .env.*
 !.env.example
-coverage/
-build/
-.svelte-kit/
-node_modules/
 

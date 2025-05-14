@@ -1,21 +1,10 @@
 # White Noise
 
-This project is called White Noise, a secure messenger app written in Rust and TypeScript. It implements secure direct and group messaging using [Messaging Layer Security protocol](https://www.rfc-editor.org/rfc/rfc9420.txt) via the [OpenMLS implementation library](https://www.github.com/openmls/openmls) and using the [Nostr Protocol](https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master/README.md) as the delivery/transport mechanism. White Noise uses several of the [rust-nostr](https://github.com/rust-nostr/nostr) rust crates to implement Nostr functionality in the app.
+This project is called White Noise, it's a rust crate that implements the backend for a secure messenger. It implements secure direct and group messaging using [Messaging Layer Security protocol](https://www.rfc-editor.org/rfc/rfc9420.txt) via the [OpenMLS implementation library](https://www.github.com/openmls/openmls) and using the [Nostr Protocol](https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master/README.md) as the delivery/transport mechanism. White Noise uses several of the [rust-nostr](https://github.com/rust-nostr/nostr) rust crates to implement Nostr functionality in the app.
 
 ## Project Structure
 
-White Noise is a [Tauri 2](https://tauri.app/) app that uses Rust on the backend and [SvelteKit](https://svelte.dev/) (with TypeScript) for the front-end. The project is organanized like a standard Tauri app, with `/src` being for the front-end code and `/src-tauri` being the backend code. The app is set up to build for Android, iOS, Linux desktop, & Macos desktop. You can find all the code for the mobile apps in the `/src-tauri/gen/apple` and `/src-tauri/gen/android` directories.
-
-## Tauri, Svelte, Bun, Biome, shadcn-svelte
-
-White Noise uses Tauri 2.x and Svelte 5.x (always use Svelte's new runes mode).
-
-Dependencies on the backend are managed with Cargo. We use clippy and rustfmt to ensure standardized formatting and linting in Rust.
-Dependencies on the front-end are managed with [Bun](https://bun.sh). You can use the `bun add` command to add any `npm` dependency. Most of the Bun commands are analogous or exactly the same as the `npm` commands of the same name. We use [biome.js](https://biomejs.dev/) to manage formatting and linting in JS/TS.
-
-You'll find useful scripts for running tests, formatting, linting, and other things in the `/package.json` file.
-
-We are in the middle of transitioning to using [shadcn-svelte](https://shadcn-svelte.com) components. Right now, you'll find a mix of custom components and newer shadcn based components. When you need to create a new component, please ask about whether to create (or replace) something custom with a shadcn component before making changes.
+White Noise is a rust library crate. The project is organanized like a standard rust library crate.
 
 ## Nostr
 
@@ -41,4 +30,4 @@ The goal of White Noise is to provide a secure messenger that allows groups (fro
 
 ## Testing Changes
 
-After making changes, please run `bun run check-all` to check for formatting & linting errors and run tests. If there are any errors, please try to fix them. Please don't try and run the app to check that things are working.
+You should always run tests after making a set of changes to ensure that you've not broken anything. Run tests with `cargo test`.
