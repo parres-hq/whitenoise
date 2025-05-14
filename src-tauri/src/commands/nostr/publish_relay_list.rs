@@ -1,14 +1,10 @@
 use crate::accounts::Account;
 use crate::relays::RelayType;
-use crate::whitenoise::Whitenoise;
+
 use nostr_sdk::prelude::*;
 
-#[tauri::command]
-pub async fn publish_relay_list(
-    relays: Vec<String>,
-    kind: u64,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<(), String> {
+
+pub async fn publish_relay_list(relays: Vec<String>, kind: u64) -> Result<(), String> {
     let signer = wn.nostr.client.signer().await.map_err(|e| e.to_string())?;
 
     let mut tags: Vec<Tag> = Vec::new();
@@ -36,20 +32,20 @@ pub async fn publish_relay_list(
         .await
         .map_err(|e| e.to_string())?;
 
-    let active_account = Account::get_active(wn.clone())
+    let active_account = Account::get_active()
         .await
         .map_err(|e| e.to_string())?;
 
     match kind {
         10050 => {
             active_account
-                .update_relays(RelayType::Inbox, &relays, wn.clone())
+                .update_relays(RelayType::Inbox, &relays)
                 .await
                 .map_err(|e| format!("Failed to update relays: {}", e))?;
         }
         10051 => {
             active_account
-                .update_relays(RelayType::KeyPackage, &relays, wn.clone())
+                .update_relays(RelayType::KeyPackage, &relays)
                 .await
                 .map_err(|e| format!("Failed to update relays: {}", e))?;
         }

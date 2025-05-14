@@ -4,7 +4,6 @@
 
 use nostr_mls::prelude::*;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -14,7 +13,7 @@ use crate::key_packages;
 use crate::nostr_manager::NostrManagerError;
 use crate::relays::RelayType;
 use crate::secrets_store;
-use crate::Whitenoise;
+
 
 #[derive(Error, Debug)]
 pub enum EventProcessorError {
@@ -63,14 +62,13 @@ pub struct MlsMessageReceivedEvent {
 }
 
 impl EventProcessor {
-    pub fn new(app_handle: AppHandle) -> Self {
+    pub fn new() -> Self {
         tracing::debug!(
             target: "whitenoise::nostr_manager::event_processor",
             "Creating new event processor"
         );
         let (sender, receiver) = mpsc::channel(500);
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
-        let app_handle_clone = app_handle;
 
         // Spawn the processing loop
         tokio::spawn(async move {
@@ -78,7 +76,7 @@ impl EventProcessor {
                 target: "whitenoise::nostr_manager::event_processor",
                 "Starting event processor loop"
             );
-            Self::process_events(receiver, shutdown_rx, app_handle_clone).await;
+            Self::process_events(receiver, shutdown_rx).await;
             tracing::debug!(
                 target: "whitenoise::nostr_manager::event_processor",
                 "Event processor loop ended"
@@ -120,11 +118,7 @@ impl EventProcessor {
         }
     }
 
-    async fn process_events(
-        mut receiver: Receiver<ProcessableEvent>,
-        mut shutdown: Receiver<()>,
-        app_handle: AppHandle,
-    ) {
+    async fn process_events(mut receiver: Receiver<ProcessableEvent>, mut shutdown: Receiver<()>) {
         tracing::debug!(
             target: "whitenoise::nostr_manager::event_processor",
             "Entering process_events loop"
@@ -138,7 +132,7 @@ impl EventProcessor {
                     );
                     match event {
                         ProcessableEvent::GiftWrap(event) => {
-                            if let Err(e) = Self::process_giftwrap(&app_handle, event).await {
+                            if let Err(e) = Self::process_giftwrap(event).await {
                                 tracing::error!(
                                     target: "whitenoise::nostr_manager::event_processor",
                                     "Error processing giftwrap: {}",
@@ -147,7 +141,7 @@ impl EventProcessor {
                             }
                         }
                         ProcessableEvent::MlsMessage(event) => {
-                            if let Err(e) = Self::process_mls_message(&app_handle, event).await {
+                            if let Err(e) = Self::process_mls_message(event).await {
                                 tracing::error!(
                                     target: "whitenoise::nostr_manager::event_processor",
                                     "Error processing MLS message: {}",
@@ -199,15 +193,13 @@ impl EventProcessor {
         }
     }
 
-    async fn process_giftwrap(app_handle: &AppHandle, event: Event) -> Result<()> {
-        let wn = app_handle.state::<Whitenoise>();
-        let active_account = Account::get_active(wn.clone()).await?;
-        let keys = active_account.keys(wn.clone())?;
+    async fn process_giftwrap(event: Event) -> Result<()> {
+        let active_account = Account::get_active().await?;
+        let keys = active_account.keys()?;
         if let Ok(unwrapped) = extract_rumor(&keys, &event).await {
             match unwrapped.rumor.kind {
                 Kind::MlsWelcome => {
-                    Self::process_welcome(app_handle, active_account, event, unwrapped.rumor)
-                        .await?;
+                    Self::process_welcome(active_account, event, unwrapped.rumor).await?;
                 }
                 Kind::PrivateDirectMessage => {
                     tracing::debug!(
@@ -229,12 +221,10 @@ impl EventProcessor {
     }
 
     async fn process_welcome(
-        app_handle: &AppHandle,
         account: Account,
         outer_event: Event,
         rumor_event: UnsignedEvent,
     ) -> Result<welcome_types::Welcome> {
-        let wn = app_handle.state::<Whitenoise>();
         let welcome: welcome_types::Welcome;
         tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Attempting to acquire nostr_mls lock");
         {
@@ -284,17 +274,13 @@ impl EventProcessor {
             })
             .and_then(|tag| tag.content());
 
-        app_handle
-            .emit("mls_welcome_processed", &welcome)
-            .map_err(NostrManagerError::TauriError)?;
-
         let key_package_relays: Vec<String> = if cfg!(dev) {
             vec![
                 "ws://localhost:8080".to_string(),
                 "ws://localhost:7777".to_string(),
             ]
         } else {
-            account.relays(RelayType::KeyPackage, wn.clone()).await?
+            account.relays(RelayType::KeyPackage).await?
         };
 
         if let Some(key_package_event_id) = key_package_event_id {
@@ -302,12 +288,11 @@ impl EventProcessor {
                 &EventId::parse(key_package_event_id).unwrap(),
                 &key_package_relays,
                 false, // For now we don't want to delete the key packages from MLS storage
-                wn.clone(),
             )
             .await?;
             tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Deleted used key package from relays");
 
-            key_packages::publish_key_package(wn.clone()).await?;
+            key_packages::publish_key_package().await?;
             tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Published new key package");
         }
 
@@ -317,7 +302,6 @@ impl EventProcessor {
     // TODO: Implement private direct message processing, maybe...
     #[allow(dead_code)]
     async fn process_private_direct_message(
-        _app_handle: &AppHandle,
         _outer_event: Event,
         inner_event: UnsignedEvent,
     ) -> Result<()> {
@@ -329,12 +313,7 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn process_mls_message(
-        app_handle: &AppHandle,
-        event: Event,
-    ) -> Result<Option<message_types::Message>> {
-        let wn = app_handle.state::<Whitenoise>();
-
+    async fn process_mls_message(event: Event) -> Result<Option<message_types::Message>> {
         tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Attempting to acquire nostr_mls lock");
         let nostr_mls_guard = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -358,9 +337,6 @@ impl EventProcessor {
                 Ok(message) => {
                     // TODO: Need to handle proposals and commits
                     tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Processed MLS message");
-                    app_handle
-                        .emit("mls_message_received", &message)
-                        .map_err(NostrManagerError::TauriError)?;
                     Ok(message)
                 }
                 Err(e) => {

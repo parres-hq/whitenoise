@@ -2,7 +2,7 @@ use nostr_mls::prelude::*;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use crate::whitenoise::Whitenoise;
+
 
 /// Gets a specific invite by its ID.
 ///
@@ -13,11 +13,7 @@ use crate::whitenoise::Whitenoise;
 /// # Returns
 /// * `Ok(Invite)` if the invite was found
 /// * `Err(String)` if there was an error retrieving the invite or it wasn't found
-#[tauri::command]
-pub async fn get_welcome(
-    event_id: String,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<welcome_types::Welcome, String> {
+pub async fn get_welcome(event_id: String) -> Result<welcome_types::Welcome, String> {
     let event_id = EventId::parse(&event_id).map_err(|e| e.to_string())?;
     tracing::debug!(target: "whitenoise::commands::welcomes::get_welcome", "Attempting to acquire nostr_mls lock");
     let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {

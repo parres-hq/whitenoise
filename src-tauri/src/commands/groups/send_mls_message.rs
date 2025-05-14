@@ -7,22 +7,19 @@ use tokio::time::timeout;
 use lightning_invoice::SignedRawBolt11Invoice;
 use nostr_mls::prelude::*;
 use nostr_sdk::prelude::*;
-use tauri::Emitter;
 
 use super::MessageWithTokens;
 use crate::media::{add_media_file, FileUpload};
 use crate::nostr_manager::parser::parse;
-use crate::whitenoise::Whitenoise;
 
-#[tauri::command]
+
+
 pub async fn send_mls_message(
     group: group_types::Group,
     message: String,
     kind: u16,
     tags: Option<Vec<Tag>>,
     uploaded_files: Option<Vec<FileUpload>>,
-    wn: tauri::State<'_, Whitenoise>,
-    app_handle: tauri::AppHandle,
 ) -> Result<MessageWithTokens, String> {
     let nostr_keys = wn.nostr.client.signer().await.map_err(|e| e.to_string())?;
     let mut final_tags = tags.unwrap_or_default();
@@ -37,7 +34,7 @@ pub async fn send_mls_message(
 
         // Process files sequentially
         for file in uploaded_files {
-            match add_media_file(&group, file, wn.clone()).await {
+            match add_media_file(&group, file).await {
                 Ok(media) => uploaded_media.push(media),
                 Err(e) => {
                     tracing::error!(
@@ -149,9 +146,6 @@ pub async fn send_mls_message(
 
     if let Some(message) = message {
         let tokens = parse(&message.content);
-        app_handle
-            .emit("mls_message_sent", (&group, &message))
-            .expect("Couldn't emit event");
         Ok(MessageWithTokens { message, tokens })
     } else {
         Err("Message not found".to_string())

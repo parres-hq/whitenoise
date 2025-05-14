@@ -1,8 +1,7 @@
 use nostr_mls::prelude::*;
-use tauri::Emitter;
 
 use crate::media::{add_media_file, FileUpload, UploadedMedia};
-use crate::whitenoise::Whitenoise;
+
 
 /// Maximum number of retry attempts for file upload operations
 const MAX_RETRIES: u8 = 3;
@@ -36,29 +35,17 @@ const MAX_RETRIES: u8 = 3;
 /// * `file_upload_success` - When the file is successfully uploaded
 /// * `file_upload_retry` - When a retry attempt is made
 /// * `file_upload_error` - When all retry attempts fail
-#[tauri::command]
 pub async fn upload_file(
     group: group_types::Group,
     file: FileUpload,
-    wn: tauri::State<'_, Whitenoise>,
-    app_handle: tauri::AppHandle,
 ) -> Result<UploadedMedia, String> {
     let mut retries = 0;
     let mut last_error = None;
 
     while retries < MAX_RETRIES {
-        match add_media_file(&group, file.clone(), wn.clone()).await {
+        match add_media_file(&group, file.clone()).await {
             Ok(media) => {
                 // Emit success event
-                app_handle
-                    .emit(
-                        "file_upload_success",
-                        (
-                            hex::encode(group.mls_group_id.as_slice()),
-                            media.blob_descriptor.url.clone(),
-                        ),
-                    )
-                    .expect("Couldn't emit event");
                 return Ok(media);
             }
             Err(e) => {
@@ -66,16 +53,6 @@ pub async fn upload_file(
                 retries += 1;
                 if retries < MAX_RETRIES {
                     // Emit retry event
-                    app_handle
-                        .emit(
-                            "file_upload_retry",
-                            (
-                                hex::encode(group.mls_group_id.as_slice()),
-                                retries,
-                                MAX_RETRIES,
-                            ),
-                        )
-                        .expect("Couldn't emit event");
                 }
             }
         }
@@ -85,12 +62,6 @@ pub async fn upload_file(
     let error = last_error.unwrap_or_else(|| "Unknown error".to_string());
 
     // Emit error event
-    app_handle
-        .emit(
-            "file_upload_error",
-            (hex::encode(group.mls_group_id.as_slice()), error.clone()),
-        )
-        .expect("Couldn't emit event");
 
     Err(error)
 }

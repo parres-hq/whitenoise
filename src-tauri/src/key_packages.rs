@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::accounts::{Account, AccountError};
 use crate::nostr_manager;
 use crate::relays::RelayType;
-use crate::whitenoise::Whitenoise;
+
 
 #[derive(Error, Debug)]
 pub enum KeyPackageError {
@@ -48,7 +48,6 @@ pub type Result<T> = std::result::Result<T, KeyPackageError>;
 /// Fetches key packages for a list of pubkeys
 pub async fn fetch_key_packages_for_members(
     member_pubkeys: &[String],
-    wn: tauri::State<'_, Whitenoise>,
 ) -> Result<Vec<KeyPackageResponse>> {
     let mut member_key_packages: Vec<KeyPackageResponse> = Vec::new();
 
@@ -61,7 +60,7 @@ pub async fn fetch_key_packages_for_members(
     // Check that members are valid pubkeys & fetch key packages
     for pubkey in member_pubkeys.iter() {
         // Fetch prekeys from the members
-        match fetch_key_package_for_pubkey(pubkey.clone(), wn.clone()).await {
+        match fetch_key_package_for_pubkey(pubkey.clone()).await {
             Ok(event_and_key_package) => match event_and_key_package {
                 Some((event_id, kp)) => member_key_packages.push(KeyPackageResponse {
                     pubkey: pubkey.clone(),
@@ -88,10 +87,7 @@ pub async fn fetch_key_packages_for_members(
 }
 
 /// Fetches key packages for a single pubkey
-pub async fn fetch_key_package_for_pubkey(
-    pubkey: String,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<Option<(EventId, KeyPackage)>> {
+pub async fn fetch_key_package_for_pubkey(pubkey: String) -> Result<Option<(EventId, KeyPackage)>> {
     tracing::debug!(target: "whitenoise::key_packages::fetch_key_package_for_pubkey", "Fetching key package for pubkey: {:?}", pubkey);
     let public_key = PublicKey::from_hex(&pubkey).expect("Invalid pubkey");
     let key_package_filter = Filter::new().kind(Kind::MlsKeyPackage).author(public_key);
@@ -173,11 +169,11 @@ pub async fn fetch_key_package_for_pubkey(
 }
 
 /// Publishes a new key package to relays
-pub async fn publish_key_package(wn: tauri::State<'_, Whitenoise>) -> Result<()> {
-    let active_account = Account::get_active(wn.clone()).await?;
+pub async fn publish_key_package() -> Result<()> {
+    let active_account = Account::get_active().await?;
 
     let key_package_relays: Vec<RelayUrl> = active_account
-        .relays(RelayType::KeyPackage, wn.clone())
+        .relays(RelayType::KeyPackage)
         .await?
         .into_iter()
         .map(|r| RelayUrl::parse(&r).expect("Invalid relay URL"))
@@ -262,9 +258,8 @@ pub async fn delete_key_package_from_relays(
     event_id: &EventId,
     key_package_relays: &[String],
     delete_mls_stored_keys: bool,
-    wn: tauri::State<'_, Whitenoise>,
 ) -> Result<()> {
-    let active_account = Account::get_active(wn.clone()).await?;
+    let active_account = Account::get_active().await?;
     let current_pubkey = active_account.pubkey;
 
     let key_package_filter = Filter::new()

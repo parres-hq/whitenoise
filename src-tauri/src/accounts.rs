@@ -2,12 +2,11 @@ use crate::database::DatabaseError;
 use crate::nostr_manager;
 use crate::relays::RelayType;
 use crate::secrets_store;
-use crate::Whitenoise;
+
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -23,9 +22,6 @@ pub enum AccountError {
 
     #[error("Error with secrets store: {0}")]
     SecretsStoreError(#[from] secrets_store::SecretsStoreError),
-
-    #[error("Tauri error: {0}")]
-    TauriError(#[from] tauri::Error),
 
     #[error("No active account found")]
     NoActiveAccount,
@@ -102,7 +98,7 @@ pub struct Account {
 
 impl Account {
     /// Generates a new keypair, generates a petname, and saves the mostly blank account to the database
-    pub async fn new(wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         tracing::debug!(target: "whitenoise::accounts", "Generating new keypair");
         let keys = Keys::generate();
 
@@ -141,20 +137,16 @@ impl Account {
         account.metadata.display_name = Some(petname);
 
         // Save the updated account to the database
-        account = account.save(wn.clone()).await?;
+        account = account.save().await?;
 
         // If the record saves, add the keys to the secret store
         secrets_store::store_private_key(&keys, &wn.data_dir)?;
 
         Ok(account)
     }
+
     /// Adds an account from an existing keypair
-    pub async fn add_from_keys(
-        keys: &Keys,
-        set_active: bool,
-        wn: tauri::State<'_, Whitenoise>,
-        app_handle: &tauri::AppHandle,
-    ) -> Result<Self> {
+    pub async fn add_from_keys(keys: &Keys, set_active: bool) -> Result<Self> {
         let pubkey = keys.public_key();
 
         tracing::debug!(target: "whitenoise::accounts", "Adding account for pubkey: {}", pubkey.to_hex());
@@ -225,25 +217,21 @@ impl Account {
         };
 
         tracing::debug!(target: "whitenoise::accounts", "Saving new account to database");
-        account.save(wn.clone()).await?;
+        account.save().await?;
 
         tracing::debug!(target: "whitenoise::accounts", "Inserting nostr relays, {:?}", nostr_relays_unwrapped);
         account
-            .update_relays(RelayType::Nostr, &nostr_relays_unwrapped, wn.clone())
+            .update_relays(RelayType::Nostr, &nostr_relays_unwrapped)
             .await?;
 
         tracing::debug!(target: "whitenoise::accounts", "Inserting inbox relays, {:?}", inbox_relays_unwrapped);
         account
-            .update_relays(RelayType::Inbox, &inbox_relays_unwrapped, wn.clone())
+            .update_relays(RelayType::Inbox, &inbox_relays_unwrapped)
             .await?;
 
         tracing::debug!(target: "whitenoise::accounts", "Inserting key package relays, {:?}", key_package_relays_unwrapped);
         account
-            .update_relays(
-                RelayType::KeyPackage,
-                &key_package_relays_unwrapped,
-                wn.clone(),
-            )
+            .update_relays(RelayType::KeyPackage, &key_package_relays_unwrapped)
             .await?;
 
         tracing::debug!(target: "whitenoise::accounts", "Storing private key");
@@ -251,17 +239,14 @@ impl Account {
 
         // Set active if requested
         if set_active {
-            account.set_active(wn.clone(), app_handle).await?;
+            account.set_active().await?;
         }
 
         Ok(account)
     }
 
     /// Finds an account by its public key
-    pub async fn find_by_pubkey(
-        pubkey: &PublicKey,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Self> {
+    pub async fn find_by_pubkey(pubkey: &PublicKey) -> Result<Self> {
         let mut txn = wn.database.pool.begin().await?;
 
         let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
@@ -281,7 +266,7 @@ impl Account {
     }
 
     /// Returns all accounts
-    pub async fn all(wn: tauri::State<'_, Whitenoise>) -> Result<Vec<Self>> {
+    pub async fn all() -> Result<Vec<Self>> {
         let mut txn = wn.database.pool.begin().await?;
 
         let iter = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts")
@@ -304,9 +289,9 @@ impl Account {
     }
 
     /// Returns the currently active account
-    pub async fn get_active(wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
+    pub async fn get_active() -> Result<Self> {
         // First validate/fix the active state
-        Self::validate_active_state(wn.clone()).await?;
+        Self::validate_active_state().await?;
 
         let mut txn = wn.database.pool.begin().await?;
 
@@ -341,9 +326,9 @@ impl Account {
     /// Returns error if:
     /// - No active account is found
     /// - Active account's public key is invalid
-    pub async fn get_active_pubkey(wn: tauri::State<'_, Whitenoise>) -> Result<PublicKey> {
+    pub async fn get_active_pubkey() -> Result<PublicKey> {
         // First validate/fix the active state
-        Self::validate_active_state(wn.clone()).await?;
+        Self::validate_active_state().await?;
 
         let mut txn = wn.database.pool.begin().await?;
 
@@ -359,11 +344,7 @@ impl Account {
     }
 
     /// Sets the active account in the database and updates nostr for the active identity
-    pub async fn set_active(
-        &self,
-        wn: tauri::State<'_, Whitenoise>,
-        app_handle: &tauri::AppHandle,
-    ) -> Result<Self> {
+    pub async fn set_active(&self) -> Result<Self> {
         tracing::debug!(
             target: "whitenoise::accounts::set_active",
             "Starting set_active for pubkey: {}",
@@ -394,7 +375,7 @@ impl Account {
         txn.commit().await?;
 
         // Validate the active state as a safeguard
-        Self::validate_active_state(wn.clone()).await?;
+        Self::validate_active_state().await?;
 
         // Then update Nostr MLS instance
         {
@@ -435,7 +416,7 @@ impl Account {
 
         // If the database operation is successful, update Nostr client
         wn.nostr
-            .set_nostr_identity(self, wn.clone(), app_handle)
+            .set_nostr_identity(self)
             .await?;
 
         tracing::debug!(
@@ -443,10 +424,6 @@ impl Account {
             "Nostr identity set for: {}",
             self.pubkey.to_hex()
         );
-
-        app_handle.emit("nostr_ready", ())?;
-
-        app_handle.emit("account_changed", ())?;
 
         tracing::debug!(
             target: "whitenoise::accounts::set_active",
@@ -458,10 +435,7 @@ impl Account {
     }
 
     /// Returns the groups the account is a member of
-    pub async fn groups(
-        &self,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Vec<group_types::Group>> {
+    pub async fn groups(&self) -> Result<Vec<group_types::Group>> {
         tracing::debug!(target: "whitenoise::accounts::groups", "Attempting to acquire nostr_mls lock");
         let nostr_mls_guard = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -491,26 +465,22 @@ impl Account {
         result
     }
 
-    pub async fn nostr_group_ids(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Vec<String>> {
-        let groups = self.groups(wn).await?;
+    pub async fn nostr_group_ids(&self) -> Result<Vec<String>> {
+        let groups = self.groups().await?;
         Ok(groups
             .iter()
             .map(|g| hex::encode(g.nostr_group_id))
             .collect::<Vec<_>>())
     }
 
-    pub fn keys(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Keys> {
+    pub fn keys(&self) -> Result<Keys> {
         Ok(secrets_store::get_nostr_keys_for_pubkey(
             self.pubkey.to_hex().as_str(),
             &wn.data_dir,
         )?)
     }
 
-    pub async fn relays(
-        &self,
-        relay_type: RelayType,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Vec<String>> {
+    pub async fn relays(&self, relay_type: RelayType) -> Result<Vec<String>> {
         Ok(sqlx::query_scalar::<_, String>(
             "SELECT url FROM account_relays WHERE relay_type = ? AND account_pubkey = ?",
         )
@@ -520,12 +490,7 @@ impl Account {
         .await?)
     }
 
-    pub async fn update_relays(
-        &self,
-        relay_type: RelayType,
-        relays: &Vec<String>,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Self> {
+    pub async fn update_relays(&self, relay_type: RelayType, relays: &Vec<String>) -> Result<Self> {
         if relays.is_empty() {
             return Ok(self.clone());
         }
@@ -551,7 +516,7 @@ impl Account {
     }
 
     /// Saves the account to the database
-    pub async fn save(&self, wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
+    pub async fn save(&self) -> Result<Self> {
         tracing::debug!(
             target: "whitenoise::accounts::save",
             "Beginning save transaction for pubkey: {}",
@@ -599,11 +564,7 @@ impl Account {
     }
 
     /// Removes the account from the database
-    pub async fn remove(
-        &self,
-        wn: tauri::State<'_, Whitenoise>,
-        app_handle: tauri::AppHandle,
-    ) -> Result<()> {
+    pub async fn remove(&self) -> Result<()> {
         let hex_pubkey = self.pubkey.to_hex();
 
         let mut txn = wn.database.pool.begin().await?;
@@ -642,12 +603,10 @@ impl Account {
         secrets_store::remove_private_key_for_pubkey(&hex_pubkey, &wn.data_dir)?;
 
         // Update Nostr client & Nostr MLS
-        let account = Self::get_active(wn.clone()).await?;
+        let account = Self::get_active().await?;
         wn.nostr
-            .set_nostr_identity(&account, wn.clone(), &app_handle)
+            .set_nostr_identity(&account)
             .await?;
-
-        app_handle.emit("nostr_ready", ())?;
 
         // Then update Nostr MLS instance
         {
@@ -673,12 +632,11 @@ impl Account {
             *nostr_mls = Some(NostrMls::new(storage));
         }
 
-        app_handle.emit("account_changed", ())?;
         Ok(())
     }
 
     // Add a validation method
-    async fn validate_active_state(wn: tauri::State<'_, Whitenoise>) -> Result<()> {
+    async fn validate_active_state() -> Result<()> {
         let mut txn = wn.database.pool.begin().await?;
 
         // Check if we have multiple active accounts
@@ -727,15 +685,11 @@ impl Account {
     }
 
     /// Stores a Nostr Wallet Connect URI for this account
-    pub fn store_nostr_wallet_connect_uri(
-        &self,
-        nostr_wallet_connect_uri: &str,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<()> {
+    pub fn store_nostr_wallet_connect_uri(&self, nostr_wallet_connect_uri: &String) -> Result<()> {
         secrets_store::store_nostr_wallet_connect_uri(
             &self.pubkey.to_hex(),
             nostr_wallet_connect_uri,
-            &wn.data_dir,
+            &self.data_dir,
         )
         .map_err(AccountError::SecretsStoreError)
     }
@@ -745,27 +699,20 @@ impl Account {
     /// # Returns
     /// * `Result<Option<String>>` - Some(uri) if a URI is stored, None if no URI is stored,
     ///   or an error if the operation fails
-    pub fn get_nostr_wallet_connect_uri(
-        &self,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<Option<String>> {
+    pub fn get_nostr_wallet_connect_uri(&self) -> Result<Option<String>> {
         secrets_store::get_nostr_wallet_connect_uri(&self.pubkey.to_hex(), &wn.data_dir)
             .map_err(AccountError::SecretsStoreError)
     }
 
     /// Removes the Nostr Wallet Connect URI for this account
-    pub fn remove_nostr_wallet_connect_uri(&self, wn: tauri::State<'_, Whitenoise>) -> Result<()> {
+    pub fn remove_nostr_wallet_connect_uri(&self) -> Result<()> {
         secrets_store::remove_nostr_wallet_connect_uri(&self.pubkey.to_hex(), &wn.data_dir)
             .map_err(AccountError::SecretsStoreError)
     }
 
     /// Helper method to publish a given type of relay list event to Nostr using the relays stored in the database
-    async fn publish_relay_list(
-        &self,
-        relay_type: RelayType,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<()> {
-        let relays = self.relays(relay_type, wn.clone()).await?;
+    async fn publish_relay_list(&self, relay_type: RelayType) -> Result<()> {
+        let relays = self.relays(relay_type).await?;
         if relays.is_empty() {
             return Ok(());
         }
@@ -794,7 +741,7 @@ impl Account {
         Ok(())
     }
 
-    pub async fn onboard_new_account(&mut self, wn: tauri::State<'_, Whitenoise>) -> Result<Self> {
+    pub async fn onboard_new_account(&mut self) -> Result<Self> {
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Starting onboarding process");
 
         // Create key package and inbox relays lists with default relays
@@ -806,11 +753,11 @@ impl Account {
         self.onboarding.key_package_relays = true;
 
         // Update relays in database
-        self.update_relays(RelayType::KeyPackage, &default_relays, wn.clone())
+        self.update_relays(RelayType::KeyPackage, &default_relays)
             .await?;
-        self.update_relays(RelayType::Inbox, &default_relays, wn.clone())
+        self.update_relays(RelayType::Inbox, &default_relays)
             .await?;
-        self.update_relays(RelayType::Nostr, &default_relays, wn.clone())
+        self.update_relays(RelayType::Nostr, &default_relays)
             .await?;
 
         // Publish the metadata event to Nostr
@@ -824,19 +771,19 @@ impl Account {
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published metadata event to Nostr: {:?}", event);
 
         // Also publish relay lists to Nostr
-        self.publish_relay_list(RelayType::Nostr, wn.clone())
+        self.publish_relay_list(RelayType::Nostr)
             .await?;
-        self.publish_relay_list(RelayType::Inbox, wn.clone())
+        self.publish_relay_list(RelayType::Inbox)
             .await?;
-        self.publish_relay_list(RelayType::KeyPackage, wn.clone())
+        self.publish_relay_list(RelayType::KeyPackage)
             .await?;
 
         // Publish key package to key package relays
-        if let Err(e) = crate::key_packages::publish_key_package(wn.clone()).await {
+        if let Err(e) = crate::key_packages::publish_key_package().await {
             tracing::warn!(target: "whitenoise::accounts::onboard_new_account", "Failed to publish key package: {}", e);
         } else {
             self.onboarding.publish_key_package = true;
-            self.save(wn.clone()).await?;
+            self.save().await?;
             tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published key package to relays");
         }
 

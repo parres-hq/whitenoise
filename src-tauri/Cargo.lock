@@ -164,6 +164,9 @@ name = "anyhow"
 version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
+dependencies = [
+ "backtrace",
+]
 
 [[package]]
 name = "arboard"
@@ -7580,11 +7583,13 @@ dependencies = [
 name = "whitenoise"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64 0.22.1",
  "blurhash",
  "chacha20poly1305",
  "chrono",
+ "clap",
  "hex",
  "image 0.24.9",
  "keyring",

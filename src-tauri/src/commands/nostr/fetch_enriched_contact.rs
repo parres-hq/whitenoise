@@ -1,16 +1,12 @@
 use crate::accounts::Account;
 use crate::relays::RelayType;
 use crate::types::EnrichedContact;
-use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
-use tauri::Emitter;
 
-#[tauri::command]
+
 pub async fn fetch_enriched_contact(
     pubkey: String,
     update_account: bool,
-    wn: tauri::State<'_, Whitenoise>,
-    app_handle: tauri::AppHandle,
 ) -> Result<EnrichedContact, String> {
     let pubkey = PublicKey::from_hex(&pubkey).map_err(|_| "Invalid pubkey".to_string())?;
 
@@ -50,35 +46,27 @@ pub async fn fetch_enriched_contact(
     };
 
     if update_account {
-        let mut account = Account::find_by_pubkey(&pubkey, wn.clone())
+        let mut account = Account::find_by_pubkey(&pubkey)
             .await
             .map_err(|e| format!("Failed to find account: {}", e))?;
 
         account.metadata = enriched_contact.metadata.clone();
         account
-            .update_relays(RelayType::Nostr, &enriched_contact.nostr_relays, wn.clone())
+            .update_relays(RelayType::Nostr, &enriched_contact.nostr_relays)
             .await
             .map_err(|e| format!("Failed to update relays: {}", e))?;
         account
-            .update_relays(RelayType::Inbox, &enriched_contact.inbox_relays, wn.clone())
+            .update_relays(RelayType::Inbox, &enriched_contact.inbox_relays)
             .await
             .map_err(|e| format!("Failed to update relays: {}", e))?;
         account
-            .update_relays(
-                RelayType::KeyPackage,
-                &enriched_contact.key_package_relays,
-                wn.clone(),
-            )
+            .update_relays(RelayType::KeyPackage, &enriched_contact.key_package_relays)
             .await
             .map_err(|e| format!("Failed to update relays: {}", e))?;
         account
-            .save(wn.clone())
+            .save()
             .await
             .map_err(|e| format!("Failed to save account: {}", e))?;
-
-        app_handle
-            .emit("account_changed", ())
-            .map_err(|e| e.to_string())?;
     }
 
     Ok(enriched_contact)

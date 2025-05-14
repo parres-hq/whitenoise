@@ -1,11 +1,11 @@
 use crate::accounts::Account;
 use crate::relays::RelayType;
-use crate::Whitenoise;
+
 use nostr_sdk::event::EventBuilder;
 use nostr_sdk::nips::nip09::EventDeletionRequest;
-#[tauri::command]
-pub async fn delete_all_key_packages(wn: tauri::State<'_, Whitenoise>) -> Result<(), String> {
-    let active_account = Account::get_active(wn.clone())
+
+pub async fn delete_all_key_packages() -> Result<(), String> {
+    let active_account = Account::get_active()
         .await
         .map_err(|e| e.to_string())?;
 
@@ -16,7 +16,7 @@ pub async fn delete_all_key_packages(wn: tauri::State<'_, Whitenoise>) -> Result
         ]
     } else {
         active_account
-            .relays(RelayType::KeyPackage, wn.clone())
+            .relays(RelayType::KeyPackage)
             .await
             .map_err(|e| e.to_string())?
     };

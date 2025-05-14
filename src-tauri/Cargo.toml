@@ -18,11 +18,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+anyhow = { version = "1.0.98", features = ["backtrace"] }
 async-trait = "0.1.88"
 base64 = "0.22"
 blurhash = "0.2.3"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4.40", features = ["serde"] }
+clap = "4.5.37"
 hex = "0.4"
 image = "0.24"
 keyring = { version = "3.6", features = [

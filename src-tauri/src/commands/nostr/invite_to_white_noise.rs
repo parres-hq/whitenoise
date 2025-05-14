@@ -1,12 +1,9 @@
 use crate::types::NostrEncryptionMethod;
-use crate::whitenoise::Whitenoise;
+
 use nostr_sdk::prelude::*;
 
-#[tauri::command]
-pub async fn invite_to_white_noise(
-    pubkey: String,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<(), String> {
+
+pub async fn invite_to_white_noise(pubkey: String) -> Result<(), String> {
     let public_key = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
     let content = "Hi, I'm using White Noise to chat securely on Nostr. Join me! https://github.com/parres-hq/whitenoise/releases".to_string();
     let encrypted_content = wn

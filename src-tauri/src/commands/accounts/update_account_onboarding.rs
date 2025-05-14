@@ -1,5 +1,5 @@
 use crate::accounts::Account;
-use crate::whitenoise::Whitenoise;
+
 use nostr_sdk::prelude::*;
 
 /// Updates the onboarding status for a specific account.
@@ -16,24 +16,22 @@ use nostr_sdk::prelude::*;
 ///
 /// * `Ok(Account)` - The updated account if successful
 /// * `Err(String)` - An error message if there was an issue updating the account
-#[tauri::command]
 pub async fn update_account_onboarding(
     pubkey: String,
     inbox_relays: bool,
     key_package_relays: bool,
     publish_key_package: bool,
-    wn: tauri::State<'_, Whitenoise>,
 ) -> Result<Account, String> {
     let pubkey =
         PublicKey::parse(&pubkey).map_err(|e| format!("Error parsing public key: {}", e))?;
-    let mut account = Account::find_by_pubkey(&pubkey, wn.clone())
+    let mut account = Account::find_by_pubkey(&pubkey)
         .await
         .map_err(|e| format!("Error fetching account: {}", e))?;
     account.onboarding.inbox_relays = inbox_relays;
     account.onboarding.key_package_relays = key_package_relays;
     account.onboarding.publish_key_package = publish_key_package;
     account
-        .save(wn.clone())
+        .save()
         .await
         .map_err(|e| format!("Error saving account: {}", e))?;
     Ok(account)

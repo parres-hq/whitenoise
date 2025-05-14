@@ -1,13 +1,10 @@
-use crate::whitenoise::Whitenoise;
+
 use nostr_mls::prelude::*;
 use std::time::Duration;
 use tokio::time::timeout;
 
-#[tauri::command]
-pub async fn query_message(
-    message_id: &str,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<Option<message_types::Message>, String> {
+
+pub async fn query_message(message_id: &str) -> Result<Option<message_types::Message>, String> {
     let event_id = EventId::parse(message_id).map_err(|e| e.to_string())?;
 
     tracing::debug!(target: "whitenoise::commands::messages::query_message", "Attempting to acquire nostr_mls lock");

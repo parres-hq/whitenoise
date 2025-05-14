@@ -4,7 +4,7 @@ use tokio::time::timeout;
 
 use super::{GroupAndMessages, MessageWithTokens};
 use crate::nostr_manager::parser::parse;
-use crate::whitenoise::Whitenoise;
+
 
 /// Gets a single MLS group and its messages by group ID
 ///
@@ -23,11 +23,7 @@ use crate::whitenoise::Whitenoise;
 /// - Group ID is not valid hex
 /// - Group not found in database
 /// - Error fetching messages
-#[tauri::command]
-pub async fn get_group_and_messages(
-    group_id: &str,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<GroupAndMessages, String> {
+pub async fn get_group_and_messages(group_id: &str) -> Result<GroupAndMessages, String> {
     let mls_group_id = GroupId::from_slice(
         &hex::decode(group_id).map_err(|e| format!("Error decoding group id: {}", e))?,
     );

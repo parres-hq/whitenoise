@@ -3,9 +3,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 use super::MessageWithTokens;
+use super::send_mls_message;
 use crate::accounts::Account;
-use crate::send_mls_message;
-use crate::whitenoise::Whitenoise;
 
 /// Deletes a message from an MLS group by creating and sending a deletion event
 ///
@@ -29,14 +28,11 @@ use crate::whitenoise::Whitenoise;
 /// * Message cannot be found in the group
 /// * User is not the owner of the message
 /// * Sending the deletion event fails
-#[tauri::command]
 pub async fn delete_message(
     group: group_types::Group,
     message_id: String,
-    wn: tauri::State<'_, Whitenoise>,
-    app_handle: tauri::AppHandle,
 ) -> Result<MessageWithTokens, String> {
-    let active_account = Account::get_active(wn.clone())
+    let active_account = Account::get_active()
         .await
         .map_err(|e| format!("Failed to get active account: {}", e))?;
 
@@ -86,8 +82,6 @@ pub async fn delete_message(
             5, // Kind 5 for deletion events as per NIP-09
             Some(deletion_tags),
             None,
-            wn.clone(),
-            app_handle,
         )
         .await;
         tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock released");

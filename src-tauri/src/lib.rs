@@ -1,3 +1,15 @@
+use crate::database::{Database, DatabaseError};
+use crate::nostr_manager::NostrManager;
+use anyhow::Context;
+use nostr_mls::NostrMls;
+use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use once_cell::sync::Lazy;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use thiserror::Error;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
+
 mod accounts;
 mod commands;
 mod database;
@@ -8,166 +20,198 @@ mod payments;
 mod relays;
 mod secrets_store;
 mod types;
-mod whitenoise;
 
-use crate::commands::accounts::*;
-use crate::commands::groups::*;
-use crate::commands::key_packages::*;
-use crate::commands::media::*;
-use crate::commands::messages::*;
-use crate::commands::nostr::*;
-use crate::commands::payments::*;
-use crate::commands::welcomes::*;
-use crate::commands::{delete_all_data, is_mobile, is_platform};
-use crate::whitenoise::Whitenoise;
-use once_cell::sync::Lazy;
-use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::Manager;
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
+#[derive(Error, Debug)]
+pub enum WhitenoiseError {
+    #[error("Directory creation error: {0}")]
+    DirectoryCreation(#[from] std::io::Error),
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
-            let data_dir = app
-                .handle()
-                .path()
-                .app_data_dir()
-                .expect("Failed to get data dir");
+    #[error("Logging setup error: {0}")]
+    LoggingSetup(String),
 
-            let logs_dir = app.handle().path().app_log_dir().unwrap();
+    #[error("Configuration error: {0}")]
+    Configuration(String),
 
-            // Initialize the barcode scanner plugin if the platform is mobile
-            #[cfg(mobile)]
-            app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
+    #[error("Database error: {0}")]
+    Database(#[from] DatabaseError),
 
-            let formatted_data_dir = if cfg!(dev) {
-                PathBuf::from(format!("{}/dev", data_dir.to_string_lossy()))
-            } else {
-                PathBuf::from(format!("{}/release", data_dir.to_string_lossy()))
-            };
-            std::fs::create_dir_all(&formatted_data_dir)?;
-
-            let formatted_logs_dir = if cfg!(dev) {
-                PathBuf::from(format!("{}/dev", logs_dir.to_string_lossy()))
-            } else {
-                PathBuf::from(format!("{}/release", logs_dir.to_string_lossy()))
-            };
-            std::fs::create_dir_all(&formatted_logs_dir)?;
-
-            setup_logging(formatted_logs_dir.clone())?;
-
-            // Open devtools on debug builds
-            #[cfg(debug_assertions)]
-            {
-                let window = app.get_webview_window("main").unwrap();
-                window.open_devtools();
-                window.close_devtools();
-            }
-
-            tauri::async_runtime::block_on(async move {
-                let whitenoise =
-                    Whitenoise::new(formatted_data_dir, formatted_logs_dir, app.handle().clone())
-                        .await;
-                app.manage(whitenoise);
-            });
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            accept_welcome,
-            create_group,
-            create_identity,
-            decline_welcome,
-            decrypt_content,
-            delete_all_data,
-            delete_all_key_packages,
-            delete_message,
-            encrypt_content,
-            export_nsec,
-            fetch_contacts_with_metadata,
-            fetch_enriched_contact,
-            fetch_enriched_contacts,
-            fetch_relays_list,
-            fetch_relays,
-            get_accounts,
-            get_group_admins,
-            get_group_and_messages,
-            get_group_members,
-            get_group,
-            get_group_relays,
-            get_active_groups,
-            get_nostr_wallet_connect_balance,
-            get_welcome,
-            get_welcomes,
-            has_nostr_wallet_connect_uri,
-            init_nostr_for_current_user,
-            invite_to_white_noise,
-            is_mobile,
-            is_platform,
-            login,
-            logout,
-            pay_invoice,
-            publish_metadata_event,
-            publish_new_key_package,
-            publish_relay_list,
-            query_contacts_with_metadata,
-            query_enriched_contact,
-            query_enriched_contacts,
-            query_message,
-            remove_nostr_wallet_connect_uri,
-            rotate_key_in_group,
-            search_for_enriched_contacts,
-            send_mls_message,
-            set_active_account,
-            set_nostr_wallet_connect_uri,
-            update_account_onboarding,
-            upload_file,
-            upload_media,
-            valid_key_package_exists_for_user,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    #[error("Other error: {0}")]
+    Other(#[from] anyhow::Error),
 }
 
-fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("whitenoise")
-        .filename_suffix("log")
-        .build(logs_dir)?;
+#[derive(Clone, Debug)]
+pub struct WhitenoiseConfig {
+    /// Directory for application data
+    pub data_dir: PathBuf,
 
-    // Create non-blocking writers for both stdout and file
-    let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
-    let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+    /// Directory for application logs
+    pub logs_dir: PathBuf,
+}
 
-    static GUARDS: Lazy<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = Lazy::new(|| Mutex::new(None));
-    *GUARDS.lock().unwrap() = Some((file_guard, stdout_guard));
+impl WhitenoiseConfig {
+    pub fn new(data_dir: &Path, logs_dir: &Path) -> Self {
+        let env_suffix = if cfg!(dev) { "dev" } else { "release" };
+        let formatted_data_dir = data_dir.join(env_suffix);
+        let formatted_logs_dir = logs_dir.join(env_suffix);
 
-    // Create a layer for stdout with ANSI color codes enabled
-    let stdout_layer = Layer::new()
-        .with_writer(non_blocking_stdout)
-        .with_ansi(true) // Enable ANSI color codes for stdout
-        .with_target(true); // Include target information in stdout logs
+        Self {
+            data_dir: formatted_data_dir,
+            logs_dir: formatted_logs_dir,
+        }
+    }
+}
 
-    // Create a layer for file output with ANSI color codes explicitly disabled
-    let file_layer = Layer::new()
-        .with_writer(non_blocking_file)
-        .with_ansi(false) // Disable ANSI color codes for file output
-        .with_target(true); // Include target information in file logs
+#[derive(Clone)]
+pub struct Whitenoise {
+    config: WhitenoiseConfig,
+    database: Arc<Database>,
+    nostr: NostrManager,
+    nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
+}
 
-    // Initialize the tracing subscriber registry
-    Registry::default()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
-        .with(stdout_layer)
-        .with(file_layer)
-        .init();
+impl Whitenoise {
+    pub async fn new(config: WhitenoiseConfig) -> Result<Self, WhitenoiseError> {
+        let data_dir = &config.data_dir;
+        let logs_dir = &config.logs_dir;
 
-    Ok(())
+        // Setup directories
+        std::fs::create_dir_all(data_dir)
+            .with_context(|| format!("Failed to create data directory: {:?}", data_dir))
+            .map_err(WhitenoiseError::from)?;
+        std::fs::create_dir_all(logs_dir)
+            .with_context(|| format!("Failed to create logs directory: {:?}", logs_dir))
+            .map_err(WhitenoiseError::from)?;
+
+        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("whitenoise")
+            .filename_suffix("log")
+            .build(logs_dir)
+            .map_err(|e| WhitenoiseError::LoggingSetup(e.to_string()))?;
+
+        // Setup logging
+        let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
+        let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+
+        static GUARDS: Lazy<Mutex<Option<(WorkerGuard, WorkerGuard)>>> =
+            Lazy::new(|| Mutex::new(None));
+        *GUARDS.lock().unwrap() = Some((file_guard, stdout_guard));
+
+        // Create a layer for stdout with ANSI color codes enabled
+        let stdout_layer = Layer::new()
+            .with_writer(non_blocking_stdout)
+            .with_ansi(true) // Enable ANSI color codes for stdout
+            .with_target(true); // Include target information in stdout logs
+
+        // Create a layer for file output with ANSI color codes explicitly disabled
+        let file_layer = Layer::new()
+            .with_writer(non_blocking_file)
+            .with_ansi(false) // Disable ANSI color codes for file output
+            .with_target(true); // Include target information in file logs
+
+        // Initialize the tracing subscriber registry
+        Registry::default()
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
+            .with(stdout_layer)
+            .with(file_layer)
+            .init();
+
+        tracing::debug!("Logging initialized in directory: {:?}", logs_dir);
+
+        let database = Arc::new(Database::new(data_dir.join("whitenoise.sqlite")).await?);
+
+        let nostr = NostrManager::new(data_dir.clone())
+            .await
+            .expect("Failed to create Nostr manager");
+
+        let nostr_mls = Arc::new(Mutex::new(None));
+
+        // Return fully configured, ready-to-go instance
+        Ok(Self {
+            config,
+            database,
+            nostr,
+            nostr_mls,
+        })
+    }
+
+    pub async fn delete_all_data(&self) -> Result<(), Box<dyn std::error::Error>> {
+        tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
+
+        // Remove nostr cache first
+        #[cfg(any(target_os = "ios", target_os = "macos"))]
+        {
+            self.nostr.delete_all_data(&self.data_dir).await?;
+        }
+        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+        {
+            self.nostr.delete_all_data().await?;
+        }
+
+        // Remove database (accounts and media) data
+        self.database.delete_all_data().await?;
+
+        // Remove MLS related data
+        {
+            let mut nostr_mls = self.nostr_mls.lock().unwrap_or_else(|e| {
+                tracing::error!("Failed to lock nostr_mls: {:?}", e);
+                panic!("Mutex poisoned: {}", e);
+            });
+
+            if let Some(_mls) = nostr_mls.as_mut() {
+                // Close the current MLS instance
+                *nostr_mls = None;
+            }
+
+            // Delete the MLS directory which contains SQLite storage files
+            let mls_dir = self.config.data_dir.join("mls");
+            if mls_dir.exists() {
+                tracing::debug!(
+                    target: "whitenoise::delete_all_data",
+                    "Removing MLS directory: {:?}",
+                    mls_dir
+                );
+                if let Err(e) = tokio::fs::remove_dir_all(&mls_dir).await {
+                    tracing::error!(
+                        target: "whitenoise::delete_all_data",
+                        "Failed to remove MLS directory: {:?}",
+                        e
+                    );
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to remove MLS directory: {}", e),
+                    )));
+                }
+
+                // Recreate the empty directory
+                if let Err(e) = tokio::fs::create_dir_all(&mls_dir).await {
+                    tracing::error!(
+                        target: "whitenoise::delete_all_data",
+                        "Failed to recreate MLS directory: {:?}",
+                        e
+                    );
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to recreate MLS directory: {}", e),
+                    )));
+                }
+            }
+        }
+
+        // Remove logs
+        if self.config.logs_dir.exists() {
+            for entry in std::fs::read_dir(&self.config.logs_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_file() {
+                    std::fs::remove_file(path)?;
+                } else if path.is_dir() {
+                    std::fs::remove_dir_all(path)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
 }

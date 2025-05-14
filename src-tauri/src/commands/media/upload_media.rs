@@ -1,7 +1,6 @@
 use crate::accounts::Account;
 use crate::media::FileUpload;
-use crate::Whitenoise;
-use tauri::State;
+
 
 /// Uploads media content to the Blossom service.
 ///
@@ -23,14 +22,13 @@ use tauri::State;
 ///   - No active account is found
 ///   - Account keys cannot be retrieved
 ///   - The upload to Blossom fails
-#[tauri::command]
 pub async fn upload_media(file: FileUpload, wn: State<'_, Whitenoise>) -> Result<String, String> {
     // Get the active account
-    let account = Account::get_active(wn.clone())
+    let account = Account::get_active()
         .await
         .map_err(|e| e.to_string())?;
 
-    let keys = account.keys(wn.clone()).map_err(|e| e.to_string())?;
+    let keys = account.keys().map_err(|e| e.to_string())?;
 
     // Upload the file to Blossom
     let blob_descriptor = wn

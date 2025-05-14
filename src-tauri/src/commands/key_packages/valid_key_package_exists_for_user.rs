@@ -1,5 +1,5 @@
 use crate::key_packages::fetch_key_package_for_pubkey;
-use crate::Whitenoise;
+
 
 /// Checks if a valid MLS key package exists for a given user
 ///
@@ -16,12 +16,8 @@ use crate::Whitenoise;
 /// - Public key is invalid
 /// - Network error occurs fetching key package
 /// - Key package parsing fails
-#[tauri::command]
-pub async fn valid_key_package_exists_for_user(
-    pubkey: String,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<bool, String> {
-    let key_package = fetch_key_package_for_pubkey(pubkey, wn.clone())
+pub async fn valid_key_package_exists_for_user(pubkey: String) -> Result<bool, String> {
+    let key_package = fetch_key_package_for_pubkey(pubkey)
         .await
         .map_err(|e| e.to_string())?;
     Ok(key_package.is_some())

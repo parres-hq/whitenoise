@@ -1,29 +1,19 @@
 use nostr_mls::prelude::*;
 use std::time::Duration;
-use tauri::Emitter;
 use tokio::time::timeout;
 
-use crate::whitenoise::Whitenoise;
+
 
 /// Declines a group welcome.
 ///
 /// # Arguments
 /// * `welcome` - The welcome to decline
 /// * `wn` - The Whitenoise state
-/// * `app_handle` - The Tauri app handle
 ///
 /// # Returns
 /// * `Ok(())` if the welcome was successfully declined
 /// * `Err(String)` if there was an error declining the welcome
-///
-/// # Events Emitted
-/// * `welcome_declined` - Emitted with the updated welcome after it is declined
-#[tauri::command]
-pub async fn decline_welcome(
-    welcome_event_id: String,
-    wn: tauri::State<'_, Whitenoise>,
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
+pub async fn decline_welcome(welcome_event_id: String) -> Result<(), String> {
     let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|e| e.to_string())?;
 
     tracing::debug!(target: "whitenoise::commands::welcomes::decline_welcome", "Attempting to acquire nostr_mls lock");
@@ -55,10 +45,6 @@ pub async fn decline_welcome(
     }
 
     tracing::debug!(target: "whitenoise::commands::welcomes::decline_welcome", "nostr_mls lock released");
-
-    app_handle
-        .emit("welcome_declined", welcome_event_id)
-        .map_err(|e| e.to_string())?;
 
     Ok(())
 }

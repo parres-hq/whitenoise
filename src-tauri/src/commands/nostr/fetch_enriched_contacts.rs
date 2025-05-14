@@ -1,12 +1,10 @@
 use crate::types::EnrichedContact;
-use crate::whitenoise::Whitenoise;
+
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
-#[tauri::command]
-pub async fn fetch_enriched_contacts(
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<HashMap<String, EnrichedContact>, String> {
+
+pub async fn fetch_enriched_contacts() -> Result<HashMap<String, EnrichedContact>, String> {
     // Fetch contact list public keys
     let contact_list_pubkeys = wn
         .nostr

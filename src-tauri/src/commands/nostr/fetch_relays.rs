@@ -1,4 +1,4 @@
-use crate::whitenoise::Whitenoise;
+
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
@@ -13,10 +13,7 @@ use std::collections::HashMap;
 ///
 /// # Returns
 /// * `Result<HashMap<String, String>, String>` - A map of relay URLs to their statuses, or an error string if something goes wrong
-#[tauri::command]
-pub async fn fetch_relays(
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<HashMap<String, String>, String> {
+pub async fn fetch_relays() -> Result<HashMap<String, String>, String> {
     Ok(wn
         .nostr
         .client

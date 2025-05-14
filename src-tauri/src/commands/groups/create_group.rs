@@ -4,12 +4,11 @@ use tokio::time::timeout;
 
 use nostr_mls::prelude::*;
 use nostr_sdk::NostrSigner;
-use tauri::Emitter;
 
 use crate::accounts::Account;
-use crate::fetch_enriched_contact;
+// use crate::fetch_enriched_contact;
 use crate::key_packages::fetch_key_packages_for_members;
-use crate::whitenoise::Whitenoise;
+
 
 /// Creates a new MLS group with the specified members and settings
 ///
@@ -44,19 +43,14 @@ use crate::whitenoise::Whitenoise;
 /// - MLS group creation fails
 /// - Welcome message sending fails
 /// - Database operations fail
-#[tauri::command]
 pub async fn create_group(
     creator_pubkey: String,
     member_pubkeys: Vec<String>,
     admin_pubkeys: Vec<String>,
     group_name: String,
     description: String,
-    wn: tauri::State<'_, Whitenoise>,
-    app_handle: tauri::AppHandle,
 ) -> Result<group_types::Group, String> {
-    let active_account = Account::get_active(wn.clone())
-        .await
-        .map_err(|e| e.to_string())?;
+    let active_account = Account::get_active().await.map_err(|e| e.to_string())?;
     let signer = wn.nostr.client.signer().await.map_err(|e| e.to_string())?;
 
     // Check that active account is the creator and signer
@@ -72,7 +66,7 @@ pub async fn create_group(
     }
 
     // Fetch key packages for all members
-    let member_key_packages = fetch_key_packages_for_members(&member_pubkeys, wn.clone())
+    let member_key_packages = fetch_key_packages_for_members(&member_pubkeys)
         .await
         .map_err(|e| e.to_string())?;
     let member_pubkeys = member_pubkeys
@@ -152,8 +146,7 @@ pub async fn create_group(
     for member in member_key_packages {
         let member_pubkey = PublicKey::from_hex(&member.pubkey).map_err(|e| e.to_string())?;
         let contact =
-            fetch_enriched_contact(member.pubkey.clone(), false, wn.clone(), app_handle.clone())
-                .await?;
+            fetch_enriched_contact(member.pubkey.clone(), false, app_handle.clone()).await?;
 
         // We only want to connect to user relays in release mode
         let relay_urls: Vec<String> = if cfg!(dev) {
@@ -295,10 +288,6 @@ pub async fn create_group(
         .subscribe_mls_group_messages(group_ids.clone())
         .await
         .map_err(|e| format!("Failed to update MLS group subscription: {}", e))?;
-
-    app_handle
-        .emit("group_added", group.clone())
-        .map_err(|e| e.to_string())?;
 
     Ok(group)
 }

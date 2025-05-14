@@ -1,6 +1,5 @@
 use crate::accounts::Account;
 use crate::relays::RelayType;
-use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
 
 /// Fetches a list of relays associated with a specific user and kind.
@@ -25,11 +24,9 @@ use nostr_sdk::prelude::*;
 ///   - Failed to get the active account
 ///   - Failed to fetch relays from the network
 ///   - Invalid relay list kind was provided
-#[tauri::command]
 pub async fn fetch_relays_list(
     kind: u64,
     pubkey: Option<String>,
-    wn: tauri::State<'_, Whitenoise>,
 ) -> Result<Vec<String>, String> {
     // Get the target pubkey
     let target_pubkey = if let Some(key) = pubkey {
@@ -39,7 +36,7 @@ pub async fn fetch_relays_list(
         }
     } else {
         // Use active account if no pubkey provided
-        match Account::get_active_pubkey(wn.clone()).await {
+        match Account::get_active_pubkey().await {
             Ok(pk) => pk,
             Err(e) => return Err(format!("Failed to get active account: {}", e)),
         }
@@ -57,9 +54,9 @@ pub async fn fetch_relays_list(
     };
 
     // First try to get relays from our database
-    let relay_urls = match Account::find_by_pubkey(&target_pubkey, wn.clone()).await {
+    let relay_urls = match Account::find_by_pubkey(&target_pubkey).await {
         Ok(account) => {
-            match account.relays(relay_type, wn.clone()).await {
+            match account.relays(relay_type).await {
                 Ok(urls) if !urls.is_empty() => urls,
                 _ => {
                     // If no relays found in database, try query methods

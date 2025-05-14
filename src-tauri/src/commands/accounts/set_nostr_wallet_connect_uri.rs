@@ -1,5 +1,5 @@
 use crate::accounts::Account;
-use crate::whitenoise::Whitenoise;
+
 use nwc::prelude::*;
 
 /// Sets the Nostr Wallet Connect URI for the active account.
@@ -13,12 +13,8 @@ use nwc::prelude::*;
 ///
 /// * `Ok(())` - If the URI was stored successfully
 /// * `Err(String)` - An error message if there was an issue storing the URI
-#[tauri::command]
-pub async fn set_nostr_wallet_connect_uri(
-    nostr_wallet_connect_uri: String,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<(), String> {
-    let active_account = Account::get_active(wn.clone())
+pub async fn set_nostr_wallet_connect_uri(nostr_wallet_connect_uri: String) -> Result<(), String> {
+    let active_account = Account::get_active()
         .await
         .map_err(|e| format!("Error getting active account: {}", e))?;
     let uri: NostrWalletConnectURI =
@@ -29,6 +25,6 @@ pub async fn set_nostr_wallet_connect_uri(
         .map_err(|e| format!("Error getting NWC info: {}", e))?;
 
     active_account
-        .store_nostr_wallet_connect_uri(&nostr_wallet_connect_uri, wn.clone())
+        .store_nostr_wallet_connect_uri(&nostr_wallet_connect_uri)
         .map_err(|e| format!("Error storing NWC URI: {}", e))
 }

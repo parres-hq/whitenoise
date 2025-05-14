@@ -53,7 +53,7 @@ use nostr_mls::prelude::*;
 
 use crate::accounts::Account;
 use crate::database::Database;
-use crate::Whitenoise;
+
 
 /// Adds a media file, ready to be used in a chat.
 ///
@@ -76,9 +76,8 @@ use crate::Whitenoise;
 pub async fn add_media_file(
     group: &group_types::Group,
     uploaded_file: FileUpload,
-    wn: tauri::State<'_, Whitenoise>,
 ) -> Result<UploadedMedia, MediaError> {
-    let active_account = Account::get_active(wn.clone())
+    let active_account = Account::get_active()
         .await
         .map_err(|_| MediaError::NoActiveAccount)?;
 

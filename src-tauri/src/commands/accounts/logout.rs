@@ -1,5 +1,5 @@
 use crate::accounts::Account;
-use crate::whitenoise::Whitenoise;
+
 use nostr_sdk::prelude::*;
 
 /// Logs out the specified account.
@@ -18,19 +18,16 @@ use nostr_sdk::prelude::*;
 ///
 /// * `Ok(())` - If the logout was successful
 /// * `Err(String)` - An error message if there was an issue during logout
-#[tauri::command]
 pub async fn logout(
     hex_pubkey: String,
-    wn: tauri::State<'_, Whitenoise>,
-    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let pubkey =
         PublicKey::parse(&hex_pubkey).map_err(|e| format!("Error parsing public key: {}", e))?;
-    let account = Account::find_by_pubkey(&pubkey, wn.clone())
+    let account = Account::find_by_pubkey(&pubkey)
         .await
         .map_err(|e| format!("Error fetching account: {}", e))?;
     account
-        .remove(wn.clone(), app_handle)
+        .remove()
         .await
         .map_err(|e| format!("Error logging out: {}", e))
 }

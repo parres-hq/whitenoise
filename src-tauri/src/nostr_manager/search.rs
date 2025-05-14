@@ -1,16 +1,12 @@
 use crate::nostr_manager::NostrManager;
 use crate::nostr_manager::NostrManagerError;
 use crate::types::EnrichedContact;
-use crate::Whitenoise;
+
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 impl NostrManager {
-    pub async fn search_users(
-        &self,
-        query: String,
-        wn: tauri::State<'_, Whitenoise>,
-    ) -> Result<HashMap<String, EnrichedContact>> {
+    pub async fn search_users(&self, query: String) -> Result<HashMap<String, EnrichedContact>> {
         let filter = Filter::new().kind(Kind::Metadata).search(query);
 
         let stored_events = wn

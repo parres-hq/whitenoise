@@ -4,7 +4,6 @@ use nostr_sdk::Keys;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::is_dev;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -36,14 +35,6 @@ pub enum SecretsStoreError {
 }
 
 pub type Result<T> = std::result::Result<T, SecretsStoreError>;
-
-#[allow(dead_code)]
-fn get_service_name() -> String {
-    match is_dev() {
-        true => "White Noise Dev".to_string(),
-        false => "White Noise".to_string(),
-    }
-}
 
 fn get_device_key(data_dir: &Path) -> Vec<u8> {
     let uuid_file = data_dir.join("whitenoise_uuid");

@@ -4,14 +4,10 @@ use tokio::time::timeout;
 
 use nostr_mls::prelude::*;
 
-use crate::whitenoise::Whitenoise;
+
 
 /// Gets the list of admin members in an MLS group
-#[tauri::command]
-pub async fn get_group_admins(
-    group_id: &str,
-    wn: tauri::State<'_, Whitenoise>,
-) -> Result<BTreeSet<PublicKey>, String> {
+pub async fn get_group_admins(group_id: &str) -> Result<BTreeSet<PublicKey>, String> {
     let mls_group_id = GroupId::from_slice(
         &hex::decode(group_id).map_err(|e| format!("Error decoding group id: {}", e))?,
     );

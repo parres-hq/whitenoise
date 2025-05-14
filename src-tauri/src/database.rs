@@ -1,9 +1,8 @@
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tauri::{path::BaseDirectory, AppHandle, Manager};
 use thiserror::Error;
 
 const MIGRATION_FILES: &[(&str, &[u8])] = &[
@@ -28,8 +27,6 @@ pub enum DatabaseError {
     Sqlx(#[from] sqlx::Error),
     #[error("Migrate error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
-    #[error("Tauri error: {0}")]
-    Tauri(#[from] tauri::Error),
 }
 
 #[derive(Clone)]
@@ -42,7 +39,7 @@ pub struct Database {
 }
 
 impl Database {
-    pub async fn new(db_path: PathBuf, app_handle: AppHandle) -> Result<Self, DatabaseError> {
+    pub async fn new(db_path: PathBuf) -> Result<Self, DatabaseError> {
         // Create parent directories if they don't exist
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -98,9 +95,16 @@ impl Database {
         // Run migrations
         tracing::info!("Running migrations...");
 
+        // Extract the parent directory from db_path as the data_dir
+        let data_dir = db_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        tracing::info!("Using data directory: {:?}", data_dir);
+
         let migrations_path = if cfg!(target_os = "android") {
             // On Android, we need to copy migrations to a temporary directory
-            let temp_dir = app_handle.path().app_data_dir()?.join("temp_migrations");
+            let temp_dir = data_dir.join("temp_migrations");
             if temp_dir.exists() {
                 fs::remove_dir_all(&temp_dir)?;
             }
@@ -114,9 +118,7 @@ impl Database {
 
             temp_dir
         } else {
-            app_handle
-                .path()
-                .resolve("db_migrations", BaseDirectory::Resource)?
+            data_dir.join("db_migrations")
         };
 
         tracing::info!("Migrations path: {:?}", migrations_path);
@@ -134,9 +136,7 @@ impl Database {
                 tracing::info!("Migrations applied successfully");
                 // Clean up temp directory on Android after successful migration
                 if cfg!(target_os = "android") {
-                    if let Ok(temp_dir) = app_handle.path().app_data_dir() {
-                        let _ = fs::remove_dir_all(temp_dir.join("temp_migrations"));
-                    }
+                    let _ = fs::remove_dir_all(data_dir.join("temp_migrations"));
                 }
             }
             Err(e) => {
