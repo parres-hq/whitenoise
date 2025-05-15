@@ -55,6 +55,7 @@ function getTokenValue(token: SerializableToken | string): string | null {
     .message-tokens.reply {
         display: -webkit-box;
         -webkit-line-clamp: 2;
+        line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
         text-overflow: ellipsis;

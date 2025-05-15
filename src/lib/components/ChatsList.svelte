@@ -5,9 +5,17 @@ import { hexKeyFromNpub, isValidHexKey, isValidNpub, npubFromPubkey } from "$lib
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
+import {
+    Format,
+    checkPermissions,
+    requestPermissions,
+    scan,
+} from "@tauri-apps/plugin-barcode-scanner";
+import { isPermissionGranted } from "@tauri-apps/plugin-notification";
 import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
 import Chat from "carbon-icons-svelte/lib/Chat.svelte";
 import ChevronLeft from "carbon-icons-svelte/lib/ChevronLeft.svelte";
+import ScanAlt from "carbon-icons-svelte/lib/ScanAlt.svelte";
 import Search from "carbon-icons-svelte/lib/Search.svelte";
 import WarningAlt from "carbon-icons-svelte/lib/WarningAlt.svelte";
 import { onDestroy, onMount } from "svelte";
@@ -61,6 +69,9 @@ let newChatSheetOpen = $state(false);
 let selectedContactPubkey = $state<string | null>(null);
 let selectedContact = $state<EnrichedContact | null>(null);
 let showStartChatView = $state(false);
+
+let isMobile = $state(false);
+let isScanning = $state(false);
 
 async function loadContacts() {
     try {
@@ -140,6 +151,10 @@ function closeNewChatSheet(): void {
 
 onMount(async () => {
     await loadContacts();
+
+    await invoke("is_mobile").then((isMobileResponse) => {
+        isMobile = isMobileResponse as boolean;
+    });
 
     if (!unlistenAccountChanging) {
         unlistenAccountChanging = await listen<string>("account_changing", async (_event) => {
@@ -230,6 +245,57 @@ $effect(() => {
         );
     }
 });
+
+async function scanQRCode(): Promise<void> {
+    try {
+        // First check if we already have permission
+        let permissionState = await checkPermissions();
+        console.log("Initial permission state:", permissionState);
+
+        // If we don't have permission, request it
+        if (permissionState !== "granted") {
+            console.log("Requesting camera permission...");
+            permissionState = await requestPermissions();
+            console.log("Permission state after request:", permissionState);
+
+            // If permission was denied, show error and return
+            if (permissionState !== "granted") {
+                console.error("Camera permission was denied or not granted");
+                return;
+            }
+        }
+
+        // Now that we have permission, start scanning
+        console.log("Starting QR code scan with options:", {
+            windowed: false,
+            formats: [Format.QRCode],
+            cameraDirection: "back",
+        });
+
+        const result = await scan({
+            windowed: false, // Use a separate camera window instead of transparent overlay
+            formats: [Format.QRCode],
+            cameraDirection: "back",
+        });
+
+        console.log("Scan result:", JSON.stringify(result, null, 2));
+
+        // Here you can handle the scan result
+        if (result) {
+            console.log("Successfully scanned QR code:", result.content);
+            if (isValidNpub(result.content) || isValidHexKey(result.content)) {
+                contactsSearch = result.content;
+            }
+        }
+    } catch (error) {
+        console.error("Error during QR code scanning:", error);
+        if (error instanceof Error) {
+            console.error("Error name:", error.name);
+            console.error("Error message:", error.message);
+            console.error("Error stack:", error.stack);
+        }
+    }
+}
 </script>
 
 <Header>
@@ -280,6 +346,11 @@ $effect(() => {
                         <Button type="submit" variant="outline" size="icon" class="shrink-0">
                             <Search size={24} class="shrink-0 !h-6 !w-6" />
                         </Button>
+                        {#if isMobile}
+                            <Button variant="outline" size="icon" class="shrink-0" onclick={() => scanQRCode()}>
+                                <ScanAlt size={24} class="shrink-0 !h-6 !w-6" />
+                            </Button>
+                        {/if}
                     </form>
                 </div>
             </div>

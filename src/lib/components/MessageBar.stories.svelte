@@ -1,6 +1,7 @@
 <script lang="ts" module>
 import type { Message } from "$lib/types/chat";
-import { NostrMlsGroupType } from "$lib/types/nostr";
+import type { MessageWithTokens } from "$lib/types/nostr";
+import { NostrMlsGroupState, NostrMlsGroupType } from "$lib/types/nostr";
 import { defineMeta } from "@storybook/addon-svelte-csf";
 import MessageBar from "./MessageBar.svelte";
 
@@ -36,14 +37,16 @@ const { Story } = defineMeta({
 });
 
 const mockGroup = {
-    mls_group_id: new Uint8Array([1, 2, 3, 4]),
-    nostr_group_id: "test_group_id",
+    mls_group_id: { value: { vec: new Uint8Array([1, 2, 3, 4]) } },
+    nostr_group_id: new Uint8Array([1, 2, 3, 4]),
     name: "Test Group",
     description: "A test group for storybook",
     admin_pubkeys: ["test_admin_pubkey"],
     last_message_at: Date.now(),
     last_message_id: "test_message_id",
     group_type: NostrMlsGroupType.Group,
+    epoch: 1,
+    state: NostrMlsGroupState.Active,
 };
 
 const mockReplyMessage = {
@@ -65,35 +68,35 @@ const mockReplyMessage = {
     },
 };
 
-function handleNewMessage(message: Message) {
+function handleNewMessage(message: Message | MessageWithTokens) {
     console.log("New message:", message);
 }
 </script>
 
-<Story 
-  name="Default" 
+<Story
+  name="Default"
   args={{
     group: mockGroup,
     handleNewMessage: handleNewMessage
-  }} 
+  }}
 />
 
-<Story 
-  name="Reply" 
+<Story
+  name="Reply"
   args={{
     group: mockGroup,
     replyToMessage: mockReplyMessage,
     handleNewMessage: handleNewMessage,
     isReplyToMessageDeleted: false
-  }} 
+  }}
 />
 
-<Story 
-  name="Deleted Reply" 
+<Story
+  name="Deleted Reply"
   args={{
     group: mockGroup,
     replyToMessage: mockReplyMessage,
     handleNewMessage: handleNewMessage,
     isReplyToMessageDeleted: true
-  }} 
+  }}
 />

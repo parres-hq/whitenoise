@@ -67,42 +67,44 @@ const mockMessage = {
         tags: [],
         content: "This is the original message that was replied to",
     },
+    tokens: [],
 };
 
 const mockOwnMessage = {
     ...mockMessage,
     pubkey: "own_pubkey",
     isMine: true,
+    tokens: [],
 };
 </script>
 
-<Story 
-  name="Default" 
+<Story
+  name="Default"
   args={{
     message: mockMessage,
     isDeleted: false
-  }} 
+  }}
 />
 
-<Story 
-  name="Own Message" 
+<Story
+  name="Own Message"
   args={{
     message: mockOwnMessage,
     isDeleted: false
-  }} 
+  }}
 />
 
-<Story 
-  name="Deleted Message" 
+<Story
+  name="Deleted Message"
   args={{
     message: mockMessage,
     isDeleted: true
-  }} 
+  }}
 />
 
-<Story 
-  name="Loading" 
+<Story
+  name="Loading"
   args={{
     message: undefined
-  }} 
-/> 
+  }}
+/>
