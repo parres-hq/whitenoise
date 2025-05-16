@@ -106,13 +106,21 @@ export function createChatStore() {
                 return deletionMessages;
             });
 
-            // If we have the target message, mark it as deleted in the UI
-            const targetMessage = findChatMessage(deletionMessage.targetId);
-            if (targetMessage) {
-                chatMessagesMap.update((chatMessages) => {
-                    chatMessages.set(targetMessage.id, targetMessage);
-                    return chatMessages;
-                });
+            // If this is a deletion of a reaction, update the parent message's reactions array
+            const reactionMessage = findReactionMessage(deletionMessage.targetId);
+            if (reactionMessage) {
+                const parentMessage = findChatMessage(reactionMessage.targetId);
+                if (parentMessage) {
+                    // Rebuild the reactions array from the reactionMessagesMap, filtering out deleted reactions
+                    const allReactions = Array.from(get(reactionMessagesMap).values()).filter(
+                        (r) => r.targetId === parentMessage.id && !isDeleted(r.id)
+                    );
+                    parentMessage.reactions = allReactions;
+                    chatMessagesMap.update((chatMessages) => {
+                        chatMessages.set(parentMessage.id, parentMessage);
+                        return chatMessages;
+                    });
+                }
             }
         },
         handleReactionMessage: (messageAndTokens: MessageWithTokens) => {
@@ -137,22 +145,15 @@ export function createChatStore() {
                 return;
             }
 
-            // Check if this reaction already exists in the message's reactions
-            const hasReaction = chatMessage.reactions.some(
-                (r) =>
-                    r.id === reactionMessage.id ||
-                    (r.pubkey === reactionMessage.pubkey &&
-                        r.content === reactionMessage.content &&
-                        r.targetId === reactionMessage.targetId)
+            // Rebuild the reactions array from the reactionMessagesMap, filtering out deleted reactions
+            const allReactions = Array.from(get(reactionMessagesMap).values()).filter(
+                (r) => r.targetId === chatMessage.id && !isDeleted(r.id)
             );
-
-            if (!hasReaction) {
-                chatMessage.reactions = [...chatMessage.reactions, reactionMessage];
-                chatMessagesMap.update((chatMessages) => {
-                    chatMessages.set(chatMessage.id, chatMessage);
-                    return chatMessages;
-                });
-            }
+            chatMessage.reactions = allReactions;
+            chatMessagesMap.update((chatMessages) => {
+                chatMessages.set(chatMessage.id, chatMessage);
+                return chatMessages;
+            });
         },
     };
 

@@ -674,10 +674,8 @@ describe("Chat Store", () => {
 
     describe("getMessageReactionsSummary", () => {
         it("returns a summary of reactions for a message", () => {
-            const messageEvent = createMessageEvent("msg-1", "Hello world", 1000);
-            chatStore.handleMessage(messageEvent);
-
             chatStore.handleMessages([
+                createMessageEvent("msg-1", "Hello world", 1000),
                 createReactionEvent("reaction-1", "👍", 1000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-2", "👍", 2000, "msg-1", "other-pubkey"),
                 createReactionEvent("reaction-3", "❤️", 3000, "msg-1", "other-pubkey"),
@@ -705,7 +703,6 @@ describe("Chat Store", () => {
                 createDeletionMessage("deletion-1", "reaction-1", 3000),
             ]);
             const summary = chatStore.getMessageReactionsSummary("msg-1");
-
             expect(summary).toEqual([
                 {
                     emoji: "👍",
