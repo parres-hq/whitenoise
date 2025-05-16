@@ -3,6 +3,7 @@ import { page } from "$app/state";
 import GroupAvatar from "$lib/components/GroupAvatar.svelte";
 import Header from "$lib/components/Header.svelte";
 import MessageBar from "$lib/components/MessageBar.svelte";
+import MessageMediaAttachments from "$lib/components/MessageMediaAttachments.svelte";
 import MessageTokens from "$lib/components/MessageTokens.svelte";
 import RepliedTo from "$lib/components/RepliedTo.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
@@ -436,6 +437,7 @@ function navigateToInfo() {
                                 isDeleted={chatStore.isDeleted(chatMessage.replyToId)}
                             />
                         {/if}
+                        <MessageMediaAttachments mediaAttachments={chatMessage.mediaAttachments} />
                         <div
                             use:press={()=>({ triggerBeforeFinished: true, timeframe: 100 })}
                             onpress={handlePress}

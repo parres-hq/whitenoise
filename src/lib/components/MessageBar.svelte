@@ -5,6 +5,7 @@ import type { ChatMessage, Message } from "$lib/types/chat";
 import type { NGroup } from "$lib/types/nostr";
 import { NMessageState } from "$lib/types/nostr";
 import { hexMlsGroupId } from "$lib/utils/group";
+import { ALLOWED_MIME_TYPES, getMimeType } from "$lib/utils/media";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
@@ -137,7 +138,7 @@ async function handleFileUpload() {
     const filePath = await open({
         multiple: false,
         directory: false,
-        mimeTypes: ["image/*", "video/*", "audio/*", "application/pdf"],
+        mimeTypes: ALLOWED_MIME_TYPES,
     });
     if (!filePath) return;
 
@@ -182,22 +183,6 @@ async function uploadFile(file: File) {
         );
         toast.error(`Failed to upload ${file.name}`);
     }
-}
-
-// Helper function to determine MIME type from file extension
-function getMimeType(filePath: string): string {
-    const extension = filePath.split(".").pop()?.toLowerCase();
-    const mimeTypes: Record<string, string> = {
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        png: "image/png",
-        gif: "image/gif",
-        mp4: "video/mp4",
-        mp3: "audio/mpeg",
-        pdf: "application/pdf",
-        // Add more as needed
-    };
-    return mimeTypes[extension || ""] || "application/octet-stream";
 }
 
 onMount(() => {
