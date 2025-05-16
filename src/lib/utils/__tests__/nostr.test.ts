@@ -168,9 +168,9 @@ describe("Nostr Utils", () => {
 
         it("returns empty string when no event is found", async () => {
             vi.mocked(invoke).mockResolvedValue(null);
-            const result = await latestMessagePreview(123);
+            const result = await latestMessagePreview("123");
             expect(result).toBe("");
-            expect(invoke).toHaveBeenCalledWith("query_message", { messageId: 123 });
+            expect(invoke).toHaveBeenCalledWith("query_message", { messageId: "123" });
         });
 
         it('returns "You: [content]" when event is from active account', async () => {
@@ -181,7 +181,7 @@ describe("Nostr Utils", () => {
                 content: "Hello there",
             });
 
-            const result = await latestMessagePreview(123);
+            const result = await latestMessagePreview("123");
             expect(result).toBe("You: Hello there");
         });
 
@@ -196,7 +196,7 @@ describe("Nostr Utils", () => {
             });
             vi.mocked(npubEncode).mockReturnValue("npub1otherpubkey");
 
-            const result = await latestMessagePreview(123);
+            const result = await latestMessagePreview("123");
             expect(result).toBe("Other User: Hi");
             expect(invoke).toHaveBeenCalledWith("query_enriched_contact", {
                 pubkey: "otherpubkey",

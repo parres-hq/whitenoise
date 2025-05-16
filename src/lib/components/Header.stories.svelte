@@ -22,11 +22,6 @@ const { Story } = defineMeta({
             control: "text",
             description: "Optional URL to navigate back to",
         },
-        variant: {
-            control: "select",
-            options: ["normal", "reverse"],
-            description: "The visual variant of the header",
-        },
     },
 });
 </script>
@@ -43,14 +38,6 @@ const { Story } = defineMeta({
   args={{
     title: "Back Navigation",
     backLocation: "/"
-  }}
-/>
-
-<Story
-  name="Reverse Variant"
-  args={{
-    title: "Reverse Style",
-    variant: "reverse"
   }}
 />
 

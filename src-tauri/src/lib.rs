@@ -136,12 +136,17 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    // Ensure the log directory exists
+    if !logs_dir.exists() {
+        std::fs::create_dir_all(&logs_dir)?;
+    }
+
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix("whitenoise")
         .filename_suffix("log")
-        .build(logs_dir)?;
+        .build(logs_dir.clone())?;
 
     // Create non-blocking writers for both stdout and file
     let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
@@ -162,12 +167,16 @@ fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi(false) // Disable ANSI color codes for file output
         .with_target(true); // Include target information in file logs
 
-    // Initialize the tracing subscriber registry
+    // Initialize the tracing subscriber registry with debug level for both dev and release
     Registry::default()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
         .with(stdout_layer)
         .with(file_layer)
         .init();
+
+    // Write a test log message
+    tracing::info!("Logging system initialized");
+    tracing::debug!("Debug logging enabled");
 
     Ok(())
 }

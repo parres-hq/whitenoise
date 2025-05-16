@@ -39,7 +39,8 @@
         "toastSuccess": "Toast successo",
         "testToastSuccess": "Test toast successo",
         "testToastError": "Test toast errore",
-        "toastError": "Toast errore"
+        "toastError": "Toast errore",
+        "qrCode": "La Tua Chiave Pubblica"
     },
     "profile": {
         "title": "Profilo",

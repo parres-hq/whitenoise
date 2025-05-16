@@ -37,7 +37,7 @@ const { Story } = defineMeta({
             content: "Test invite content"
         },
         mls_group_id: {
-            value: new Uint8Array([1, 2, 3])
+            value: { vec: new Uint8Array([1, 2, 3]) }
         },
         nostr_group_id: new Uint8Array([1, 2, 3]),
         wrapper_event_id: "7c2a4aba1246de3142ddaf8a5b11f3ee0bbc4ec2808a6d06454df800c365a9ac",
@@ -47,7 +47,7 @@ const { Story } = defineMeta({
         group_relays: [{
             relay_url: "wss://relay.example.com",
             mls_group_id: {
-                value: new Uint8Array([1, 2, 3])
+                value: { vec: new Uint8Array([1, 2, 3]) }
             }
         }],
         welcomer: "7d92b004bce83a1fa097bbbf04c68436c5003b5d1b0c3f5121e59c2c32d17135",

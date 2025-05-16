@@ -70,6 +70,16 @@ export function createChatStore() {
                 messagesToUpdate.push(replyToMessage);
             }
 
+            // Check for any existing reactions to this message
+            const reactionMessages = get(reactionMessagesMap);
+            const reactions = Array.from(reactionMessages.values()).filter(
+                (r) => r.targetId === newMessage.id && !isDeleted(r.id)
+            );
+
+            if (reactions.length > 0) {
+                newMessage.reactions = reactions;
+            }
+
             chatMessagesMap.update((chatMessages) => {
                 for (const message of messagesToUpdate) {
                     chatMessages.set(message.id, message);
@@ -80,22 +90,66 @@ export function createChatStore() {
         handleDeletionMessage: (messageAndTokens: MessageWithTokens) => {
             const deletionMessage = messageToDeletionMessage(messageAndTokens);
             if (!deletionMessage) return;
+
+            // Check if this deletion already exists
+            const existingDeletion = get(deletionMessagesMap).get(deletionMessage.targetId);
+            if (existingDeletion) {
+                // If the existing deletion is newer, don't overwrite it
+                if (existingDeletion.event.created_at > deletionMessage.event.created_at) {
+                    return;
+                }
+            }
+
+            // Process the deletion regardless of whether we have the target message
             deletionMessagesMap.update((deletionMessages) => {
                 deletionMessages.set(deletionMessage.targetId, deletionMessage);
                 return deletionMessages;
             });
+
+            // If this is a deletion of a reaction, update the parent message's reactions array
+            const reactionMessage = findReactionMessage(deletionMessage.targetId);
+            if (reactionMessage) {
+                const parentMessage = findChatMessage(reactionMessage.targetId);
+                if (parentMessage) {
+                    // Rebuild the reactions array from the reactionMessagesMap, filtering out deleted reactions
+                    const allReactions = Array.from(get(reactionMessagesMap).values()).filter(
+                        (r) => r.targetId === parentMessage.id && !isDeleted(r.id)
+                    );
+                    parentMessage.reactions = allReactions;
+                    chatMessagesMap.update((chatMessages) => {
+                        chatMessages.set(parentMessage.id, parentMessage);
+                        return chatMessages;
+                    });
+                }
+            }
         },
         handleReactionMessage: (messageAndTokens: MessageWithTokens) => {
             const reactionMessage = messageToReactionMessage(messageAndTokens, currentPubkey);
             if (!reactionMessage) return;
+
+            // First check if this reaction already exists
+            const existingReaction = findReactionMessage(reactionMessage.id);
+            if (existingReaction) return; // Skip if reaction already exists
+
+            // Add the reaction to the reactionMessagesMap
             reactionMessagesMap.update((reactionMessages) => {
                 reactionMessages.set(reactionMessage.id, reactionMessage);
                 return reactionMessages;
             });
 
+            // Find the target message
             const chatMessage = findChatMessage(reactionMessage.targetId);
-            if (!chatMessage) return;
-            chatMessage.reactions = [...chatMessage.reactions, reactionMessage];
+            if (!chatMessage) {
+                // If the target message doesn't exist yet, we'll store the reaction
+                // and it will be added when the target message is processed
+                return;
+            }
+
+            // Rebuild the reactions array from the reactionMessagesMap, filtering out deleted reactions
+            const allReactions = Array.from(get(reactionMessagesMap).values()).filter(
+                (r) => r.targetId === chatMessage.id && !isDeleted(r.id)
+            );
+            chatMessage.reactions = allReactions;
             chatMessagesMap.update((chatMessages) => {
                 chatMessages.set(chatMessage.id, chatMessage);
                 return chatMessages;

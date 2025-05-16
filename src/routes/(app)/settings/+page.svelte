@@ -5,6 +5,7 @@ import ConfirmSheet from "$lib/components/ConfirmSheet.svelte";
 import FormattedNpub from "$lib/components/FormattedNpub.svelte";
 import Header from "$lib/components/Header.svelte";
 import LoginSheet from "$lib/components/LoginSheet.svelte";
+import QrCodeSheet from "$lib/components/QrCodeSheet.svelte";
 import Sheet from "$lib/components/Sheet.svelte";
 import * as Accordion from "$lib/components/ui/accordion";
 import Button from "$lib/components/ui/button/button.svelte";
@@ -17,6 +18,7 @@ import {
     setActiveAccount,
     updateAccountsStore,
 } from "$lib/stores/accounts";
+import { copyToClipboard } from "$lib/utils/clipboard";
 import { nameFromMetadata, npubFromPubkey } from "$lib/utils/nostr";
 import { invoke } from "@tauri-apps/api/core";
 import { type UnlistenFn, listen } from "@tauri-apps/api/event";
@@ -28,9 +30,11 @@ import {
 import AddLarge from "carbon-icons-svelte/lib/AddLarge.svelte";
 import ChevronRight from "carbon-icons-svelte/lib/ChevronRight.svelte";
 import ChevronSort from "carbon-icons-svelte/lib/ChevronSort.svelte";
+import Copy from "carbon-icons-svelte/lib/Copy.svelte";
 import Logout from "carbon-icons-svelte/lib/Logout.svelte";
 import Notification from "carbon-icons-svelte/lib/Notification.svelte";
 import Password from "carbon-icons-svelte/lib/Password.svelte";
+import QrCode from "carbon-icons-svelte/lib/QrCode.svelte";
 import Satellite from "carbon-icons-svelte/lib/Satellite.svelte";
 import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte";
 import User from "carbon-icons-svelte/lib/User.svelte";
@@ -142,6 +146,25 @@ function publishKeyPackage() {
             showPublishKeyPackageConfirmSheet = false;
         });
 }
+
+let highlightButton = $state(false);
+async function copyNpub() {
+    if ($activeAccount) {
+        if (await copyToClipboard(npubFromPubkey($activeAccount.pubkey), "npub")) {
+            highlightButton = true;
+            setTimeout(() => {
+                highlightButton = false;
+            }, 2000);
+        } else {
+            toast.error("Error copying npub");
+        }
+    }
+}
+
+let showQrCodeSheet = $state(false);
+function showQrCode() {
+    showQrCodeSheet = true;
+}
 </script>
 
 <Header backLocation="/chats" title={$t("settings.title")} />
@@ -183,11 +206,17 @@ function publishKeyPackage() {
                                 {nameFromMetadata($activeAccount!.metadata, $activeAccount!.pubkey)}
                             </div>
                             <div class="flex gap-4 items-center">
-                                <FormattedNpub npub={npubFromPubkey($activeAccount!.pubkey)} showCopy={true} />
+                                <FormattedNpub npub={npubFromPubkey($activeAccount!.pubkey)} showCopy={false} />
                             </div>
                         </div>
+                        <Button variant="ghost" size="icon" class="p-2 shrink-0 hover:bg-transparent" onclick={showQrCode}>
+                            <QrCode size={24} class="shrink-0 !h-6 !w-6" />
+                        </Button>
+                        <Button variant="ghost" size="icon" class="p-2 shrink-0 hover:bg-transparent {$accounts.length > 1 ? '' : '-mr-2'}" onclick={copyNpub}>
+                            <Copy size={24} class="shrink-0 !h-6 !w-6 {highlightButton ? 'text-green-500' : ''}" />
+                        </Button>
                         {#if $accounts.length > 1}
-                            <Button variant="ghost" size="icon" class="p-2 shrink-0 -mr-2" onclick={() => showSwitchAccountSheet = true}>
+                            <Button variant="ghost" size="icon" class="p-2 shrink-0 hover:bg-transparent" onclick={() => showSwitchAccountSheet = true}>
                                 <ChevronSort size={24} class="text-muted-foreground shrink-0 !w-6 !h-6" />
                             </Button>
                             <Sheet bind:open={showSwitchAccountSheet}>
@@ -380,3 +409,8 @@ function publishKeyPackage() {
         </Accordion.Item>
     </Accordion.Root>
 </main>
+
+{#if $activeAccount}
+    <QrCodeSheet bind:open={showQrCodeSheet} npub={npubFromPubkey($activeAccount.pubkey)} />
+{/if}
+

@@ -92,7 +92,7 @@ async function inviteContact() {
 </script>
 
 <div class="flex flex-col h-full relative">
-    <div class="flex flex-col justify-start items-center pt-40 flex-1 gap-4">
+    <div class="flex flex-col justify-start items-center flex-1 gap-4">
         <Avatar
             pubkey={pubkey}
             picture={contact?.metadata?.picture}

@@ -48,54 +48,53 @@ pub async fn delete_message(
     );
 
     tracing::debug!(target: "whitenoise::commands::groups::delete_message", "Attempting to acquire nostr_mls lock");
-    let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
-        Ok(guard) => {
-            tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock acquired");
-            guard
+    let (message_event_id, deletion_tags, deletion_reason);
+    {
+        let nostr_mls_guard = match timeout(Duration::from_secs(5), wn.nostr_mls.lock()).await {
+            Ok(guard) => guard,
+            Err(_) => {
+                tracing::error!("Timeout waiting for nostr_mls lock");
+                return Err("Timeout waiting for nostr_mls lock".to_string());
+            }
+        };
+
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            let group_messages = nostr_mls
+                .get_messages(&group.mls_group_id)
+                .map_err(|e| format!("Failed to fetch messages: {}", e))?;
+
+            // Validate inputs and permissions
+            message_event_id =
+                validate_deletion_request(&message_id, &group_messages, &active_account).await?;
+
+            deletion_tags = vec![Tag::event(message_event_id)];
+            deletion_reason = "Message deleted by user".to_string();
+        } else {
+            return Err("Failed to fetch messages: No Nostr MLS instance".to_string());
         }
-        Err(_) => {
-            tracing::error!(target: "whitenoise::commands::groups::delete_message", "Timeout waiting for nostr_mls lock");
-            return Err("Timeout waiting for nostr_mls lock".to_string());
-        }
-    };
+    } // <-- lock released here
 
-    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-        let group_messages = nostr_mls
-            .get_messages(&group.mls_group_id)
-            .map_err(|e| format!("Failed to fetch messages: {}", e))?;
+    // 2. Now publish the deletion event (no lock held)
+    tracing::debug!(
+        target: "whitenoise::commands::groups::delete_message",
+        "Creating deletion event for message ID: {}, from user: {}",
+        message_id,
+        active_account.pubkey.to_hex()
+    );
 
-        // Validate inputs and permissions
-        let message_event_id =
-            validate_deletion_request(&message_id, &group_messages, &active_account).await?;
+    let result = send_mls_message(
+        group,
+        deletion_reason,
+        5, // Kind 5 for deletion events as per NIP-09
+        Some(deletion_tags),
+        None,
+        wn.clone(),
+        app_handle,
+    )
+    .await;
 
-        // Create deletion event with "e" tag (NIP-09)
-        let deletion_tags = vec![Tag::event(message_event_id)];
-        let deletion_reason = "Message deleted by user";
-
-        tracing::debug!(
-            target: "whitenoise::commands::groups::delete_message",
-            "Creating deletion event for message ID: {}, from user: {}",
-            message_id,
-            active_account.pubkey.to_hex()
-        );
-
-        // Send the deletion event
-        let result = send_mls_message(
-            group,
-            deletion_reason.to_string(),
-            5, // Kind 5 for deletion events as per NIP-09
-            Some(deletion_tags),
-            None,
-            wn.clone(),
-            app_handle,
-        )
-        .await;
-        tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock released");
-        result
-    } else {
-        tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock released");
-        Err("Failed to fetch messages: No Nostr MLS instance".to_string())
-    }
+    tracing::debug!(target: "whitenoise::commands::groups::delete_message", "nostr_mls lock released");
+    result
 }
 
 /// Validates a message deletion request
