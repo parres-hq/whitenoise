@@ -27,13 +27,16 @@ let inviteDescription = $derived(
 
 $effect(() => {
     if (welcome.welcomer && !enrichedInviter) {
-        invoke("query_enriched_contact", {
-            pubkey: counterpartyPubkey,
+        invoke("fetch_enriched_contact", {
+            pubkey: welcome.welcomer,
             updateAccount: false,
         }).then((value) => {
             enrichedInviter = value as EnrichedContact;
         });
     }
+});
+
+$effect(() => {
     if (groupType === NostrMlsGroupType.DirectMessage && welcome.welcomer && enrichedInviter) {
         groupName = nameFromMetadata(
             (enrichedInviter as EnrichedContact).metadata,

@@ -70,6 +70,16 @@ export function createChatStore() {
                 messagesToUpdate.push(replyToMessage);
             }
 
+            // Check for any existing reactions to this message
+            const reactionMessages = get(reactionMessagesMap);
+            const reactions = Array.from(reactionMessages.values()).filter(
+                (r) => r.targetId === newMessage.id && !isDeleted(r.id)
+            );
+
+            if (reactions.length > 0) {
+                newMessage.reactions = reactions;
+            }
+
             chatMessagesMap.update((chatMessages) => {
                 for (const message of messagesToUpdate) {
                     chatMessages.set(message.id, message);
@@ -80,26 +90,69 @@ export function createChatStore() {
         handleDeletionMessage: (messageAndTokens: MessageWithTokens) => {
             const deletionMessage = messageToDeletionMessage(messageAndTokens);
             if (!deletionMessage) return;
+
+            // Check if this deletion already exists
+            const existingDeletion = get(deletionMessagesMap).get(deletionMessage.targetId);
+            if (existingDeletion) {
+                // If the existing deletion is newer, don't overwrite it
+                if (existingDeletion.event.created_at > deletionMessage.event.created_at) {
+                    return;
+                }
+            }
+
+            // Process the deletion regardless of whether we have the target message
             deletionMessagesMap.update((deletionMessages) => {
                 deletionMessages.set(deletionMessage.targetId, deletionMessage);
                 return deletionMessages;
             });
+
+            // If we have the target message, mark it as deleted in the UI
+            const targetMessage = findChatMessage(deletionMessage.targetId);
+            if (targetMessage) {
+                chatMessagesMap.update((chatMessages) => {
+                    chatMessages.set(targetMessage.id, targetMessage);
+                    return chatMessages;
+                });
+            }
         },
         handleReactionMessage: (messageAndTokens: MessageWithTokens) => {
             const reactionMessage = messageToReactionMessage(messageAndTokens, currentPubkey);
             if (!reactionMessage) return;
+
+            // First check if this reaction already exists
+            const existingReaction = findReactionMessage(reactionMessage.id);
+            if (existingReaction) return; // Skip if reaction already exists
+
+            // Add the reaction to the reactionMessagesMap
             reactionMessagesMap.update((reactionMessages) => {
                 reactionMessages.set(reactionMessage.id, reactionMessage);
                 return reactionMessages;
             });
 
+            // Find the target message
             const chatMessage = findChatMessage(reactionMessage.targetId);
-            if (!chatMessage) return;
-            chatMessage.reactions = [...chatMessage.reactions, reactionMessage];
-            chatMessagesMap.update((chatMessages) => {
-                chatMessages.set(chatMessage.id, chatMessage);
-                return chatMessages;
-            });
+            if (!chatMessage) {
+                // If the target message doesn't exist yet, we'll store the reaction
+                // and it will be added when the target message is processed
+                return;
+            }
+
+            // Check if this reaction already exists in the message's reactions
+            const hasReaction = chatMessage.reactions.some(
+                (r) =>
+                    r.id === reactionMessage.id ||
+                    (r.pubkey === reactionMessage.pubkey &&
+                        r.content === reactionMessage.content &&
+                        r.targetId === reactionMessage.targetId)
+            );
+
+            if (!hasReaction) {
+                chatMessage.reactions = [...chatMessage.reactions, reactionMessage];
+                chatMessagesMap.update((chatMessages) => {
+                    chatMessages.set(chatMessage.id, chatMessage);
+                    return chatMessages;
+                });
+            }
         },
     };
 

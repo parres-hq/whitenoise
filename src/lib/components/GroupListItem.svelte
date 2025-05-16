@@ -35,7 +35,9 @@ $effect(() => {
                   )[0]
                 : undefined;
     }
+});
 
+$effect(() => {
     if (counterpartyPubkey && !counterpartyQueried) {
         invoke("query_enriched_contact", {
             pubkey: counterpartyPubkey,
@@ -46,7 +48,9 @@ $effect(() => {
             counterpartyQueried = true;
         });
     }
+});
 
+$effect(() => {
     if (
         counterpartyPubkey &&
         counterpartyQueried &&
@@ -64,7 +68,9 @@ $effect(() => {
             counterpartyFetched = true;
         });
     }
+});
 
+$effect(() => {
     if (
         group.group_type === NostrMlsGroupType.DirectMessage &&
         counterpartyPubkey &&

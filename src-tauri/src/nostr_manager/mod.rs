@@ -71,9 +71,7 @@ impl Default for NostrManagerSettings {
             // relays.push("wss://nos.lol".to_string());
         } else {
             relays.push("wss://relay.damus.io".to_string());
-            relays.push("wss://purplepag.es".to_string());
             relays.push("wss://relay.primal.net".to_string());
-            relays.push("wss://nos.lol".to_string());
         }
 
         Self {

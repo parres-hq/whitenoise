@@ -37,6 +37,7 @@ type ChatsListProps = {
     welcomes?: NWelcome[];
     groups?: NGroup[];
     selectedChatId?: string | null;
+    onRefresh?: () => void;
 };
 
 let {
@@ -45,6 +46,7 @@ let {
     welcomes = $bindable([]),
     groups = $bindable([]),
     selectedChatId = $bindable(null),
+    onRefresh = () => {},
 }: ChatsListProps = $props();
 
 let unlistenAccountChanging: UnlistenFn;

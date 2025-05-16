@@ -139,11 +139,8 @@ onMount(async () => {
         unlistenMlsMessageProcessed = await listen<[NGroup, MessageWithTokens]>(
             "mls_message_processed",
             ({ payload: [_updatedGroup, messageWithTokens] }) => {
-                const storedMessage = chatStore.findChatMessage(messageWithTokens.message.event_id);
-                if (!storedMessage) {
-                    console.log("pushing message to transcript");
-                    chatStore.handleMessage(messageWithTokens);
-                }
+                // Always process the message, regardless of whether it exists in the store
+                chatStore.handleMessage(messageWithTokens);
                 scrollToBottom();
             }
         );

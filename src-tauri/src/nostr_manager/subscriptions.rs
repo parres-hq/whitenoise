@@ -62,13 +62,6 @@ impl NostrManager {
     }
 
     async fn subscribe_giftwraps(&self, pubkey: PublicKey) -> Result<Output<SubscriptionId>> {
-        // This is a hack to get the client to do the initial authenticate on relays that require it.
-        // https://github.com/rust-nostr/nostr/issues/509
-        let null_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey).limit(0);
-        self.client
-            .fetch_events(null_filter, self.timeout().await?)
-            .await?;
-
         let giftwrap_filter = Filter::new()
             .kind(Kind::GiftWrap)
             .pubkey(pubkey)

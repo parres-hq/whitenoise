@@ -136,19 +136,39 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Setting up logging in directory: {:?}", logs_dir);
+
+    // Ensure the log directory exists
+    if !logs_dir.exists() {
+        println!("Log directory does not exist, creating it");
+        std::fs::create_dir_all(&logs_dir)?;
+    }
+
+    println!("Log directory exists: {}", logs_dir.exists());
+    println!(
+        "Log directory is writable: {}",
+        !logs_dir.metadata()?.permissions().readonly()
+    );
+
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix("whitenoise")
         .filename_suffix("log")
-        .build(logs_dir)?;
+        .build(logs_dir.clone())?;
+
+    println!("Created file appender");
 
     // Create non-blocking writers for both stdout and file
     let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
     let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
 
+    println!("Created non-blocking writers");
+
     static GUARDS: Lazy<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = Lazy::new(|| Mutex::new(None));
     *GUARDS.lock().unwrap() = Some((file_guard, stdout_guard));
+
+    println!("Stored guards");
 
     // Create a layer for stdout with ANSI color codes enabled
     let stdout_layer = Layer::new()
@@ -162,12 +182,20 @@ fn setup_logging(logs_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi(false) // Disable ANSI color codes for file output
         .with_target(true); // Include target information in file logs
 
-    // Initialize the tracing subscriber registry
+    println!("Created layers");
+
+    // Initialize the tracing subscriber registry with debug level for both dev and release
     Registry::default()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
         .with(stdout_layer)
         .with(file_layer)
         .init();
+
+    println!("Initialized tracing subscriber");
+
+    // Write a test log message
+    tracing::info!("Logging system initialized");
+    tracing::debug!("Debug logging enabled");
 
     Ok(())
 }

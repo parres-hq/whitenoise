@@ -203,6 +203,7 @@ impl EventProcessor {
         let wn = app_handle.state::<Whitenoise>();
         let active_account = Account::get_active(wn.clone()).await?;
         let keys = active_account.keys(wn.clone())?;
+        tracing::debug!("whitenoise::nostr_manager::event_processor::process_giftwrap: Recieved giftwrap event {:?}", event);
         if let Ok(unwrapped) = extract_rumor(&keys, &event).await {
             match unwrapped.rumor.kind {
                 Kind::MlsWelcome => {

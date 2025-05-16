@@ -85,7 +85,7 @@ async function declineInvite() {
 
 {#if enrichedInviter}
     <div class="flex flex-col h-full relative">
-        <div class="flex flex-col justify-start items-center pt-24 flex-1 gap-4">
+        <div class="flex flex-col justify-start items-center pt-12 flex-1 gap-4">
             <h2 class="text-lg font-normal px-6 mb-10">{nameFromMetadata(enrichedInviter?.metadata)} {subhead}</h2>
             <Avatar
                 pubkey={welcomerPubkey}
@@ -108,12 +108,12 @@ async function declineInvite() {
             </div>
         </div>
 
-        <div class="flex flex-col gap-0 w-full px-0 fixed bottom-0 left-0 right-0 bg-background">
+        <div class="flex flex-col gap-2 w-full px-4 md:px-8 pb-8 bg-background mt-24">
             <Button
                 variant="ghost"
                 size="lg"
                 tabindex="1"
-                class="text-base font-medium w-full py-6 focus-visible:ring-0"
+                class="w-full h-fit text-base font-medium py-4 px-0 focus-visible:ring-0 disabled:cursor-not-allowed"
                 disabled={isDecliningInvite}
                 onclick={declineInvite}>
                 {isDecliningInvite ? $t("chats.decliningInvite") : $t("chats.declineInvite")}
@@ -122,7 +122,7 @@ async function declineInvite() {
                 variant="default"
                 size="lg"
                 tabindex="0"
-                class="text-base font-medium w-full pb-[calc(1.5rem+var(--sab))] pt-6 focus-visible:ring-0"
+                class="text-base font-medium w-full h-fit mx-0 py-4 px-1 focus-visible:ring-0 disabled:cursor-not-allowed"
                 disabled={isAcceptingInvite}
                 onclick={acceptInvite}>
                     {isAcceptingInvite ? $t("chats.acceptingInvite") : $t("chats.acceptInvite")}

@@ -171,6 +171,6 @@ $inspect(selectedChatId);
 <!-- On mobile, show just the chats list -->
 <div class="md:hidden">
     <div class="max-w-full">
-        <ChatsList bind:welcomes bind:groups />
+        <ChatsList bind:welcomes bind:groups onRefresh={loadEvents} />
     </div>
 </div>
