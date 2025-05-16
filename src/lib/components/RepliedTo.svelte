@@ -23,8 +23,8 @@ function scrollToMessage() {
 </script>
 
 {#if message}
-    <button 
-        class="flex flex-col gap-1 bg-primary-foreground text-primary rounded-sm p-2 border-l-4 border-l-white dark:border-l-black pl-4 mb-2 text-sm"
+    <button
+        class="flex flex-col gap-1 bg-primary-foreground text-primary rounded-sm p-2 border-l-4 border-l-white dark:border-l-black pl-4 mb-2 text-sm w-full"
         onclick={scrollToMessage}
         aria-label={$t("chats.scrollToMessage")}
     >
