@@ -41,10 +41,12 @@ pub mod blossom;
 mod cache;
 mod encryption;
 mod errors;
+mod media_retriever;
 mod sanitizer;
 mod types;
 
 pub use errors::MediaError;
+pub use media_retriever::retrieve_and_cache_media_file;
 pub use sanitizer::sanitize_media;
 pub use types::*;
 
