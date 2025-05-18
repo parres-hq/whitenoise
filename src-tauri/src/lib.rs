@@ -90,6 +90,7 @@ pub fn run() {
             delete_all_data,
             delete_all_key_packages,
             delete_message,
+            download_file,
             encrypt_content,
             export_nsec,
             fetch_contacts_with_metadata,
