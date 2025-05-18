@@ -8,6 +8,7 @@ mod payments;
 mod relays;
 mod secrets_store;
 mod types;
+mod utils;
 mod whitenoise;
 
 use crate::commands::accounts::*;
