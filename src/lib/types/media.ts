@@ -13,6 +13,8 @@ export type MediaAttachment = {
     alt?: string;
     width?: number;
     height?: number;
+    decryptionNonceHex: string;
+    fileHashOriginal: string;
 };
 
 export type MediaFileMap = Map<string, MediaFile>;

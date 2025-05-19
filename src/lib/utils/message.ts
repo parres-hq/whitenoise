@@ -1,5 +1,6 @@
-import type { ChatMessage, MediaAttachment } from "$lib/types/chat";
-import type { MessageWithTokens, SerializableToken } from "$lib/types/nnostr";
+import type { ChatMessage } from "$lib/types/chat";
+import type { MediaAttachment } from "$lib/types/media";
+import type { MessageWithTokens, SerializableToken } from "$lib/types/nostr";
 import { eventToLightningInvoice, eventToLightningPayment } from "./lightning";
 import { findMediaAttachments } from "./media";
 import { findReplyToId } from "./tags";

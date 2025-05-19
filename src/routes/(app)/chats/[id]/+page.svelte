@@ -24,6 +24,7 @@ import {
 import { copyToClipboard } from "$lib/utils/clipboard";
 import { hexMlsGroupId } from "$lib/utils/group";
 import { lightningInvoiceToQRCode } from "$lib/utils/lightning";
+import { findMediaAttachments } from "$lib/utils/media";
 import { nameFromMetadata } from "$lib/utils/nostr";
 import { formatMessageTime } from "$lib/utils/time";
 import { invoke } from "@tauri-apps/api/core";
@@ -48,6 +49,7 @@ let {
 
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
+let unlistenFileDownloadSuccess: UnlistenFn;
 
 const chatStore = createChatStore();
 const mediaStore = createMediaStore();
@@ -155,6 +157,15 @@ onMount(async () => {
             ({ payload: _message }) => {
                 console.log("mls_message_received event received");
                 loadGroup();
+            }
+        );
+    }
+
+    if (!unlistenFileDownloadSuccess) {
+        unlistenFileDownloadSuccess = await listen<[string, string, string]>(
+            "file_download_success",
+            ({ payload: [blossomUrl, filePath, fileMimeType] }) => {
+                mediaStore.fetchMediaFile(blossomUrl, filePath, fileMimeType);
             }
         );
     }
@@ -375,6 +386,7 @@ function hasMessageReactions(chatMessage: ChatMessage): boolean {
 onDestroy(() => {
     unlistenMlsMessageProcessed();
     unlistenMlsMessageReceived();
+    unlistenFileDownloadSuccess();
     chatStore.clear();
 });
 
@@ -440,7 +452,11 @@ function navigateToInfo() {
                                 isDeleted={chatStore.isDeleted(chatMessage.replyToId)}
                             />
                             {/if}
-                            <MessageMediaAttachments mediaAttachments={chatMessage.mediaAttachments} mediaStore={mediaStore} />
+                            <MessageMediaAttachments 
+                                mediaAttachments={chatMessage.mediaAttachments} 
+                                mediaStore={mediaStore} 
+                                {group}
+                            />
                         {/if}
                         <div
                             use:press={()=>({ triggerBeforeFinished: true, timeframe: 100 })}

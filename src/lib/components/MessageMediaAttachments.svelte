@@ -1,13 +1,17 @@
 <script lang="ts">
 import { createMediaStore } from "$lib/stores/media";
 import type { MediaAttachment } from "$lib/types/media";
+import type { NGroup } from "$lib/types/nostr";
 import { calculateGridColumns, calculateVisibleAttachments } from "$lib/utils/media";
 import MessageMediaAttachment from "./MessageMediaAttachment.svelte";
 
-let { mediaAttachments, mediaStore } = $props<{
+let { mediaAttachments, mediaStore, group } = $props<{
     mediaAttachments: MediaAttachment[];
     mediaStore: ReturnType<typeof createMediaStore>;
+    group: NGroup;
 }>();
+
+let isInitialLoading = $state(false);
 
 let showAll = $state(false);
 
@@ -26,9 +30,12 @@ let gridCols = $derived(
 let mediaFilesMap = $state(mediaStore.mediaFilesMap);
 
 $effect(() => {
-    const unsubscribe = mediaStore.subscribe((state: { mediaFilesMap: Map<string, string> }) => {
-        mediaFilesMap = state.mediaFilesMap;
-    });
+    const unsubscribe = mediaStore.subscribe(
+        (state: { mediaFilesMap: Map<string, string>; isInitialLoading: boolean }) => {
+            mediaFilesMap = state.mediaFilesMap;
+            isInitialLoading = state.isInitialLoading;
+        }
+    );
     return unsubscribe;
 });
 
@@ -42,6 +49,9 @@ function toggleShowAll() {
       <MessageMediaAttachment
         src={mediaFilesMap.get(mediaAttachment.url)}
         mediaAttachment={mediaAttachment}
+        group={group}
+        {mediaStore}
+        {isInitialLoading}
       />
     {/each}
     {#if hasHiddenMediaAttachments && !showAll}

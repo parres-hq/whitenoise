@@ -1,4 +1,6 @@
 import type { MediaFile } from "$lib/types/media";
+import type { MediaAttachment } from "$lib/types/media";
+import type { NGroup } from "$lib/types/nostr";
 import { readLocalFile } from "$lib/utils/media";
 import { invoke } from "@tauri-apps/api/core";
 import { writable } from "svelte/store";
@@ -8,12 +10,22 @@ type MediaFilesMap = Map<string, string>;
 export function createMediaStore() {
     const { subscribe, update } = writable<{
         mediaFilesMap: MediaFilesMap;
+        isInitialLoading: boolean;
         fetchMediaFiles: (groupId: string) => Promise<MediaFile[]>;
         findMediaFile: (blossomUrl: string) => string | undefined;
+        downloadMedia: (group: NGroup, mediaAttachment: MediaAttachment) => Promise<string>;
+        fetchMediaFile: (
+            blossomUrl: string,
+            filePath: string,
+            fileMimeType: string
+        ) => Promise<void>;
     }>({
         mediaFilesMap: new Map(),
+        isInitialLoading: false,
         fetchMediaFiles,
         findMediaFile,
+        downloadMedia,
+        fetchMediaFile,
     });
 
     /**
@@ -23,6 +35,7 @@ export function createMediaStore() {
      */
     async function fetchMediaFiles(groupId: string): Promise<MediaFile[]> {
         try {
+            update((state) => ({ ...state, isInitialLoading: true }));
             const files = await invoke<MediaFile[]>("fetch_group_media_files", { groupId });
 
             const mediaFilesMap = new Map<string, string>();
@@ -40,12 +53,24 @@ export function createMediaStore() {
                 ...state,
                 groupId,
                 mediaFilesMap,
+                isInitialLoading: false,
             }));
 
             return files;
         } catch (error) {
+            update((state) => ({ ...state, isInitialLoading: false }));
             console.error("Error fetching media files:", error);
             throw error;
+        }
+    }
+
+    async function fetchMediaFile(blossomUrl: string, filePath: string, fileMimeType: string) {
+        const localFile = await readLocalFile(filePath, fileMimeType);
+        if (localFile) {
+            update((state) => ({
+                ...state,
+                mediaFilesMap: new Map(state.mediaFilesMap).set(blossomUrl, localFile),
+            }));
         }
     }
 
@@ -62,10 +87,38 @@ export function createMediaStore() {
         return result;
     }
 
+    /**
+     * Downloads a media file and adds it to the store
+     * @param {NGroup} group - The group the media belongs to
+     * @param {MediaAttachment} mediaAttachment - The media attachment to download
+     * @returns {Promise<string>} The local file path of the downloaded media
+     */
+    async function downloadMedia(group: NGroup, mediaAttachment: MediaAttachment): Promise<string> {
+        try {
+            const filePath = await invoke<string>("download_file", {
+                group,
+                decryptionNonceHex: mediaAttachment.decryptionNonceHex,
+                mimeType: mediaAttachment.type,
+                dimensions:
+                    mediaAttachment.width && mediaAttachment.height
+                        ? [mediaAttachment.width, mediaAttachment.height]
+                        : undefined,
+                fileHashOriginal: mediaAttachment.fileHashOriginal,
+                blossomUrl: mediaAttachment.url,
+            });
+            return filePath;
+        } catch (error) {
+            console.error("Error downloading media:", error);
+            throw error;
+        }
+    }
+
     return {
         subscribe,
         fetchMediaFiles,
         findMediaFile,
+        downloadMedia,
+        fetchMediaFile,
         get mediaFilesMap() {
             let map: MediaFilesMap = new Map();
             subscribe((state) => {

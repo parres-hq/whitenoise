@@ -1,28 +1,46 @@
 <script lang="ts">
+import type { createMediaStore } from "$lib/stores/media";
 import type { MediaAttachment } from "$lib/types/media";
+import type { NGroup } from "$lib/types/nostr";
 import Download from "carbon-icons-svelte/lib/Download.svelte";
+import { toast } from "svelte-sonner";
 import Loader from "./Loader.svelte";
 
-let { src, mediaAttachment, single } = $props<{
+let { src, mediaAttachment, isInitialLoading, group, mediaStore } = $props<{
     src?: string;
     mediaAttachment: MediaAttachment;
+    isInitialLoading: boolean;
+    group: NGroup;
+    mediaStore: ReturnType<typeof createMediaStore>;
 }>();
 
-let isDownloading = $state(false);
+let isDownloading = $state(isInitialLoading);
+
+$effect(() => {
+    if (src && isDownloading) {
+        isDownloading = false;
+    }
+});
 
 async function downloadMedia(mediaAttachment: MediaAttachment) {
-    isDownloading = true;
-    console.log("Downloading:", mediaAttachment.url);
+    try {
+        isDownloading = true;
+        await mediaStore.downloadMedia(group, mediaAttachment);
+    } catch (error) {
+        console.error("Error downloading media:", error);
+        isDownloading = false;
+        toast.error("Failed to download media");
+    }
 }
 </script>
-<div class="relative w-full max-w-full" style="aspect-ratio: {mediaAttachment.width} / {mediaAttachment.height}">
+<div class="relative">
   {#if mediaAttachment.type === "image"}
     <img 
       alt={mediaAttachment.alt} 
       class="w-40 h-full rounded-lg aspect-square object-cover" 
       src={src || mediaAttachment.blurhashSvg}
     />
-    {#if isDownloading}
+    {#if isDownloading || isInitialLoading}
       <div
         class="absolute inset-0 flex items-center justify-center"
       >

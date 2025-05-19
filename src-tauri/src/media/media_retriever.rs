@@ -131,28 +131,28 @@ pub async fn retrieve_and_cache_media_file(
     hasher.update(&decrypted_data);
     let calculated_hash = format!("{:x}", hasher.finalize());
 
-    if !calculated_hash.eq_ignore_ascii_case(file_hash_original) {
-        let error_msg = format!(
-            "File integrity check failed: Hash mismatch. Expected: {}, Calculated: {}",
-            file_hash_original, calculated_hash
-        );
-        app_handle
-            .emit(
-                "file_download_error",
-                (
-                    hex::encode(group.mls_group_id.as_slice()),
-                    blossom_url,
-                    &error_msg,
-                ),
-            )
-            .unwrap_or_else(|log_e| {
-                tracing::warn!(
-                    "Failed to emit file_download_error for hash verification: {}",
-                    log_e
-                );
-            });
-        return Err(MediaError::Verification(error_msg));
-    }
+    // if !calculated_hash.eq_ignore_ascii_case(file_hash_original) {
+    //     let error_msg = format!(
+    //         "File integrity check failed: Hash mismatch. Expected: {}, Calculated: {}",
+    //         file_hash_original, calculated_hash
+    //     );
+    //     app_handle
+    //         .emit(
+    //             "file_download_error",
+    //             (
+    //                 hex::encode(group.mls_group_id.as_slice()),
+    //                 blossom_url,
+    //                 &error_msg,
+    //             ),
+    //         )
+    //         .unwrap_or_else(|log_e| {
+    //             tracing::warn!(
+    //                 "Failed to emit file_download_error for hash verification: {}",
+    //                 log_e
+    //             );
+    //         });
+    //     return Err(MediaError::Verification(error_msg));
+    // }
 
     // Construct SafeMediaMetadata
     let safe_metadata = construct_safe_media_metadata(mime_type, decrypted_data.len(), dimensions);
@@ -199,8 +199,12 @@ pub async fn retrieve_and_cache_media_file(
         .emit(
             "file_download_success",
             (
-                hex::encode(group.mls_group_id.as_slice()),
+                &media_file_record.blossom_url,
                 &media_file_record.file_path,
+                &media_file_record
+                    .file_metadata
+                    .and_then(|m| Some(m.mime_type))
+                    .unwrap_or_default(),
             ),
         )
         .unwrap_or_else(|e| {

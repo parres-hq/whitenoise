@@ -36,11 +36,20 @@ function mediaAttachmentFromTag(tag: string[]): MediaAttachment {
     const mimeType = tag[2]?.split(" ")[1];
     const type = getTypeFromMimeType(mimeType);
     const isImage = mimeType?.startsWith("image/");
+    const dim = tag[4]?.split(" ")[1].split("x");
+    const width = dim ? Number.parseInt(dim[0]) : undefined;
+    const height = dim ? Number.parseInt(dim[1]) : undefined;
     const blurhashSvg = blurhash && isImage ? blurhashToSVG(blurhash) : undefined;
+    const fileHashOriginal = tag[6]?.split(" ")[1];
+    const decryptionNonceHex = tag[7]?.split(" ")[1];
     return {
         url,
         type,
         blurhashSvg,
+        fileHashOriginal,
+        decryptionNonceHex,
+        width,
+        height,
     };
 }
 
