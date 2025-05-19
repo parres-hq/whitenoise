@@ -1,6 +1,8 @@
-import type { ChatMessage, Message } from "$lib/types/chat";
+import type { ChatMessage } from "$lib/types/chat";
+import type { MediaAttachment } from "$lib/types/media";
 import type { MessageWithTokens, SerializableToken } from "$lib/types/nostr";
 import { eventToLightningInvoice, eventToLightningPayment } from "./lightning";
+import { findMediaAttachments } from "./media";
 import { findReplyToId } from "./tags";
 
 /**
@@ -33,6 +35,25 @@ function contentToShow({ content, invoice }: { content: string; invoice: string 
 }
 
 /**
+ * Removes linebreaks and whitespace tokens from the end of a message.
+ *
+ * @param tokens - Array of SerializableToken to process
+ * @returns Array of SerializableToken with trailing linebreaks and whitespace removed
+ */
+function removeTrailingWhitespace(tokens: SerializableToken[]): SerializableToken[] {
+    let endIndex = tokens.length - 1;
+    while (endIndex >= 0) {
+        const token = tokens[endIndex];
+        if ("LineBreak" in token || "Whitespace" in token) {
+            endIndex--;
+        } else {
+            break;
+        }
+    }
+    return tokens.slice(0, endIndex + 1);
+}
+
+/**
  * Converts a Message object to a Message object.
  *
  * @param message - The Message object to convert
@@ -49,7 +70,13 @@ export function messageToChatMessage(
     const lightningInvoice = eventToLightningInvoice(event);
     const lightningPayment = eventToLightningPayment(event);
     const content = contentToShow({ content: event.content, invoice: lightningInvoice?.invoice });
-    const tokens: SerializableToken[] = messageAndTokens.tokens;
+    const mediaAttachments: MediaAttachment[] = findMediaAttachments(messageAndTokens.message);
+    const mediaAttachmentsUrls = new Set(mediaAttachments.map((attachment) => attachment.url));
+    const tokens: SerializableToken[] = removeTrailingWhitespace(
+        messageAndTokens.tokens.filter(
+            (token: SerializableToken) => !mediaAttachmentsUrls.has(token.Url)
+        )
+    );
 
     return {
         id: event.id,
@@ -64,5 +91,6 @@ export function messageToChatMessage(
         isMine,
         event,
         tokens,
+        mediaAttachments,
     };
 }

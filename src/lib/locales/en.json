@@ -168,5 +168,8 @@
         "emptyTextError": "No text found in clipboard",
         "readError": "Failed to read from clipboard",
         "error": "Clipboard error"
+    },
+    "media": {
+        "downloadError": "Download error"
     }
 }

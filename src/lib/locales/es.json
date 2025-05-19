@@ -168,5 +168,8 @@
         "emptyTextError": "No se encontró texto en el portapapeles",
         "readError": "Error al leer del portapapeles",
         "error": "Error del portapapeles"
+    },
+    "media": {
+        "downloadError": "Error de descarga"
     }
 }

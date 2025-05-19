@@ -3,12 +3,14 @@ import { page } from "$app/state";
 import GroupAvatar from "$lib/components/GroupAvatar.svelte";
 import Header from "$lib/components/Header.svelte";
 import MessageBar from "$lib/components/MessageBar.svelte";
+import MessageMediaAttachments from "$lib/components/MessageMediaAttachments.svelte";
 import MessageTokens from "$lib/components/MessageTokens.svelte";
 import RepliedTo from "$lib/components/RepliedTo.svelte";
 import Button from "$lib/components/ui/button/button.svelte";
 import { DEFAULT_REACTION_EMOJIS } from "$lib/constants/reactions";
 import { activeAccount, hasLightningWallet } from "$lib/stores/accounts";
 import { createChatStore } from "$lib/stores/chat";
+import { createMediaStore } from "$lib/stores/media";
 import type { ChatMessage, Message } from "$lib/types/chat";
 import {
     type EnrichedContact,
@@ -46,9 +48,10 @@ let {
 
 let unlistenMlsMessageReceived: UnlistenFn;
 let unlistenMlsMessageProcessed: UnlistenFn;
+let unlistenFileDownloadSuccess: UnlistenFn;
 
 const chatStore = createChatStore();
-
+const mediaStore = createMediaStore();
 let group: NGroup | undefined = $state(undefined);
 let counterpartyPubkey: string | undefined = $state(undefined);
 let enrichedCounterparty: EnrichedContact | undefined = $state(undefined);
@@ -118,6 +121,7 @@ async function loadGroup() {
             });
         }
         await scrollToBottom();
+        mediaStore.fetchMediaFiles(group);
     });
 }
 
@@ -152,6 +156,15 @@ onMount(async () => {
             ({ payload: _message }) => {
                 console.log("mls_message_received event received");
                 loadGroup();
+            }
+        );
+    }
+
+    if (!unlistenFileDownloadSuccess) {
+        unlistenFileDownloadSuccess = await listen<[string, string, string]>(
+            "file_download_success",
+            ({ payload: [blossomUrl, filePath, fileMimeType] }) => {
+                mediaStore.fetchMediaFile(blossomUrl, filePath, fileMimeType);
             }
         );
     }
@@ -372,6 +385,7 @@ function hasMessageReactions(chatMessage: ChatMessage): boolean {
 onDestroy(() => {
     unlistenMlsMessageProcessed();
     unlistenMlsMessageReceived();
+    unlistenFileDownloadSuccess();
     chatStore.clear();
 });
 
@@ -427,13 +441,21 @@ function navigateToInfo() {
                         data-message-container
                         data-message-id={chatMessage.id}
                         data-is-current-user={chatMessage.isMine}
-                        class={`font-normal text-base relative rounded-md max-w-[70%] ${chatMessage.lightningPayment ? "bg-opacity-10" : ""} ${!chatMessage.isSingleEmoji ? `${chatMessage.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && chatMessage.id === selectedMessageId ? 'relative z-20' : ''}`}
+                        class={`font-normal text-base relative rounded-md max-w-[70%] ${chatMessage.mediaAttachments.length > 0 ? "md:max-w-[40%]" : ""} ${chatMessage.lightningPayment ? "bg-opacity-10" : ""} ${!chatMessage.isSingleEmoji ? `${chatMessage.isMine ? `bg-primary text-primary-foreground` : `bg-muted text-accent-foreground`} p-3` : ''} ${showMessageMenu && chatMessage.id === selectedMessageId ? 'relative z-20' : ''}`}
                         id={chatMessage.id}
                     >
-                        {#if chatMessage.replyToId && !chatStore.isDeleted(chatMessage.id) }
+                        {#if !chatStore.isDeleted(chatMessage.id) }
+                            {#if chatMessage.replyToId }
                             <RepliedTo
                                 message={chatStore.findReplyToChatMessage(chatMessage)}
                                 isDeleted={chatStore.isDeleted(chatMessage.replyToId)}
+                            />
+                            {/if}
+                            <MessageMediaAttachments 
+                                mediaAttachments={chatMessage.mediaAttachments} 
+                                mediaStore={mediaStore} 
+                                {group}
+                                isMine={chatMessage.isMine}
                             />
                         {/if}
                         <div

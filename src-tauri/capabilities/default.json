@@ -12,6 +12,10 @@
         "notification:allow-request-permission",
         "notification:allow-notify",
         "dialog:default",
-        "fs:default"
+        "fs:default",
+        {
+            "identifier": "fs:allow-read-file",
+            "allow": ["$APPDATA/*", "$APPDATA/**/*"]
+        }
     ]
 }

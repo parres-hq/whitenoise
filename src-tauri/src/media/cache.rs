@@ -126,6 +126,42 @@ pub async fn fetch_cached_file(
     }
 }
 
+/// Fetches all cached files for a specific group.
+///
+/// # Arguments
+/// * `group` - The MLS group to fetch files for
+/// * `db` - Database connection
+///
+/// # Returns
+/// * `Ok(Vec<CachedMediaFile>)` - Vector of cached media files for the group
+/// * `Err(MediaError)` - Error if fetch fails
+pub async fn fetch_group_media_files(
+    group: &group_types::Group,
+    db: &Database,
+) -> Result<Vec<CachedMediaFile>, MediaError> {
+    let media_files = sqlx::query_as::<_, MediaFile>(
+        "SELECT * FROM media_files WHERE mls_group_id = ? ORDER BY created_at DESC",
+    )
+    .bind(group.mls_group_id.as_slice())
+    .fetch_all(&db.pool)
+    .await
+    .map_err(|e| MediaError::Cache(e.to_string()))?;
+
+    let mut cached_files = Vec::with_capacity(media_files.len());
+
+    for media_file in media_files {
+        let file_data =
+            fs::read(media_file.file_path.clone()).map_err(|e| MediaError::Cache(e.to_string()))?;
+
+        cached_files.push(CachedMediaFile {
+            media_file,
+            file_data,
+        });
+    }
+
+    Ok(cached_files)
+}
+
 /// Deletes a cached file from both disk and database.
 ///
 /// # Arguments
