@@ -17,13 +17,17 @@ pub enum MediaError {
     #[error("Sanitization error: {0}")]
     Sanitize(String),
 
-    // #[error("Failed to download file: {0}")]
-    // Download(String),
+    #[error("Failed to download file: {0}")]
+    Download(String),
+
     #[error("Failed to generate IMETA tag: {0}")]
     Encryption(String),
 
     #[error("Failed to decrypt file: {0}")]
     Decryption(String),
+
+    #[error("File verification failed: {0}")]
+    Verification(String),
 
     #[error("Database operation failed: {0}")]
     Database(#[from] sqlx::Error),

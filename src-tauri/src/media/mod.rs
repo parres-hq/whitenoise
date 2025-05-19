@@ -41,10 +41,12 @@ pub mod blossom;
 mod cache;
 mod encryption;
 mod errors;
+mod media_retriever;
 mod sanitizer;
 mod types;
 
 pub use errors::MediaError;
+pub use media_retriever::retrieve_and_cache_media_file;
 pub use sanitizer::sanitize_media;
 pub use types::*;
 
@@ -110,7 +112,7 @@ pub async fn add_media_file(
 
     // Add the file to the local cache
     let media_file = cache::add_to_cache(
-        &uploaded_file.data,
+        &sanitized_file.data,
         group,
         &active_account.pubkey.to_string(),
         Some(blob_descriptor.url.clone()),
