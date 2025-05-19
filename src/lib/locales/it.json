@@ -168,5 +168,8 @@
         "emptyTextError": "Nessun testo trovato negli appunti",
         "readError": "Impossibile leggere dagli appunti",
         "error": "Errore appunti"
+    },
+    "media": {
+        "downloadError": "Errore di download"
     }
 }

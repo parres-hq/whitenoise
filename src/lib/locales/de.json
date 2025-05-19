@@ -168,5 +168,8 @@
         "emptyTextError": "Kein Text in der Zwischenablage gefunden",
         "readError": "Fehler beim Lesen aus der Zwischenablage",
         "error": "Zwischenablagefehler"
+    },
+    "media": {
+        "downloadError": "Download-Fehler"
     }
 }
