@@ -38,7 +38,7 @@
 //! - Decryption information (nonce and algorithm)
 
 pub mod blossom;
-mod cache;
+pub mod cache;
 mod encryption;
 mod errors;
 mod media_retriever;
@@ -50,12 +50,11 @@ pub use media_retriever::retrieve_and_cache_media_file;
 pub use sanitizer::sanitize_media;
 pub use types::*;
 
-use ::image::GenericImageView;
-use nostr_mls::prelude::*;
-
 use crate::accounts::Account;
 use crate::database::Database;
 use crate::Whitenoise;
+use ::image::GenericImageView;
+use nostr_mls::prelude::*;
 
 /// Adds a media file, ready to be used in a chat.
 ///

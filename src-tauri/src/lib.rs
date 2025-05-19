@@ -93,6 +93,7 @@ pub fn run() {
             download_file,
             encrypt_content,
             export_nsec,
+            fetch_group_media_files,
             fetch_contacts_with_metadata,
             fetch_enriched_contact,
             fetch_enriched_contacts,
