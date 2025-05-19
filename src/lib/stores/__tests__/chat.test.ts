@@ -79,6 +79,51 @@ const createMessageEvent = (
     };
 };
 
+const createMessageWithMedia = (
+    id: string,
+    content: string,
+    createdAt: number,
+    mediaUrl: string,
+    mimeType: string,
+    blurhash?: string
+): import("$lib/types/nostr").MessageWithTokens => {
+    const imetaValues = [
+        "imeta",
+        `url ${mediaUrl}`,
+        `mime ${mimeType}`,
+        "size 1234",
+        "dim 800x600",
+        blurhash ? `blurhash ${blurhash}` : "",
+    ].filter(Boolean);
+
+    const tags: string[][] = [imetaValues];
+
+    const message: Message = {
+        event_id: id,
+        kind: 9,
+        content,
+        created_at: createdAt,
+        mls_group_id: createTestMlsGroupId(),
+        pubkey: "user-pubkey",
+        tags,
+        wrapper_event_id: "test-wrapper-id",
+        state: NMessageState.Created,
+        event: {
+            id,
+            kind: 9,
+            pubkey: "user-pubkey",
+            created_at: createdAt,
+            tags,
+            content,
+            sig: "test-sig",
+        },
+    };
+    return {
+        message,
+        tokens: [{ Text: content }, { Url: mediaUrl }],
+    };
+};
+
 const createReactionEvent = (
     id: string,
     content: string,
@@ -203,6 +248,7 @@ describe("Chat Store", () => {
                         lightningPayment: undefined,
                         event: messageEvent.message.event,
                         tokens: [{ Text: "Hello world" }],
+                        mediaAttachments: [],
                     },
                 ]);
             });
@@ -238,6 +284,7 @@ describe("Chat Store", () => {
                             lightningPayment: undefined,
                             event: messageEvent.message.event,
                             tokens: [{ Text: "Hello world" }],
+                            mediaAttachments: [],
                         },
                     ]);
                 });
@@ -279,6 +326,7 @@ describe("Chat Store", () => {
                             },
                             event: paymentMessageEvent.message.event,
                             tokens: [{ Text: "" }],
+                            mediaAttachments: [],
                         });
                     });
                     it("updates the lightning invoice to paid", () => {
@@ -317,6 +365,7 @@ describe("Chat Store", () => {
                             lightningPayment: undefined,
                             event: invoiceMessageEvent.message.event,
                             tokens: [{ Text: "Hello world" }],
+                            mediaAttachments: [],
                         });
                     });
 
@@ -347,6 +396,7 @@ describe("Chat Store", () => {
                             },
                             event: paymentMessageEvent.message.event,
                             tokens: [{ Text: "" }],
+                            mediaAttachments: [],
                         });
                     });
                 });
@@ -373,9 +423,205 @@ describe("Chat Store", () => {
                                 },
                                 event: messageEvent.message.event,
                                 tokens: [{ Text: "Hello world" }],
+                                mediaAttachments: [],
                             },
                         ]);
                     });
+                });
+            });
+
+            describe("with media attachments", () => {
+                it("saves message with image attachment", () => {
+                    const messageEvent = createMessageWithMedia(
+                        "msg-1",
+                        "Check out this image",
+                        1000,
+                        "https://example.com/image.jpg",
+                        "image/jpeg",
+                        "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+                    );
+
+                    chatStore.handleMessage(messageEvent);
+
+                    const state = get(chatStore) as ChatState;
+                    expect(state.chatMessages).toEqual([
+                        {
+                            id: "msg-1",
+                            pubkey: "user-pubkey",
+                            replyToId: undefined,
+                            content: "Check out this image",
+                            createdAt: 1000,
+                            reactions: [],
+                            isMine: true,
+                            isSingleEmoji: false,
+                            lightningInvoice: undefined,
+                            lightningPayment: undefined,
+                            event: messageEvent.message.event,
+                            tokens: [{ Text: "Check out this image" }],
+                            mediaAttachments: [
+                                {
+                                    url: "https://example.com/image.jpg",
+                                    type: "image",
+                                    blurhashSvg: expect.any(String),
+                                    decryptionNonceHex: undefined,
+                                    fileHashOriginal: undefined,
+                                    width: 800,
+                                    height: 600,
+                                },
+                            ],
+                        },
+                    ]);
+                });
+
+                it("saves message with video attachment", () => {
+                    const messageEvent = createMessageWithMedia(
+                        "msg-1",
+                        "Check out this video",
+                        1000,
+                        "https://example.com/video.mp4",
+                        "video/mp4"
+                    );
+
+                    chatStore.handleMessage(messageEvent);
+
+                    const state = get(chatStore) as ChatState;
+                    expect(state.chatMessages).toEqual([
+                        {
+                            id: "msg-1",
+                            pubkey: "user-pubkey",
+                            replyToId: undefined,
+                            content: "Check out this video",
+                            createdAt: 1000,
+                            reactions: [],
+                            isMine: true,
+                            isSingleEmoji: false,
+                            lightningInvoice: undefined,
+                            lightningPayment: undefined,
+                            event: messageEvent.message.event,
+                            tokens: [{ Text: "Check out this video" }],
+                            mediaAttachments: [
+                                {
+                                    url: "https://example.com/video.mp4",
+                                    type: "video",
+                                    blurhashSvg: undefined,
+                                    decryptionNonceHex: undefined,
+                                    fileHashOriginal: undefined,
+                                    width: 800,
+                                    height: 600,
+                                },
+                            ],
+                        },
+                    ]);
+                });
+
+                it("saves message with multiple media attachments", () => {
+                    const messageEvent = createMessageWithMedia(
+                        "msg-1",
+                        "Multiple attachments",
+                        1000,
+                        "https://example.com/image.jpg",
+                        "image/jpeg",
+                        "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+                    );
+                    messageEvent.message.tags.push([
+                        "imeta",
+                        "url https://example.com/video.mp4",
+                        "mime video/mp4",
+                    ]);
+                    messageEvent.tokens.push({ Url: "https://example.com/video.mp4" });
+
+                    chatStore.handleMessage(messageEvent);
+
+                    const state = get(chatStore) as ChatState;
+                    expect(state.chatMessages).toEqual([
+                        {
+                            id: "msg-1",
+                            pubkey: "user-pubkey",
+                            replyToId: undefined,
+                            content: "Multiple attachments",
+                            createdAt: 1000,
+                            reactions: [],
+                            isMine: true,
+                            isSingleEmoji: false,
+                            lightningInvoice: undefined,
+                            lightningPayment: undefined,
+                            event: messageEvent.message.event,
+                            tokens: [{ Text: "Multiple attachments" }],
+                            mediaAttachments: [
+                                {
+                                    url: "https://example.com/image.jpg",
+                                    type: "image",
+                                    blurhashSvg: expect.any(String),
+                                    decryptionNonceHex: undefined,
+                                    fileHashOriginal: undefined,
+                                    width: 800,
+                                    height: 600,
+                                },
+                                {
+                                    url: "https://example.com/video.mp4",
+                                    type: "video",
+                                    blurhashSvg: undefined,
+                                    decryptionNonceHex: undefined,
+                                    fileHashOriginal: undefined,
+                                    width: undefined,
+                                    height: undefined,
+                                },
+                            ],
+                        },
+                    ]);
+                });
+
+                it("handles message with media attachment and lightning invoice", () => {
+                    const messageEvent = createMessageWithMedia(
+                        "msg-1",
+                        "Image with invoice",
+                        1000,
+                        "https://example.com/image.jpg",
+                        "image/jpeg"
+                    );
+                    messageEvent.message.tags.push([
+                        "bolt11",
+                        "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
+                        "21000",
+                        "Bitdevs pizza",
+                    ]);
+
+                    chatStore.handleMessage(messageEvent);
+
+                    const state = get(chatStore) as ChatState;
+                    expect(state.chatMessages).toEqual([
+                        {
+                            id: "msg-1",
+                            pubkey: "user-pubkey",
+                            replyToId: undefined,
+                            content: "Image with invoice",
+                            createdAt: 1000,
+                            reactions: [],
+                            isMine: true,
+                            isSingleEmoji: false,
+                            lightningInvoice: {
+                                amount: 21,
+                                description: "Bitdevs pizza",
+                                invoice:
+                                    "lntbs210n1pnu7rc4dqqnp4qg094pqgshvyfsltrck5lkdw5negkn3zwe36ukdf8zhwfc2h5ay6spp5rfrpyaypdh8jpw2vptz5zrna7k68zz4npl7nrjdxqav2zfeu02cqsp5qw2sue0k56dytxvn7fnyl3jn044u6xawc7gzkxh65ftfnkyf5tds9qyysgqcqpcxqyz5vqs24aglvyr5k79da9aparklu7dr767krnapz7f9zp85mjd29m747quzpkg6x5hk42xt6z5eell769emk9mvr4wt8ftwz08nenx2fnl7cpfv0cte",
+                                isPaid: false,
+                            },
+                            lightningPayment: undefined,
+                            event: messageEvent.message.event,
+                            tokens: [{ Text: "Image with invoice" }],
+                            mediaAttachments: [
+                                {
+                                    url: "https://example.com/image.jpg",
+                                    type: "image",
+                                    blurhashSvg: undefined,
+                                    decryptionNonceHex: undefined,
+                                    fileHashOriginal: undefined,
+                                    width: 800,
+                                    height: 600,
+                                },
+                            ],
+                        },
+                    ]);
                 });
             });
         });
@@ -483,6 +729,7 @@ describe("Chat Store", () => {
                     lightningInvoice: undefined,
                     lightningPayment: undefined,
                     event: firstMessageEvent.message.event,
+                    mediaAttachments: [],
                 },
                 {
                     id: "msg-2",
@@ -497,6 +744,7 @@ describe("Chat Store", () => {
                     lightningPayment: undefined,
                     event: secondMessageEvent.message.event,
                     tokens: [{ Text: "Second message" }],
+                    mediaAttachments: [],
                 },
             ]);
             expect(chatStore.isDeleted("msg-1")).toBe(true);
@@ -579,6 +827,7 @@ describe("Chat Store", () => {
                 event: messageEvent.message.event,
                 reactions: [],
                 tokens: [{ Text: "Hello world" }],
+                mediaAttachments: [],
             });
         });
 
@@ -644,6 +893,7 @@ describe("Chat Store", () => {
                 event: parentMessageEvent.message.event,
                 reactions: [],
                 tokens: [{ Text: "Parent message" }],
+                mediaAttachments: [],
             });
         });
 
@@ -761,7 +1011,11 @@ describe("Chat Store", () => {
             chatStore.handleMessages([
                 createMessageEvent("msg-1", "Hello world", 1000),
                 createReactionEvent("reaction-1", "👍", 2000, "msg-1", "other-pubkey"),
-                createDeletionMessage("deletion-1", "reaction-1", 3000),
+                createReactionEvent("reaction-2", "👍", 3000, "msg-1", "other-pubkey"),
+                createReactionEvent("reaction-3", "❤️", 4000, "msg-1", "other-pubkey"),
+                createDeletionMessage("deletion-1", "reaction-1", 5000),
+                createDeletionMessage("deletion-2", "reaction-2", 6000),
+                createDeletionMessage("deletion-3", "reaction-3", 7000),
             ]);
 
             const message = chatStore.findChatMessage("msg-1");
