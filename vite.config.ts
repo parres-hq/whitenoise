@@ -26,6 +26,12 @@ const excludes = [
 export default defineConfig(() => ({
     plugins: [sveltekit()],
 
+    build: {
+        rollupOptions: {
+            external: ["blurhash"],
+        },
+    },
+
     // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
     //
     // 1. prevent vite from obscuring rust errors
