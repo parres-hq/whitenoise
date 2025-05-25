@@ -170,6 +170,7 @@
         "error": "Zwischenablagefehler"
     },
     "media": {
-        "downloadError": "Download-Fehler"
+        "downloadError": "Download-Fehler",
+        "image": "Bild"
     }
 }

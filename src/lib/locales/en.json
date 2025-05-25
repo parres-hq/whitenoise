@@ -170,6 +170,7 @@
         "error": "Clipboard error"
     },
     "media": {
-        "downloadError": "Download error"
+        "downloadError": "Download error",
+        "image": "Image"
     }
 }

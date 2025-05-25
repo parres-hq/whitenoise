@@ -170,6 +170,7 @@
         "error": "Errore appunti"
     },
     "media": {
-        "downloadError": "Errore di download"
+        "downloadError": "Errore di download",
+        "image": "Immagine"
     }
 }
