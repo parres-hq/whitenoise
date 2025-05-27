@@ -170,6 +170,7 @@
         "error": "Error del portapapeles"
     },
     "media": {
-        "downloadError": "Error de descarga"
+        "downloadError": "Error de descarga",
+        "image": "Imagen"
     }
 }

@@ -6,6 +6,7 @@ import Close from "carbon-icons-svelte/lib/Close.svelte";
 import Download from "carbon-icons-svelte/lib/Download.svelte";
 import { _ as t } from "svelte-i18n";
 import Loader from "./Loader.svelte";
+import MediaImageSheet from "./MediaImageSheet.svelte";
 
 let { src, mediaAttachment, isInitialLoading, group, mediaStore, isMine } = $props<{
     src?: string;
@@ -18,7 +19,18 @@ let { src, mediaAttachment, isInitialLoading, group, mediaStore, isMine } = $pro
 
 let isDownloading = $state(isInitialLoading);
 let downloadFailed = $state(false);
+let isSheetOpen = $state(false);
 const showLoader = $derived((isDownloading || isInitialLoading) && !src);
+
+function handleImageClick() {
+    if (src) {
+        isSheetOpen = true;
+    }
+}
+
+function handleSheetClose() {
+    isSheetOpen = false;
+}
 
 $effect(() => {
     if (src && (isDownloading || isInitialLoading)) {
@@ -46,11 +58,16 @@ async function downloadMedia(mediaAttachment: MediaAttachment) {
 </script>
 <div class="relative">
   {#if mediaAttachment.type === "image"}
-    <img 
-      alt={mediaAttachment.alt} 
-      class="w-40 h-full rounded-lg aspect-square object-cover" 
-      src={src || mediaAttachment.blurhashSvg}
-    />
+    <button
+      onclick={handleImageClick}
+      class="max-w-40 h-full rounded-lg aspect-square overflow-hidden"
+    >
+      <img 
+        alt={mediaAttachment.alt} 
+        class="w-full h-full object-cover" 
+        src={src || mediaAttachment.blurhashSvg}
+      />
+    </button>
     {#if showLoader}
       <div
         class="absolute inset-0 flex items-center justify-center"
@@ -59,7 +76,7 @@ async function downloadMedia(mediaAttachment: MediaAttachment) {
           <Loader fullscreen={false} size={30} />
         </div>
       </div>
-    {:else if downloadFailed}
+    {:else if downloadFailed && !src}
       <div
         class="absolute inset-0 flex flex-col items-center justify-center gap-1"
       >
@@ -83,4 +100,12 @@ async function downloadMedia(mediaAttachment: MediaAttachment) {
     {/if}
   {/if}
 </div>
+
+{#if isSheetOpen}
+    <MediaImageSheet
+        bind:isOpen={isSheetOpen}
+        imageUrl={src}
+        alt={mediaAttachment.alt}
+    />
+{/if}
   
