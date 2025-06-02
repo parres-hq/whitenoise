@@ -1,8 +1,10 @@
 use crate::database::{Database, DatabaseError};
-use crate::nostr_manager::NostrManager;
+// use crate::nostr_manager::NostrManager;
+use nostr_sdk::{NostrLMDB, Options};
 use anyhow::Context;
 use nostr_mls::NostrMls;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use nostr_sdk::Client;
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -10,15 +12,13 @@ use thiserror::Error;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
 
-mod accounts;
-mod commands;
+// mod accounts;
 mod database;
-mod key_packages;
-mod media;
-mod nostr_manager;
-mod payments;
+// mod key_packages;
+// mod nostr_manager;
 mod relays;
-mod secrets_store;
+// mod media;
+// mod secrets_store;
 mod types;
 
 #[derive(Error, Debug)]
@@ -31,6 +31,9 @@ pub enum WhitenoiseError {
 
     #[error("Configuration error: {0}")]
     Configuration(String),
+
+    #[error("Nostr client error: {0}")]
+    NostrClient(#[from] nostr_sdk::client::Error),
 
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
@@ -69,7 +72,7 @@ impl WhitenoiseConfig {
 pub struct Whitenoise {
     config: WhitenoiseConfig,
     database: Arc<Database>,
-    nostr: NostrManager,
+    nostr: Client,
     nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
 }
 
@@ -124,9 +127,14 @@ impl Whitenoise {
 
         let database = Arc::new(Database::new(data_dir.join("whitenoise.sqlite")).await?);
 
-        let nostr = NostrManager::new(data_dir.clone())
-            .await
-            .expect("Failed to create Nostr manager");
+        let client = {
+            let full_path = data_dir.join("nostr_lmdb");
+            let db = NostrLMDB::open(full_path).expect("Failed to open Nostr database");
+            Client::builder().database(db).opts(Options::default()).build()
+        };
+
+        client.add_relay("wss://purplepag.es").await.map_err(WhitenoiseError::from)?;
+        client.add_relay("wss://relay.primal.net").await.map_err(WhitenoiseError::from)?;
 
         let nostr_mls = Arc::new(Mutex::new(None));
 
@@ -134,7 +142,7 @@ impl Whitenoise {
         Ok(Self {
             config,
             database,
-            nostr,
+            nostr: client,
             nostr_mls,
         })
     }
@@ -142,8 +150,8 @@ impl Whitenoise {
     pub async fn delete_all_data(&self) -> Result<(), Box<dyn std::error::Error>> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
-        // Remove nostr cache first
-        self.nostr.delete_all_data().await?;
+        // TODO: Remove nostr cache first
+        // self.nostr.delete_all_data().await?;
 
         // Remove database (accounts and media) data
         self.database.delete_all_data().await?;
@@ -159,39 +167,39 @@ impl Whitenoise {
                 // Close the current MLS instance
                 *nostr_mls = None;
             }
+        }
 
-            // Delete the MLS directory which contains SQLite storage files
-            let mls_dir = self.config.data_dir.join("mls");
-            if mls_dir.exists() {
-                tracing::debug!(
+        // Remove MLS related data
+        let mls_dir = self.config.data_dir.join("mls");
+        if mls_dir.exists() {
+            tracing::debug!(
+                target: "whitenoise::delete_all_data",
+                "Removing MLS directory: {:?}",
+                mls_dir
+            );
+            if let Err(e) = tokio::fs::remove_dir_all(&mls_dir).await {
+                tracing::error!(
                     target: "whitenoise::delete_all_data",
-                    "Removing MLS directory: {:?}",
-                    mls_dir
+                    "Failed to remove MLS directory: {:?}",
+                    e
                 );
-                if let Err(e) = tokio::fs::remove_dir_all(&mls_dir).await {
-                    tracing::error!(
-                        target: "whitenoise::delete_all_data",
-                        "Failed to remove MLS directory: {:?}",
-                        e
-                    );
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to remove MLS directory: {}", e),
-                    )));
-                }
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to remove MLS directory: {}", e),
+                )));
+            }
 
-                // Recreate the empty directory
-                if let Err(e) = tokio::fs::create_dir_all(&mls_dir).await {
-                    tracing::error!(
-                        target: "whitenoise::delete_all_data",
-                        "Failed to recreate MLS directory: {:?}",
-                        e
-                    );
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to recreate MLS directory: {}", e),
-                    )));
-                }
+            // Recreate the empty directory
+            if let Err(e) = tokio::fs::create_dir_all(&mls_dir).await {
+                tracing::error!(
+                    target: "whitenoise::delete_all_data",
+                    "Failed to recreate MLS directory: {:?}",
+                    e
+                );
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to recreate MLS directory: {}", e),
+                )));
             }
         }
 
@@ -209,5 +217,16 @@ impl Whitenoise {
         }
 
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Whitenoise {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Whitenoise")
+            .field("config", &self.config)
+            .field("database", &self.database)
+            .field("nostr", &self.nostr)
+            .field("nostr_mls", &"<redacted>")
+            .finish()
     }
 }

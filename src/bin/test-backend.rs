@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use whitenoise_lib::{WhitenoiseConfig, WhitenoiseCore};
+use whitenoise::{Whitenoise, WhitenoiseConfig};
 
 /// Test backend for Whitenoise
 #[derive(Parser, Debug)]
@@ -17,14 +17,15 @@ struct Args {
     logs_dir: PathBuf,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     let config = WhitenoiseConfig::new(&args.data_dir, &args.logs_dir);
-    let core = match WhitenoiseCore::new(config) {
+    let core: Whitenoise = match Whitenoise::new(config).await {
         Ok(core) => core,
         Err(err) => {
-            eprintln!("Failed to initialize WhitenoiseCore: {}", err);
+            eprintln!("Failed to initialize Whitenoise: {}", err);
             std::process::exit(1);
         }
     };
