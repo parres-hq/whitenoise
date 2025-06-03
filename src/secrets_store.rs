@@ -197,6 +197,7 @@ impl Whitenoise {
     ///
     /// This function will return an error if:
     /// * The Entry creation fails
+    #[allow(dead_code)]
     pub(crate) fn remove_private_key_for_pubkey(
         &self,
         pubkey: &str,

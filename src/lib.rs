@@ -251,8 +251,7 @@ impl Whitenoise {
                     "Failed to remove MLS directory: {:?}",
                     e
                 );
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Box::new(std::io::Error::other(
                     format!("Failed to remove MLS directory: {}", e),
                 )));
             }
@@ -264,8 +263,7 @@ impl Whitenoise {
                     "Failed to recreate MLS directory: {:?}",
                     e
                 );
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Box::new(std::io::Error::other(
                     format!("Failed to recreate MLS directory: {}", e),
                 )));
             }
