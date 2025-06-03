@@ -296,23 +296,23 @@ mod tests {
         let pubkey = keys.public_key().to_hex();
 
         // Store the private key
-        store_private_key(&keys, temp_dir.path())?;
+        wn.store_private_key(&keys).unwrap();
 
         // Retrieve the keys
-        let retrieved_keys = get_nostr_keys_for_pubkey(&pubkey, temp_dir.path())?;
+        let retrieved_keys = wn.get_nostr_keys_for_pubkey(&pubkey).unwrap();
 
         assert_eq!(keys.public_key(), retrieved_keys.public_key());
         assert_eq!(keys.secret_key(), retrieved_keys.secret_key());
 
         // Verify that the key is stored in the file
-        let secrets = read_secrets_file(temp_dir.path())?;
+        let secrets = wn.read_secrets_file().unwrap();
         assert!(secrets.get(&pubkey).is_some());
 
         // Clean up
-        remove_private_key_for_pubkey(&pubkey, temp_dir.path())?;
+        wn.remove_private_key_for_pubkey(&pubkey).unwrap();
 
         // Verify that the key is removed from the file
-        let secrets = read_secrets_file(temp_dir.path())?;
+        let secrets = wn.read_secrets_file().unwrap();
         assert!(secrets.get(&pubkey).is_none());
 
         Ok(())
