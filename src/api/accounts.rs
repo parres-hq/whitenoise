@@ -1,11 +1,10 @@
-use crate::{accounts::{Account}, Whitenoise, WhitenoiseError};
+use crate::{accounts::Account, Whitenoise, WhitenoiseError};
 
-use nostr_sdk::prelude::*;
 use nostr_mls::NostrMls;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use nostr_sdk::prelude::*;
 
 impl Whitenoise {
-
     /// Creates a new identity (account) for the user.
     ///
     /// This method performs the following steps:
@@ -33,7 +32,11 @@ impl Whitenoise {
         self.store_private_key(&keys)?;
 
         // Initialize NostrMls for the account
-        let storage_dir = self.config.data_dir.join("mls").join(account.pubkey.to_hex());
+        let storage_dir = self
+            .config
+            .data_dir
+            .join("mls")
+            .join(account.pubkey.to_hex());
         let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(storage_dir).unwrap());
         {
             let mut guard = account.nostr_mls.lock().unwrap();

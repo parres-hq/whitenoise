@@ -1,3 +1,4 @@
+use crate::Whitenoise;
 use base64::{engine::general_purpose, Engine as _};
 use keyring::Entry;
 use nostr_sdk::Keys;
@@ -6,7 +7,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
-use crate::Whitenoise;
 
 #[derive(Error, Debug)]
 pub enum SecretsStoreError {
@@ -49,9 +49,10 @@ impl Whitenoise {
         } else {
             // Generate new UUID
             let new_uuid = Uuid::new_v4();
-            let _ = std::fs::create_dir_all(&self.config.data_dir).map_err(SecretsStoreError::FileError);
-            let _ =
-                std::fs::write(uuid_file, new_uuid.to_string()).map_err(SecretsStoreError::FileError);
+            let _ = std::fs::create_dir_all(&self.config.data_dir)
+                .map_err(SecretsStoreError::FileError);
+            let _ = std::fs::write(uuid_file, new_uuid.to_string())
+                .map_err(SecretsStoreError::FileError);
             Ok(new_uuid)
         };
 
@@ -156,7 +157,10 @@ impl Whitenoise {
     /// * The Entry creation fails
     /// * Retrieving the password from the keyring fails
     /// * Parsing the private key into a `Keys` object fails
-    pub(crate) fn get_nostr_keys_for_pubkey(&self, pubkey: &str) -> Result<Keys, SecretsStoreError> {
+    pub(crate) fn get_nostr_keys_for_pubkey(
+        &self,
+        pubkey: &str,
+    ) -> Result<Keys, SecretsStoreError> {
         if cfg!(target_os = "android") {
             let secrets = self.read_secrets_file()?;
             let obfuscated_key = secrets[pubkey]
@@ -193,7 +197,10 @@ impl Whitenoise {
     ///
     /// This function will return an error if:
     /// * The Entry creation fails
-    pub(crate) fn remove_private_key_for_pubkey(&self, pubkey: &str) -> Result<(), SecretsStoreError> {
+    pub(crate) fn remove_private_key_for_pubkey(
+        &self,
+        pubkey: &str,
+    ) -> Result<(), SecretsStoreError> {
         if cfg!(target_os = "android") {
             let mut secrets = self.read_secrets_file()?;
             secrets.as_object_mut().map(|obj| obj.remove(pubkey));
@@ -211,15 +218,21 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{WhitenoiseConfig, Whitenoise};
+    use crate::{Whitenoise, WhitenoiseConfig};
     use tempfile::TempDir;
 
     async fn build_whitenoise() -> Whitenoise {
-        let data_temp_dir = TempDir::new().expect("Failed to create temp directory").path().to_path_buf();
-        let logs_temp_dir = TempDir::new().expect("Failed to create temp directory").path().to_path_buf();
+        let data_temp_dir = TempDir::new()
+            .expect("Failed to create temp directory")
+            .path()
+            .to_path_buf();
+        let logs_temp_dir = TempDir::new()
+            .expect("Failed to create temp directory")
+            .path()
+            .to_path_buf();
         let config = WhitenoiseConfig {
             data_dir: data_temp_dir,
-            logs_dir: logs_temp_dir
+            logs_dir: logs_temp_dir,
         };
         Whitenoise::initialize_whitenoise(config).await.unwrap()
     }
@@ -303,5 +316,4 @@ mod tests {
 
         Ok(())
     }
-
 }

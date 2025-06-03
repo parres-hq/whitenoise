@@ -1,5 +1,5 @@
-use crate::database::DatabaseError;
 use crate::accounts::AccountError;
+use crate::database::DatabaseError;
 use crate::secrets_store::SecretsStoreError;
 use thiserror::Error;
 
@@ -34,5 +34,4 @@ pub enum WhitenoiseError {
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
-
 }

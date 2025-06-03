@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-14]
+        target: [native, aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android]
+        exclude:
+          - os: macos-latest
+            target: aarch64-linux-android
+          - os: macos-latest
+            target: armv7-linux-androideabi
+          - os: macos-latest
+            target: x86_64-linux-android
+          - os: macos-14
+            target: aarch64-linux-android
+          - os: macos-14
+            target: armv7-linux-androideabi
+          - os: macos-14
+            target: x86_64-linux-android
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target != 'native' && matrix.target || '' }}
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - name: Install Android NDK and SDK
+        if: matrix.target != 'native' && runner.os == 'Linux'
+        uses: android-actions/setup-android@v3
+      - name: Cargo check
+        run: cargo check --target ${{ matrix.target == 'native' && '' || matrix.target }}
+      - name: Build for target
+        run: cargo build --target ${{ matrix.target == 'native' && '' || matrix.target }}
+      - name: Install cross
+        if: matrix.target != 'native' && runner.os == 'Linux'
+        run: cargo install cross
+      - name: Run Android tests
+        if: matrix.target != 'native' && runner.os == 'Linux'
+        run: cross test --target ${{ matrix.target }}
+      - name: Run rustfmt
+        if: matrix.target == 'native'
+        run: cargo fmt --all -- --check
+      - name: Run clippy
+        if: matrix.target == 'native'
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run tests
+        if: matrix.target == 'native'
+        run: cargo test --all-features --all-targets -- --nocapture

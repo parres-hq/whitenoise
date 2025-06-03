@@ -88,19 +88,19 @@ pub struct Account {
 impl std::fmt::Debug for Account {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Account")
-        .field("pubkey", &self.pubkey)
-        .field("metadata", &self.metadata)
-        .field("settings", &self.settings)
-        .field("onboarding", &self.onboarding)
-        .field("last_used", &self.last_used)
-        .field("last_synced", &self.last_synced)
-        .field("relays", &self.relays)
-        .field("nwc", &self.nwc)
-        .field("contacts", &self.contacts)
-        .field("nostr_mls", &"<REDACTED>")
-        .field("groups", &self.groups)
-        .field("weclomes", &self.weclomes)
-        .finish()
+            .field("pubkey", &self.pubkey)
+            .field("metadata", &self.metadata)
+            .field("settings", &self.settings)
+            .field("onboarding", &self.onboarding)
+            .field("last_used", &self.last_used)
+            .field("last_synced", &self.last_synced)
+            .field("relays", &self.relays)
+            .field("nwc", &self.nwc)
+            .field("contacts", &self.contacts)
+            .field("nostr_mls", &"<REDACTED>")
+            .field("groups", &self.groups)
+            .field("weclomes", &self.weclomes)
+            .finish()
     }
 }
 
@@ -275,14 +275,23 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if any database or Nostr operation fails.
-    pub(crate) async fn onboard_new_account(&self, account: &mut Account) -> Result<Account, WhitenoiseError> {
+    pub(crate) async fn onboard_new_account(
+        &self,
+        account: &mut Account,
+    ) -> Result<Account, WhitenoiseError> {
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Starting onboarding process");
 
         // Set onboarding flags
         account.onboarding.inbox_relays = true;
         account.onboarding.key_package_relays = true;
 
-        let default_relays = self.nostr.relays().await.keys().cloned().collect::<Vec<RelayUrl>>();
+        let default_relays = self
+            .nostr
+            .relays()
+            .await
+            .keys()
+            .cloned()
+            .collect::<Vec<RelayUrl>>();
 
         // Update relays in database
         account.relays.nostr_relays = default_relays.clone();
@@ -343,7 +352,11 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if event creation or publishing fails.
-    pub(crate) async fn publish_relay_list_for_account(&self, account: &Account, relay_type: RelayType) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn publish_relay_list_for_account(
+        &self,
+        account: &Account,
+        relay_type: RelayType,
+    ) -> Result<(), WhitenoiseError> {
         let relays = account.relays.get_relays(relay_type);
         if relays.is_empty() {
             return Ok(());
@@ -390,8 +403,10 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if the lock cannot be acquired, if the key package cannot be generated,
     /// or if publishing to Nostr fails.
-    pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<(), WhitenoiseError> {
-
+    pub(crate) async fn publish_key_package_for_account(
+        &self,
+        account: &Account,
+    ) -> Result<(), WhitenoiseError> {
         let mut encoded_key_package: Option<String> = None;
         let mut tags: Option<[Tag; 4]> = None;
         let key_package_relays = account.relays.get_relays(RelayType::KeyPackage);
@@ -428,7 +443,8 @@ impl Whitenoise {
                 EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package.unwrap())
                     .tags(tags.unwrap());
 
-            let result = self.nostr
+            let result = self
+                .nostr
                 .send_event_builder_to(key_package_relays, key_package_event_builder.clone())
                 .await?;
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Published key package to relays: {:?}", result);

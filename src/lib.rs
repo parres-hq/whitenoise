@@ -1,19 +1,19 @@
 use crate::database::Database;
 pub use crate::error::WhitenoiseError;
 // use crate::nostr_manager::NostrManager;
-use nostr_sdk::prelude::*;
 use anyhow::Context;
+use nostr_sdk::prelude::*;
 use nostr_sdk::Client;
+use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use once_cell::sync::OnceCell;
 
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
 
 mod accounts;
-mod database;
 mod api;
+mod database;
 mod error;
 // mod key_packages;
 // mod nostr_manager;
@@ -37,7 +37,9 @@ fn init_tracing(logs_dir: &std::path::Path) {
         let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
         let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
 
-        TRACING_GUARDS.set(Mutex::new(Some((file_guard, stdout_guard)))).ok();
+        TRACING_GUARDS
+            .set(Mutex::new(Some((file_guard, stdout_guard))))
+            .ok();
 
         let stdout_layer = Layer::new()
             .with_writer(non_blocking_stdout)
@@ -147,15 +149,30 @@ impl Whitenoise {
         let client = {
             let full_path = data_dir.join("nostr_lmdb");
             let db = NostrLMDB::open(full_path).expect("Failed to open Nostr database");
-            Client::builder().database(db).opts(Options::default()).build()
+            Client::builder()
+                .database(db)
+                .opts(Options::default())
+                .build()
         };
 
         if cfg!(debug_assertions) {
-            client.add_relay("ws://localhost:8080").await.map_err(WhitenoiseError::from)?;
-            client.add_relay("ws://localhost:7777").await.map_err(WhitenoiseError::from)?;
+            client
+                .add_relay("ws://localhost:8080")
+                .await
+                .map_err(WhitenoiseError::from)?;
+            client
+                .add_relay("ws://localhost:7777")
+                .await
+                .map_err(WhitenoiseError::from)?;
         } else {
-            client.add_relay("wss://purplepag.es").await.map_err(WhitenoiseError::from)?;
-            client.add_relay("wss://relay.primal.net").await.map_err(WhitenoiseError::from)?;
+            client
+                .add_relay("wss://purplepag.es")
+                .await
+                .map_err(WhitenoiseError::from)?;
+            client
+                .add_relay("wss://relay.primal.net")
+                .await
+                .map_err(WhitenoiseError::from)?;
         }
 
         client.connect().await;
