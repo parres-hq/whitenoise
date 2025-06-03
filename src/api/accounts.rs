@@ -5,6 +5,23 @@ use nostr_mls::NostrMls;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 
 impl Whitenoise {
+
+    /// Creates a new identity (account) for the user.
+    ///
+    /// This method performs the following steps:
+    /// - Generates a new account with a keypair and petname.
+    /// - Saves the account to the database.
+    /// - Stores the private key in the secret store.
+    /// - Initializes NostrMls for the account with SQLite storage.
+    /// - Onboards the new account (performs any additional setup).
+    ///
+    /// # Returns
+    ///
+    /// Returns the newly created [`Account`] on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
     pub async fn create_identity(&self) -> Result<Account, WhitenoiseError> {
         // Create a new account with a generated keypair and a petname
         let (initial_account, keys) = Account::new().await?;

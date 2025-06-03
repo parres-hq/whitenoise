@@ -128,6 +128,21 @@ pub struct AccountNwc {
 }
 
 impl Account {
+    /// Creates a new `Account` with a freshly generated keypair and default settings.
+    ///
+    /// This function generates a new cryptographic keypair, initializes an `Account` struct
+    /// with default metadata, settings, onboarding flags, relays, and other fields. It also
+    /// generates a random petname for the account, which is set as both the `name` and
+    /// `display_name` in the account's metadata.
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple containing the new `Account` and its associated `Keys`.
+    ///
+    /// # Errors
+    ///
+    /// This function does not currently return any errors, but it is fallible to allow for
+    /// future error handling and to match the expected signature for account creation.
     pub(crate) async fn new() -> Result<(Account, Keys), AccountError> {
         // Create a new account with a generated keypair
         tracing::debug!(target: "whitenoise::accounts::new", "Generating new keypair");
@@ -177,7 +192,23 @@ impl Account {
 }
 
 impl Whitenoise {
-    /// Saves the account to the database
+    /// Saves the provided `Account` to the database.
+    ///
+    /// This method inserts or updates the account record in the database, serializing all
+    /// relevant fields as JSON. If an account with the same public key already exists,
+    /// its data will be updated.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A reference to the `Account` to be saved.
+    ///
+    /// # Returns
+    ///
+    /// Returns the saved `Account` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if the database operation fails or if serialization fails.
     pub(crate) async fn save_account(&self, account: &Account) -> Result<Account, WhitenoiseError> {
         tracing::debug!(
             target: "whitenoise::accounts::save_account",
@@ -227,6 +258,23 @@ impl Whitenoise {
         Ok(account.clone())
     }
 
+    /// Performs onboarding steps for a new account, including relay setup and publishing metadata.
+    ///
+    /// This method sets onboarding flags, assigns default relays, publishes the account's metadata
+    /// and relay lists to Nostr, and attempts to publish the key package. It updates the onboarding
+    /// status based on the success of these operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A mutable reference to the `Account` being onboarded.
+    ///
+    /// # Returns
+    ///
+    /// Returns the onboarded `Account` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if any database or Nostr operation fails.
     pub(crate) async fn onboard_new_account(&self, account: &mut Account) -> Result<Account, WhitenoiseError> {
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Starting onboarding process");
 
@@ -277,7 +325,24 @@ impl Whitenoise {
         Ok(account.clone())
     }
 
-    /// Helper method to publish a given type of relay list event to Nostr using the relays stored in the database
+    /// Publishes a relay list event of the specified type for the given account to Nostr.
+    ///
+    /// This helper method constructs and sends a relay list event (Nostr, Inbox, or KeyPackage)
+    /// using the relays stored in the account. If there are no relays of the specified type,
+    /// the method returns early.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A reference to the `Account` whose relay list will be published.
+    /// * `relay_type` - The type of relay list to publish (Nostr, Inbox, or KeyPackage).
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if event creation or publishing fails.
     pub(crate) async fn publish_relay_list_for_account(&self, account: &Account, relay_type: RelayType) -> Result<(), WhitenoiseError> {
         let relays = account.relays.get_relays(relay_type);
         if relays.is_empty() {
@@ -307,6 +372,24 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Publishes the MLS key package for the given account to its key package relays.
+    ///
+    /// This method attempts to acquire the `nostr_mls` lock, generate a key package event,
+    /// and publish it to the account's key package relays. If successful, the key package
+    /// is published to Nostr; otherwise, onboarding status is updated accordingly.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A reference to the `Account` whose key package will be published.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if the lock cannot be acquired, if the key package cannot be generated,
+    /// or if publishing to Nostr fails.
     pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<(), WhitenoiseError> {
 
         let mut encoded_key_package: Option<String> = None;
@@ -353,5 +436,40 @@ impl Whitenoise {
 
         self.nostr.unset_signer().await;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_account_new_creates_account_and_keys() {
+        let (account, keys) = Account::new().await.unwrap();
+        assert_eq!(account.pubkey, keys.public_key());
+        assert!(account.metadata.name.is_some());
+        assert!(account.metadata.display_name.is_some());
+        // Check defaults
+        assert!(account.settings.dark_theme);
+        assert!(!account.settings.dev_mode);
+        assert!(!account.settings.lockdown_mode);
+        assert!(!account.onboarding.inbox_relays);
+        assert!(!account.onboarding.key_package_relays);
+        assert!(!account.onboarding.publish_key_package);
+    }
+
+    #[test]
+    fn test_account_relays_get_relays() {
+        let nostr = RelayUrl::parse("wss://relay.nostr.example").unwrap();
+        let inbox = RelayUrl::parse("wss://inbox.nostr.example").unwrap();
+        let key_package = RelayUrl::parse("wss://keypkg.nostr.example").unwrap();
+        let relays = AccountRelays {
+            nostr_relays: vec![nostr.clone()],
+            inbox_relays: vec![inbox.clone()],
+            key_package_relays: vec![key_package.clone()],
+        };
+        assert_eq!(relays.get_relays(RelayType::Nostr), vec![nostr]);
+        assert_eq!(relays.get_relays(RelayType::Inbox), vec![inbox]);
+        assert_eq!(relays.get_relays(RelayType::KeyPackage), vec![key_package]);
     }
 }

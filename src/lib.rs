@@ -1,12 +1,12 @@
 use crate::database::Database;
-use crate::error::WhitenoiseError;
+pub use crate::error::WhitenoiseError;
 // use crate::nostr_manager::NostrManager;
 use nostr_sdk::prelude::*;
 use anyhow::Context;
 use nostr_sdk::Client;
-use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use once_cell::sync::OnceCell;
 
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
@@ -21,6 +21,41 @@ mod relays;
 // mod media;
 mod secrets_store;
 mod types;
+
+static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
+static TRACING_INIT: OnceCell<()> = OnceCell::new();
+
+fn init_tracing(logs_dir: &std::path::Path) {
+    TRACING_INIT.get_or_init(|| {
+        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("whitenoise")
+            .filename_suffix("log")
+            .build(logs_dir)
+            .expect("Failed to create file appender");
+
+        let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
+        let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+
+        TRACING_GUARDS.set(Mutex::new(Some((file_guard, stdout_guard)))).ok();
+
+        let stdout_layer = Layer::new()
+            .with_writer(non_blocking_stdout)
+            .with_ansi(true)
+            .with_target(true);
+
+        let file_layer = Layer::new()
+            .with_writer(non_blocking_file)
+            .with_ansi(false)
+            .with_target(true);
+
+        Registry::default()
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
+            .with(stdout_layer)
+            .with(file_layer)
+            .init();
+    });
+}
 
 #[derive(Clone, Debug)]
 pub struct WhitenoiseConfig {
@@ -56,6 +91,40 @@ pub struct Whitenoise {
 }
 
 impl Whitenoise {
+    /// Initializes the Whitenoise application with the provided configuration.
+    ///
+    /// This method sets up the necessary data and log directories, configures logging,
+    /// initializes the database, and sets up the Nostr client with appropriate relays
+    /// based on the build environment (development or release).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - A [`WhitenoiseConfig`] struct specifying the data and log directories.
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`Result`] containing a fully initialized [`Whitenoise`] instance on success,
+    /// or a [`WhitenoiseError`] if initialization fails at any step.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The data or log directories cannot be created.
+    /// - Logging cannot be set up.
+    /// - The database cannot be initialized.
+    /// - The Nostr client cannot be configured or fails to connect to relays.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
+    /// # use std::path::Path;
+    /// # async fn example() -> Result<(), whitenoise::WhitenoiseError> {
+    /// let config = WhitenoiseConfig::new(Path::new("./data"), Path::new("./logs"));
+    /// let whitenoise = Whitenoise::initialize_whitenoise(config).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Self, WhitenoiseError> {
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
@@ -68,39 +137,8 @@ impl Whitenoise {
             .with_context(|| format!("Failed to create logs directory: {:?}", logs_dir))
             .map_err(WhitenoiseError::from)?;
 
-        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
-            .rotation(tracing_appender::rolling::Rotation::DAILY)
-            .filename_prefix("whitenoise")
-            .filename_suffix("log")
-            .build(logs_dir)
-            .map_err(|e| WhitenoiseError::LoggingSetup(e.to_string()))?;
-
-        // Setup logging
-        let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
-        let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
-
-        static GUARDS: Lazy<Mutex<Option<(WorkerGuard, WorkerGuard)>>> =
-            Lazy::new(|| Mutex::new(None));
-        *GUARDS.lock().unwrap() = Some((file_guard, stdout_guard));
-
-        // Create a layer for stdout with ANSI color codes enabled
-        let stdout_layer = Layer::new()
-            .with_writer(non_blocking_stdout)
-            .with_ansi(true) // Enable ANSI color codes for stdout
-            .with_target(true); // Include target information in stdout logs
-
-        // Create a layer for file output with ANSI color codes explicitly disabled
-        let file_layer = Layer::new()
-            .with_writer(non_blocking_file)
-            .with_ansi(false) // Disable ANSI color codes for file output
-            .with_target(true); // Include target information in file logs
-
-        // Initialize the tracing subscriber registry
-        Registry::default()
-            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
-            .with(stdout_layer)
-            .with(file_layer)
-            .init();
+        // Only initialize tracing once
+        init_tracing(logs_dir);
 
         tracing::debug!("Logging initialized in directory: {:?}", logs_dir);
 
@@ -130,6 +168,35 @@ impl Whitenoise {
         })
     }
 
+    /// Deletes all application data, including the database, MLS data, and log files.
+    ///
+    /// This asynchronous method removes all persistent data associated with the Whitenoise instance.
+    /// It deletes the database, MLS-related directories, and all log files. If the MLS directory exists,
+    /// it is removed and then recreated as an empty directory. This is useful for resetting the application
+    /// to a clean state.
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`Result`] which is `Ok(())` if all data is successfully deleted, or an error boxed as
+    /// [`Box<dyn std::error::Error>`] if any step fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database data cannot be deleted.
+    /// - The MLS directory cannot be removed or recreated.
+    /// - Log files or directories cannot be deleted.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
+    /// # use std::path::Path;
+    /// # async fn example(whitenoise: Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
+    /// whitenoise.delete_all_data().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn delete_all_data(&self) -> Result<(), Box<dyn std::error::Error>> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
