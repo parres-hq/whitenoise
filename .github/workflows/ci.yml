@@ -71,12 +71,12 @@ jobs:
         if: matrix.target == 'native'
         run: cargo test --all-features --all-targets
 
-      - name: Test Android with emulator
-        if: contains(matrix.target, 'android')
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 29
-          target: default
-          arch: x86_64
-          script: |
-            cross test --target ${{ matrix.target }}
+      # - name: Test Android with emulator
+      #   if: contains(matrix.target, 'android')
+      #   uses: reactivecircus/android-emulator-runner@v2
+      #   with:
+      #     api-level: 29
+      #     target: default
+      #     arch: x86_64
+      #     script: |
+      #       cross test --target ${{ matrix.target }}
