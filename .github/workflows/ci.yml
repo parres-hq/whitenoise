@@ -42,9 +42,19 @@ jobs:
         if: matrix.target != 'native' && runner.os == 'Linux'
         uses: android-actions/setup-android@v3
       - name: Cargo check
-        run: cargo check --target ${{ matrix.target == 'native' && '' || matrix.target }}
+        run: |
+          if [ "${{ matrix.target }}" = "native" ]; then
+            cargo check
+          else
+            cargo check --target ${{ matrix.target }}
+          fi
       - name: Build for target
-        run: cargo build --target ${{ matrix.target == 'native' && '' || matrix.target }}
+        run: |
+          if [ "${{ matrix.target }}" = "native" ]; then
+            cargo build
+          else
+            cargo build --target ${{ matrix.target }}
+          fi
       - name: Install cross
         if: matrix.target != 'native' && runner.os == 'Linux'
         run: cargo install cross
