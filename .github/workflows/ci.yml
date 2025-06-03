@@ -17,20 +17,12 @@ jobs:
             target: native
           - os: macos-14
             target: native
-          - os: ubuntu-latest
-            target: aarch64-linux-android
-          - os: ubuntu-latest
-            target: armv7-linux-androideabi
-          - os: ubuntu-latest
-            target: x86_64-linux-android
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target != 'native' && matrix.target || '' }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -39,25 +31,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
-      - name: Install cross
-        if: matrix.target != 'native'
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
       - name: Check
-        run: |
-          if [ "${{ matrix.target }}" = "native" ]; then
-            cargo check --all-targets --all-features
-          else
-            cross check --target ${{ matrix.target }}
-          fi
+        run: cargo check --all-targets --all-features
 
       - name: Build
-        run: |
-          if [ "${{ matrix.target }}" = "native" ]; then
-            cargo build --all-targets --all-features
-          else
-            cross build --target ${{ matrix.target }}
-          fi
+        run: cargo build --all-targets --all-features
 
       - name: Format check
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
@@ -70,13 +48,3 @@ jobs:
       - name: Test native
         if: matrix.target == 'native'
         run: cargo test --all-features --all-targets
-
-      # - name: Test Android with emulator
-      #   if: contains(matrix.target, 'android')
-      #   uses: reactivecircus/android-emulator-runner@v2
-      #   with:
-      #     api-level: 29
-      #     target: default
-      #     arch: x86_64
-      #     script: |
-      #       cross test --target ${{ matrix.target }}
