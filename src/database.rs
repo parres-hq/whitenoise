@@ -7,8 +7,8 @@ use thiserror::Error;
 
 const MIGRATION_FILES: &[(&str, &[u8])] = &[
     (
-        "0001_initial.sql",
-        include_bytes!("../db_migrations/0001_initial.sql"),
+        "0001_accounts.sql",
+        include_bytes!("../db_migrations/0001_accounts.sql"),
     ),
     (
         "0002_add_media_files.sql",
@@ -29,7 +29,7 @@ pub enum DatabaseError {
     Migrate(#[from] sqlx::migrate::MigrateError),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Database {
     pub pool: SqlitePool,
     #[allow(unused)]
@@ -102,42 +102,28 @@ impl Database {
             .to_path_buf();
         tracing::info!("Using data directory: {:?}", data_dir);
 
-        let migrations_path = if cfg!(target_os = "android") {
-            // On Android, we need to copy migrations to a temporary directory
-            let temp_dir = data_dir.join("temp_migrations");
-            if temp_dir.exists() {
-                fs::remove_dir_all(&temp_dir)?;
-            }
-            fs::create_dir_all(&temp_dir)?;
-
-            // Copy all migration files from the embedded assets
-            for (filename, content) in MIGRATION_FILES {
-                tracing::info!("Writing migration file: {}", filename);
-                fs::write(temp_dir.join(filename), content)?;
-            }
-
-            temp_dir
-        } else {
-            data_dir.join("db_migrations")
-        };
-
-        tracing::info!("Migrations path: {:?}", migrations_path);
-        if !migrations_path.exists() {
-            tracing::error!("Migrations directory not found at {:?}", migrations_path);
-            return Err(DatabaseError::FileSystem(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Migrations directory not found at {:?}", migrations_path),
-            )));
+        // Always use embedded migrations by copying them to a temporary directory
+        let temp_dir = data_dir.join("temp_migrations");
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir)?;
         }
+        fs::create_dir_all(&temp_dir)?;
+
+        // Copy all migration files from the embedded assets
+        for (filename, content) in MIGRATION_FILES {
+            tracing::info!("Writing migration file: {}", filename);
+            fs::write(temp_dir.join(filename), content)?;
+        }
+
+        let migrations_path = temp_dir;
+        tracing::info!("Migrations path: {:?}", migrations_path);
 
         match sqlx::migrate::Migrator::new(migrations_path).await {
             Ok(migrator) => {
                 migrator.run(&pool).await?;
                 tracing::info!("Migrations applied successfully");
-                // Clean up temp directory on Android after successful migration
-                if cfg!(target_os = "android") {
-                    let _ = fs::remove_dir_all(data_dir.join("temp_migrations"));
-                }
+                // Clean up temp migrations directory
+                let _ = fs::remove_dir_all(data_dir.join("temp_migrations"));
             }
             Err(e) => {
                 tracing::error!("Failed to create migrator: {:?}", e);

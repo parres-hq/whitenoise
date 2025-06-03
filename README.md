@@ -6,15 +6,11 @@ A secure, private, and decentralized chat app built on Nostr, using the MLS prot
 
 White Noise aims to be the most secure private chat app on Nostr, with a focus on privacy and security. Under the hood, it uses the [Messaging Layer Security](https://www.rfc-editor.org/rfc/rfc9420.html) (MLS) protocol to manage group communications in a highly secure way. Nostr is used as the transport protocol and as the framework for the ongoing conversation in each chat.
 
+This crate is the core library that powers our Flutter app. It is front-end agnostic and will allow for CLI and other interfaces to operate groups in the future.
+
 ## Status
 
 ![CI](https://github.com/parres-hq/whitenoise/actions/workflows/ci.yml/badge.svg?event=push)
-
-![Linux Build](https://github.com/parres-hq/whitenoise/actions/workflows/build_linux.yml/badge.svg?event=push) ![Android Build](https://github.com/parres-hq/whitenoise/actions/workflows/build_android.yml/badge.svg?event=push)
-
-![MacOS Build](https://github.com/parres-hq/whitenoise/actions/workflows/build_macos.yml/badge.svg?event=push) ![iOS Build](https://github.com/parres-hq/whitenoise/actions/workflows/build_ios.yml/badge.svg?event=push)
-
-![Release](https://github.com/parres-hq/whitenoise/actions/workflows/release.yml/badge.svg?event=push)
 
 ## The Spec
 

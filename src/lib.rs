@@ -1,42 +1,62 @@
-use crate::database::{Database, DatabaseError};
-use crate::nostr_manager::NostrManager;
+use crate::database::Database;
+pub use crate::error::WhitenoiseError;
+// use crate::nostr_manager::NostrManager;
 use anyhow::Context;
-use nostr_mls::NostrMls;
-use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
-use once_cell::sync::Lazy;
+use nostr_sdk::prelude::*;
+use nostr_sdk::Client;
+use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use thiserror::Error;
+
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
 
 mod accounts;
-mod commands;
+mod api;
 mod database;
-mod key_packages;
-mod media;
-mod nostr_manager;
-mod payments;
+mod error;
+// mod key_packages;
+// mod nostr_manager;
 mod relays;
+// mod media;
 mod secrets_store;
 mod types;
 
-#[derive(Error, Debug)]
-pub enum WhitenoiseError {
-    #[error("Directory creation error: {0}")]
-    DirectoryCreation(#[from] std::io::Error),
+static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
+static TRACING_INIT: OnceCell<()> = OnceCell::new();
 
-    #[error("Logging setup error: {0}")]
-    LoggingSetup(String),
+fn init_tracing(logs_dir: &std::path::Path) {
+    TRACING_INIT.get_or_init(|| {
+        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("whitenoise")
+            .filename_suffix("log")
+            .build(logs_dir)
+            .expect("Failed to create file appender");
 
-    #[error("Configuration error: {0}")]
-    Configuration(String),
+        let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
+        let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
 
-    #[error("Database error: {0}")]
-    Database(#[from] DatabaseError),
+        TRACING_GUARDS
+            .set(Mutex::new(Some((file_guard, stdout_guard))))
+            .ok();
 
-    #[error("Other error: {0}")]
-    Other(#[from] anyhow::Error),
+        let stdout_layer = Layer::new()
+            .with_writer(non_blocking_stdout)
+            .with_ansi(true)
+            .with_target(true);
+
+        let file_layer = Layer::new()
+            .with_writer(non_blocking_file)
+            .with_ansi(false)
+            .with_target(true);
+
+        Registry::default()
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
+            .with(stdout_layer)
+            .with(file_layer)
+            .init();
+    });
 }
 
 #[derive(Clone, Debug)]
@@ -69,12 +89,45 @@ impl WhitenoiseConfig {
 pub struct Whitenoise {
     config: WhitenoiseConfig,
     database: Arc<Database>,
-    nostr: NostrManager,
-    nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
+    nostr: Client,
 }
 
 impl Whitenoise {
-    pub async fn new(config: WhitenoiseConfig) -> Result<Self, WhitenoiseError> {
+    /// Initializes the Whitenoise application with the provided configuration.
+    ///
+    /// This method sets up the necessary data and log directories, configures logging,
+    /// initializes the database, and sets up the Nostr client with appropriate relays
+    /// based on the build environment (development or release).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - A [`WhitenoiseConfig`] struct specifying the data and log directories.
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`Result`] containing a fully initialized [`Whitenoise`] instance on success,
+    /// or a [`WhitenoiseError`] if initialization fails at any step.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The data or log directories cannot be created.
+    /// - Logging cannot be set up.
+    /// - The database cannot be initialized.
+    /// - The Nostr client cannot be configured or fails to connect to relays.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
+    /// # use std::path::Path;
+    /// # async fn example() -> Result<(), whitenoise::WhitenoiseError> {
+    /// let config = WhitenoiseConfig::new(Path::new("./data"), Path::new("./logs"));
+    /// let whitenoise = Whitenoise::initialize_whitenoise(config).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Self, WhitenoiseError> {
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
 
@@ -86,112 +139,135 @@ impl Whitenoise {
             .with_context(|| format!("Failed to create logs directory: {:?}", logs_dir))
             .map_err(WhitenoiseError::from)?;
 
-        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
-            .rotation(tracing_appender::rolling::Rotation::DAILY)
-            .filename_prefix("whitenoise")
-            .filename_suffix("log")
-            .build(logs_dir)
-            .map_err(|e| WhitenoiseError::LoggingSetup(e.to_string()))?;
-
-        // Setup logging
-        let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
-        let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
-
-        static GUARDS: Lazy<Mutex<Option<(WorkerGuard, WorkerGuard)>>> =
-            Lazy::new(|| Mutex::new(None));
-        *GUARDS.lock().unwrap() = Some((file_guard, stdout_guard));
-
-        // Create a layer for stdout with ANSI color codes enabled
-        let stdout_layer = Layer::new()
-            .with_writer(non_blocking_stdout)
-            .with_ansi(true) // Enable ANSI color codes for stdout
-            .with_target(true); // Include target information in stdout logs
-
-        // Create a layer for file output with ANSI color codes explicitly disabled
-        let file_layer = Layer::new()
-            .with_writer(non_blocking_file)
-            .with_ansi(false) // Disable ANSI color codes for file output
-            .with_target(true); // Include target information in file logs
-
-        // Initialize the tracing subscriber registry
-        Registry::default()
-            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
-            .with(stdout_layer)
-            .with(file_layer)
-            .init();
+        // Only initialize tracing once
+        init_tracing(logs_dir);
 
         tracing::debug!("Logging initialized in directory: {:?}", logs_dir);
 
         let database = Arc::new(Database::new(data_dir.join("whitenoise.sqlite")).await?);
 
-        let nostr = NostrManager::new(data_dir.clone())
-            .await
-            .expect("Failed to create Nostr manager");
+        let client = {
+            let full_path = data_dir.join("nostr_lmdb");
+            let db = NostrLMDB::open(full_path).expect("Failed to open Nostr database");
+            Client::builder()
+                .database(db)
+                .opts(Options::default())
+                .build()
+        };
 
-        let nostr_mls = Arc::new(Mutex::new(None));
+        if cfg!(debug_assertions) {
+            client
+                .add_relay("ws://localhost:8080")
+                .await
+                .map_err(WhitenoiseError::from)?;
+            client
+                .add_relay("ws://localhost:7777")
+                .await
+                .map_err(WhitenoiseError::from)?;
+        } else {
+            client
+                .add_relay("wss://purplepag.es")
+                .await
+                .map_err(WhitenoiseError::from)?;
+            client
+                .add_relay("wss://relay.primal.net")
+                .await
+                .map_err(WhitenoiseError::from)?;
+        }
+
+        client.connect().await;
 
         // Return fully configured, ready-to-go instance
         Ok(Self {
             config,
             database,
-            nostr,
-            nostr_mls,
+            nostr: client,
         })
     }
 
+    /// Deletes all application data, including the database, MLS data, and log files.
+    ///
+    /// This asynchronous method removes all persistent data associated with the Whitenoise instance.
+    /// It deletes the database, MLS-related directories, and all log files. If the MLS directory exists,
+    /// it is removed and then recreated as an empty directory. This is useful for resetting the application
+    /// to a clean state.
+    ///
+    /// # Returns
+    ///
+    /// Returns a [`Result`] which is `Ok(())` if all data is successfully deleted, or an error boxed as
+    /// [`Box<dyn std::error::Error>`] if any step fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The database data cannot be deleted.
+    /// - The MLS directory cannot be removed or recreated.
+    /// - Log files or directories cannot be deleted.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
+    /// # use std::path::Path;
+    /// # async fn example(whitenoise: Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
+    /// whitenoise.delete_all_data().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn delete_all_data(&self) -> Result<(), Box<dyn std::error::Error>> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
-        // Remove nostr cache first
-        self.nostr.delete_all_data().await?;
+        // TODO: Remove nostr cache first
+        // self.nostr.delete_all_data().await?;
 
         // Remove database (accounts and media) data
         self.database.delete_all_data().await?;
 
         // Remove MLS related data
-        {
-            let mut nostr_mls = self.nostr_mls.lock().unwrap_or_else(|e| {
-                tracing::error!("Failed to lock nostr_mls: {:?}", e);
-                panic!("Mutex poisoned: {}", e);
-            });
+        // TODO: MOVE TO ACCOUNTS
+        // {
+        //     let mut nostr_mls = self.nostr_mls.lock().unwrap_or_else(|e| {
+        //         tracing::error!("Failed to lock nostr_mls: {:?}", e);
+        //         panic!("Mutex poisoned: {}", e);
+        //     });
 
-            if let Some(_mls) = nostr_mls.as_mut() {
-                // Close the current MLS instance
-                *nostr_mls = None;
+        //     if let Some(_mls) = nostr_mls.as_mut() {
+        //         // Close the current MLS instance
+        //         *nostr_mls = None;
+        //     }
+        // }
+
+        // Remove MLS related data
+        let mls_dir = self.config.data_dir.join("mls");
+        if mls_dir.exists() {
+            tracing::debug!(
+                target: "whitenoise::delete_all_data",
+                "Removing MLS directory: {:?}",
+                mls_dir
+            );
+            if let Err(e) = tokio::fs::remove_dir_all(&mls_dir).await {
+                tracing::error!(
+                    target: "whitenoise::delete_all_data",
+                    "Failed to remove MLS directory: {:?}",
+                    e
+                );
+                return Err(Box::new(std::io::Error::other(format!(
+                    "Failed to remove MLS directory: {}",
+                    e
+                ))));
             }
 
-            // Delete the MLS directory which contains SQLite storage files
-            let mls_dir = self.config.data_dir.join("mls");
-            if mls_dir.exists() {
-                tracing::debug!(
+            // Recreate the empty directory
+            if let Err(e) = tokio::fs::create_dir_all(&mls_dir).await {
+                tracing::error!(
                     target: "whitenoise::delete_all_data",
-                    "Removing MLS directory: {:?}",
-                    mls_dir
+                    "Failed to recreate MLS directory: {:?}",
+                    e
                 );
-                if let Err(e) = tokio::fs::remove_dir_all(&mls_dir).await {
-                    tracing::error!(
-                        target: "whitenoise::delete_all_data",
-                        "Failed to remove MLS directory: {:?}",
-                        e
-                    );
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to remove MLS directory: {}", e),
-                    )));
-                }
-
-                // Recreate the empty directory
-                if let Err(e) = tokio::fs::create_dir_all(&mls_dir).await {
-                    tracing::error!(
-                        target: "whitenoise::delete_all_data",
-                        "Failed to recreate MLS directory: {:?}",
-                        e
-                    );
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to recreate MLS directory: {}", e),
-                    )));
-                }
+                return Err(Box::new(std::io::Error::other(format!(
+                    "Failed to recreate MLS directory: {}",
+                    e
+                ))));
             }
         }
 
@@ -209,5 +285,16 @@ impl Whitenoise {
         }
 
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Whitenoise {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Whitenoise")
+            .field("config", &self.config)
+            .field("database", &self.database)
+            .field("nostr", &"<redacted>")
+            .field("nostr_mls", &"<redacted>")
+            .finish()
     }
 }
