@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
-// use keyring::Entry;
+use keyring::Entry;
 use nostr_sdk::Keys;
 use serde_json::{json, Value};
 use std::fs;
@@ -35,7 +35,7 @@ pub enum SecretsStoreError {
     KeyNotFound,
 }
 
-pub type Result<T> = std::result::Result<T, SecretsStoreError>;
+const SERVICE_NAME: &str = "whitenoise";
 
 impl Whitenoise {
     fn get_device_key(&self) -> Vec<u8> {
@@ -72,7 +72,7 @@ impl Whitenoise {
         general_purpose::STANDARD_NO_PAD.encode(xored)
     }
 
-    fn deobfuscate(&self, data: &str) -> Result<String> {
+    fn deobfuscate(&self, data: &str) -> Result<String, SecretsStoreError> {
         let decoded = general_purpose::STANDARD_NO_PAD
             .decode(data)
             .map_err(SecretsStoreError::Base64Error)?;
@@ -84,7 +84,7 @@ impl Whitenoise {
         String::from_utf8(xored).map_err(SecretsStoreError::Utf8Error)
     }
 
-    fn read_secrets_file(&self) -> Result<Value> {
+    fn read_secrets_file(&self) -> Result<Value, SecretsStoreError> {
         let content = match fs::read_to_string(Self::get_file_path(&self.config.data_dir)) {
             Ok(content) => content,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::from("{}"),
@@ -93,7 +93,7 @@ impl Whitenoise {
         Ok(serde_json::from_str(&content)?)
     }
 
-    fn write_secrets_file(&self, secrets: &Value) -> Result<()> {
+    fn write_secrets_file(&self, secrets: &Value) -> Result<(), SecretsStoreError> {
         let content = serde_json::to_string_pretty(secrets)?;
         fs::write(Self::get_file_path(&self.config.data_dir), content)?;
         Ok(())
@@ -119,25 +119,19 @@ impl Whitenoise {
     /// * The Entry creation fails
     /// * Setting the password in the keyring fails
     /// * The secret key cannot be retrieved from the keypair
-    pub(crate) fn store_private_key(&self, keys: &Keys) -> Result<()> {
-        let mut secrets = self.read_secrets_file().unwrap_or(json!({}));
-        let obfuscated_key = self.obfuscate(keys.secret_key().to_secret_hex().as_str());
-        secrets[keys.public_key().to_hex()] = json!(obfuscated_key);
-        self.write_secrets_file(&secrets)?;
-
-        // if cfg!(target_os = "android") {
-        //     let mut secrets = read_secrets_file(data_dir).unwrap_or(json!({}));
-        //     let obfuscated_key = obfuscate(keys.secret_key().to_secret_hex().as_str(), data_dir);
-        //     secrets[keys.public_key().to_hex()] = json!(obfuscated_key);
-        //     write_secrets_file(data_dir, &secrets)?;
-        // } else {
-        //     let service = get_service_name();
-        //     let entry = Entry::new(service.as_str(), keys.public_key().to_hex().as_str())
-        //         .map_err(SecretsStoreError::KeyringError)?;
-        //     entry
-        //         .set_password(keys.secret_key().to_secret_hex().as_str())
-        //         .map_err(SecretsStoreError::KeyringError)?;
-        // }
+    pub(crate) fn store_private_key(&self, keys: &Keys) -> Result<(), SecretsStoreError> {
+        if cfg!(target_os = "android") {
+            let mut secrets = self.read_secrets_file().unwrap_or(json!({}));
+            let obfuscated_key = self.obfuscate(keys.secret_key().to_secret_hex().as_str());
+            secrets[keys.public_key().to_hex()] = json!(obfuscated_key);
+            self.write_secrets_file(&secrets)?;
+        } else {
+            let entry = Entry::new(SERVICE_NAME, keys.public_key().to_hex().as_str())
+                .map_err(SecretsStoreError::KeyringError)?;
+            entry
+                .set_password(keys.secret_key().to_secret_hex().as_str())
+                .map_err(SecretsStoreError::KeyringError)?;
+        }
 
         Ok(())
     }
@@ -162,30 +156,22 @@ impl Whitenoise {
     /// * The Entry creation fails
     /// * Retrieving the password from the keyring fails
     /// * Parsing the private key into a `Keys` object fails
-    pub(crate) fn get_nostr_keys_for_pubkey(&self, pubkey: &str) -> Result<Keys> {
-        let secrets = self.read_secrets_file()?;
-        let obfuscated_key = secrets[pubkey]
-            .as_str()
-            .ok_or(SecretsStoreError::KeyNotFound)?;
-        let private_key = self.deobfuscate(obfuscated_key)?;
-        Keys::parse(&private_key).map_err(SecretsStoreError::KeyError)
-
-        // if cfg!(target_os = "android") {
-        //     let secrets = read_secrets_file(data_dir)?;
-        //     let obfuscated_key = secrets[pubkey]
-        //         .as_str()
-        //         .ok_or(SecretsStoreError::KeyNotFound)?;
-        //     let private_key = deobfuscate(obfuscated_key, data_dir)?;
-        //     Keys::parse(private_key).map_err(SecretsStoreError::KeyError)
-        // } else {
-        //     let service = get_service_name();
-        //     let entry =
-        //         Entry::new(service.as_str(), pubkey).map_err(SecretsStoreError::KeyringError)?;
-        //     let private_key = entry
-        //         .get_password()
-        //         .map_err(SecretsStoreError::KeyringError)?;
-        //     Keys::parse(private_key).map_err(SecretsStoreError::KeyError)
-        // }
+    pub(crate) fn get_nostr_keys_for_pubkey(&self, pubkey: &str) -> Result<Keys, SecretsStoreError> {
+        if cfg!(target_os = "android") {
+            let secrets = self.read_secrets_file()?;
+            let obfuscated_key = secrets[pubkey]
+                .as_str()
+                .ok_or(SecretsStoreError::KeyNotFound)?;
+            let private_key = self.deobfuscate(obfuscated_key)?;
+            Keys::parse(&private_key).map_err(SecretsStoreError::KeyError)
+        } else {
+            let entry =
+                Entry::new(SERVICE_NAME, pubkey).map_err(SecretsStoreError::KeyringError)?;
+            let private_key = entry
+                .get_password()
+                .map_err(SecretsStoreError::KeyringError)?;
+            Keys::parse(&private_key).map_err(SecretsStoreError::KeyError)
+        }
     }
 
     /// Removes the private key associated with a given public key from the system's keyring.
@@ -207,84 +193,17 @@ impl Whitenoise {
     ///
     /// This function will return an error if:
     /// * The Entry creation fails
-    fn remove_private_key_for_pubkey(&self, pubkey: &str) -> Result<()> {
-        let mut secrets = self.read_secrets_file()?;
-        secrets.as_object_mut().map(|obj| obj.remove(pubkey));
-        self.write_secrets_file(&secrets)?;
-
-        // if cfg!(target_os = "android") {
-        //     let mut secrets = read_secrets_file(data_dir)?;
-        //     secrets.as_object_mut().map(|obj| obj.remove(pubkey));
-        //     write_secrets_file(data_dir, &secrets)?;
-        // } else {
-        //     let service = get_service_name();
-        //     let entry = Entry::new(service.as_str(), pubkey);
-        //     if let Ok(entry) = entry {
-        //         let _ = entry.delete_credential();
-        //     }
-        // }
-        Ok(())
-    }
-
-    /// Stores the NWC (Nostr Wallet Connect) URI for a specific public key in the secrets store.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - The public key to associate the NWC URI with
-    /// * `nostr_wallet_connect_uri` - The NWC URI to store
-    /// * `data_dir` - Path to the data directory
-    ///
-    /// # Returns
-    ///
-    /// * `Result<()>` - Ok(()) if successful, or an error if the operation fails
-    fn store_nostr_wallet_connect_uri(
-        &self,
-        pubkey: &str,
-        nostr_wallet_connect_uri: &str,
-    ) -> Result<()> {
-        let mut secrets = self.read_secrets_file().unwrap_or(json!({}));
-        let key = format!("nwc:{}", pubkey);
-        let obfuscated_uri = self.obfuscate(nostr_wallet_connect_uri);
-        secrets[key] = json!(obfuscated_uri);
-        self.write_secrets_file(&secrets)?;
-        Ok(())
-    }
-
-    /// Retrieves the NWC URI for a specific public key from the secrets store.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - The public key to get the NWC URI for
-    /// * `data_dir` - Path to the data directory
-    ///
-    /// # Returns
-    ///
-    /// * `Result<Option<String>>` - Some(uri) if found, None if not found, or an error if operation fails
-    fn get_nostr_wallet_connect_uri(&self, pubkey: &str) -> Result<Option<String>> {
-        let secrets = self.read_secrets_file()?;
-        let key = format!("nwc:{}", pubkey);
-
-        match secrets[key].as_str() {
-            Some(obfuscated_uri) => Ok(Some(self.deobfuscate(obfuscated_uri)?)),
-            None => Ok(None),
+    pub(crate) fn remove_private_key_for_pubkey(&self, pubkey: &str) -> Result<(), SecretsStoreError> {
+        if cfg!(target_os = "android") {
+            let mut secrets = self.read_secrets_file()?;
+            secrets.as_object_mut().map(|obj| obj.remove(pubkey));
+            self.write_secrets_file(&secrets)?;
+        } else {
+            let entry = Entry::new(SERVICE_NAME, pubkey);
+            if let Ok(entry) = entry {
+                let _ = entry.delete_credential();
+            }
         }
-    }
-
-    /// Removes the NWC URI for a specific public key from the secrets store.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - The public key to remove the NWC URI for
-    /// * `data_dir` - Path to the data directory
-    ///
-    /// # Returns
-    ///
-    /// * `Result<()>` - Ok(()) if successful, or an error if the operation fails
-    fn remove_nostr_wallet_connect_uri(&self, pubkey: &str) -> Result<()> {
-        let mut secrets = self.read_secrets_file()?;
-        let key = format!("nwc:{}", pubkey);
-        secrets.as_object_mut().map(|obj| obj.remove(&key));
-        self.write_secrets_file(&secrets)?;
         Ok(())
     }
 }
@@ -306,7 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_and_retrieve_private_key() -> Result<()> {
+    async fn test_store_and_retrieve_private_key() -> Result<(), SecretsStoreError> {
         let wn = build_whitenoise().await;
         let keys = Keys::generate();
         let pubkey = keys.public_key().to_hex();
@@ -327,7 +246,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_private_key() -> Result<()> {
+    async fn test_remove_private_key() -> Result<(), SecretsStoreError> {
         let wn = build_whitenoise().await;
         let keys = Keys::generate();
         let pubkey = keys.public_key().to_hex();
@@ -385,31 +304,4 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_store_and_retrieve_nostr_wallet_connect_uri() -> Result<()> {
-        let wn = build_whitenoise().await;
-        let pubkey = "test_pubkey";
-        let nostr_wallet_connect_uri = "nostr+walletconnect://abcdef1234567890?secret=mysecret";
-
-        // Test non-existent URI returns None
-        let result = wn.get_nostr_wallet_connect_uri(pubkey).unwrap();
-        assert!(result.is_none());
-
-        // Store the NWC URI
-        wn.store_nostr_wallet_connect_uri(pubkey, nostr_wallet_connect_uri).unwrap();
-
-        // Retrieve the NWC URI
-        let retrieved_uri =
-            wn.get_nostr_wallet_connect_uri(pubkey).unwrap().expect("URI should exist");
-        assert_eq!(nostr_wallet_connect_uri, retrieved_uri);
-
-        // Clean up
-        wn.remove_nostr_wallet_connect_uri(pubkey).unwrap();
-
-        // Verify removal returns None
-        let result = wn.get_nostr_wallet_connect_uri(pubkey).unwrap();
-        assert!(result.is_none());
-
-        Ok(())
-    }
 }
