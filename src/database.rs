@@ -7,8 +7,8 @@ use thiserror::Error;
 
 const MIGRATION_FILES: &[(&str, &[u8])] = &[
     (
-        "0001_initial.sql",
-        include_bytes!("../db_migrations/0001_initial.sql"),
+        "0001_accounts.sql",
+        include_bytes!("../db_migrations/0001_accounts.sql"),
     ),
     (
         "0002_add_media_files.sql",

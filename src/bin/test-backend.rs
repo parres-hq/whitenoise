@@ -22,15 +22,19 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let config = WhitenoiseConfig::new(&args.data_dir, &args.logs_dir);
-    let core: Whitenoise = match Whitenoise::new(config).await {
-        Ok(core) => core,
+    let whitenoise: Whitenoise = match Whitenoise::initialize_whitenoise(config).await {
+        Ok(whitenoise) => whitenoise,
         Err(err) => {
             eprintln!("Failed to initialize Whitenoise: {}", err);
             std::process::exit(1);
         }
     };
 
-    println!("{:?}", core);
+    println!("WHITENOISE: {:?}", whitenoise);
+
+    let account = whitenoise.create_identity().await?;
+
+    println!("ACCOUNT: {:?}", account);
 
     Ok(())
 }

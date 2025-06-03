@@ -1,46 +1,26 @@
-use crate::database::{Database, DatabaseError};
+use crate::database::Database;
+use crate::error::WhitenoiseError;
 // use crate::nostr_manager::NostrManager;
-use nostr_sdk::{NostrLMDB, Options};
+use nostr_sdk::prelude::*;
 use anyhow::Context;
-use nostr_mls::NostrMls;
-use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::Client;
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use thiserror::Error;
+
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
 
-// mod accounts;
+mod accounts;
 mod database;
+mod api;
+mod error;
 // mod key_packages;
 // mod nostr_manager;
 mod relays;
 // mod media;
-// mod secrets_store;
+mod secrets_store;
 mod types;
-
-#[derive(Error, Debug)]
-pub enum WhitenoiseError {
-    #[error("Directory creation error: {0}")]
-    DirectoryCreation(#[from] std::io::Error),
-
-    #[error("Logging setup error: {0}")]
-    LoggingSetup(String),
-
-    #[error("Configuration error: {0}")]
-    Configuration(String),
-
-    #[error("Nostr client error: {0}")]
-    NostrClient(#[from] nostr_sdk::client::Error),
-
-    #[error("Database error: {0}")]
-    Database(#[from] DatabaseError),
-
-    #[error("Other error: {0}")]
-    Other(#[from] anyhow::Error),
-}
 
 #[derive(Clone, Debug)]
 pub struct WhitenoiseConfig {
@@ -73,11 +53,10 @@ pub struct Whitenoise {
     config: WhitenoiseConfig,
     database: Arc<Database>,
     nostr: Client,
-    nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
 }
 
 impl Whitenoise {
-    pub async fn new(config: WhitenoiseConfig) -> Result<Self, WhitenoiseError> {
+    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Self, WhitenoiseError> {
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
 
@@ -133,17 +112,21 @@ impl Whitenoise {
             Client::builder().database(db).opts(Options::default()).build()
         };
 
-        client.add_relay("wss://purplepag.es").await.map_err(WhitenoiseError::from)?;
-        client.add_relay("wss://relay.primal.net").await.map_err(WhitenoiseError::from)?;
+        if cfg!(debug_assertions) {
+            client.add_relay("ws://localhost:8080").await.map_err(WhitenoiseError::from)?;
+            client.add_relay("ws://localhost:7777").await.map_err(WhitenoiseError::from)?;
+        } else {
+            client.add_relay("wss://purplepag.es").await.map_err(WhitenoiseError::from)?;
+            client.add_relay("wss://relay.primal.net").await.map_err(WhitenoiseError::from)?;
+        }
 
-        let nostr_mls = Arc::new(Mutex::new(None));
+        client.connect().await;
 
         // Return fully configured, ready-to-go instance
         Ok(Self {
             config,
             database,
             nostr: client,
-            nostr_mls,
         })
     }
 
@@ -157,17 +140,18 @@ impl Whitenoise {
         self.database.delete_all_data().await?;
 
         // Remove MLS related data
-        {
-            let mut nostr_mls = self.nostr_mls.lock().unwrap_or_else(|e| {
-                tracing::error!("Failed to lock nostr_mls: {:?}", e);
-                panic!("Mutex poisoned: {}", e);
-            });
+        // TODO: MOVE TO ACCOUNTS
+        // {
+        //     let mut nostr_mls = self.nostr_mls.lock().unwrap_or_else(|e| {
+        //         tracing::error!("Failed to lock nostr_mls: {:?}", e);
+        //         panic!("Mutex poisoned: {}", e);
+        //     });
 
-            if let Some(_mls) = nostr_mls.as_mut() {
-                // Close the current MLS instance
-                *nostr_mls = None;
-            }
-        }
+        //     if let Some(_mls) = nostr_mls.as_mut() {
+        //         // Close the current MLS instance
+        //         *nostr_mls = None;
+        //     }
+        // }
 
         // Remove MLS related data
         let mls_dir = self.config.data_dir.join("mls");
@@ -225,7 +209,7 @@ impl std::fmt::Debug for Whitenoise {
         f.debug_struct("Whitenoise")
             .field("config", &self.config)
             .field("database", &self.database)
-            .field("nostr", &self.nostr)
+            .field("nostr", &"<redacted>")
             .field("nostr_mls", &"<redacted>")
             .finish()
     }
