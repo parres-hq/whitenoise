@@ -53,14 +53,11 @@ impl Database {
             tracing::info!("DB exists");
         } else {
             tracing::info!("DB does not exist, creating...");
-            match Sqlite::create_database(&db_url).await {
-                Ok(_) => {
-                    tracing::info!("DB created");
-                }
-                Err(e) => {
-                    tracing::error!("Error creating DB: {:?}", e);
-                }
-            }
+            Sqlite::create_database(&db_url).await.map_err(|e| {
+                tracing::error!("Error creating DB: {:?}", e);
+                DatabaseError::Sqlx(e)
+            })?;
+            tracing::info!("DB created");
         }
 
         // Create connection pool with refined settings
@@ -118,18 +115,27 @@ impl Database {
         let migrations_path = temp_dir;
         tracing::info!("Migrations path: {:?}", migrations_path);
 
-        match sqlx::migrate::Migrator::new(migrations_path).await {
+        let migration_result = match sqlx::migrate::Migrator::new(migrations_path.clone()).await {
             Ok(migrator) => {
-                migrator.run(&pool).await?;
-                tracing::info!("Migrations applied successfully");
-                // Clean up temp migrations directory
-                let _ = fs::remove_dir_all(data_dir.join("temp_migrations"));
+                let result = migrator.run(&pool).await;
+                if result.is_ok() {
+                    tracing::info!("Migrations applied successfully");
+                }
+                result.map_err(DatabaseError::from)
             }
             Err(e) => {
                 tracing::error!("Failed to create migrator: {:?}", e);
-                return Err(DatabaseError::Migrate(e));
+                Err(DatabaseError::Migrate(e))
             }
+        };
+
+        // Always clean up temp migrations directory
+        if let Err(e) = fs::remove_dir_all(data_dir.join("temp_migrations")) {
+            tracing::warn!("Failed to remove temp migrations directory: {:?}", e);
         }
+
+        // Return migration result or error
+        migration_result?;
 
         Ok(Self {
             pool,

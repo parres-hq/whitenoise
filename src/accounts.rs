@@ -1,6 +1,9 @@
 use crate::{relays::RelayType, Whitenoise, WhitenoiseError};
 
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
@@ -27,11 +30,6 @@ pub enum AccountError {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
-pub struct ActiveAccount {
-    pub pubkey: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct AccountSettings {
     pub dark_theme: bool,
     pub dev_mode: bool,
@@ -52,12 +50,12 @@ impl Default for AccountSettings {
 pub struct AccountOnboarding {
     pub inbox_relays: bool,
     pub key_package_relays: bool,
-    pub publish_key_package: bool,
+    pub key_package_published: bool,
 }
 
 /// This is an intermediate struct representing an account in the database
 #[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
-pub struct AccountRow {
+struct AccountRow {
     pub pubkey: String,
     pub metadata: String,   // JSON string
     pub settings: String,   // JSON string
@@ -144,7 +142,6 @@ impl Account {
     /// This function does not currently return any errors, but it is fallible to allow for
     /// future error handling and to match the expected signature for account creation.
     pub(crate) async fn new() -> Result<(Account, Keys), AccountError> {
-        // Create a new account with a generated keypair
         tracing::debug!(target: "whitenoise::accounts::new", "Generating new keypair");
         let keys = Keys::generate();
 
@@ -192,6 +189,215 @@ impl Account {
 }
 
 impl Whitenoise {
+    pub(crate) async fn find_account_by_pubkey(
+        &self,
+        pubkey: &PublicKey,
+    ) -> Result<Account, WhitenoiseError> {
+        let mut txn = self.database.pool.begin().await?;
+
+        let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
+            .bind(pubkey.to_hex().as_str())
+            .fetch_one(&mut *txn)
+            .await?;
+
+        let mut account = Account {
+            pubkey: PublicKey::parse(row.pubkey.as_str()).map_err(AccountError::PublicKeyError)?,
+            metadata: serde_json::from_str(&row.metadata)?,
+            settings: serde_json::from_str(&row.settings)?,
+            onboarding: serde_json::from_str(&row.onboarding)?,
+            relays: serde_json::from_str(&row.relays)?,
+            nwc: serde_json::from_str(&row.nwc)?,
+            last_used: Timestamp::from(row.last_used),
+            last_synced: Timestamp::from(row.last_synced),
+            contacts: Vec::new(),
+            nostr_mls: Arc::new(Mutex::new(None)),
+            groups: Vec::new(),
+            weclomes: Vec::new(),
+        };
+
+        // Get contacts
+        let signer = self.get_nostr_keys_for_pubkey(&account.pubkey.to_hex())?;
+        self.nostr.set_signer(signer).await;
+        let contacts = self
+            .nostr
+            .get_contact_list_public_keys(Duration::from_secs(5))
+            .await?;
+        self.nostr.unset_signer().await;
+        account.contacts = contacts;
+
+        let storage_dir = self
+            .config
+            .data_dir
+            .join("mls")
+            .join(account.pubkey.to_hex());
+
+        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(storage_dir).unwrap());
+
+        // Get groups
+        let groups = nostr_mls
+            .get_groups()
+            .map_err(AccountError::NostrMlsError)?;
+        account.groups = groups;
+
+        // Get weclomes
+        let weclomes = nostr_mls
+            .get_pending_welcomes()
+            .map_err(AccountError::NostrMlsError)?;
+        account.weclomes = weclomes;
+
+        // Set nostr_mls
+        {
+            let mut guard = account.nostr_mls.lock().unwrap();
+            *guard = Some(nostr_mls);
+        }
+
+        Ok(account)
+    }
+
+    /// Adds a new account to the database using the provided Nostr keys.
+    ///
+    /// This method initializes an `Account` struct with the given keys, fetches relevant events
+    /// (such as metadata and relay lists) from Nostr, and populates the account's fields accordingly.
+    /// It also fetches the contact list, updates relay and onboarding information, saves the account
+    /// to the database, stores the private key, and initializes the Nostr MLS instance for the account.
+    ///
+    /// # Arguments
+    ///
+    /// * `keys` - A reference to the `Keys` struct containing the Nostr keypair for the account.
+    ///
+    /// # Returns
+    ///
+    /// Returns the newly created `Account` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if any database operation, event fetching, serialization,
+    /// or key storage fails.
+    pub(crate) async fn add_account_from_keys(
+        &self,
+        keys: &Keys,
+    ) -> Result<Account, WhitenoiseError> {
+        tracing::debug!(target: "whitenoise::accounts", "Adding account for pubkey: {}", keys.public_key().to_hex());
+
+        let mut account = Account {
+            pubkey: keys.public_key(),
+            metadata: Metadata::default(),
+            settings: AccountSettings::default(),
+            onboarding: AccountOnboarding::default(),
+            last_used: Timestamp::now(),
+            last_synced: Timestamp::zero(),
+            relays: AccountRelays::default(),
+            nwc: AccountNwc::default(),
+            contacts: Vec::new(),
+            nostr_mls: Arc::new(Mutex::new(None)),
+            groups: Vec::new(),
+            weclomes: Vec::new(),
+        };
+
+        // Fetch events
+        let filter = Filter::new()
+            .kinds(vec![
+                Kind::RelayList,
+                Kind::InboxRelays,
+                Kind::MlsKeyPackageRelays,
+                Kind::Metadata,
+                Kind::MlsKeyPackage,
+            ])
+            .author(keys.public_key());
+        let mut stream = self
+            .nostr
+            .stream_events(filter, Duration::from_secs(5))
+            .await?;
+
+        let mut metadata: Option<Metadata> = None;
+        let mut relays: Vec<RelayUrl> = Vec::new();
+        let mut inbox_relays: Vec<RelayUrl> = Vec::new();
+        let mut key_package_relays: Vec<RelayUrl> = Vec::new();
+        let mut key_package_exists: bool = false;
+
+        while let Some(event) = stream.next().await {
+            tracing::debug!(target: "whitenoise::accounts", "Received event: {:?}", event);
+            match event.kind {
+                Kind::Metadata => {
+                    metadata = Some(Metadata::from_json(&event.content)?);
+                }
+                Kind::RelayList => {
+                    relays = event.tags.iter().filter_map(|tag| {
+                        if tag.kind() == TagKind::Relay {
+                            tag.content().and_then(|value| RelayUrl::parse(value).ok())
+                        } else {
+                            None
+                        }
+                    }).collect();
+                }
+                Kind::InboxRelays => {
+                    inbox_relays = event.tags.iter().filter_map(|tag| {
+                        if tag.kind() == TagKind::Relay {
+                            tag.content().and_then(|value| RelayUrl::parse(value).ok())
+                        } else {
+                            None
+                        }
+                    }).collect();
+                }
+                Kind::MlsKeyPackageRelays => {
+                    key_package_relays = event.tags.iter().filter_map(|tag| {
+                        if tag.kind() == TagKind::Relay {
+                            tag.content().and_then(|value| RelayUrl::parse(value).ok())
+                        } else {
+                            None
+                        }
+                    }).collect();
+                }
+                Kind::MlsKeyPackage => {
+                    key_package_exists = true;
+                }
+                _ => {
+                    tracing::debug!(target: "whitenoise::accounts", "Received unknown event: {:?}", event);
+                }
+            }
+        }
+
+        // Update metadata
+        account.metadata = metadata.unwrap_or_default();
+
+        // Fetch contacts
+        let contacts = self.nostr.get_contact_list_public_keys(Duration::from_secs(5)).await?;
+        account.contacts = contacts;
+
+        // Update relays
+        account.relays.nostr_relays = relays;
+        account.relays.inbox_relays = inbox_relays.clone();
+        account.relays.key_package_relays = key_package_relays.clone();
+
+        // Update onboarding
+        account.onboarding.inbox_relays = !inbox_relays.is_empty();
+        account.onboarding.key_package_relays = !key_package_relays.is_empty();
+        account.onboarding.key_package_published = key_package_exists;
+
+        self.save_account(&account).await?;
+        tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Account saved to database");
+
+        // Add the keys to the secret store
+        self.store_private_key(keys)?;
+        tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Keys stored in secret store");
+
+        // Initialize NostrMls for the account
+        let storage_dir = self
+            .config
+            .data_dir
+            .join("mls")
+            .join(account.pubkey.to_hex());
+
+        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(storage_dir).unwrap());
+        {
+            let mut guard = account.nostr_mls.lock().unwrap();
+            *guard = Some(nostr_mls);
+        }
+        tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "NostrMls initialized");
+
+        Ok(account)
+    }
+
     /// Saves the provided `Account` to the database.
     ///
     /// This method inserts or updates the account record in the database, serializing all
@@ -304,9 +510,11 @@ impl Whitenoise {
 
         let keys = self.get_nostr_keys_for_pubkey(&account.pubkey.to_hex())?;
         self.nostr.set_signer(keys).await;
-        let result = self.nostr.send_event_builder(event.clone()).await?;
-        tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
+        let result = self.nostr.send_event_builder(event.clone()).await;
+        // Ensure that we unset signer before returning the result, whether it's Ok or Err
         self.nostr.unset_signer().await;
+        let result = result?;
+        tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
 
         // Also publish relay lists to Nostr
         self.publish_relay_list_for_account(account, RelayType::Nostr)
@@ -319,12 +527,12 @@ impl Whitenoise {
         // Publish key package to key package relays
         match self.publish_key_package_for_account(account).await {
             Ok(_) => {
-                account.onboarding.publish_key_package = true;
+                account.onboarding.key_package_published = true;
                 self.save_account(account).await?;
                 tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published key package to relays");
             }
             Err(e) => {
-                account.onboarding.publish_key_package = false;
+                account.onboarding.key_package_published = false;
                 self.save_account(account).await?;
                 tracing::warn!(target: "whitenoise::accounts::onboard_new_account", "Failed to publish key package: {}", e);
             }
@@ -471,7 +679,7 @@ mod tests {
         assert!(!account.settings.lockdown_mode);
         assert!(!account.onboarding.inbox_relays);
         assert!(!account.onboarding.key_package_relays);
-        assert!(!account.onboarding.publish_key_package);
+        assert!(!account.onboarding.key_package_published);
     }
 
     #[test]

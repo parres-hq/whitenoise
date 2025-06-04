@@ -14,11 +14,17 @@ pub enum WhitenoiseError {
     #[error("Configuration error: {0}")]
     Configuration(String),
 
+    #[error("Nostr MLS SQLite storage error: {0}")]
+    NostrMlsSqliteStorage(#[from] nostr_mls_sqlite_storage::error::Error),
+
     #[error("Secrets store error: {0}")]
     SecretsStore(#[from] SecretsStoreError),
 
     #[error("Nostr client error: {0}")]
     NostrClient(#[from] nostr_sdk::client::Error),
+
+    #[error("Nostr key error: {0}")]
+    NostrKey(#[from] nostr_sdk::key::Error),
 
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),

@@ -16,7 +16,7 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns the newly created [`Account`] on success.
+    /// Returns the newly created `Account` on success.
     ///
     /// # Errors
     ///
@@ -37,7 +37,7 @@ impl Whitenoise {
             .data_dir
             .join("mls")
             .join(account.pubkey.to_hex());
-        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(storage_dir).unwrap());
+        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(storage_dir)?);
         {
             let mut guard = account.nostr_mls.lock().unwrap();
             *guard = Some(nostr_mls);
@@ -47,5 +47,40 @@ impl Whitenoise {
         self.onboard_new_account(&mut account).await?;
 
         Ok(account)
+    }
+
+    /// Logs in an existing user using a private key (nsec or hex format).
+    ///
+    /// This method performs the following steps:
+    /// - Parses the provided private key (either nsec or hex format) to obtain the user's keys.
+    /// - Attempts to find an existing account in the database matching the public key.
+    /// - If the account exists, returns it.
+    /// - If the account does not exist, creates a new account from the provided keys and adds it to the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `nsec_or_hex_privkey` - The user's private key as a nsec string or hex-encoded string.
+    ///
+    /// # Returns
+    ///
+    /// Returns the `Account` associated with the provided private key on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the private key is invalid, or if there is a failure in finding or adding the account.
+    pub async fn login(&self, nsec_or_hex_privkey: String) -> Result<Account, WhitenoiseError> {
+        let keys = Keys::parse(&nsec_or_hex_privkey)?;
+
+        match self.find_account_by_pubkey(&keys.public_key).await {
+            Ok(account) => {
+                tracing::debug!(target: "whitenoise::api::accounts::login", "Account found");
+                Ok(account)
+            }
+            _ => {
+                tracing::debug!(target: "whitenoise::api::accounts::login", "Account not found, adding from keys");
+                let account = self.add_account_from_keys(&keys).await?;
+                Ok(account)
+            }
+        }
     }
 }
