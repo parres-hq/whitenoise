@@ -119,7 +119,7 @@ impl Whitenoise {
     /// Finds and loads an account from the database by its public key.
     ///
     /// This method queries the database for an account matching the provided public key,
-    /// deserializes its settings, onboarding, and NWC data, and initializes the account's
+    /// deserializes its settings, onboarding, and initializes the account's
     /// NostrManager and NostrMls instances. The account is returned fully initialized and ready
     /// for use in the application.
     ///
@@ -264,12 +264,11 @@ impl Whitenoise {
         let mut txn = self.database.pool.begin().await?;
 
         let result = sqlx::query(
-            "INSERT INTO accounts (pubkey, settings, onboarding, nwc, last_synced)
-             VALUES (?, ?, ?, ?, ?)
+            "INSERT INTO accounts (pubkey, settings, onboarding, last_synced)
+             VALUES (?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
                 settings = excluded.settings,
                 onboarding = excluded.onboarding,
-                nwc = excluded.nwc,
                 last_synced = excluded.last_synced",
         )
         .bind(account.pubkey.to_hex())
