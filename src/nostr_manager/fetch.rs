@@ -45,7 +45,7 @@ impl NostrManager {
             .await
             .map_err(NostrManagerError::from)?;
 
-        Ok(Self::relay_urls_from_events(events))
+        Ok(Self::relay_url_strings_from_events(events))
     }
 
     pub async fn fetch_user_inbox_relays(&self, pubkey: PublicKey) -> Result<Vec<String>> {
@@ -59,7 +59,7 @@ impl NostrManager {
             .await
             .map_err(NostrManagerError::from)?;
 
-        Ok(Self::relay_urls_from_events(events))
+        Ok(Self::relay_url_strings_from_events(events))
     }
 
     pub async fn fetch_user_key_package_relays(&self, pubkey: PublicKey) -> Result<Vec<String>> {
@@ -73,7 +73,7 @@ impl NostrManager {
             .await
             .map_err(NostrManagerError::from)?;
 
-        Ok(Self::relay_urls_from_events(events))
+        Ok(Self::relay_url_strings_from_events(events))
     }
 
     pub async fn fetch_user_key_packages(&self, pubkey: PublicKey) -> Result<Events> {

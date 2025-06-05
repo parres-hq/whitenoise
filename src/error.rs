@@ -1,5 +1,6 @@
 use crate::accounts::AccountError;
 use crate::database::DatabaseError;
+use crate::nostr_manager::NostrManagerError;
 use crate::secrets_store::SecretsStoreError;
 use thiserror::Error;
 
@@ -14,11 +15,20 @@ pub enum WhitenoiseError {
     #[error("Configuration error: {0}")]
     Configuration(String),
 
+    #[error("Nostr MLS SQLite storage error: {0}")]
+    NostrMlsSqliteStorage(#[from] nostr_mls_sqlite_storage::error::Error),
+
+    #[error("Account not found")]
+    AccountNotFound,
+
     #[error("Secrets store error: {0}")]
     SecretsStore(#[from] SecretsStoreError),
 
     #[error("Nostr client error: {0}")]
     NostrClient(#[from] nostr_sdk::client::Error),
+
+    #[error("Nostr key error: {0}")]
+    NostrKey(#[from] nostr_sdk::key::Error),
 
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
@@ -31,6 +41,9 @@ pub enum WhitenoiseError {
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+
+    #[error("Nostr manager error: {0}")]
+    NostrManager(#[from] NostrManagerError),
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),

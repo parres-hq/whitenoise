@@ -1,22 +1,24 @@
+pub use crate::accounts::{Account, AccountOnboarding, AccountSettings};
 use crate::database::Database;
 pub use crate::error::WhitenoiseError;
-// use crate::nostr_manager::NostrManager;
+use crate::nostr_manager::NostrManager;
+
 use anyhow::Context;
 use nostr_sdk::prelude::*;
-use nostr_sdk::Client;
 use once_cell::sync::OnceCell;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 mod accounts;
 mod api;
 mod database;
 mod error;
 // mod key_packages;
-// mod nostr_manager;
+mod nostr_manager;
 mod relays;
 // mod media;
 mod secrets_store;
@@ -52,7 +54,7 @@ fn init_tracing(logs_dir: &std::path::Path) {
             .with_target(true);
 
         Registry::default()
-            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
             .with(stdout_layer)
             .with(file_layer)
             .init();
@@ -87,9 +89,11 @@ impl WhitenoiseConfig {
 
 #[derive(Clone)]
 pub struct Whitenoise {
-    config: WhitenoiseConfig,
-    database: Arc<Database>,
-    nostr: Client,
+    pub config: WhitenoiseConfig,
+    pub accounts: HashMap<PublicKey, Account>,
+    pub active_account: Option<PublicKey>,
+    pub(crate) database: Arc<Database>,
+    pub(crate) nostr: NostrManager,
 }
 
 impl Whitenoise {
@@ -145,50 +149,24 @@ impl Whitenoise {
         tracing::debug!("Logging initialized in directory: {:?}", logs_dir);
 
         let database = Arc::new(Database::new(data_dir.join("whitenoise.sqlite")).await?);
+        let nostr = NostrManager::new(data_dir.join("nostr_lmdb")).await?;
 
-        let client = {
-            let full_path = data_dir.join("nostr_lmdb");
-            let db = NostrLMDB::open(full_path).expect("Failed to open Nostr database");
-            Client::builder()
-                .database(db)
-                .opts(Options::default())
-                .build()
-        };
-
-        if cfg!(debug_assertions) {
-            client
-                .add_relay("ws://localhost:8080")
-                .await
-                .map_err(WhitenoiseError::from)?;
-            client
-                .add_relay("ws://localhost:7777")
-                .await
-                .map_err(WhitenoiseError::from)?;
-        } else {
-            client
-                .add_relay("wss://purplepag.es")
-                .await
-                .map_err(WhitenoiseError::from)?;
-            client
-                .add_relay("wss://relay.primal.net")
-                .await
-                .map_err(WhitenoiseError::from)?;
-        }
-
-        client.connect().await;
+        // TODO: Load accounts from database
 
         // Return fully configured, ready-to-go instance
         Ok(Self {
             config,
             database,
-            nostr: client,
+            nostr,
+            accounts: HashMap::new(),
+            active_account: None,
         })
     }
 
     /// Deletes all application data, including the database, MLS data, and log files.
     ///
     /// This asynchronous method removes all persistent data associated with the Whitenoise instance.
-    /// It deletes the database, MLS-related directories, and all log files. If the MLS directory exists,
+    /// It deletes the nostr cache, database, MLS-related directories, and all log files. If the MLS directory exists,
     /// it is removed and then recreated as an empty directory. This is useful for resetting the application
     /// to a clean state.
     ///
@@ -200,6 +178,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// This function will return an error if:
+    /// - The Nostr cache cannot be deleted.
     /// - The database data cannot be deleted.
     /// - The MLS directory cannot be removed or recreated.
     /// - Log files or directories cannot be deleted.
@@ -217,8 +196,8 @@ impl Whitenoise {
     pub async fn delete_all_data(&self) -> Result<(), Box<dyn std::error::Error>> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
-        // TODO: Remove nostr cache first
-        // self.nostr.delete_all_data().await?;
+        // Remove nostr cache first
+        self.nostr.delete_all_data().await?;
 
         // Remove database (accounts and media) data
         self.database.delete_all_data().await?;
@@ -292,9 +271,10 @@ impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Whitenoise")
             .field("config", &self.config)
-            .field("database", &self.database)
-            .field("nostr", &"<redacted>")
-            .field("nostr_mls", &"<redacted>")
+            .field("accounts", &self.accounts)
+            .field("active_account", &self.active_account)
+            .field("database", &"<REDACTED>")
+            .field("nostr", &"<REDACTED>")
             .finish()
     }
 }
