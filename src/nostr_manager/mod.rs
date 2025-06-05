@@ -552,14 +552,15 @@ impl NostrManager {
             })
             .collect()
     }
-    fn relay_url_strings_from_events(events: Events) -> Vec<String> {
-        events
-            .into_iter()
-            .flat_map(|e| e.tags)
-            .filter(|tag| tag.kind() == TagKind::Relay)
-            .map_while(|tag| tag.content().map(|c| c.to_string()))
-            .collect()
-    }
+
+    // fn relay_url_strings_from_events(events: Events) -> Vec<String> {
+    //     events
+    //         .into_iter()
+    //         .flat_map(|e| e.tags)
+    //         .filter(|tag| tag.kind() == TagKind::Relay)
+    //         .map_while(|tag| tag.content().map(|c| c.to_string()))
+    //         .collect()
+    // }
 
     pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(

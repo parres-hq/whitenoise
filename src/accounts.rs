@@ -113,6 +113,18 @@ impl Account {
 
         Ok((account, keys))
     }
+
+    pub(crate) fn groups_nostr_group_ids(&self) -> Result<Vec<String>, AccountError> {
+        let mut group_ids = vec![];
+        {
+            let nostr_mls_guard = self.nostr_mls.lock().unwrap();
+            if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+                let groups = nostr_mls.get_groups()?;
+                group_ids = groups.iter().map(|g| g.nostr_group_id).collect::<Vec<[u8; 32]>>();
+            }
+        }
+        Ok(group_ids.into_iter().map(hex::encode).collect::<Vec<String>>())
+    }
 }
 
 impl Whitenoise {
@@ -199,6 +211,9 @@ impl Whitenoise {
         // Add the keys to the secret store
         self.store_private_key(keys)?;
         tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Keys stored in secret store");
+
+        // Trigger fetch of nostr events on another thread
+        self.background_fetch_account_data(&account).await?;
 
         Ok(account)
     }
@@ -529,6 +544,21 @@ impl Whitenoise {
                 .await?;
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Published key package to relays: {:?}", result);
         }
+
+        Ok(())
+    }
+
+    pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
+        let group_ids = account.groups_nostr_group_ids()?;
+        let nostr = self.nostr.clone();
+        let pubkey = account.pubkey;
+        let last_synced = account.last_synced;
+
+        tokio::spawn(async move {
+            if let Err(e) = nostr.fetch_all_user_data(pubkey, last_synced, group_ids).await {
+                tracing::error!("Failed to fetch user data: {}", e);
+            }
+        });
 
         Ok(())
     }
