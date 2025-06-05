@@ -57,7 +57,6 @@ struct AccountRow {
     pub pubkey: String,
     pub settings: String,   // JSON string
     pub onboarding: String, // JSON string
-    pub nwc: String,        // JSON string
     pub last_synced: u64,
 }
 
@@ -66,9 +65,9 @@ pub struct Account {
     pub pubkey: PublicKey,
     pub settings: AccountSettings,
     pub onboarding: AccountOnboarding,
-    pub nwc: AccountNwc,
     pub last_synced: Timestamp,
     #[serde(skip)]
+    #[doc(hidden)]
     pub(crate) nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
 }
 
@@ -78,17 +77,10 @@ impl std::fmt::Debug for Account {
             .field("pubkey", &self.pubkey)
             .field("settings", &self.settings)
             .field("onboarding", &self.onboarding)
-            .field("nwc", &self.nwc)
             .field("last_synced", &self.last_synced)
             .field("nostr_mls", &"<REDACTED>")
             .finish()
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct AccountNwc {
-    pub nwc_url: String,
-    pub balance: u64,
 }
 
 impl Account {
@@ -116,7 +108,6 @@ impl Account {
             settings: AccountSettings::default(),
             onboarding: AccountOnboarding::default(),
             last_synced: Timestamp::zero(),
-            nwc: AccountNwc::default(),
             nostr_mls: Arc::new(Mutex::new(None)),
         };
 
@@ -159,7 +150,6 @@ impl Whitenoise {
             pubkey: PublicKey::parse(row.pubkey.as_str()).map_err(AccountError::PublicKeyError)?,
             settings: serde_json::from_str(&row.settings)?,
             onboarding: serde_json::from_str(&row.onboarding)?,
-            nwc: serde_json::from_str(&row.nwc)?,
             last_synced: Timestamp::from(row.last_synced),
             nostr_mls: Arc::new(Mutex::new(None)),
         };
@@ -197,7 +187,6 @@ impl Whitenoise {
             settings: AccountSettings::default(),
             onboarding: AccountOnboarding::default(),
             last_synced: Timestamp::zero(),
-            nwc: AccountNwc::default(),
             nostr_mls: Arc::new(Mutex::new(None)),
         };
 
@@ -286,7 +275,6 @@ impl Whitenoise {
         .bind(account.pubkey.to_hex())
         .bind(&serde_json::to_string(&account.settings)?)
         .bind(&serde_json::to_string(&account.onboarding)?)
-        .bind(&serde_json::to_string(&account.nwc)?)
         .bind(account.last_synced.to_string())
         .execute(&mut *txn)
         .await?;
@@ -507,7 +495,9 @@ impl Whitenoise {
     ) -> Result<(), WhitenoiseError> {
         let mut encoded_key_package: Option<String> = None;
         let mut tags: Option<[Tag; 4]> = None;
-        let key_package_relays = self.get_account_relays(account, RelayType::KeyPackage).await?;
+        let key_package_relays = self
+            .get_account_relays(account, RelayType::KeyPackage)
+            .await?;
 
         {
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Attempting to acquire nostr_mls lock");

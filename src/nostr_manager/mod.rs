@@ -10,11 +10,11 @@ use thiserror::Error;
 use tokio::{spawn, sync::Mutex};
 
 pub mod event_processor;
-pub mod fetch;
+// pub mod fetch;
 pub mod parser;
 pub mod query;
-pub mod search;
-pub mod subscriptions;
+// pub mod search;
+// pub mod subscriptions;
 pub mod sync;
 
 #[derive(Error, Debug)]

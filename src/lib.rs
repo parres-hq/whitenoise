@@ -1,4 +1,4 @@
-use crate::accounts::Account;
+pub use crate::accounts::{Account, AccountSettings, AccountOnboarding};
 use crate::database::Database;
 pub use crate::error::WhitenoiseError;
 use crate::nostr_manager::NostrManager;
