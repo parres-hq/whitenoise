@@ -1,7 +1,5 @@
 use crate::{accounts::Account, relays::RelayType, Whitenoise, WhitenoiseError};
 
-use nostr_mls::NostrMls;
-use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
 
 impl Whitenoise {
@@ -34,19 +32,7 @@ impl Whitenoise {
 
         // TODO: initialize subs on nostr manager
 
-        // Initialize NostrMls for the account
-        let storage_dir = self
-            .config
-            .data_dir
-            .join("mls")
-            .join(account.pubkey.to_hex());
-
-        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(storage_dir)?);
-        {
-            let mut guard = account.nostr_mls.lock().unwrap();
-            *guard = Some(nostr_mls);
-        }
-        tracing::debug!(target: "whitenoise::api::accounts::create_identity", "NostrMls initialized");
+        self.initialize_nostr_mls_for_account(&account).await?;
 
         // Onboard the account
         self.onboard_new_account(&mut account).await?;
@@ -103,19 +89,7 @@ impl Whitenoise {
 
         // TODO: initialize subs on nostr manager
 
-        // Initialize NostrMls for the account
-        let mls_storage_dir = self
-            .config
-            .data_dir
-            .join("mls")
-            .join(account.pubkey.to_hex());
-
-        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(mls_storage_dir).unwrap());
-        {
-            let mut nostr_mls_guard = account.nostr_mls.lock().unwrap();
-            *nostr_mls_guard = Some(nostr_mls);
-        }
-        tracing::debug!(target: "whitenoise::api::accounts::login", "NostrMls initialized");
+        self.initialize_nostr_mls_for_account(&account).await?;
 
         // Set the account to active
         self.active_account = Some(account.pubkey);

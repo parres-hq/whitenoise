@@ -321,6 +321,54 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Initializes the Nostr MLS (Message Layer Security) instance for a given account.
+    ///
+    /// This method sets up the MLS storage and initializes a new NostrMls instance for secure messaging.
+    /// The MLS storage is created in a directory specific to the account's public key, ensuring
+    /// isolation between different accounts. The initialized NostrMls instance is stored in the
+    /// account's nostr_mls field for future use.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A reference to the `Account` for which to initialize the NostrMls instance.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if initialization is successful.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if:
+    /// * The MLS storage directory cannot be created
+    /// * The NostrMls instance cannot be initialized
+    /// * The mutex lock cannot be acquired
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use whitenoise::{Whitenoise, Account};
+    /// # async fn example(whitenoise: &Whitenoise, account: &Account) -> Result<(), WhitenoiseError> {
+    /// whitenoise.initialize_nostr_mls_for_account(account).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub(crate) async fn initialize_nostr_mls_for_account(&self, account: &Account) -> Result<(), WhitenoiseError> {
+        // Initialize NostrMls for the account
+        let mls_storage_dir = self
+            .config
+            .data_dir
+            .join("mls")
+            .join(account.pubkey.to_hex());
+
+        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(mls_storage_dir)?);
+        {
+            let mut nostr_mls_guard = account.nostr_mls.lock().unwrap();
+            *nostr_mls_guard = Some(nostr_mls);
+        }
+        tracing::debug!(target: "whitenoise::api::accounts::login", "NostrMls initialized for account: {}", account.pubkey.to_hex());
+        Ok(())
+    }
+
     /// Performs onboarding steps for a new account, including relay setup and publishing metadata.
     ///
     /// This method sets onboarding flags, assigns default relays, publishes the account's metadata
@@ -350,12 +398,8 @@ impl Whitenoise {
 
         let default_relays = self
             .nostr
-            .client
             .relays()
-            .await
-            .keys()
-            .cloned()
-            .collect::<Vec<RelayUrl>>();
+            .await?;
 
         // Generate a petname for the account (two words, separated by a space)
         let petname_raw = petname::petname(2, " ").unwrap_or_else(|| "Anonymous User".to_string());
@@ -384,13 +428,8 @@ impl Whitenoise {
         // Publish a metadata event to Nostr
         let metadata_json = serde_json::to_string(&metadata)?;
         let event = EventBuilder::new(Kind::Metadata, metadata_json);
-
         let keys = self.get_nostr_keys_for_pubkey(&account.pubkey)?;
-        self.nostr.client.set_signer(keys).await;
-        let result = self.nostr.client.send_event_builder(event.clone()).await;
-        // Ensure that we unset signer before returning the result, whether it's Ok or Err
-        self.nostr.client.unset_signer().await;
-        let result = result?;
+        let result = self.nostr.publish_event_builder_with_signer(event.clone(), keys).await?;
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
 
         // Also publish relay lists to Nostr
@@ -462,10 +501,8 @@ impl Whitenoise {
 
         let event = EventBuilder::new(relay_event_kind, "").tags(tags);
         let keys = self.get_nostr_keys_for_pubkey(&account.pubkey)?;
-        self.nostr.client.set_signer(keys).await;
-        let result = self.nostr.client.send_event_builder(event.clone()).await?;
+        let result = self.nostr.publish_event_builder_with_signer(event.clone(), keys).await?;
         tracing::debug!(target: "whitenoise::accounts::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
-        self.nostr.client.unset_signer().await;
 
         Ok(())
     }
@@ -524,7 +561,6 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock released");
 
         let signer = self.get_nostr_keys_for_pubkey(&account.pubkey)?;
-        self.nostr.client.set_signer(signer).await;
         if encoded_key_package.is_some() && tags.is_some() {
             let key_package_event_builder =
                 EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package.unwrap())
@@ -532,13 +568,11 @@ impl Whitenoise {
 
             let result = self
                 .nostr
-                .client
-                .send_event_builder_to(key_package_relays, key_package_event_builder.clone())
+                .publish_event_builder_with_signer(key_package_event_builder.clone(), signer)
                 .await?;
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Published key package to relays: {:?}", result);
         }
 
-        self.nostr.client.unset_signer().await;
         Ok(())
     }
 }
