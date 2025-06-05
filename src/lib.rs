@@ -1,6 +1,6 @@
-pub use crate::accounts::{Account, AccountOnboarding, AccountSettings};
+pub use crate::accounts::{Account, OnboardingState, AccountSettings};
 use crate::database::Database;
-pub use crate::error::WhitenoiseError;
+pub use crate::error::{Result, WhitenoiseError};
 use crate::nostr_manager::NostrManager;
 
 use anyhow::Context;
@@ -23,6 +23,8 @@ mod relays;
 // mod media;
 mod secrets_store;
 mod types;
+
+
 
 static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
 static TRACING_INIT: OnceCell<()> = OnceCell::new();
@@ -131,7 +133,7 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Self, WhitenoiseError> {
+    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Self> {
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
 
@@ -188,12 +190,12 @@ impl Whitenoise {
     /// ```rust
     /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
     /// # use std::path::Path;
-    /// # async fn example(whitenoise: Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: Whitenoise) -> Result<(), whitenoise::WhitenoiseError> {
     /// whitenoise.delete_all_data().await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_all_data(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
         // Remove nostr cache first
@@ -224,30 +226,9 @@ impl Whitenoise {
                 "Removing MLS directory: {:?}",
                 mls_dir
             );
-            if let Err(e) = tokio::fs::remove_dir_all(&mls_dir).await {
-                tracing::error!(
-                    target: "whitenoise::delete_all_data",
-                    "Failed to remove MLS directory: {:?}",
-                    e
-                );
-                return Err(Box::new(std::io::Error::other(format!(
-                    "Failed to remove MLS directory: {}",
-                    e
-                ))));
-            }
-
+            tokio::fs::remove_dir_all(&mls_dir).await?;
             // Recreate the empty directory
-            if let Err(e) = tokio::fs::create_dir_all(&mls_dir).await {
-                tracing::error!(
-                    target: "whitenoise::delete_all_data",
-                    "Failed to recreate MLS directory: {:?}",
-                    e
-                );
-                return Err(Box::new(std::io::Error::other(format!(
-                    "Failed to recreate MLS directory: {}",
-                    e
-                ))));
-            }
+            tokio::fs::create_dir_all(&mls_dir).await?;
         }
 
         // Remove logs

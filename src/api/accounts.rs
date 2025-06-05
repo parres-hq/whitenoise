@@ -1,6 +1,13 @@
-use crate::{accounts::Account, relays::RelayType, Whitenoise, WhitenoiseError};
+//! Accounts API for Whitenoise
+//! This module provides methods for managing user accounts, including creating, logging in, and logging out.
+//!
+//! All methods in this module only load data from the database. They do not perform any network requests.
+//! The database is updated by the accounts manager in the backaground.
 
+use crate::{accounts::Account, Whitenoise, WhitenoiseError};
+use crate::error::{Result};
 use nostr_sdk::prelude::*;
+
 
 impl Whitenoise {
     /// Creates a new identity (account) for the user.
@@ -20,7 +27,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
-    pub async fn create_identity(&mut self) -> Result<Account, WhitenoiseError> {
+    pub async fn create_identity(&mut self) -> Result<Account> {
         // Create a new account with a generated keypair and a petname
         let (initial_account, keys) = Account::new().await?;
 
@@ -68,7 +75,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if the private key is invalid, or if there is a failure in finding or adding the account.
-    pub async fn login(&mut self, nsec_or_hex_privkey: String) -> Result<Account, WhitenoiseError> {
+    pub async fn login(&mut self, nsec_or_hex_privkey: String) -> Result<Account> {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
 
@@ -77,8 +84,8 @@ impl Whitenoise {
                 tracing::debug!(target: "whitenoise::api::accounts::login", "Account found");
                 Ok(account)
             }
-            Err(e) => match e {
-                WhitenoiseError::AccountNotFound => {
+            Err(e) => match e.downcast_ref::<WhitenoiseError>() {
+                Some(WhitenoiseError::AccountNotFound) => {
                     tracing::debug!(target: "whitenoise::api::accounts::login", "Account not found, adding from keys");
                     let account = self.add_account_from_keys(&keys).await?;
                     Ok(account)
@@ -122,7 +129,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if the account cannot be found, or if there is a failure in removing the account or its private key.
-    pub async fn logout(&mut self, account: &Account) -> Result<(), WhitenoiseError> {
+    pub async fn logout(&mut self, account: &Account) -> Result<()> {
         // Delete the account from the database
         self.delete_account(account).await?;
 
@@ -148,60 +155,8 @@ impl Whitenoise {
     /// # Returns
     ///
     /// Returns the `Account` that was set as active.
-    pub fn update_active_account(&mut self, account: &Account) -> Result<Account, WhitenoiseError> {
+    pub fn update_active_account(&mut self, account: &Account) -> Result<Account> {
         self.active_account = Some(account.pubkey);
         Ok(account.clone())
-    }
-
-    /// Retrieves the Nostr metadata for the given account's public key.
-    ///
-    /// This method queries the Nostr network for user metadata associated with the provided account's public key.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` whose metadata should be fetched.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(Some(Metadata))` if metadata is found, `Ok(None)` if no metadata is available, or an error if the query fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if the metadata query fails.
-    pub async fn get_account_metadata(
-        &self,
-        account: &Account,
-    ) -> Result<Option<Metadata>, WhitenoiseError> {
-        let metadata = self.nostr.query_user_metadata(account.pubkey).await?;
-        Ok(metadata)
-    }
-
-    /// Retrieves the relays associated with the given account's public key.
-    ///
-    /// This method queries the Nostr network for relays associated with the provided account's public key,
-    /// filtered by the specified relay type.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` whose relays should be fetched.
-    /// * `relay_type` - The type of relays to retrieve (e.g., read, write, or all).
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing a vector of `RelayUrl` on success, or a [`WhitenoiseError`] if the query fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if the relay query fails.
-    pub async fn get_account_relays(
-        &self,
-        account: &Account,
-        relay_type: RelayType,
-    ) -> Result<Vec<RelayUrl>, WhitenoiseError> {
-        let relays = self
-            .nostr
-            .query_user_relays(account.pubkey, relay_type)
-            .await?;
-        Ok(relays)
     }
 }

@@ -10,12 +10,12 @@ use thiserror::Error;
 use tokio::{spawn, sync::Mutex};
 
 pub mod event_processor;
-// pub mod fetch;
+pub mod fetch;
 pub mod parser;
 pub mod query;
 // pub mod search;
 // pub mod subscriptions;
-pub mod sync;
+// pub mod sync;
 
 #[derive(Error, Debug)]
 pub enum NostrManagerError {
@@ -47,9 +47,9 @@ pub struct NostrManagerSettings {
 
 #[derive(Debug, Clone)]
 pub struct NostrManager {
-    pub client: Client, // TODO: make this private
-    // pub blossom: BlossomClient,
     pub settings: Arc<Mutex<NostrManagerSettings>>,
+    client: Client,
+    // blossom: BlossomClient,
     event_processor: Arc<Mutex<EventProcessor>>,
 }
 
@@ -151,20 +151,12 @@ impl NostrManager {
     ///
     /// * `Result<Output<EventId>>` - The published event ID if successful, or an error if publishing fails
     ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let event_builder = EventBuilder::new_text_note("Hello, world!", &[]);
-    /// let signer = Keys::generate();
-    /// let result = nostr_manager.publish_event_builder_with_signer(event_builder, signer).await?;
-    /// ```
     pub(crate) async fn publish_event_builder_with_signer(&self, event_builder: EventBuilder, signer: impl NostrSigner + 'static) -> Result<Output<EventId>> {
         self.client.set_signer(signer).await;
         let result = self.client.send_event_builder(event_builder.clone()).await?;
         self.client.unset_signer().await;
         Ok(result)
     }
-
 
     /// Extracts welcome events from a list of giftwrapped events.
     ///

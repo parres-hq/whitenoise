@@ -4,10 +4,12 @@ use crate::nostr_manager::NostrManagerError;
 use crate::secrets_store::SecretsStoreError;
 use thiserror::Error;
 
+pub type Result<T> = core::result::Result<T, WhitenoiseError>;
+
 #[derive(Error, Debug)]
 pub enum WhitenoiseError {
-    #[error("Directory creation error: {0}")]
-    DirectoryCreation(#[from] std::io::Error),
+    #[error("Filesystem error: {0}")]
+    Filesystem(#[from] std::io::Error),
 
     #[error("Logging setup error: {0}")]
     LoggingSetup(String),
@@ -47,4 +49,10 @@ pub enum WhitenoiseError {
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
+}
+
+impl From<Box<dyn std::error::Error>> for WhitenoiseError {
+    fn from(err: Box<dyn std::error::Error>) -> Self {
+        WhitenoiseError::Other(anyhow::anyhow!(err.to_string()))
+    }
 }

@@ -1,5 +1,5 @@
 use crate::nostr_manager::NostrManagerError;
-use crate::{relays::RelayType, Whitenoise, WhitenoiseError};
+use crate::{relays::RelayType, Whitenoise};
 
 use std::sync::{Arc, Mutex};
 
@@ -45,7 +45,7 @@ impl Default for AccountSettings {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, sqlx::FromRow)]
-pub struct AccountOnboarding {
+pub struct OnboardingState {
     pub inbox_relays: bool,
     pub key_package_relays: bool,
     pub key_package_published: bool,
@@ -64,7 +64,7 @@ struct AccountRow {
 pub struct Account {
     pub pubkey: PublicKey,
     pub settings: AccountSettings,
-    pub onboarding: AccountOnboarding,
+    pub onboarding: OnboardingState,
     pub last_synced: Timestamp,
     #[serde(skip)]
     #[doc(hidden)]
@@ -106,7 +106,7 @@ impl Account {
         let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
-            onboarding: AccountOnboarding::default(),
+            onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
             nostr_mls: Arc::new(Mutex::new(None)),
         };
@@ -138,7 +138,7 @@ impl Whitenoise {
     pub(crate) async fn find_account_by_pubkey(
         &self,
         pubkey: &PublicKey,
-    ) -> Result<Account, WhitenoiseError> {
+    ) -> Result<Account> {
         let mut txn = self.database.pool.begin().await?;
 
         let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
@@ -179,53 +179,19 @@ impl Whitenoise {
     pub(crate) async fn add_account_from_keys(
         &self,
         keys: &Keys,
-    ) -> Result<Account, WhitenoiseError> {
+    ) -> Result<Account> {
         tracing::debug!(target: "whitenoise::accounts", "Adding account for pubkey: {}", keys.public_key().to_hex());
 
         let mut account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
-            onboarding: AccountOnboarding::default(),
+            onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
             nostr_mls: Arc::new(Mutex::new(None)),
         };
 
-        // Fetch events: This helps us determine if the account is ready to use MLS messaging
-        let filter = Filter::new()
-            .kinds(vec![
-                Kind::RelayList,
-                Kind::InboxRelays,
-                Kind::MlsKeyPackageRelays,
-                Kind::MlsKeyPackage,
-            ])
-            .author(keys.public_key());
-
-        let mut stream = self
-            .nostr
-            .client
-            .stream_events(filter, self.nostr.timeout().await?)
-            .await?;
-
-        while let Some(event) = stream.next().await {
-            tracing::debug!(target: "whitenoise::accounts", "Received event: {:?}", event);
-            match event.kind {
-                Kind::InboxRelays => {
-                    tracing::debug!(target: "whitenoise::accounts", "Received inbox relays event: {:?}", event);
-                    account.onboarding.inbox_relays = true;
-                }
-                Kind::MlsKeyPackageRelays => {
-                    tracing::debug!(target: "whitenoise::accounts", "Received key package relays event: {:?}", event);
-                    account.onboarding.key_package_relays = true;
-                }
-                Kind::MlsKeyPackage => {
-                    tracing::debug!(target: "whitenoise::accounts", "Received key package event: {:?}", event);
-                    account.onboarding.key_package_published = true;
-                }
-                _ => {
-                    tracing::debug!(target: "whitenoise::accounts", "Received {:?} event", event.kind);
-                }
-            }
-        }
+        let onboarding_state = self.load_onboarding_state(keys.public_key()).await?;
+        account.onboarding = onboarding_state;
 
         self.save_account(&account).await?;
         tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Account saved to database");
@@ -254,7 +220,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the database operation fails or if serialization fails.
-    pub(crate) async fn save_account(&self, account: &Account) -> Result<Account, WhitenoiseError> {
+    pub(crate) async fn save_account(&self, account: &Account) -> Result<Account> {
         tracing::debug!(
             target: "whitenoise::accounts::save_account",
             "Beginning save transaction for pubkey: {}",
@@ -307,7 +273,7 @@ impl Whitenoise {
     /// # Returns
     ///
     /// Returns `Ok(())` if the account was successfully deleted, or a `WhitenoiseError` if the operation fails.
-    pub(crate) async fn delete_account(&self, account: &Account) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn delete_account(&self, account: &Account) -> Result<()> {
         let mut txn = self.database.pool.begin().await?;
         sqlx::query("DELETE FROM accounts WHERE pubkey = ?")
             .bind(account.pubkey.to_hex())
@@ -343,16 +309,7 @@ impl Whitenoise {
     /// * The NostrMls instance cannot be initialized
     /// * The mutex lock cannot be acquired
     ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use whitenoise::{Whitenoise, Account};
-    /// # async fn example(whitenoise: &Whitenoise, account: &Account) -> Result<(), WhitenoiseError> {
-    /// whitenoise.initialize_nostr_mls_for_account(account).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub(crate) async fn initialize_nostr_mls_for_account(&self, account: &Account) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn initialize_nostr_mls_for_account(&self, account: &Account) -> Result<()> {
         // Initialize NostrMls for the account
         let mls_storage_dir = self
             .config
@@ -389,7 +346,7 @@ impl Whitenoise {
     pub(crate) async fn onboard_new_account(
         &self,
         account: &mut Account,
-    ) -> Result<Account, WhitenoiseError> {
+    ) -> Result<Account> {
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Starting onboarding process");
 
         // Set onboarding flags
@@ -481,7 +438,7 @@ impl Whitenoise {
         account: &Account,
         relays: Vec<RelayUrl>,
         relay_type: RelayType,
-    ) -> Result<(), WhitenoiseError> {
+    ) -> Result<()> {
         if relays.is_empty() {
             return Ok(());
         }
@@ -528,11 +485,11 @@ impl Whitenoise {
     pub(crate) async fn publish_key_package_for_account(
         &self,
         account: &Account,
-    ) -> Result<(), WhitenoiseError> {
+    ) -> Result<()> {
         let mut encoded_key_package: Option<String> = None;
         let mut tags: Option<[Tag; 4]> = None;
         let key_package_relays = self
-            .get_account_relays(account, RelayType::KeyPackage)
+            .load_relays(account.pubkey, RelayType::KeyPackage)
             .await?;
 
         {

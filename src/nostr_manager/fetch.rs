@@ -5,9 +5,51 @@
 
 use crate::nostr_manager::event_processor::ProcessableEvent;
 use crate::nostr_manager::{NostrManager, NostrManagerError, Result};
+use crate::accounts::OnboardingState;
 use nostr_sdk::prelude::*;
 
 impl NostrManager {
+    pub async fn fetch_onboarding_state(&self, pubkey: PublicKey) -> Result<OnboardingState> {
+        // Fetch events: This helps us determine if the account is ready to use MLS messaging
+        let filter = Filter::new()
+            .kinds(vec![
+                Kind::InboxRelays,
+                Kind::MlsKeyPackageRelays,
+                Kind::MlsKeyPackage,
+            ])
+            .author(pubkey);
+
+        let mut stream = self
+            .client
+            .stream_events(filter, self.timeout().await?)
+            .await?;
+
+        let mut onboarding_state = OnboardingState::default();
+
+        while let Some(event) = stream.next().await {
+            tracing::debug!(target: "whitenoise::accounts", "Received event: {:?}", event);
+            match event.kind {
+                Kind::InboxRelays => {
+                    tracing::debug!(target: "whitenoise::accounts", "Received inbox relays event: {:?}", event);
+                    onboarding_state.inbox_relays = true;
+                }
+                Kind::MlsKeyPackageRelays => {
+                    tracing::debug!(target: "whitenoise::accounts", "Received key package relays event: {:?}", event);
+                    onboarding_state.key_package_relays = true;
+                }
+                Kind::MlsKeyPackage => {
+                    tracing::debug!(target: "whitenoise::accounts", "Received key package event: {:?}", event);
+                    onboarding_state.key_package_published = true;
+                }
+                _ => {
+                    tracing::debug!(target: "whitenoise::accounts", "Received {:?} event", event.kind);
+                }
+            }
+        };
+
+        Ok(onboarding_state)
+    }
+
     pub async fn fetch_for_user(
         &self,
         pubkey: PublicKey,

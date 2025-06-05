@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use whitenoise::{Whitenoise, WhitenoiseConfig};
+use whitenoise::{Whitenoise, WhitenoiseConfig, WhitenoiseError};
 
 /// Test backend for Whitenoise
 #[derive(Parser, Debug)]
@@ -18,7 +18,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), WhitenoiseError> {
     let args = Args::parse();
 
     let config = WhitenoiseConfig::new(&args.data_dir, &args.logs_dir);
