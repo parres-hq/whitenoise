@@ -4267,6 +4267,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "base64ct",
  "blurhash",
  "chacha20poly1305",
  "chrono",
