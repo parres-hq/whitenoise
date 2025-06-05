@@ -83,7 +83,6 @@ impl Whitenoise {
     ///
     /// Returns a [`WhitenoiseError`] if the private key is invalid, or if there is a failure in finding or adding the account.
     pub async fn login(&mut self, nsec_or_hex_privkey: String) -> Result<Account, WhitenoiseError> {
-
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
 
@@ -92,20 +91,17 @@ impl Whitenoise {
                 tracing::debug!(target: "whitenoise::api::accounts::login", "Account found");
                 Ok(account)
             }
-            Err(e) => {
-                match e {
-                    WhitenoiseError::AccountNotFound => {
-                        tracing::debug!(target: "whitenoise::api::accounts::login", "Account not found, adding from keys");
-                        let account = self.add_account_from_keys(&keys).await?;
-                        Ok(account)
-                    }
-                    _ => Err(e),
+            Err(e) => match e {
+                WhitenoiseError::AccountNotFound => {
+                    tracing::debug!(target: "whitenoise::api::accounts::login", "Account not found, adding from keys");
+                    let account = self.add_account_from_keys(&keys).await?;
+                    Ok(account)
                 }
-            }
+                _ => Err(e),
+            },
         }?;
 
         // TODO: initialize subs on nostr manager
-
 
         // Initialize NostrMls for the account
         let mls_storage_dir = self
@@ -153,7 +149,6 @@ impl Whitenoise {
     ///
     /// Returns a [`WhitenoiseError`] if the account cannot be found, or if there is a failure in removing the account or its private key.
     pub async fn logout(&mut self, account: &Account) -> Result<(), WhitenoiseError> {
-
         // Delete the account from the database
         self.delete_account(account).await?;
 
@@ -199,7 +194,10 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if the metadata query fails.
-    pub async fn get_account_metadata(&self, account: &Account) -> Result<Option<Metadata>, WhitenoiseError> {
+    pub async fn get_account_metadata(
+        &self,
+        account: &Account,
+    ) -> Result<Option<Metadata>, WhitenoiseError> {
         let metadata = self.nostr.query_user_metadata(account.pubkey).await?;
         Ok(metadata)
     }
@@ -221,8 +219,15 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if the relay query fails.
-    pub async fn get_account_relays(&self, account: &Account, relay_type: RelayType) -> Result<Vec<RelayUrl>, WhitenoiseError> {
-        let relays = self.nostr.query_user_relays(account.pubkey, relay_type).await?;
+    pub async fn get_account_relays(
+        &self,
+        account: &Account,
+        relay_type: RelayType,
+    ) -> Result<Vec<RelayUrl>, WhitenoiseError> {
+        let relays = self
+            .nostr
+            .query_user_relays(account.pubkey, relay_type)
+            .await?;
         Ok(relays)
     }
 }

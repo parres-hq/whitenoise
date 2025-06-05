@@ -170,8 +170,8 @@ impl Whitenoise {
             let private_key = self.deobfuscate(obfuscated_key)?;
             Keys::parse(&private_key).map_err(SecretsStoreError::KeyError)
         } else {
-            let entry =
-                Entry::new(SERVICE_NAME, hex_pubkey.as_str()).map_err(SecretsStoreError::KeyringError)?;
+            let entry = Entry::new(SERVICE_NAME, hex_pubkey.as_str())
+                .map_err(SecretsStoreError::KeyringError)?;
             let private_key = entry
                 .get_password()
                 .map_err(SecretsStoreError::KeyringError)?;
@@ -206,7 +206,9 @@ impl Whitenoise {
         let hex_pubkey = pubkey.to_hex();
         if cfg!(target_os = "android") {
             let mut secrets = self.read_secrets_file()?;
-            secrets.as_object_mut().map(|obj| obj.remove(hex_pubkey.as_str()));
+            secrets
+                .as_object_mut()
+                .map(|obj| obj.remove(hex_pubkey.as_str()));
             self.write_secrets_file(&secrets)?;
         } else {
             let entry = Entry::new(SERVICE_NAME, hex_pubkey.as_str());

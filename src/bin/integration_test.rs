@@ -34,7 +34,6 @@ async fn main() -> Result<()> {
     assert_eq!(whitenoise.accounts.len(), 0);
     assert_eq!(whitenoise.active_account, None);
 
-
     let created_account = whitenoise.create_identity().await?;
     println!("CREATED ACCOUNT: {:?}", created_account);
     println!("WHITENOISE AFTER CREATING ACCOUNT: {:?}", whitenoise);
