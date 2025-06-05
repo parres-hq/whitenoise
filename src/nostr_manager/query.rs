@@ -2,6 +2,7 @@
 //! This handles fetching events from the database cache.
 
 use crate::nostr_manager::{NostrManager, Result};
+use crate::relays::RelayType;
 use nostr_sdk::prelude::*;
 
 impl NostrManager {
@@ -9,9 +10,15 @@ impl NostrManager {
         Ok(self.client.database().metadata(pubkey).await?)
     }
 
-    #[allow(dead_code)]
-    pub async fn query_user_relays(&self, pubkey: PublicKey) -> Result<Vec<String>> {
-        let filter = Filter::new().author(pubkey).kind(Kind::RelayList).limit(1);
+    pub async fn query_user_relays(
+        &self,
+        pubkey: PublicKey,
+        relay_type: RelayType,
+    ) -> Result<Vec<RelayUrl>> {
+        let filter = Filter::new()
+            .author(pubkey)
+            .kind(relay_type.into())
+            .limit(1);
         let events = self.client.database().query(filter).await?;
         Ok(Self::relay_urls_from_events(events))
     }
@@ -23,7 +30,7 @@ impl NostrManager {
             .limit(1);
         let events = self.client.database().query(filter).await?;
 
-        Ok(Self::relay_urls_from_events(events))
+        Ok(Self::relay_url_strings_from_events(events))
     }
 
     pub async fn query_user_key_package_relays(&self, pubkey: PublicKey) -> Result<Vec<String>> {
@@ -33,7 +40,7 @@ impl NostrManager {
             .limit(1);
         let events = self.client.database().query(filter).await?;
 
-        Ok(Self::relay_urls_from_events(events))
+        Ok(Self::relay_url_strings_from_events(events))
     }
 
     pub async fn query_user_key_packages(&self, pubkey: PublicKey) -> Result<Events> {

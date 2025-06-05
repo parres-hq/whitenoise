@@ -48,20 +48,20 @@ impl Database {
         let db_url = format!("{}", db_path.display());
 
         // Create database if it doesn't exist
-        tracing::info!("Checking if DB exists...{:?}", db_url);
+        tracing::debug!("Checking if DB exists...{:?}", db_url);
         if Sqlite::database_exists(&db_url).await.unwrap_or(false) {
-            tracing::info!("DB exists");
+            tracing::debug!("DB exists");
         } else {
-            tracing::info!("DB does not exist, creating...");
+            tracing::debug!("DB does not exist, creating...");
             Sqlite::create_database(&db_url).await.map_err(|e| {
                 tracing::error!("Error creating DB: {:?}", e);
                 DatabaseError::Sqlx(e)
             })?;
-            tracing::info!("DB created");
+            tracing::debug!("DB created");
         }
 
         // Create connection pool with refined settings
-        tracing::info!("Creating connection pool...");
+        tracing::debug!("Creating connection pool...");
         let pool = SqlitePoolOptions::new()
             .acquire_timeout(Duration::from_secs(5))
             .max_connections(10)
@@ -90,14 +90,14 @@ impl Database {
             .await?;
 
         // Run migrations
-        tracing::info!("Running migrations...");
+        tracing::debug!("Running migrations...");
 
         // Extract the parent directory from db_path as the data_dir
         let data_dir = db_path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
-        tracing::info!("Using data directory: {:?}", data_dir);
+        tracing::debug!("Using data directory: {:?}", data_dir);
 
         // Always use embedded migrations by copying them to a temporary directory
         let temp_dir = data_dir.join("temp_migrations");
@@ -108,18 +108,18 @@ impl Database {
 
         // Copy all migration files from the embedded assets
         for (filename, content) in MIGRATION_FILES {
-            tracing::info!("Writing migration file: {}", filename);
+            tracing::debug!("Writing migration file: {}", filename);
             fs::write(temp_dir.join(filename), content)?;
         }
 
         let migrations_path = temp_dir;
-        tracing::info!("Migrations path: {:?}", migrations_path);
+        tracing::debug!("Migrations path: {:?}", migrations_path);
 
         let migration_result = match sqlx::migrate::Migrator::new(migrations_path.clone()).await {
             Ok(migrator) => {
                 let result = migrator.run(&pool).await;
                 if result.is_ok() {
-                    tracing::info!("Migrations applied successfully");
+                    tracing::debug!("Migrations applied successfully");
                 }
                 result.map_err(DatabaseError::from)
             }

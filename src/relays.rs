@@ -43,3 +43,13 @@ impl From<RelayType> for String {
         }
     }
 }
+
+impl From<RelayType> for Kind {
+    fn from(relay_type: RelayType) -> Self {
+        match relay_type {
+            RelayType::Nostr => Kind::RelayList,
+            RelayType::Inbox => Kind::InboxRelays,
+            RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
+        }
+    }
+}

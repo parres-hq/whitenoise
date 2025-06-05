@@ -1,7 +1,7 @@
 use crate::Whitenoise;
 use base64::{engine::general_purpose, Engine as _};
 use keyring::Entry;
-use nostr_sdk::Keys;
+use nostr_sdk::{Keys, PublicKey};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -159,18 +159,19 @@ impl Whitenoise {
     /// * Parsing the private key into a `Keys` object fails
     pub(crate) fn get_nostr_keys_for_pubkey(
         &self,
-        pubkey: &str,
+        pubkey: &PublicKey,
     ) -> Result<Keys, SecretsStoreError> {
+        let hex_pubkey = pubkey.to_hex();
         if cfg!(target_os = "android") {
             let secrets = self.read_secrets_file()?;
-            let obfuscated_key = secrets[pubkey]
+            let obfuscated_key = secrets[&hex_pubkey.as_str()]
                 .as_str()
                 .ok_or(SecretsStoreError::KeyNotFound)?;
             let private_key = self.deobfuscate(obfuscated_key)?;
             Keys::parse(&private_key).map_err(SecretsStoreError::KeyError)
         } else {
             let entry =
-                Entry::new(SERVICE_NAME, pubkey).map_err(SecretsStoreError::KeyringError)?;
+                Entry::new(SERVICE_NAME, hex_pubkey.as_str()).map_err(SecretsStoreError::KeyringError)?;
             let private_key = entry
                 .get_password()
                 .map_err(SecretsStoreError::KeyringError)?;
@@ -200,14 +201,15 @@ impl Whitenoise {
     #[allow(dead_code)]
     pub(crate) fn remove_private_key_for_pubkey(
         &self,
-        pubkey: &str,
+        pubkey: &PublicKey,
     ) -> Result<(), SecretsStoreError> {
+        let hex_pubkey = pubkey.to_hex();
         if cfg!(target_os = "android") {
             let mut secrets = self.read_secrets_file()?;
-            secrets.as_object_mut().map(|obj| obj.remove(pubkey));
+            secrets.as_object_mut().map(|obj| obj.remove(hex_pubkey.as_str()));
             self.write_secrets_file(&secrets)?;
         } else {
-            let entry = Entry::new(SERVICE_NAME, pubkey);
+            let entry = Entry::new(SERVICE_NAME, hex_pubkey.as_str());
             if let Ok(entry) = entry {
                 let _ = entry.delete_credential();
             }
@@ -242,7 +244,7 @@ mod tests {
     async fn test_store_and_retrieve_private_key() -> Result<(), SecretsStoreError> {
         let wn = build_whitenoise().await;
         let keys = Keys::generate();
-        let pubkey = keys.public_key().to_hex();
+        let pubkey = keys.public_key();
 
         // Store the private key
         wn.store_private_key(&keys).unwrap();
@@ -263,7 +265,7 @@ mod tests {
     async fn test_remove_private_key() -> Result<(), SecretsStoreError> {
         let wn = build_whitenoise().await;
         let keys = Keys::generate();
-        let pubkey = keys.public_key().to_hex();
+        let pubkey = keys.public_key();
 
         // Store the private key
         wn.store_private_key(&keys).unwrap();
@@ -282,8 +284,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_nonexistent_key() {
         let wn = build_whitenoise().await;
-        let nonexistent_pubkey = "nonexistent_pubkey";
-        let result = wn.get_nostr_keys_for_pubkey(nonexistent_pubkey);
+        let keys = Keys::generate();
+        let pubkey = keys.public_key();
+        let result = wn.get_nostr_keys_for_pubkey(&pubkey);
 
         assert!(result.is_err());
     }

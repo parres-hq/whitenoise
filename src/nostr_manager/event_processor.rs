@@ -9,7 +9,6 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::accounts::{Account, AccountError};
-use crate::key_packages;
 use crate::nostr_manager::NostrManagerError;
 use crate::relays::RelayType;
 use crate::secrets_store;
@@ -26,8 +25,6 @@ pub enum EventProcessorError {
     UndecodableHex(#[from] nostr_sdk::util::hex::Error),
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
-    #[error("Key package error: {0}")]
-    KeyPackageError(#[from] key_packages::KeyPackageError),
     #[error("NIP44 encryption error: {0}")]
     EncryptionError(#[from] nostr_sdk::nips::nip44::Error),
     #[error("Secrets store error: {0}")]
@@ -193,29 +190,34 @@ impl EventProcessor {
     }
 
     async fn process_giftwrap(event: Event) -> Result<()> {
-        let active_account = Account::get_active().await?;
-        let keys = active_account.keys()?;
-        if let Ok(unwrapped) = extract_rumor(&keys, &event).await {
-            match unwrapped.rumor.kind {
-                Kind::MlsWelcome => {
-                    Self::process_welcome(active_account, event, unwrapped.rumor).await?;
-                }
-                Kind::PrivateDirectMessage => {
-                    tracing::debug!(
-                        target: "whitenoise::nostr_manager::event_processor",
-                        "Received private direct message: {:?}",
-                        unwrapped.rumor
-                    );
-                }
-                _ => {
-                    tracing::debug!(
-                        target: "whitenoise::nostr_manager::event_processor",
-                        "Received unhandled giftwrap of kind {:?}",
-                        unwrapped.rumor.kind
-                    );
-                }
-            }
-        }
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Processing giftwrap: {:?}",
+            event
+        );
+        // let active_account = Account::get_active().await?;
+        // let keys = active_account.keys()?;
+        // if let Ok(unwrapped) = extract_rumor(&keys, &event).await {
+        //     match unwrapped.rumor.kind {
+        //         Kind::MlsWelcome => {
+        //             Self::process_welcome(active_account, event, unwrapped.rumor).await?;
+        //         }
+        //         Kind::PrivateDirectMessage => {
+        //             tracing::debug!(
+        //                 target: "whitenoise::nostr_manager::event_processor",
+        //                 "Received private direct message: {:?}",
+        //                 unwrapped.rumor
+        //             );
+        //         }
+        //         _ => {
+        //             tracing::debug!(
+        //                 target: "whitenoise::nostr_manager::event_processor",
+        //                 "Received unhandled giftwrap of kind {:?}",
+        //                 unwrapped.rumor.kind
+        //             );
+        //         }
+        //     }
+        // }
         Ok(())
     }
 
@@ -223,79 +225,85 @@ impl EventProcessor {
         account: Account,
         outer_event: Event,
         rumor_event: UnsignedEvent,
-    ) -> Result<welcome_types::Welcome> {
-        let welcome: welcome_types::Welcome;
-        tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Attempting to acquire nostr_mls lock");
-        {
-            let nostr_mls_guard = match tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                wn.nostr_mls.lock(),
-            )
-            .await
-            {
-                Ok(guard) => {
-                    tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "nostr_mls lock acquired");
-                    guard
-                }
-                Err(_) => {
-                    tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Timeout waiting for nostr_mls lock");
-                    return Err(EventProcessorError::NostrMlsError(
-                        nostr_mls::Error::KeyPackage(
-                            "Timeout waiting for nostr_mls lock".to_string(),
-                        ),
-                    ));
-                }
-            };
-            let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-                match nostr_mls.process_welcome(&outer_event.id, &rumor_event) {
-                    Ok(result) => {
-                        tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Processed welcome event: {:?}", result);
-                        Ok(result)
-                    }
-                    Err(e) => {
-                        tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Error processing welcome event: {}", e);
-                        Err(EventProcessorError::NostrMlsError(e))
-                    }
-                }
-            } else {
-                tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Nostr MLS not initialized");
-                Err(EventProcessorError::NostrMlsNotInitialized)
-            };
-            welcome = result?;
-        }
-        tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "nostr_mls lock released");
+    ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Processing welcome: {:?}",
+            rumor_event
+        );
+        // let welcome: welcome_types::Welcome;
+        // tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Attempting to acquire nostr_mls lock");
+        // {
+        //     let nostr_mls_guard = match tokio::time::timeout(
+        //         std::time::Duration::from_secs(5),
+        //         wn.nostr_mls.lock(),
+        //     )
+        //     .await
+        //     {
+        //         Ok(guard) => {
+        //             tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "nostr_mls lock acquired");
+        //             guard
+        //         }
+        //         Err(_) => {
+        //             tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Timeout waiting for nostr_mls lock");
+        //             return Err(EventProcessorError::NostrMlsError(
+        //                 nostr_mls::Error::KeyPackage(
+        //                     "Timeout waiting for nostr_mls lock".to_string(),
+        //                 ),
+        //             ));
+        //         }
+        //     };
+        //     let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        //         match nostr_mls.process_welcome(&outer_event.id, &rumor_event) {
+        //             Ok(result) => {
+        //                 tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Processed welcome event: {:?}", result);
+        //                 Ok(result)
+        //             }
+        //             Err(e) => {
+        //                 tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Error processing welcome event: {}", e);
+        //                 Err(EventProcessorError::NostrMlsError(e))
+        //             }
+        //         }
+        //     } else {
+        //         tracing::error!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Nostr MLS not initialized");
+        //         Err(EventProcessorError::NostrMlsNotInitialized)
+        //     };
+        //     welcome = result?;
+        // }
+        // tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "nostr_mls lock released");
 
-        let key_package_event_id = rumor_event
-            .tags
-            .iter()
-            .find(|tag| {
-                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E))
-            })
-            .and_then(|tag| tag.content());
+        // let key_package_event_id = rumor_event
+        //     .tags
+        //     .iter()
+        //     .find(|tag| {
+        //         tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E))
+        //     })
+        //     .and_then(|tag| tag.content());
 
-        let key_package_relays: Vec<String> = if cfg!(debug_assertions) {
-            vec![
-                "ws://localhost:8080".to_string(),
-                "ws://localhost:7777".to_string(),
-            ]
-        } else {
-            account.relays(RelayType::KeyPackage).await?
-        };
+        // let key_package_relays: Vec<String> = if cfg!(debug_assertions) {
+        //     vec![
+        //         "ws://localhost:8080".to_string(),
+        //         "ws://localhost:7777".to_string(),
+        //     ]
+        // } else {
+        //     account.relays(RelayType::KeyPackage).await?
+        // };
 
-        if let Some(key_package_event_id) = key_package_event_id {
-            key_packages::delete_key_package_from_relays(
-                &EventId::parse(key_package_event_id).unwrap(),
-                &key_package_relays,
-                false, // For now we don't want to delete the key packages from MLS storage
-            )
-            .await?;
-            tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Deleted used key package from relays");
+        // if let Some(key_package_event_id) = key_package_event_id {
+        //     key_packages::delete_key_package_from_relays(
+        //         &EventId::parse(key_package_event_id).unwrap(),
+        //         &key_package_relays,
+        //         false, // For now we don't want to delete the key packages from MLS storage
+        //     )
+        //     .await?;
+        //     tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Deleted used key package from relays");
 
-            key_packages::publish_key_package().await?;
-            tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Published new key package");
-        }
+        //     key_packages::publish_key_package().await?;
+        //     tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Published new key package");
+        // }
 
-        Ok(welcome)
+        // Ok(welcome)
+        Ok(())
     }
 
     // TODO: Implement private direct message processing, maybe...
@@ -313,42 +321,48 @@ impl EventProcessor {
     }
 
     async fn process_mls_message(event: Event) -> Result<Option<message_types::Message>> {
-        tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Attempting to acquire nostr_mls lock");
-        let nostr_mls_guard = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            wn.nostr_mls.lock(),
-        )
-        .await
-        {
-            Ok(guard) => {
-                tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "nostr_mls lock acquired");
-                guard
-            }
-            Err(_) => {
-                tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Timeout waiting for nostr_mls lock");
-                return Err(EventProcessorError::NostrMlsError(
-                    nostr_mls::Error::KeyPackage("Timeout waiting for nostr_mls lock".to_string()),
-                ));
-            }
-        };
-        let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            match nostr_mls.process_message(&event) {
-                Ok(message) => {
-                    // TODO: Need to handle proposals and commits
-                    tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Processed MLS message");
-                    Ok(message)
-                }
-                Err(e) => {
-                    // TODO: Need to figure out how to reprocess events that fail because a commit arrives out of order
-                    tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Error processing MLS message: {}", e);
-                    Err(EventProcessorError::NostrMlsError(e))
-                }
-            }
-        } else {
-            tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Nostr MLS not initialized");
-            Err(EventProcessorError::NostrMlsNotInitialized)
-        };
-        tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "nostr_mls lock released");
-        result
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Processing MLS message: {:?}",
+            event
+        );
+        // tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Attempting to acquire nostr_mls lock");
+        // let nostr_mls_guard = match tokio::time::timeout(
+        //     std::time::Duration::from_secs(5),
+        //     wn.nostr_mls.lock(),
+        // )
+        // .await
+        // {
+        //     Ok(guard) => {
+        //         tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "nostr_mls lock acquired");
+        //         guard
+        //     }
+        //     Err(_) => {
+        //         tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Timeout waiting for nostr_mls lock");
+        //         return Err(EventProcessorError::NostrMlsError(
+        //             nostr_mls::Error::KeyPackage("Timeout waiting for nostr_mls lock".to_string()),
+        //         ));
+        //     }
+        // };
+        // let result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+        //     match nostr_mls.process_message(&event) {
+        //         Ok(message) => {
+        //             // TODO: Need to handle proposals and commits
+        //             tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Processed MLS message");
+        //             Ok(message)
+        //         }
+        //         Err(e) => {
+        //             // TODO: Need to figure out how to reprocess events that fail because a commit arrives out of order
+        //             tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Error processing MLS message: {}", e);
+        //             Err(EventProcessorError::NostrMlsError(e))
+        //         }
+        //     }
+        // } else {
+        //     tracing::error!(target: "whitenoise::nostr_manager::event_processor", "Nostr MLS not initialized");
+        //     Err(EventProcessorError::NostrMlsNotInitialized)
+        // };
+        // tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "nostr_mls lock released");
+        // result
+        Ok(None)
     }
 }

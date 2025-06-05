@@ -9,18 +9,16 @@ impl NostrManager {
     pub async fn search_users(&self, query: String) -> Result<HashMap<String, EnrichedContact>> {
         let filter = Filter::new().kind(Kind::Metadata).search(query);
 
-        let stored_events = wn
-            .nostr
+        let stored_events = self
             .client
             .database()
             .query(filter.clone())
             .await
             .map_err(NostrManagerError::from)?;
 
-        let fetched_events = wn
-            .nostr
+        let fetched_events = self
             .client
-            .fetch_events(filter.clone(), wn.nostr.timeout().await.unwrap())
+            .fetch_events(filter.clone(), self.timeout().await.unwrap())
             .await
             .map_err(NostrManagerError::from)?;
 
@@ -31,8 +29,7 @@ impl NostrManager {
             .map(|user| user.pubkey)
             .collect::<Vec<PublicKey>>();
 
-        let enriching_events = wn
-            .nostr
+        let enriching_events = self
             .client
             .fetch_events(
                 Filter::new().authors(pubkeys).kinds(vec![
@@ -40,7 +37,7 @@ impl NostrManager {
                     Kind::InboxRelays,
                     Kind::MlsKeyPackage,
                 ]),
-                wn.nostr.timeout().await.unwrap(),
+                self.timeout().await.unwrap(),
             )
             .await
             .map_err(NostrManagerError::from)?;
