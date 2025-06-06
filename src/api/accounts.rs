@@ -94,7 +94,11 @@ impl Whitenoise {
 
         // TODO: initialize subs on nostr manager
 
+        // Initialize NostrMls for the account
         self.initialize_nostr_mls_for_account(&account).await?;
+
+        // Spawn a background task to fetch the account's data from relays
+        self.background_fetch_account_data(&account).await?;
 
         // Set the account to active
         self.active_account = Some(account.pubkey);

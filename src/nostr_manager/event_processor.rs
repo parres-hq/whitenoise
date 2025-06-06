@@ -10,7 +10,6 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::accounts::{Account, AccountError};
 use crate::nostr_manager::NostrManagerError;
-use crate::relays::RelayType;
 use crate::secrets_store;
 
 #[derive(Error, Debug)]
@@ -41,8 +40,21 @@ pub type Result<T> = std::result::Result<T, EventProcessorError>;
 
 #[derive(Debug)]
 pub enum ProcessableEvent {
-    GiftWrap(Event),
-    MlsMessage(Event),
+    NostrEvent(Event, Option<String>), // Event and optional subscription_id
+    RelayMessage(RelayUrl, String),
+}
+
+impl ProcessableEvent {
+    /// Extract the account pubkey from a subscription_id
+    /// Subscription IDs follow the format: {pubkey}_{subscription_type}
+    fn extract_pubkey_from_subscription_id(subscription_id: &str) -> Option<PublicKey> {
+        if let Some(underscore_pos) = subscription_id.find('_') {
+            let pubkey_str = &subscription_id[..underscore_pos];
+            PublicKey::parse(pubkey_str).ok()
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -89,27 +101,73 @@ impl EventProcessor {
         }
     }
 
-    pub async fn queue_event(&self, event: ProcessableEvent) -> Result<()> {
+
+
+    pub async fn queue_message(&self, relay_url: RelayUrl, message: RelayMessage<'_>) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::event_processor",
-            "Queuing event: {:?}",
-            event
+            "Queuing message from {}: {:?}",
+            relay_url,
+            message
         );
-        match self.sender.send(event).await {
-            Ok(_) => {
+
+        match message {
+            RelayMessage::Event { subscription_id, event } => {
+                // Extract events from messages and include subscription_id for account-aware processing
                 tracing::debug!(
                     target: "whitenoise::nostr_manager::event_processor",
-                    "Event queued successfully"
+                    "Queuing event from subscription: {}",
+                    subscription_id
                 );
-                Ok(())
+                match self.sender.send(ProcessableEvent::NostrEvent(event.as_ref().clone(), Some(subscription_id.to_string()))).await {
+                    Ok(_) => {
+                        tracing::debug!(
+                            target: "whitenoise::nostr_manager::event_processor",
+                            "Event queued successfully with subscription_id"
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target: "whitenoise::nostr_manager::event_processor",
+                            "Failed to queue event: {}",
+                            e
+                        );
+                        Err(e.into())
+                    }
+                }
             }
-            Err(e) => {
-                tracing::error!(
-                    target: "whitenoise::nostr_manager::event_processor",
-                    "Failed to queue event: {}",
-                    e
-                );
-                Err(e.into())
+            _ => {
+                // Handle other relay messages as before
+                let message_str = match message {
+                    RelayMessage::Ok { .. } => "Ok".to_string(),
+                    RelayMessage::Notice { .. } => "Notice".to_string(),
+                    RelayMessage::Closed { .. } => "Closed".to_string(),
+                    RelayMessage::EndOfStoredEvents(_) => "EndOfStoredEvents".to_string(),
+                    RelayMessage::Auth { .. } => "Auth".to_string(),
+                    RelayMessage::Count { .. } => "Count".to_string(),
+                    RelayMessage::NegMsg { .. } => "NegMsg".to_string(),
+                    RelayMessage::NegErr { .. } => "NegErr".to_string(),
+                    _ => "Unknown".to_string(),
+                };
+
+                match self.sender.send(ProcessableEvent::RelayMessage(relay_url, message_str)).await {
+                    Ok(_) => {
+                        tracing::debug!(
+                            target: "whitenoise::nostr_manager::event_processor",
+                            "Message queued successfully"
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target: "whitenoise::nostr_manager::event_processor",
+                            "Failed to queue message: {}",
+                            e
+                        );
+                        Err(e.into())
+                    }
+                }
             }
         }
     }
@@ -119,6 +177,9 @@ impl EventProcessor {
             target: "whitenoise::nostr_manager::event_processor",
             "Entering process_events loop"
         );
+
+        let mut shutting_down = false;
+
         loop {
             tokio::select! {
                 Some(event) = receiver.recv() => {
@@ -127,48 +188,75 @@ impl EventProcessor {
                         "Received event in processing loop"
                     );
                     match event {
-                        ProcessableEvent::GiftWrap(event) => {
-                            if let Err(e) = Self::process_giftwrap(event).await {
-                                tracing::error!(
-                                    target: "whitenoise::nostr_manager::event_processor",
-                                    "Error processing giftwrap: {}",
-                                    e
-                                );
+                        ProcessableEvent::NostrEvent(event, subscription_id) => {
+                            // Filter and route nostr events based on kind
+                            match event.kind {
+                                Kind::GiftWrap => {
+                                    if let Err(e) = Self::process_giftwrap(event, subscription_id).await {
+                                        tracing::error!(
+                                            target: "whitenoise::nostr_manager::event_processor",
+                                            "Error processing giftwrap: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                                Kind::MlsGroupMessage => {
+                                    if let Err(e) = Self::process_mls_message(event, subscription_id).await {
+                                        tracing::error!(
+                                            target: "whitenoise::nostr_manager::event_processor",
+                                            "Error processing MLS message: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    // For now, just log other event types
+                                    tracing::debug!(
+                                        target: "whitenoise::nostr_manager::event_processor",
+                                        "Received unhandled event of kind: {:?}",
+                                        event.kind
+                                    );
+                                }
                             }
                         }
-                        ProcessableEvent::MlsMessage(event) => {
-                            if let Err(e) = Self::process_mls_message(event).await {
-                                tracing::error!(
-                                    target: "whitenoise::nostr_manager::event_processor",
-                                    "Error processing MLS message: {}",
-                                    e
-                                );
-                            }
+
+                        ProcessableEvent::RelayMessage(relay_url, message) => {
+                            Self::process_relay_message(relay_url, message);
                         }
                     }
                 }
-                Some(_) = shutdown.recv() => {
-                    tracing::debug!(
+                Some(_) = shutdown.recv(), if !shutting_down => {
+                    tracing::info!(
                         target: "whitenoise::nostr_manager::event_processor",
-                        "Received shutdown signal"
+                        "Received shutdown signal, finishing current queue..."
                     );
-                    break;
+                    shutting_down = true;
+                    // Continue processing remaining events in queue, but don't wait for new shutdown signals
                 }
                 else => {
-                    tracing::debug!(
-                        target: "whitenoise::nostr_manager::event_processor",
-                        "All channels closed, exiting process_events loop"
-                    );
+                    if shutting_down {
+                        tracing::debug!(
+                            target: "whitenoise::nostr_manager::event_processor",
+                            "Queue flushed, shutting down event processor"
+                        );
+                    } else {
+                        tracing::debug!(
+                            target: "whitenoise::nostr_manager::event_processor",
+                            "All channels closed, exiting process_events loop"
+                        );
+                    }
                     break;
                 }
             }
         }
     }
 
-    pub async fn clear_queue(&self) -> Result<()> {
+    /// Initiates a graceful shutdown that finishes processing the current queue.
+    /// Returns immediately - doesn't wait for shutdown to complete.
+    pub async fn shutdown(&self) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::event_processor",
-            "Attempting to clear queue"
+            "Initiating graceful shutdown"
         );
         match self.shutdown.send(()).await {
             Ok(_) => {
@@ -184,23 +272,90 @@ impl EventProcessor {
                     "Failed to send shutdown signal: {}",
                     e
                 );
-                Ok(()) // Still return Ok since this is expected in some cases
+                Ok(()) // Still return Ok since this is expected if processor already shut down
             }
         }
     }
 
-    async fn process_giftwrap(event: Event) -> Result<()> {
+    fn process_relay_message(relay_url: RelayUrl, message_type: String) {
+        tracing::debug!(
+            target: "whitenoise::nostr_client::event_processor::process_relay_message",
+            "Processing message from {}: {}",
+            relay_url,
+            message_type
+        );
+    }
+
+            async fn process_giftwrap(event: Event, subscription_id: Option<String>) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::event_processor",
             "Processing giftwrap: {:?}",
             event
         );
-        // let active_account = Account::get_active().await?;
-        // let keys = active_account.keys()?;
+
+        // For giftwrap events, the target account (who the giftwrap is encrypted for)
+        // is specified in a 'p' tag, not in the event.pubkey field
+        let target_pubkey = event
+            .tags
+            .iter()
+            .find(|tag| tag.kind() == TagKind::p())
+            .and_then(|tag| tag.content())
+            .and_then(|pubkey_str| PublicKey::parse(pubkey_str).ok());
+
+        let target_pubkey = match target_pubkey {
+            Some(pk) => pk,
+            None => {
+                tracing::warn!(
+                    target: "whitenoise::nostr_manager::event_processor",
+                    "No target pubkey found in 'p' tag for giftwrap event"
+                );
+                return Ok(());
+            }
+        };
+
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::event_processor",
+            "Processing giftwrap for target account: {} (author: {})",
+            target_pubkey.to_hex(),
+            event.pubkey.to_hex()
+        );
+
+        // Validate that this matches the subscription_id if available
+        if let Some(sub_id) = subscription_id {
+            if let Some(sub_pubkey) = ProcessableEvent::extract_pubkey_from_subscription_id(&sub_id) {
+                if target_pubkey != sub_pubkey {
+                    tracing::warn!(
+                        target: "whitenoise::nostr_manager::event_processor",
+                        "Giftwrap target pubkey {} does not match subscription pubkey {} - possible routing error",
+                        target_pubkey.to_hex(),
+                        sub_pubkey.to_hex()
+                    );
+                    return Ok(());
+                }
+            }
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::event_processor",
+                "Processing giftwrap from subscription: {} for account: {}",
+                sub_id,
+                target_pubkey.to_hex()
+            );
+        } else {
+            tracing::warn!(
+                target: "whitenoise::nostr_manager::event_processor",
+                "No subscription_id provided for giftwrap event - this should not happen with Message-based processing"
+            );
+        }
+
+        // TODO: Re-enable once we have access to the Whitenoise instance for account loading
+        // For now, we have the account pubkey but need a way to load the account and process the giftwrap
+        // This requires refactoring to pass the Whitenoise instance or AccountManager to the event processor
+
+        // let account = whitenoise.find_account_by_pubkey(&target_pubkey).await?;
+        // let keys = whitenoise.get_nostr_keys_for_pubkey(&target_pubkey)?;
         // if let Ok(unwrapped) = extract_rumor(&keys, &event).await {
         //     match unwrapped.rumor.kind {
         //         Kind::MlsWelcome => {
-        //             Self::process_welcome(active_account, event, unwrapped.rumor).await?;
+        //             Self::process_welcome(account, event, unwrapped.rumor).await?;
         //         }
         //         Kind::PrivateDirectMessage => {
         //             tracing::debug!(
@@ -222,8 +377,8 @@ impl EventProcessor {
     }
 
     async fn process_welcome(
-        account: Account,
-        outer_event: Event,
+        _account: Account,
+        _outer_event: Event,
         rumor_event: UnsignedEvent,
     ) -> Result<()> {
         tracing::debug!(
@@ -231,6 +386,7 @@ impl EventProcessor {
             "Processing welcome: {:?}",
             rumor_event
         );
+        // TODO: Update for multi-account support
         // let welcome: welcome_types::Welcome;
         // tracing::debug!(target: "whitenoise::nostr_manager::event_processor::process_welcome", "Attempting to acquire nostr_mls lock");
         // {
@@ -306,26 +462,26 @@ impl EventProcessor {
         Ok(())
     }
 
-    // TODO: Implement private direct message processing, maybe...
-    #[allow(dead_code)]
-    async fn process_private_direct_message(
-        _outer_event: Event,
-        inner_event: UnsignedEvent,
-    ) -> Result<()> {
-        tracing::debug!(
-            target: "whitenoise::event_processor",
-            "Received private direct message: {:?}",
-            inner_event
-        );
-        Ok(())
-    }
-
-    async fn process_mls_message(event: Event) -> Result<Option<message_types::Message>> {
+    async fn process_mls_message(event: Event, subscription_id: Option<String>) -> Result<Option<message_types::Message>> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::event_processor",
             "Processing MLS message: {:?}",
             event
         );
+
+        // For MLS messages, we can extract the account pubkey from the subscription_id if available
+        // or use other methods to determine the target account
+        if let Some(sub_id) = subscription_id {
+            if let Some(target_pubkey) = ProcessableEvent::extract_pubkey_from_subscription_id(&sub_id) {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::event_processor",
+                    "Processing MLS message for account: {}",
+                    target_pubkey.to_hex()
+                );
+            }
+        }
+
+        // TODO: Update for multi-account support - need to determine which account this message is for
         // tracing::debug!(target: "whitenoise::nostr_manager::event_processor", "Attempting to acquire nostr_mls lock");
         // let nostr_mls_guard = match tokio::time::timeout(
         //     std::time::Duration::from_secs(5),

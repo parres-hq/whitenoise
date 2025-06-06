@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::{spawn, sync::Mutex};
+use tokio::sync::Mutex;
 
 pub mod event_processor;
 pub mod fetch;
@@ -112,6 +112,45 @@ impl NostrManager {
 
         let event_processor = Arc::new(Mutex::new(EventProcessor::new()));
 
+        // Set up notification handler - only handle Messages which contain subscription_id
+        if let Err(e) = client
+            .handle_notifications(|notification| async {
+                match notification {
+                    RelayPoolNotification::Message { relay_url, message } => {
+                        event_processor.lock().await.queue_message(relay_url, message).await?;
+                        Ok(false)
+                    }
+                    RelayPoolNotification::Shutdown => {
+                        tracing::debug!(
+                            target: "whitenoise::nostr_client::handle_notifications",
+                            "Relay pool shutdown, shutting down event processor"
+                        );
+                        // Shutdown event processor to flush remaining events (fire-and-forget)
+                        // Note: For app-level shutdown, use shutdown_and_wait() instead
+                        if let Err(e) = event_processor.lock().await.shutdown().await {
+                            tracing::error!(
+                                target: "whitenoise::nostr_client::handle_notifications",
+                                "Failed to shutdown event processor: {:?}",
+                                e
+                            );
+                        }
+                        Ok(true)
+                    }
+                    _ => {
+                        // Ignore other notification types (like Event which we no longer use)
+                        Ok(false)
+                    }
+                }
+            })
+            .await
+        {
+            tracing::error!(
+                target: "whitenoise::nostr_client::handle_notifications",
+                "Notification handler error: {:?}",
+                e
+            );
+        }
+
         Ok(Self {
             client,
             // blossom,
@@ -185,311 +224,6 @@ impl NostrManager {
         invite_events
     }
 
-    // pub async fn set_nostr_identity(&self, account: &Account) -> Result<()> {
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Starting Nostr identity update for {}",
-    //         account.pubkey
-    //     );
-
-    //     let keys = account
-    //         .keys()
-    //         .map_err(|e| NostrManagerError::SecretsStoreError(e.to_string()))?;
-
-    //     // Shutdown existing event processor
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Shutting down existing event processor"
-    //     );
-    //     self.event_processor
-    //         .lock()
-    //         .await
-    //         .clear_queue()
-    //         .await
-    //         .map_err(|e| NostrManagerError::FailedToShutdownEventProcessor(e.to_string()))?;
-
-    //     // Reset the client
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Resetting client"
-    //     );
-
-    //     self.client.reset().await;
-
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Client reset complete"
-    //     );
-
-    //     // Set the new signer
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Setting new signer"
-    //     );
-    //     self.client.set_signer(keys.clone()).await;
-
-    //     // Add the default relays
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Adding default relays"
-    //     );
-    //     for relay in self.relays().await? {
-    //         self.client.add_relay(relay).await?;
-    //     }
-
-    //     // Connect to the default relays
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Connecting to default relays"
-    //     );
-    //     self.client.connect().await;
-
-    //     // We only want to connect to user relays in release mode
-    //     if !cfg!(debug_assertions) {
-    //         tracing::debug!(
-    //             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //             "Setting up user-specific relays"
-    //         );
-
-    //         // Get currently connected relays to avoid duplicate connections
-    //         let connected_relays = self
-    //             .client
-    //             .relays()
-    //             .await
-    //             .keys()
-    //             .map(|url| url.to_string())
-    //             .collect::<std::collections::HashSet<String>>();
-
-    //         tracing::debug!(
-    //             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //             "Already connected to relays: {:?}",
-    //             connected_relays
-    //         );
-
-    //         // 1. Try to get relays from account object (cached in database)
-    //         // 2. If none found, try to query from local database
-    //         // 3. If still none found, fetch from network
-
-    //         // Handle standard Nostr relays
-    //         tracing::debug!(
-    //             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //             "Getting user's standard relays"
-    //         );
-    //         let mut relays = account
-    //             .relays(RelayType::Nostr)
-    //             .await
-    //             .map_err(|e| NostrManagerError::AccountError(e.to_string()))?;
-    //         if relays.is_empty() {
-    //             tracing::debug!(
-    //                 target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                 "No cached relays found, trying query_user_relays"
-    //             );
-    //             relays = self.query_user_relays(keys.public_key()).await?;
-    //         }
-    //         if relays.is_empty() {
-    //             tracing::debug!(
-    //                 target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                 "No relays found via query, trying fetch_user_relays"
-    //             );
-    //             relays = self.fetch_user_relays(keys.public_key()).await?;
-    //         }
-
-    //         for relay in relays.iter() {
-    //             if !connected_relays.contains(relay) {
-    //                 self.client.add_relay(relay).await?;
-    //                 self.client.connect_relay(relay).await?;
-    //                 tracing::debug!(
-    //                     target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                     "Connected to user relay: {}",
-    //                     relay
-    //                 );
-    //             }
-    //         }
-
-    //         // Handle inbox relays
-    //         tracing::debug!(
-    //             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //             "Getting user's inbox relays"
-    //         );
-    //         let mut inbox_relays = account
-    //             .relays(RelayType::Inbox)
-    //             .await
-    //             .map_err(|e| NostrManagerError::AccountError(e.to_string()))?;
-    //         if inbox_relays.is_empty() {
-    //             tracing::debug!(
-    //                 target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                 "No cached inbox relays found, trying query_user_inbox_relays"
-    //             );
-    //             inbox_relays = self.query_user_inbox_relays(keys.public_key()).await?;
-    //         }
-    //         if inbox_relays.is_empty() {
-    //             tracing::debug!(
-    //                 target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                 "No inbox relays found via query, trying fetch_user_inbox_relays"
-    //             );
-    //             inbox_relays = self.fetch_user_inbox_relays(keys.public_key()).await?;
-    //         }
-
-    //         for relay in inbox_relays.iter() {
-    //             if !connected_relays.contains(relay) {
-    //                 self.client.add_read_relay(relay).await?;
-    //                 self.client.connect_relay(relay).await?;
-    //                 tracing::debug!(
-    //                     target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                     "Connected to user inbox relay: {}",
-    //                     relay
-    //                 );
-    //             }
-    //         }
-
-    //         // Handle key package relays
-    //         tracing::debug!(
-    //             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //             "Getting user's key package relays"
-    //         );
-    //         let mut key_package_relays = account
-    //             .relays(RelayType::KeyPackage)
-    //             .await
-    //             .map_err(|e| NostrManagerError::AccountError(e.to_string()))?;
-    //         if key_package_relays.is_empty() {
-    //             tracing::debug!(
-    //                 target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                 "No cached key package relays found, trying query_user_key_package_relays"
-    //             );
-    //             key_package_relays = self
-    //                 .query_user_key_package_relays(keys.public_key())
-    //                 .await?;
-    //         }
-    //         if key_package_relays.is_empty() {
-    //             tracing::debug!(
-    //                 target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                 "No key package relays found via query, trying fetch_user_key_package_relays"
-    //             );
-    //             key_package_relays = self
-    //                 .fetch_user_key_package_relays(keys.public_key())
-    //                 .await?;
-    //         }
-
-    //         for relay in key_package_relays.iter() {
-    //             if !connected_relays.contains(relay) {
-    //                 self.client.add_relay(relay).await?;
-    //                 self.client.connect_relay(relay).await?;
-    //                 tracing::debug!(
-    //                     target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                     "Connected to user key package relay: {}",
-    //                     relay
-    //                 );
-    //             }
-    //         }
-    //     }
-
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Connected to relays: {:?}",
-    //         self.client
-    //             .relays()
-    //             .await
-    //             .keys()
-    //             .map(|url| url.to_string())
-    //             .collect::<Vec<_>>()
-    //     );
-
-    //     // Create and store new processor
-    //     tracing::debug!(
-    //         target: "whitenoise::nostr_manager::set_nostr_identity",
-    //         "Creating new event processor"
-    //     );
-    //     let new_processor = EventProcessor::new();
-    //     *self.event_processor.lock().await = new_processor;
-
-    //     // Spawn two tasks in parallel:
-    //     // 1. Setup subscriptions to catch future events
-    //     // 2. Fetch past events
-    //     let account_clone_subs = account.clone();
-    //     spawn(async move {
-    //         tracing::debug!(
-    //             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //             "Starting subscriptions"
-    //         );
-
-    //         let group_ids = account_clone_subs
-    //             .nostr_group_ids()
-    //             .await
-    //             .expect("Couldn't get nostr group ids");
-
-    //         match wn_state
-    //             .nostr
-    //             .setup_subscriptions(account_clone_subs.pubkey, group_ids)
-    //             .await
-    //         {
-    //             Ok(_) => {
-    //                 tracing::debug!(
-    //                     target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                     "Subscriptions setup completed"
-    //                 );
-    //             }
-    //             Err(e) => {
-    //                 tracing::error!(
-    //                     target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                     "Error subscribing to events: {}",
-    //                     e
-    //                 );
-    //             }
-    //         }
-    //     });
-
-    //     let pubkey = account.pubkey;
-    //     let last_synced = account.last_synced;
-    //     spawn(async move {
-    //         tracing::debug!(
-    //             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //             "Starting fetch for {}",
-    //             pubkey
-    //         );
-
-    //         let group_ids = Account::find_by_pubkey(&pubkey)
-    //             .await
-    //             .expect("Couldn't get account")
-    //             .nostr_group_ids()
-    //             .await
-    //             .expect("Couldn't get nostr group ids");
-
-    //         match &wn_state
-    //             .nostr
-    //             .fetch_for_user(pubkey, last_synced, group_ids)
-    //             .await
-    //         {
-    //             Ok(_) => {
-    //                 tracing::debug!(
-    //                     target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                     "Fetch completed for {}",
-    //                     pubkey
-    //                 );
-    //                 // Update last_synced through a new database query
-    //                 if let Ok(mut account) = Account::find_by_pubkey(&pubkey).await {
-    //                     account.last_synced = Timestamp::now();
-    //                     if let Err(e) = account.save().await {
-    //                         tracing::error!(
-    //                             target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                             "Error updating last_synced: {}",
-    //                             e
-    //                         );
-    //                     }
-    //                 }
-    //             }
-    //             Err(e) => {
-    //                 tracing::error!(
-    //                     target: "whitenoise::nostr_manager::set_nostr_identity",
-    //                     "Error in fetch: {}",
-    //                     e
-    //                 );
-    //             }
-    //         }
-    //     });
-
-    //     Ok(())
-    // }
-
     pub async fn encrypt_content(
         &self,
         content: String,
@@ -541,6 +275,45 @@ impl NostrManager {
             }
         }
     }
+
+    /// Extracts and parses relay URLs from a collection of Nostr events.
+    ///
+    /// This helper method processes a collection of Nostr events and extracts all valid
+    /// relay URLs from their tags. It filters for tags of kind `Relay` and attempts to
+    /// parse each tag's content as a valid relay URL.
+    ///
+    /// The method performs the following operations:
+    /// 1. Iterates through all events in the collection
+    /// 2. Extracts all tags from each event
+    /// 3. Filters for tags with kind `TagKind::Relay`
+    /// 4. Attempts to parse each tag's content as a `RelayUrl`
+    /// 5. Collects all successfully parsed relay URLs into a vector
+    ///
+    /// # Arguments
+    ///
+    /// * `events` - A collection of `Event` structs containing relay information in their tags
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Vec<RelayUrl>` containing all valid relay URLs found in the events.
+    /// Invalid or malformed relay URLs are silently skipped.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let events = fetch_relay_list_events().await?;
+    /// let relay_urls = relay_urls_from_events(events);
+    /// // relay_urls now contains all valid relay URLs from the events
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// * This method silently skips any tags that:
+    ///   - Are not of kind `Relay`
+    ///   - Have no content
+    ///   - Contain invalid relay URL formats
+    /// * The order of relay URLs in the returned vector is not guaranteed to match
+    ///   the order they appeared in the events
     fn relay_urls_from_events(events: Events) -> Vec<RelayUrl> {
         events
             .into_iter()
@@ -553,16 +326,53 @@ impl NostrManager {
             .collect()
     }
 
-    // fn relay_url_strings_from_events(events: Events) -> Vec<String> {
-    //     events
-    //         .into_iter()
-    //         .flat_map(|e| e.tags)
-    //         .filter(|tag| tag.kind() == TagKind::Relay)
-    //         .map_while(|tag| tag.content().map(|c| c.to_string()))
-    //         .collect()
-    // }
-
-    pub async fn delete_all_data(&self) -> Result<()> {
+    /// Permanently deletes all Nostr data managed by this NostrManager instance.
+    ///
+    /// This is a destructive operation that completely removes all stored Nostr data,
+    /// including events, messages, relay connections, and cached information. The operation
+    /// resets the client to a clean state and wipes the underlying database.
+    ///
+    /// **⚠️ WARNING: This operation is irreversible and will permanently delete all data.**
+    ///
+    /// The deletion process includes:
+    /// - Resetting the Nostr client and disconnecting from all relays
+    /// - Wiping the entire Nostr database, removing all stored events and metadata
+    /// - Clearing any cached relay information and connection state
+    /// - Removing all locally stored messages and contact data
+    ///
+    /// This method is typically used during:
+    /// - Account deletion workflows
+    /// - Application uninstall procedures
+    /// - Debug/testing scenarios requiring a clean slate
+    /// - Factory reset operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on successful completion of the deletion process.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if:
+    /// * The database wipe operation fails due to I/O errors
+    /// * File system permissions prevent deletion of database files
+    /// * The database is locked by another process
+    ///
+    /// Note that the client reset operation is infallible and will not cause this method to fail.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // During account deletion
+    /// nostr_manager.delete_all_data().await?;
+    /// // All Nostr data has been permanently removed
+    /// ```
+    ///
+    /// # Safety
+    ///
+    /// This method should only be called when you are certain that all Nostr data
+    /// should be permanently removed. Consider backing up important data before
+    /// calling this method if recovery might be needed.
+    pub(crate) async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::delete_all_data",
             "Deleting Nostr data"

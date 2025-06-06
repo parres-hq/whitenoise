@@ -549,6 +549,47 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Initiates a background fetch of all Nostr data associated with the given account.
+    ///
+    /// This method spawns an asynchronous background task to fetch the account's complete
+    /// Nostr data, including events, messages, and group-related information. The fetch
+    /// operation runs independently without blocking the caller, making it ideal for
+    /// triggering data synchronization after account creation or login.
+    ///
+    /// The background task will fetch:
+    /// - User metadata and profile information
+    /// - Contact lists and relay configurations
+    /// - Messages and events since the last sync timestamp
+    /// - Group-specific data for all groups the account belongs to
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A reference to the `Account` for which to fetch Nostr data.
+    ///   The account's public key, last sync timestamp, and group memberships
+    ///   are used to determine what data to fetch.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` immediately after spawning the background task. The actual
+    /// data fetching occurs asynchronously and any errors are logged rather than
+    /// propagated to the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if:
+    /// * Failed to extract group IDs from the account's NostrMls instance
+    /// * The account's NostrMls instance is not properly initialized
+    ///
+    /// Note that errors occurring within the spawned background task (such as network
+    /// failures or parsing errors) are logged but do not cause this method to fail.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Trigger background data fetch after account login
+    /// whitenoise.background_fetch_account_data(&account).await?;
+    /// // Method returns immediately, data fetch continues in background
+    /// ```
     pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
         let group_ids = account.groups_nostr_group_ids()?;
         let nostr = self.nostr.clone();
