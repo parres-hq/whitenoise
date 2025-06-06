@@ -1,5 +1,6 @@
 use crate::nostr_manager::NostrManagerError;
 use crate::{relays::RelayType, Whitenoise};
+use crate::error::Result;
 
 use std::sync::{Arc, Mutex};
 
@@ -99,7 +100,7 @@ impl Account {
     ///
     /// This function does not currently return any errors, but it is fallible to allow for
     /// future error handling and to match the expected signature for account creation.
-    pub(crate) async fn new() -> Result<(Account, Keys), AccountError> {
+    pub(crate) async fn new() -> core::result::Result<(Account, Keys), AccountError> {
         tracing::debug!(target: "whitenoise::accounts::new", "Generating new keypair");
         let keys = Keys::generate();
 
@@ -114,7 +115,7 @@ impl Account {
         Ok((account, keys))
     }
 
-    pub(crate) fn groups_nostr_group_ids(&self) -> Result<Vec<String>, AccountError> {
+    pub(crate) fn groups_nostr_group_ids(&self) -> core::result::Result<Vec<String>, AccountError> {
         let mut group_ids = vec![];
         {
             let nostr_mls_guard = self.nostr_mls.lock().unwrap();

@@ -51,8 +51,8 @@ pub enum WhitenoiseError {
     Other(#[from] anyhow::Error),
 }
 
-impl From<Box<dyn std::error::Error>> for WhitenoiseError {
-    fn from(err: Box<dyn std::error::Error>) -> Self {
+impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {
+    fn from(err: Box<dyn std::error::Error + Send + Sync>) -> Self {
         WhitenoiseError::Other(anyhow::anyhow!(err.to_string()))
     }
 }

@@ -84,14 +84,12 @@ impl Whitenoise {
                 tracing::debug!(target: "whitenoise::api::accounts::login", "Account found");
                 Ok(account)
             }
-            Err(e) => match e.downcast_ref::<WhitenoiseError>() {
-                Some(WhitenoiseError::AccountNotFound) => {
-                    tracing::debug!(target: "whitenoise::api::accounts::login", "Account not found, adding from keys");
-                    let account = self.add_account_from_keys(&keys).await?;
-                    Ok(account)
-                }
-                _ => Err(e),
-            },
+            Err(WhitenoiseError::AccountNotFound) => {
+                tracing::debug!(target: "whitenoise::api::accounts::login", "Account not found, adding from keys");
+                let account = self.add_account_from_keys(&keys).await?;
+                Ok(account)
+            }
+            Err(e) => Err(e),
         }?;
 
         // TODO: initialize subs on nostr manager
