@@ -1,15 +1,13 @@
 // use crate::media::blossom::BlossomClient;
-use crate::nostr_manager::event_processor::EventProcessor;
-use crate::types::NostrEncryptionMethod;
+use crate::types::{NostrEncryptionMethod, ProcessableEvent};
 
 use nostr_sdk::prelude::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc::Sender, Mutex};
 
-pub mod event_processor;
 pub mod fetch;
 pub mod parser;
 pub mod query;
@@ -50,7 +48,6 @@ pub struct NostrManager {
     pub settings: Arc<Mutex<NostrManagerSettings>>,
     client: Client,
     // blossom: BlossomClient,
-    event_processor: Arc<Mutex<EventProcessor>>,
 }
 
 impl Default for NostrManagerSettings {
@@ -87,8 +84,9 @@ impl NostrManager {
     /// # Arguments
     ///
     /// * `db_path` - The path to the nostr cache database
+    /// * `event_sender` - Channel sender for forwarding events to Whitenoise for processing
     ///
-    pub async fn new(db_path: PathBuf) -> Result<Self> {
+    pub async fn new(db_path: PathBuf, event_sender: Sender<crate::types::ProcessableEvent>) -> Result<Self> {
         let opts = Options::default();
 
         // Initialize the client with the appropriate database based on platform
@@ -110,35 +108,69 @@ impl NostrManager {
         // Connect to the default relays
         client.connect().await;
 
-        let event_processor = Arc::new(Mutex::new(EventProcessor::new()));
-
-        // Set up notification handler - only handle Messages which contain subscription_id
+        // Set up notification handler - forward events directly to Whitenoise
         if let Err(e) = client
-            .handle_notifications(|notification| async {
-                match notification {
-                    RelayPoolNotification::Message { relay_url, message } => {
-                        event_processor.lock().await.queue_message(relay_url, message).await?;
-                        Ok(false)
-                    }
-                    RelayPoolNotification::Shutdown => {
-                        tracing::debug!(
-                            target: "whitenoise::nostr_client::handle_notifications",
-                            "Relay pool shutdown, shutting down event processor"
-                        );
-                        // Shutdown event processor to flush remaining events (fire-and-forget)
-                        // Note: For app-level shutdown, use shutdown_and_wait() instead
-                        if let Err(e) = event_processor.lock().await.shutdown().await {
-                            tracing::error!(
-                                target: "whitenoise::nostr_client::handle_notifications",
-                                "Failed to shutdown event processor: {:?}",
-                                e
-                            );
+            .handle_notifications(move |notification| {
+                let sender = event_sender.clone();
+                async move {
+                    match notification {
+                        RelayPoolNotification::Message { relay_url, message } => {
+                            // Extract events and send to Whitenoise queue
+                            match message {
+                                RelayMessage::Event { subscription_id, event } => {
+                                    if let Err(e) = sender
+                                        .send(ProcessableEvent::NostrEvent(
+                                            event.as_ref().clone(),
+                                            Some(subscription_id.to_string()),
+                                        ))
+                                        .await
+                                    {
+                                        tracing::error!(
+                                            target: "whitenoise::nostr_client::handle_notifications",
+                                            "Failed to queue event: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    // Handle other relay messages as before
+                                    let message_str = match message {
+                                        RelayMessage::Ok { .. } => "Ok".to_string(),
+                                        RelayMessage::Notice { .. } => "Notice".to_string(),
+                                        RelayMessage::Closed { .. } => "Closed".to_string(),
+                                        RelayMessage::EndOfStoredEvents(_) => "EndOfStoredEvents".to_string(),
+                                        RelayMessage::Auth { .. } => "Auth".to_string(),
+                                        RelayMessage::Count { .. } => "Count".to_string(),
+                                        RelayMessage::NegMsg { .. } => "NegMsg".to_string(),
+                                        RelayMessage::NegErr { .. } => "NegErr".to_string(),
+                                        _ => "Unknown".to_string(),
+                                    };
+
+                                    if let Err(e) = sender
+                                        .send(ProcessableEvent::RelayMessage(relay_url, message_str))
+                                        .await
+                                    {
+                                        tracing::error!(
+                                            target: "whitenoise::nostr_client::handle_notifications",
+                                            "Failed to queue message: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(false)
                         }
-                        Ok(true)
-                    }
-                    _ => {
-                        // Ignore other notification types (like Event which we no longer use)
-                        Ok(false)
+                        RelayPoolNotification::Shutdown => {
+                            tracing::debug!(
+                                target: "whitenoise::nostr_client::handle_notifications",
+                                "Relay pool shutdown"
+                            );
+                            Ok(true)
+                        }
+                        _ => {
+                            // Ignore other notification types
+                            Ok(false)
+                        }
                     }
                 }
             })
@@ -155,7 +187,6 @@ impl NostrManager {
             client,
             // blossom,
             settings: Arc::new(Mutex::new(settings)),
-            event_processor,
         })
     }
 
