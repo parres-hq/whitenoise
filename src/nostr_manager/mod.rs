@@ -10,12 +10,12 @@ use thiserror::Error;
 use tokio::{spawn, sync::Mutex};
 
 pub mod event_processor;
-// pub mod fetch;
+pub mod fetch;
 pub mod parser;
 pub mod query;
 // pub mod search;
 // pub mod subscriptions;
-pub mod sync;
+// pub mod sync;
 
 #[derive(Error, Debug)]
 pub enum NostrManagerError {
@@ -47,9 +47,9 @@ pub struct NostrManagerSettings {
 
 #[derive(Debug, Clone)]
 pub struct NostrManager {
-    pub client: Client,
-    // pub blossom: BlossomClient,
     pub settings: Arc<Mutex<NostrManagerSettings>>,
+    client: Client,
+    // blossom: BlossomClient,
     event_processor: Arc<Mutex<EventProcessor>>,
 }
 
@@ -82,6 +82,12 @@ impl Default for NostrManagerSettings {
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
 
 impl NostrManager {
+    /// Create a new Nostr manager
+    ///
+    /// # Arguments
+    ///
+    /// * `db_path` - The path to the nostr cache database
+    ///
     pub async fn new(db_path: PathBuf) -> Result<Self> {
         let opts = Options::default();
 
@@ -114,14 +120,42 @@ impl NostrManager {
         })
     }
 
-    pub async fn timeout(&self) -> Result<Duration> {
+    /// Get the timeout for the Nostr manager
+    pub(crate) async fn timeout(&self) -> Result<Duration> {
         let guard = self.settings.lock().await;
         Ok(guard.timeout)
     }
 
-    pub async fn relays(&self) -> Result<Vec<String>> {
+    /// Get the relays for the Nostr manager
+    pub(crate) async fn relays(&self) -> Result<Vec<RelayUrl>> {
         let guard = self.settings.lock().await;
-        Ok(guard.relays.clone())
+        Ok(guard
+            .relays
+            .clone()
+            .into_iter()
+            .map(|r| RelayUrl::parse(&r).unwrap())
+            .collect())
+    }
+
+    /// Publishes a Nostr event using a temporary signer.
+    ///
+    /// This method allows publishing an event with a signer that is only used for this specific operation.
+    /// The signer is set before publishing and unset immediately after.
+    ///
+    /// # Arguments
+    ///
+    /// * `event_builder` - The event builder containing the event to publish
+    /// * `signer` - A signer that implements `NostrSigner` and has a 'static lifetime
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Output<EventId>>` - The published event ID if successful, or an error if publishing fails
+    ///
+    pub(crate) async fn publish_event_builder_with_signer(&self, event_builder: EventBuilder, signer: impl NostrSigner + 'static) -> Result<Output<EventId>> {
+        self.client.set_signer(signer).await;
+        let result = self.client.send_event_builder(event_builder.clone()).await?;
+        self.client.unset_signer().await;
+        Ok(result)
     }
 
     /// Extracts welcome events from a list of giftwrapped events.
@@ -518,14 +552,15 @@ impl NostrManager {
             })
             .collect()
     }
-    fn relay_url_strings_from_events(events: Events) -> Vec<String> {
-        events
-            .into_iter()
-            .flat_map(|e| e.tags)
-            .filter(|tag| tag.kind() == TagKind::Relay)
-            .map_while(|tag| tag.content().map(|c| c.to_string()))
-            .collect()
-    }
+
+    // fn relay_url_strings_from_events(events: Events) -> Vec<String> {
+    //     events
+    //         .into_iter()
+    //         .flat_map(|e| e.tags)
+    //         .filter(|tag| tag.kind() == TagKind::Relay)
+    //         .map_while(|tag| tag.content().map(|c| c.to_string()))
+    //         .collect()
+    // }
 
     pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(
