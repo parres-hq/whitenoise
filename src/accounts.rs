@@ -1,6 +1,6 @@
+use crate::error::Result;
 use crate::nostr_manager::NostrManagerError;
 use crate::{relays::RelayType, Whitenoise};
-use crate::error::Result;
 
 use std::sync::{Arc, Mutex};
 
@@ -121,10 +121,16 @@ impl Account {
             let nostr_mls_guard = self.nostr_mls.lock().unwrap();
             if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
                 let groups = nostr_mls.get_groups()?;
-                group_ids = groups.iter().map(|g| g.nostr_group_id).collect::<Vec<[u8; 32]>>();
+                group_ids = groups
+                    .iter()
+                    .map(|g| g.nostr_group_id)
+                    .collect::<Vec<[u8; 32]>>();
             }
         }
-        Ok(group_ids.into_iter().map(hex::encode).collect::<Vec<String>>())
+        Ok(group_ids
+            .into_iter()
+            .map(hex::encode)
+            .collect::<Vec<String>>())
     }
 }
 
@@ -148,10 +154,7 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if the account is not found, if deserialization fails,
     /// or if initialization of the NostrManager or NostrMls fails.
-    pub(crate) async fn find_account_by_pubkey(
-        &self,
-        pubkey: &PublicKey,
-    ) -> Result<Account> {
+    pub(crate) async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
         let mut txn = self.database.pool.begin().await?;
 
         let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
@@ -189,10 +192,7 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if any database operation, event fetching, serialization,
     /// or key storage fails.
-    pub(crate) async fn add_account_from_keys(
-        &self,
-        keys: &Keys,
-    ) -> Result<Account> {
+    pub(crate) async fn add_account_from_keys(&self, keys: &Keys) -> Result<Account> {
         tracing::debug!(target: "whitenoise::accounts", "Adding account for pubkey: {}", keys.public_key().to_hex());
 
         let mut account = Account {
@@ -324,7 +324,6 @@ impl Whitenoise {
     /// * The MLS storage directory cannot be created
     /// * The NostrMls instance cannot be initialized
     /// * The mutex lock cannot be acquired
-    ///
     pub(crate) async fn initialize_nostr_mls_for_account(&self, account: &Account) -> Result<()> {
         // Initialize NostrMls for the account
         let mls_storage_dir = self
@@ -359,20 +358,14 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if any database or Nostr operation fails.
-    pub(crate) async fn onboard_new_account(
-        &self,
-        account: &mut Account,
-    ) -> Result<Account> {
+    pub(crate) async fn onboard_new_account(&self, account: &mut Account) -> Result<Account> {
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Starting onboarding process");
 
         // Set onboarding flags
         account.onboarding.inbox_relays = true;
         account.onboarding.key_package_relays = true;
 
-        let default_relays = self
-            .nostr
-            .relays()
-            .await?;
+        let default_relays = self.nostr.relays().await?;
 
         // Generate a petname for the account (two words, separated by a space)
         let petname_raw = petname::petname(2, " ").unwrap_or_else(|| "Anonymous User".to_string());
@@ -402,7 +395,10 @@ impl Whitenoise {
         let metadata_json = serde_json::to_string(&metadata)?;
         let event = EventBuilder::new(Kind::Metadata, metadata_json);
         let keys = self.get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let result = self.nostr.publish_event_builder_with_signer(event.clone(), keys).await?;
+        let result = self
+            .nostr
+            .publish_event_builder_with_signer(event.clone(), keys)
+            .await?;
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
 
         // Also publish relay lists to Nostr
@@ -474,7 +470,10 @@ impl Whitenoise {
 
         let event = EventBuilder::new(relay_event_kind, "").tags(tags);
         let keys = self.get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let result = self.nostr.publish_event_builder_with_signer(event.clone(), keys).await?;
+        let result = self
+            .nostr
+            .publish_event_builder_with_signer(event.clone(), keys)
+            .await?;
         tracing::debug!(target: "whitenoise::accounts::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
 
         Ok(())
@@ -498,10 +497,7 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if the lock cannot be acquired, if the key package cannot be generated,
     /// or if publishing to Nostr fails.
-    pub(crate) async fn publish_key_package_for_account(
-        &self,
-        account: &Account,
-    ) -> Result<()> {
+    pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
         let mut encoded_key_package: Option<String> = None;
         let mut tags: Option<[Tag; 4]> = None;
         let key_package_relays = self
@@ -597,7 +593,10 @@ impl Whitenoise {
         let last_synced = account.last_synced;
 
         tokio::spawn(async move {
-            if let Err(e) = nostr.fetch_all_user_data(pubkey, last_synced, group_ids).await {
+            if let Err(e) = nostr
+                .fetch_all_user_data(pubkey, last_synced, group_ids)
+                .await
+            {
                 tracing::error!("Failed to fetch user data: {}", e);
             }
         });

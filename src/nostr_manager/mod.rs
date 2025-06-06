@@ -85,8 +85,10 @@ impl NostrManager {
     ///
     /// * `db_path` - The path to the nostr cache database
     /// * `event_sender` - Channel sender for forwarding events to Whitenoise for processing
-    ///
-    pub async fn new(db_path: PathBuf, event_sender: Sender<crate::types::ProcessableEvent>) -> Result<Self> {
+    pub async fn new(
+        db_path: PathBuf,
+        event_sender: Sender<crate::types::ProcessableEvent>,
+    ) -> Result<Self> {
         let opts = Options::default();
 
         // Initialize the client with the appropriate database based on platform
@@ -220,10 +222,16 @@ impl NostrManager {
     /// # Returns
     ///
     /// * `Result<Output<EventId>>` - The published event ID if successful, or an error if publishing fails
-    ///
-    pub(crate) async fn publish_event_builder_with_signer(&self, event_builder: EventBuilder, signer: impl NostrSigner + 'static) -> Result<Output<EventId>> {
+    pub(crate) async fn publish_event_builder_with_signer(
+        &self,
+        event_builder: EventBuilder,
+        signer: impl NostrSigner + 'static,
+    ) -> Result<Output<EventId>> {
         self.client.set_signer(signer).await;
-        let result = self.client.send_event_builder(event_builder.clone()).await?;
+        let result = self
+            .client
+            .send_event_builder(event_builder.clone())
+            .await?;
         self.client.unset_signer().await;
         Ok(result)
     }
@@ -240,6 +248,7 @@ impl NostrManager {
     /// # Returns
     ///
     /// A vector of tuples containing the gift-wrap event id and the inner welcome event (the gift wrap rumor event)
+    #[allow(dead_code)]
     async fn extract_invite_events(&self, gw_events: Vec<Event>) -> Vec<(EventId, UnsignedEvent)> {
         let mut invite_events: Vec<(EventId, UnsignedEvent)> = Vec::new();
 
@@ -255,6 +264,7 @@ impl NostrManager {
         invite_events
     }
 
+    #[allow(dead_code)]
     pub async fn encrypt_content(
         &self,
         content: String,
@@ -281,6 +291,7 @@ impl NostrManager {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn decrypt_content(
         &self,
         content: String,

@@ -29,7 +29,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if the metadata query fails.
+    /// Returns a `WhitenoiseError` if the metadata query fails.
     pub async fn load_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
         let metadata = self.nostr.query_user_metadata(pubkey).await?;
         Ok(metadata)
@@ -52,7 +52,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if the relay query fails.
+    /// Returns a `WhitenoiseError` if the relay query fails.
     pub async fn load_relays(
         &self,
         pubkey: PublicKey,
@@ -79,7 +79,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if the contact list query fails.
+    /// Returns a `WhitenoiseError` if the contact list query fails.
     pub async fn load_contact_list(
         &self,
         pubkey: PublicKey,

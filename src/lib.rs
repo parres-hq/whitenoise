@@ -1,4 +1,4 @@
-pub use crate::accounts::{Account, OnboardingState, AccountSettings};
+pub use crate::accounts::{Account, AccountSettings, OnboardingState};
 use crate::database::Database;
 pub use crate::error::{Result, WhitenoiseError};
 use crate::nostr_manager::NostrManager;
@@ -25,8 +25,6 @@ mod relays;
 // mod media;
 mod secrets_store;
 mod types;
-
-
 
 static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
 static TRACING_INIT: OnceCell<()> = OnceCell::new();
@@ -176,7 +174,9 @@ impl Whitenoise {
         };
 
         // Start the event processing loop
-        whitenoise.start_event_processing_loop(event_receiver, shutdown_receiver).await;
+        whitenoise
+            .start_event_processing_loop(event_receiver, shutdown_receiver)
+            .await;
 
         // Return fully configured, ready-to-go instance
         Ok(whitenoise)
@@ -264,8 +264,12 @@ impl Whitenoise {
         Ok(())
     }
 
-        /// Start the event processing loop in a background task
-    async fn start_event_processing_loop(&mut self, receiver: Receiver<ProcessableEvent>, shutdown_receiver: Receiver<()>) {
+    /// Start the event processing loop in a background task
+    async fn start_event_processing_loop(
+        &mut self,
+        receiver: Receiver<ProcessableEvent>,
+        shutdown_receiver: Receiver<()>,
+    ) {
         tokio::spawn(async move {
             Self::process_events(receiver, shutdown_receiver).await;
         });
@@ -273,17 +277,31 @@ impl Whitenoise {
 
     /// Queue an event for processing
     pub async fn queue_event(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
-        match self.event_sender.send(ProcessableEvent::NostrEvent(event, subscription_id)).await {
+        match self
+            .event_sender
+            .send(ProcessableEvent::NostrEvent(event, subscription_id))
+            .await
+        {
             Ok(_) => Ok(()),
-            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!("Failed to queue event: {}", e))),
+            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Failed to queue event: {}",
+                e
+            ))),
         }
     }
 
     /// Queue a relay message for processing
     pub async fn queue_message(&self, relay_url: RelayUrl, message_str: String) -> Result<()> {
-        match self.event_sender.send(ProcessableEvent::RelayMessage(relay_url, message_str)).await {
+        match self
+            .event_sender
+            .send(ProcessableEvent::RelayMessage(relay_url, message_str))
+            .await
+        {
             Ok(_) => Ok(()),
-            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!("Failed to queue message: {}", e))),
+            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Failed to queue message: {}",
+                e
+            ))),
         }
     }
 

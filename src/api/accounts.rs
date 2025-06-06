@@ -4,10 +4,9 @@
 //! All methods in this module only load data from the database. They do not perform any network requests.
 //! The database is updated by the accounts manager in the backaground.
 
+use crate::error::Result;
 use crate::{accounts::Account, Whitenoise, WhitenoiseError};
-use crate::error::{Result};
 use nostr_sdk::prelude::*;
-
 
 impl Whitenoise {
     /// Creates a new identity (account) for the user.
