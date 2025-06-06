@@ -173,10 +173,12 @@ impl Whitenoise {
             shutdown_sender,
         };
 
-        // Start the event processing loop
-        whitenoise
-            .start_event_processing_loop(event_receiver, shutdown_receiver)
-            .await;
+        // Start the event processing loop only when not running tests
+        if !cfg!(test) {
+            whitenoise
+                .start_event_processing_loop(event_receiver, shutdown_receiver)
+                .await;
+        }
 
         // Return fully configured, ready-to-go instance
         Ok(whitenoise)

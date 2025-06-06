@@ -102,87 +102,92 @@ impl NostrManager {
 
         // let blossom = BlossomClient::new(&settings.blossom_server);
 
-        // Add the default relays
-        for relay in &settings.relays {
-            client.add_relay(relay).await?;
+        // Add the default relays and connect only when not running tests
+        if !cfg!(test) {
+            for relay in &settings.relays {
+                client.add_relay(relay).await?;
+            }
+
+            // Connect to the default relays
+            client.connect().await;
         }
 
-        // Connect to the default relays
-        client.connect().await;
+        // Set up notification handler only when not running tests
+        if !cfg!(test) {
+            // Set up notification handler - forward events directly to Whitenoise
+            if let Err(e) = client
+                .handle_notifications(move |notification| {
+                    let sender = event_sender.clone();
+                    async move {
+                        match notification {
+                            RelayPoolNotification::Message { relay_url, message } => {
+                                // Extract events and send to Whitenoise queue
+                                match message {
+                                    RelayMessage::Event { subscription_id, event } => {
+                                        if let Err(e) = sender
+                                            .send(ProcessableEvent::NostrEvent(
+                                                event.as_ref().clone(),
+                                                Some(subscription_id.to_string()),
+                                            ))
+                                            .await
+                                        {
+                                            tracing::error!(
+                                                target: "whitenoise::nostr_client::handle_notifications",
+                                                "Failed to queue event: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                    _ => {
+                                        // Handle other relay messages as before
+                                        let message_str = match message {
+                                            RelayMessage::Ok { .. } => "Ok".to_string(),
+                                            RelayMessage::Notice { .. } => "Notice".to_string(),
+                                            RelayMessage::Closed { .. } => "Closed".to_string(),
+                                            RelayMessage::EndOfStoredEvents(_) => "EndOfStoredEvents".to_string(),
+                                            RelayMessage::Auth { .. } => "Auth".to_string(),
+                                            RelayMessage::Count { .. } => "Count".to_string(),
+                                            RelayMessage::NegMsg { .. } => "NegMsg".to_string(),
+                                            RelayMessage::NegErr { .. } => "NegErr".to_string(),
+                                            _ => "Unknown".to_string(),
+                                        };
 
-        // Set up notification handler - forward events directly to Whitenoise
-        if let Err(e) = client
-            .handle_notifications(move |notification| {
-                let sender = event_sender.clone();
-                async move {
-                    match notification {
-                        RelayPoolNotification::Message { relay_url, message } => {
-                            // Extract events and send to Whitenoise queue
-                            match message {
-                                RelayMessage::Event { subscription_id, event } => {
-                                    if let Err(e) = sender
-                                        .send(ProcessableEvent::NostrEvent(
-                                            event.as_ref().clone(),
-                                            Some(subscription_id.to_string()),
-                                        ))
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            target: "whitenoise::nostr_client::handle_notifications",
-                                            "Failed to queue event: {}",
-                                            e
-                                        );
+                                        if let Err(e) = sender
+                                            .send(ProcessableEvent::RelayMessage(relay_url, message_str))
+                                            .await
+                                        {
+                                            tracing::error!(
+                                                target: "whitenoise::nostr_client::handle_notifications",
+                                                "Failed to queue message: {}",
+                                                e
+                                            );
+                                        }
                                     }
                                 }
-                                _ => {
-                                    // Handle other relay messages as before
-                                    let message_str = match message {
-                                        RelayMessage::Ok { .. } => "Ok".to_string(),
-                                        RelayMessage::Notice { .. } => "Notice".to_string(),
-                                        RelayMessage::Closed { .. } => "Closed".to_string(),
-                                        RelayMessage::EndOfStoredEvents(_) => "EndOfStoredEvents".to_string(),
-                                        RelayMessage::Auth { .. } => "Auth".to_string(),
-                                        RelayMessage::Count { .. } => "Count".to_string(),
-                                        RelayMessage::NegMsg { .. } => "NegMsg".to_string(),
-                                        RelayMessage::NegErr { .. } => "NegErr".to_string(),
-                                        _ => "Unknown".to_string(),
-                                    };
-
-                                    if let Err(e) = sender
-                                        .send(ProcessableEvent::RelayMessage(relay_url, message_str))
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            target: "whitenoise::nostr_client::handle_notifications",
-                                            "Failed to queue message: {}",
-                                            e
-                                        );
-                                    }
-                                }
+                                Ok(false)
                             }
-                            Ok(false)
-                        }
-                        RelayPoolNotification::Shutdown => {
-                            tracing::debug!(
-                                target: "whitenoise::nostr_client::handle_notifications",
-                                "Relay pool shutdown"
-                            );
-                            Ok(true)
-                        }
-                        _ => {
-                            // Ignore other notification types
-                            Ok(false)
+                            RelayPoolNotification::Shutdown => {
+                                tracing::debug!(
+                                    target: "whitenoise::nostr_client::handle_notifications",
+                                    "Relay pool shutdown"
+                                );
+                                Ok(true)
+                            }
+                            _ => {
+                                // Ignore other notification types
+                                Ok(false)
+                            }
                         }
                     }
-                }
-            })
-            .await
-        {
-            tracing::error!(
-                target: "whitenoise::nostr_client::handle_notifications",
-                "Notification handler error: {:?}",
-                e
-            );
+                })
+                .await
+            {
+                tracing::error!(
+                    target: "whitenoise::nostr_client::handle_notifications",
+                    "Notification handler error: {:?}",
+                    e
+                );
+            }
         }
 
         Ok(Self {
