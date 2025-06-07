@@ -209,7 +209,7 @@ impl Whitenoise {
     /// ```rust
     /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
     /// # use std::path::Path;
-    /// # async fn example(whitenoise: Whitenoise) -> Result<(), whitenoise::WhitenoiseError> {
+    /// # async fn example(mut whitenoise: Whitenoise) -> Result<(), whitenoise::WhitenoiseError> {
     /// whitenoise.delete_all_data().await?;
     /// # Ok(())
     /// # }
