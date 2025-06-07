@@ -116,15 +116,17 @@ impl Account {
     }
 
     pub(crate) fn groups_nostr_group_ids(&self) -> core::result::Result<Vec<String>, AccountError> {
-        let nostr_mls_guard = self.nostr_mls.lock()
+        let nostr_mls_guard = self
+            .nostr_mls
+            .lock()
             .map_err(|_| AccountError::NostrMlsNotInitialized)?;
 
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             let groups = nostr_mls.get_groups()?;
-        Ok(groups
-            .iter()
-            .map(|g| hex::encode(g.nostr_group_id))
-            .collect())
+            Ok(groups
+                .iter()
+                .map(|g| hex::encode(g.nostr_group_id))
+                .collect())
         } else {
             Ok(Vec::new())
         }
@@ -362,7 +364,10 @@ impl Whitenoise {
 
         let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(mls_storage_dir)?);
         {
-            let mut nostr_mls_guard = account.nostr_mls.lock().map_err(|_| AccountError::NostrMlsNotInitialized)?;
+            let mut nostr_mls_guard = account
+                .nostr_mls
+                .lock()
+                .map_err(|_| AccountError::NostrMlsNotInitialized)?;
             *nostr_mls_guard = Some(nostr_mls);
         }
         tracing::debug!(target: "whitenoise::api::accounts::login", "NostrMls initialized for account: {}", account.pubkey.to_hex());
@@ -530,7 +535,7 @@ impl Whitenoise {
             .load_relays(account.pubkey, RelayType::KeyPackage)
             .await?;
 
-                // Extract key package data while holding the lock
+        // Extract key package data while holding the lock
         let (encoded_key_package, tags) = {
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Attempting to acquire nostr_mls lock");
 
@@ -557,8 +562,8 @@ impl Whitenoise {
         };
 
         let signer = self.get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package)
-            .tags(tags);
+        let key_package_event_builder =
+            EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package).tags(tags);
 
         let result = self
             .nostr

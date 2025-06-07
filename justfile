@@ -10,6 +10,10 @@ clear-dev-data:
 int-test:
     cargo run --bin integration_test -- --data-dir ./dev/data/test-backend/ --logs-dir ./dev/data/test-backend/
 
+# Run all tests (unit tests and integration tests)
+test:
+    cargo test --all-features --all-targets
+
 # Check clippy
 check-clippy:
     @bash scripts/check-clippy.sh
