@@ -214,7 +214,7 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_all_data(&self) -> Result<()> {
+    pub async fn delete_all_data(&mut self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
         // Remove nostr cache first
@@ -222,20 +222,6 @@ impl Whitenoise {
 
         // Remove database (accounts and media) data
         self.database.delete_all_data().await?;
-
-        // Remove MLS related data
-        // TODO: MOVE TO ACCOUNTS
-        // {
-        //     let mut nostr_mls = self.nostr_mls.lock().unwrap_or_else(|e| {
-        //         tracing::error!("Failed to lock nostr_mls: {:?}", e);
-        //         panic!("Mutex poisoned: {}", e);
-        //     });
-
-        //     if let Some(_mls) = nostr_mls.as_mut() {
-        //         // Close the current MLS instance
-        //         *nostr_mls = None;
-        //     }
-        // }
 
         // Remove MLS related data
         let mls_dir = self.config.data_dir.join("mls");
@@ -262,6 +248,13 @@ impl Whitenoise {
                 }
             }
         }
+
+        // Shutdown the event processing loop
+        self.shutdown_event_processing().await?;
+
+        // Clear the accounts map
+        self.accounts.clear();
+        self.active_account = None;
 
         Ok(())
     }

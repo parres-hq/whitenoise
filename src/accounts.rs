@@ -116,21 +116,18 @@ impl Account {
     }
 
     pub(crate) fn groups_nostr_group_ids(&self) -> core::result::Result<Vec<String>, AccountError> {
-        let mut group_ids = vec![];
-        {
-            let nostr_mls_guard = self.nostr_mls.lock().unwrap();
-            if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-                let groups = nostr_mls.get_groups()?;
-                group_ids = groups
-                    .iter()
-                    .map(|g| g.nostr_group_id)
-                    .collect::<Vec<[u8; 32]>>();
-            }
+        let nostr_mls_guard = self.nostr_mls.lock()
+            .map_err(|_| AccountError::NostrMlsNotInitialized)?;
+
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            let groups = nostr_mls.get_groups()?;
+        Ok(groups
+            .iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect())
+        } else {
+            Ok(Vec::new())
         }
-        Ok(group_ids
-            .into_iter()
-            .map(hex::encode)
-            .collect::<Vec<String>>())
     }
 }
 
@@ -155,11 +152,9 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the account is not found, if deserialization fails,
     /// or if initialization of the NostrManager or NostrMls fails.
     pub(crate) async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
-        let mut txn = self.database.pool.begin().await?;
-
         let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
-            .fetch_one(&mut *txn)
+            .fetch_one(&self.database.pool)
             .await?;
 
         let account = Account {
@@ -173,12 +168,19 @@ impl Whitenoise {
         Ok(account)
     }
 
-    /// Adds a new account to the database using the provided Nostr keys.
+    /// Adds a new account to the database using the provided Nostr keys (atomic operation).
     ///
-    /// This method initializes an `Account` struct with the given keys, fetches relevant events
-    /// (such as metadata and relay lists) from Nostr, and populates the account's fields accordingly.
-    /// It also fetches the contact list, updates relay and onboarding information, saves the account
-    /// to the database, stores the private key, and initializes the Nostr MLS instance for the account.
+    /// This method performs account creation atomically with automatic cleanup on failure.
+    /// The operation follows this sequence:
+    ///
+    /// 1. **Store private key** - Saves the private key to the system keychain/secret store
+    /// 2. **Load onboarding state** - Queries cached Nostr data to determine account setup status
+    /// 3. **Save account to database** - Persists the account record with settings and onboarding info
+    /// 4. **Trigger background sync** - Initiates async fetch of account data (non-critical)
+    ///
+    /// If any critical step (1-3) fails, all previous operations are automatically rolled back
+    /// to ensure no partial account state is left in the system. The background sync step (4)
+    /// is non-critical and will not cause the operation to fail.
     ///
     /// # Arguments
     ///
@@ -186,35 +188,61 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns the newly created `Account` on success.
+    /// Returns the newly created `Account` with default settings and populated onboarding state.
     ///
     /// # Errors
     ///
-    /// Returns a `WhitenoiseError` if any database operation, event fetching, serialization,
-    /// or key storage fails.
+    /// Returns a `WhitenoiseError` if any critical operation fails:
+    /// * Private key storage fails (keychain/secret store error)
+    /// * Onboarding state loading fails (cache query error)
+    /// * Database save fails (transaction or serialization error)
+    ///
+    /// On failure, any partial state (e.g., stored private keys) is automatically cleaned up.
     pub(crate) async fn add_account_from_keys(&self, keys: &Keys) -> Result<Account> {
         tracing::debug!(target: "whitenoise::accounts", "Adding account for pubkey: {}", keys.public_key().to_hex());
 
-        let mut account = Account {
+        // Step 1: Try to store private key first (most likely to fail)
+        // If this fails, we haven't persisted anything yet
+        self.store_private_key(keys).map_err(|e| {
+            tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to store private key: {}", e);
+            e
+        })?;
+        tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Keys stored in secret store");
+
+        // Step 2: Load onboarding state (read-only operation)
+        let onboarding_state = self.load_onboarding_state(keys.public_key()).await.map_err(|e| {
+            tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to load onboarding state: {}", e);
+            // Try to clean up stored private key
+            if let Err(cleanup_err) = self.remove_private_key_for_pubkey(&keys.public_key()) {
+                tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to cleanup private key after onboarding state failure: {}", cleanup_err);
+            }
+            e
+        })?;
+
+        // Step 3: Create account struct and save to database
+        let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
-            onboarding: OnboardingState::default(),
+            onboarding: onboarding_state,
             last_synced: Timestamp::zero(),
             nostr_mls: Arc::new(Mutex::new(None)),
         };
 
-        let onboarding_state = self.load_onboarding_state(keys.public_key()).await?;
-        account.onboarding = onboarding_state;
-
-        self.save_account(&account).await?;
+        self.save_account(&account).await.map_err(|e| {
+            tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to save account: {}", e);
+            // Try to clean up stored private key
+            if let Err(cleanup_err) = self.remove_private_key_for_pubkey(&keys.public_key()) {
+                tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to cleanup private key after account save failure: {}", cleanup_err);
+            }
+            e
+        })?;
         tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Account saved to database");
 
-        // Add the keys to the secret store
-        self.store_private_key(keys)?;
-        tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Keys stored in secret store");
-
-        // Trigger fetch of nostr events on another thread
-        self.background_fetch_account_data(&account).await?;
+        // Step 4: Trigger fetch of nostr events on another thread (least critical)
+        // Don't fail the whole operation if this fails
+        if let Err(e) = self.background_fetch_account_data(&account).await {
+            tracing::warn!(target: "whitenoise::accounts::add_account_from_keys", "Failed to trigger background fetch (non-critical): {}", e);
+        }
 
         Ok(account)
     }
@@ -334,7 +362,7 @@ impl Whitenoise {
 
         let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(mls_storage_dir)?);
         {
-            let mut nostr_mls_guard = account.nostr_mls.lock().unwrap();
+            let mut nostr_mls_guard = account.nostr_mls.lock().map_err(|_| AccountError::NostrMlsNotInitialized)?;
             *nostr_mls_guard = Some(nostr_mls);
         }
         tracing::debug!(target: "whitenoise::api::accounts::login", "NostrMls initialized for account: {}", account.pubkey.to_hex());
@@ -362,8 +390,8 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Starting onboarding process");
 
         // Set onboarding flags
-        account.onboarding.inbox_relays = true;
-        account.onboarding.key_package_relays = true;
+        account.onboarding.inbox_relays = false;
+        account.onboarding.key_package_relays = false;
 
         let default_relays = self.nostr.relays().await?;
 
@@ -498,49 +526,46 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the lock cannot be acquired, if the key package cannot be generated,
     /// or if publishing to Nostr fails.
     pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
-        let mut encoded_key_package: Option<String> = None;
-        let mut tags: Option<[Tag; 4]> = None;
         let key_package_relays = self
             .load_relays(account.pubkey, RelayType::KeyPackage)
             .await?;
 
-        {
+                // Extract key package data while holding the lock
+        let (encoded_key_package, tags) = {
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Attempting to acquire nostr_mls lock");
-            let nostr_mls_guard = match account.nostr_mls.lock() {
-                Ok(guard) => {
-                    tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock acquired");
-                    guard
-                }
-                Err(_) => {
+
+            let nostr_mls_guard = account.nostr_mls.lock()
+                .map_err(|_| {
                     tracing::error!(target: "whitenoise::accounts::publish_key_package_for_account", "Timeout waiting for nostr_mls lock");
-                    return Err(AccountError::NostrMlsNotInitialized)?;
-                }
-            };
-            let _result = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-                let (encoded_key_package_value, tags_value) = nostr_mls
-                    .create_key_package_for_event(&account.pubkey, key_package_relays.clone())
-                    .map_err(AccountError::NostrMlsError)?;
-                encoded_key_package = Some(encoded_key_package_value);
-                tags = Some(tags_value);
-                Ok(())
-            } else {
-                Err(AccountError::NostrMlsNotInitialized)
-            };
-        }
-        tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock released");
+                    AccountError::NostrMlsNotInitialized
+                })?;
+
+            tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock acquired");
+
+            let nostr_mls = nostr_mls_guard.as_ref()
+                .ok_or_else(|| {
+                    tracing::error!(target: "whitenoise::accounts::publish_key_package_for_account", "NostrMls not initialized for account");
+                    AccountError::NostrMlsNotInitialized
+                })?;
+
+            let result = nostr_mls
+                .create_key_package_for_event(&account.pubkey, key_package_relays)
+                .map_err(AccountError::NostrMlsError)?;
+
+            tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock released");
+            result
+        };
 
         let signer = self.get_nostr_keys_for_pubkey(&account.pubkey)?;
-        if encoded_key_package.is_some() && tags.is_some() {
-            let key_package_event_builder =
-                EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package.unwrap())
-                    .tags(tags.unwrap());
+        let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package)
+            .tags(tags);
 
-            let result = self
-                .nostr
-                .publish_event_builder_with_signer(key_package_event_builder.clone(), signer)
-                .await?;
-            tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Published key package to relays: {:?}", result);
-        }
+        let result = self
+            .nostr
+            .publish_event_builder_with_signer(key_package_event_builder, signer)
+            .await?;
+
+        tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Published key package to relays: {:?}", result);
 
         Ok(())
     }
