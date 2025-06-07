@@ -24,7 +24,10 @@ impl NostrManager {
         Ok(Self::relay_urls_from_events(events))
     }
 
-    pub(crate) async fn query_user_contact_list(&self, pubkey: PublicKey) -> Result<HashMap<PublicKey, Option<Metadata>>> {
+    pub(crate) async fn query_user_contact_list(
+        &self,
+        pubkey: PublicKey,
+    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
         let filter = Filter::new()
             .kind(Kind::ContactList)
             .author(pubkey)

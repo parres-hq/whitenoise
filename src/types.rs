@@ -23,3 +23,12 @@ pub enum NostrEncryptionMethod {
     Nip04,
     Nip44,
 }
+
+/// Events that can be processed by the Whitenoise event processing system
+#[derive(Debug)]
+pub enum ProcessableEvent {
+    /// A Nostr event with an optional subscription ID for account-aware processing
+    NostrEvent(Event, Option<String>), // Event and optional subscription_id
+    /// A relay message for logging/monitoring purposes
+    RelayMessage(RelayUrl, String),
+}

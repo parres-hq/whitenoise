@@ -1,11 +1,13 @@
-pub use crate::accounts::{Account, OnboardingState, AccountSettings};
+pub use crate::accounts::{Account, AccountSettings, OnboardingState};
 use crate::database::Database;
 pub use crate::error::{Result, WhitenoiseError};
 use crate::nostr_manager::NostrManager;
+use crate::types::ProcessableEvent;
 
 use anyhow::Context;
 use nostr_sdk::prelude::*;
 use once_cell::sync::OnceCell;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
 
@@ -23,8 +25,6 @@ mod relays;
 // mod media;
 mod secrets_store;
 mod types;
-
-
 
 static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
 static TRACING_INIT: OnceCell<()> = OnceCell::new();
@@ -89,13 +89,14 @@ impl WhitenoiseConfig {
     }
 }
 
-#[derive(Clone)]
 pub struct Whitenoise {
     pub config: WhitenoiseConfig,
     pub accounts: HashMap<PublicKey, Account>,
     pub active_account: Option<PublicKey>,
     pub(crate) database: Arc<Database>,
     pub(crate) nostr: NostrManager,
+    event_sender: Sender<ProcessableEvent>,
+    shutdown_sender: Sender<()>,
 }
 
 impl Whitenoise {
@@ -151,18 +152,36 @@ impl Whitenoise {
         tracing::debug!("Logging initialized in directory: {:?}", logs_dir);
 
         let database = Arc::new(Database::new(data_dir.join("whitenoise.sqlite")).await?);
-        let nostr = NostrManager::new(data_dir.join("nostr_lmdb")).await?;
+
+        // Create event processing channels
+        let (event_sender, event_receiver) = mpsc::channel(500);
+        let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
+
+        // Create NostrManager with event_sender for direct event queuing
+        let nostr = NostrManager::new(data_dir.join("nostr_lmdb"), event_sender.clone()).await?;
 
         // TODO: Load accounts from database
 
-        // Return fully configured, ready-to-go instance
-        Ok(Self {
+        // Create Whitenoise instance
+        let mut whitenoise = Self {
             config,
             database,
             nostr,
             accounts: HashMap::new(),
             active_account: None,
-        })
+            event_sender,
+            shutdown_sender,
+        };
+
+        // Start the event processing loop only when not running tests
+        if !cfg!(test) {
+            whitenoise
+                .start_event_processing_loop(event_receiver, shutdown_receiver)
+                .await;
+        }
+
+        // Return fully configured, ready-to-go instance
+        Ok(whitenoise)
     }
 
     /// Deletes all application data, including the database, MLS data, and log files.
@@ -190,12 +209,12 @@ impl Whitenoise {
     /// ```rust
     /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
     /// # use std::path::Path;
-    /// # async fn example(whitenoise: Whitenoise) -> Result<(), whitenoise::WhitenoiseError> {
+    /// # async fn example(mut whitenoise: Whitenoise) -> Result<(), whitenoise::WhitenoiseError> {
     /// whitenoise.delete_all_data().await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_all_data(&self) -> Result<()> {
+    pub async fn delete_all_data(&mut self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
         // Remove nostr cache first
@@ -203,20 +222,6 @@ impl Whitenoise {
 
         // Remove database (accounts and media) data
         self.database.delete_all_data().await?;
-
-        // Remove MLS related data
-        // TODO: MOVE TO ACCOUNTS
-        // {
-        //     let mut nostr_mls = self.nostr_mls.lock().unwrap_or_else(|e| {
-        //         tracing::error!("Failed to lock nostr_mls: {:?}", e);
-        //         panic!("Mutex poisoned: {}", e);
-        //     });
-
-        //     if let Some(_mls) = nostr_mls.as_mut() {
-        //         // Close the current MLS instance
-        //         *nostr_mls = None;
-        //     }
-        // }
 
         // Remove MLS related data
         let mls_dir = self.config.data_dir.join("mls");
@@ -227,9 +232,9 @@ impl Whitenoise {
                 mls_dir
             );
             tokio::fs::remove_dir_all(&mls_dir).await?;
-            // Recreate the empty directory
-            tokio::fs::create_dir_all(&mls_dir).await?;
         }
+        // Always recreate the empty MLS directory
+        tokio::fs::create_dir_all(&mls_dir).await?;
 
         // Remove logs
         if self.config.logs_dir.exists() {
@@ -244,7 +249,257 @@ impl Whitenoise {
             }
         }
 
+        // Shutdown the event processing loop
+        self.shutdown_event_processing().await?;
+
+        // Clear the accounts map
+        self.accounts.clear();
+        self.active_account = None;
+
         Ok(())
+    }
+
+    /// Start the event processing loop in a background task
+    async fn start_event_processing_loop(
+        &mut self,
+        receiver: Receiver<ProcessableEvent>,
+        shutdown_receiver: Receiver<()>,
+    ) {
+        tokio::spawn(async move {
+            Self::process_events(receiver, shutdown_receiver).await;
+        });
+    }
+
+    /// Queue an event for processing
+    pub async fn queue_event(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
+        match self
+            .event_sender
+            .send(ProcessableEvent::NostrEvent(event, subscription_id))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Failed to queue event: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Queue a relay message for processing
+    pub async fn queue_message(&self, relay_url: RelayUrl, message_str: String) -> Result<()> {
+        match self
+            .event_sender
+            .send(ProcessableEvent::RelayMessage(relay_url, message_str))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Failed to queue message: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Shutdown event processing gracefully
+    pub async fn shutdown_event_processing(&self) -> Result<()> {
+        match self.shutdown_sender.send(()).await {
+            Ok(_) => Ok(()),
+            Err(_) => Ok(()), // Expected if processor already shut down
+        }
+    }
+
+    /// Extract the account pubkey from a subscription_id
+    /// Subscription IDs follow the format: {pubkey}_{subscription_type}
+    fn extract_pubkey_from_subscription_id(subscription_id: &str) -> Option<PublicKey> {
+        if let Some(underscore_pos) = subscription_id.find('_') {
+            let pubkey_str = &subscription_id[..underscore_pos];
+            PublicKey::parse(pubkey_str).ok()
+        } else {
+            None
+        }
+    }
+
+    /// Main event processing loop
+    async fn process_events(mut receiver: Receiver<ProcessableEvent>, mut shutdown: Receiver<()>) {
+        tracing::debug!(
+            target: "whitenoise::event_processing",
+            "Starting event processing loop"
+        );
+
+        let mut shutting_down = false;
+
+        loop {
+            tokio::select! {
+                Some(event) = receiver.recv() => {
+                    tracing::debug!(
+                        target: "whitenoise::event_processing",
+                        "Received event for processing"
+                    );
+
+                    // Process the event
+                    match event {
+                        ProcessableEvent::NostrEvent(event, subscription_id) => {
+                            // Filter and route nostr events based on kind
+                            match event.kind {
+                                Kind::GiftWrap => {
+                                    if let Err(e) = Self::process_giftwrap(event, subscription_id).await {
+                                        tracing::error!(
+                                            target: "whitenoise::event_processing",
+                                            "Error processing giftwrap: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                                Kind::MlsGroupMessage => {
+                                    if let Err(e) = Self::process_mls_message(event, subscription_id).await {
+                                        tracing::error!(
+                                            target: "whitenoise::event_processing",
+                                            "Error processing MLS message: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    // For now, just log other event types
+                                    tracing::debug!(
+                                        target: "whitenoise::event_processing",
+                                        "Received unhandled event of kind: {:?}",
+                                        event.kind
+                                    );
+                                }
+                            }
+                        }
+                        ProcessableEvent::RelayMessage(relay_url, message) => {
+                            Self::process_relay_message(relay_url, message);
+                        }
+                    }
+                }
+                Some(_) = shutdown.recv(), if !shutting_down => {
+                    tracing::info!(
+                        target: "whitenoise::event_processing",
+                        "Received shutdown signal, finishing current queue..."
+                    );
+                    shutting_down = true;
+                    // Continue processing remaining events in queue, but don't wait for new shutdown signals
+                }
+                else => {
+                    if shutting_down {
+                        tracing::debug!(
+                            target: "whitenoise::event_processing",
+                            "Queue flushed, shutting down event processor"
+                        );
+                    } else {
+                        tracing::debug!(
+                            target: "whitenoise::event_processing",
+                            "All channels closed, exiting event processing loop"
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Process giftwrap events with account awareness
+    async fn process_giftwrap(event: Event, subscription_id: Option<String>) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::event_processing",
+            "Processing giftwrap: {:?}",
+            event
+        );
+
+        // For giftwrap events, the target account (who the giftwrap is encrypted for)
+        // is specified in a 'p' tag, not in the event.pubkey field
+        let target_pubkey = event
+            .tags
+            .iter()
+            .find(|tag| tag.kind() == TagKind::p())
+            .and_then(|tag| tag.content())
+            .and_then(|pubkey_str| PublicKey::parse(pubkey_str).ok());
+
+        let target_pubkey = match target_pubkey {
+            Some(pk) => pk,
+            None => {
+                tracing::warn!(
+                    target: "whitenoise::event_processing",
+                    "No target pubkey found in 'p' tag for giftwrap event"
+                );
+                return Ok(());
+            }
+        };
+
+        tracing::debug!(
+            target: "whitenoise::event_processing",
+            "Processing giftwrap for target account: {} (author: {})",
+            target_pubkey.to_hex(),
+            event.pubkey.to_hex()
+        );
+
+        // Validate that this matches the subscription_id if available
+        if let Some(sub_id) = subscription_id {
+            if let Some(sub_pubkey) = Self::extract_pubkey_from_subscription_id(&sub_id) {
+                if target_pubkey != sub_pubkey {
+                    tracing::warn!(
+                        target: "whitenoise::event_processing",
+                        "Giftwrap target pubkey {} does not match subscription pubkey {} - possible routing error",
+                        target_pubkey.to_hex(),
+                        sub_pubkey.to_hex()
+                    );
+                    return Ok(());
+                }
+            }
+        }
+
+        // TODO: Implement account-aware giftwrap processing
+        // This requires access to self.accounts and self.get_nostr_keys_for_pubkey()
+        // For now, just log that we received it
+        tracing::info!(
+            target: "whitenoise::event_processing",
+            "Giftwrap processing not yet implemented for account: {}",
+            target_pubkey.to_hex()
+        );
+
+        Ok(())
+    }
+
+    /// Process MLS group messages with account awareness
+    async fn process_mls_message(event: Event, subscription_id: Option<String>) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::event_processing",
+            "Processing MLS message: {:?}",
+            event
+        );
+
+        // Extract the account pubkey from the subscription_id if available
+        if let Some(sub_id) = subscription_id {
+            if let Some(target_pubkey) = Self::extract_pubkey_from_subscription_id(&sub_id) {
+                tracing::debug!(
+                    target: "whitenoise::event_processing",
+                    "Processing MLS message for account: {}",
+                    target_pubkey.to_hex()
+                );
+            }
+        }
+
+        // TODO: Implement account-aware MLS message processing
+        // This requires access to self.accounts and MLS state
+        // For now, just log that we received it
+        tracing::info!(
+            target: "whitenoise::event_processing",
+            "MLS message processing not yet implemented"
+        );
+
+        Ok(())
+    }
+
+    /// Process relay messages for logging/monitoring
+    fn process_relay_message(relay_url: RelayUrl, message_type: String) {
+        tracing::debug!(
+            target: "whitenoise::event_processing::relay_message",
+            "Processing message from {}: {}",
+            relay_url,
+            message_type
+        );
     }
 }
 
@@ -257,5 +512,255 @@ impl std::fmt::Debug for Whitenoise {
             .field("database", &"<REDACTED>")
             .field("nostr", &"<REDACTED>")
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
+        let data_temp_dir = TempDir::new().expect("Failed to create temp data dir");
+        let logs_temp_dir = TempDir::new().expect("Failed to create temp logs dir");
+
+        let config = WhitenoiseConfig::new(data_temp_dir.path(), logs_temp_dir.path());
+
+        (config, data_temp_dir, logs_temp_dir)
+    }
+
+    #[test]
+    fn test_whitenoise_config_new() {
+        let data_dir = std::path::Path::new("/test/data");
+        let logs_dir = std::path::Path::new("/test/logs");
+
+        let config = WhitenoiseConfig::new(data_dir, logs_dir);
+
+        if cfg!(debug_assertions) {
+            assert_eq!(config.data_dir, data_dir.join("dev"));
+            assert_eq!(config.logs_dir, logs_dir.join("dev"));
+        } else {
+            assert_eq!(config.data_dir, data_dir.join("release"));
+            assert_eq!(config.logs_dir, logs_dir.join("release"));
+        }
+    }
+
+    #[test]
+    fn test_whitenoise_config_debug() {
+        let config = WhitenoiseConfig {
+            data_dir: PathBuf::from("/test/data"),
+            logs_dir: PathBuf::from("/test/logs"),
+        };
+
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("data_dir"));
+        assert!(debug_str.contains("logs_dir"));
+    }
+
+    #[tokio::test]
+    async fn test_whitenoise_initialization() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+
+        let result = Whitenoise::initialize_whitenoise(config.clone()).await;
+        assert!(result.is_ok());
+
+        let whitenoise = result.unwrap();
+        assert_eq!(whitenoise.config.data_dir, config.data_dir);
+        assert_eq!(whitenoise.config.logs_dir, config.logs_dir);
+        assert!(whitenoise.accounts.is_empty());
+        assert!(whitenoise.active_account.is_none());
+
+        // Verify directories were created
+        assert!(config.data_dir.exists());
+        assert!(config.logs_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_whitenoise_debug_format() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
+
+        let debug_str = format!("{:?}", whitenoise);
+        assert!(debug_str.contains("Whitenoise"));
+        assert!(debug_str.contains("config"));
+        assert!(debug_str.contains("accounts"));
+        assert!(debug_str.contains("active_account"));
+        assert!(debug_str.contains("<REDACTED>"));
+    }
+
+    #[tokio::test]
+    async fn test_queue_event() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
+
+        // Create a test event
+        let test_keys = Keys::generate();
+        let event = EventBuilder::text_note("test message")
+            .sign_with_keys(&test_keys)
+            .unwrap();
+
+        // In test mode, the event processing loop is not started, so queuing will fail
+        // This is expected behavior - we're testing that the method exists and handles errors correctly
+        let result = whitenoise
+            .queue_event(event, Some("test_subscription".to_string()))
+            .await;
+        assert!(result.is_err()); // Expected to fail because event processor is not running in tests
+    }
+
+    #[tokio::test]
+    async fn test_queue_message() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
+
+        let relay_url = RelayUrl::parse("wss://relay.example.com").unwrap();
+        let message = "test message".to_string();
+
+        // In test mode, the event processing loop is not started, so queuing will fail
+        let result = whitenoise.queue_message(relay_url, message).await;
+        assert!(result.is_err()); // Expected to fail because event processor is not running in tests
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_event_processing() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
+
+        let result = whitenoise.shutdown_event_processing().await;
+        assert!(result.is_ok());
+
+        // Test that multiple shutdowns don't cause errors
+        let result2 = whitenoise.shutdown_event_processing().await;
+        assert!(result2.is_ok());
+    }
+
+    #[test]
+    fn test_extract_pubkey_from_subscription_id() {
+        // Test valid subscription ID format
+        let test_pubkey = Keys::generate().public_key();
+        let subscription_id = format!("{}_messages", test_pubkey.to_hex());
+
+        let extracted = Whitenoise::extract_pubkey_from_subscription_id(&subscription_id);
+        assert!(extracted.is_some());
+        assert_eq!(extracted.unwrap(), test_pubkey);
+
+        // Test invalid format (no underscore)
+        let invalid_id = test_pubkey.to_hex();
+        let extracted = Whitenoise::extract_pubkey_from_subscription_id(&invalid_id);
+        assert!(extracted.is_none());
+
+        // Test invalid pubkey
+        let invalid_subscription = "invalid_pubkey_messages";
+        let extracted = Whitenoise::extract_pubkey_from_subscription_id(invalid_subscription);
+        assert!(extracted.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_all_data() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        let mut whitenoise = Whitenoise::initialize_whitenoise(config.clone())
+            .await
+            .unwrap();
+
+        // Create some test files in the directories
+        let test_data_file = config.data_dir.join("test_data.txt");
+        let test_log_file = config.logs_dir.join("test_log.txt");
+
+        tokio::fs::write(&test_data_file, "test data")
+            .await
+            .unwrap();
+        tokio::fs::write(&test_log_file, "test log").await.unwrap();
+
+        // Verify files exist
+        assert!(test_data_file.exists());
+        assert!(test_log_file.exists());
+
+        // Add a test account to verify clearing
+        let (test_account, test_keys) = Account::new().await.unwrap();
+        let pubkey = test_keys.public_key();
+        whitenoise.accounts.insert(pubkey, test_account);
+        whitenoise.active_account = Some(pubkey);
+
+        assert!(!whitenoise.accounts.is_empty());
+        assert!(whitenoise.active_account.is_some());
+
+        // Delete all data
+        let result = whitenoise.delete_all_data().await;
+        assert!(result.is_ok());
+
+        // Verify accounts are cleared
+        assert!(whitenoise.accounts.is_empty());
+        assert!(whitenoise.active_account.is_none());
+
+        // Verify log file is deleted
+        assert!(!test_log_file.exists());
+
+        // MLS directory should be recreated as empty
+        let mls_dir = config.data_dir.join("mls");
+        assert!(mls_dir.exists());
+        assert!(mls_dir.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_queue_operations_after_shutdown() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
+
+        // Shutdown event processing
+        whitenoise.shutdown_event_processing().await.unwrap();
+
+        // Give a moment for shutdown to complete
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Try to queue an event after shutdown
+        let test_keys = Keys::generate();
+        let event = EventBuilder::text_note("test message")
+            .sign_with_keys(&test_keys)
+            .unwrap();
+
+        // This should fail since the receiver is closed
+        let result = whitenoise.queue_event(event, None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_initializations_with_same_config() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+
+        // First initialization
+        let result1 = Whitenoise::initialize_whitenoise(config.clone()).await;
+        assert!(result1.is_ok());
+
+        // Second initialization with same config should also work
+        let result2 = Whitenoise::initialize_whitenoise(config).await;
+        assert!(result2.is_ok());
+    }
+
+    #[test]
+    fn test_whitenoise_config_clone() {
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        let cloned_config = config.clone();
+
+        assert_eq!(config.data_dir, cloned_config.data_dir);
+        assert_eq!(config.logs_dir, cloned_config.logs_dir);
+    }
+
+    // Test helper functions for subscription ID parsing edge cases
+    #[test]
+    fn test_extract_pubkey_edge_cases() {
+        // Empty string
+        let result = Whitenoise::extract_pubkey_from_subscription_id("");
+        assert!(result.is_none());
+
+        // String with underscore but empty pubkey
+        let result = Whitenoise::extract_pubkey_from_subscription_id("_messages");
+        assert!(result.is_none());
+
+        // String with multiple underscores (should take first part)
+        let test_pubkey = Keys::generate().public_key();
+        let subscription_id = format!("{}_messages_extra_data", test_pubkey.to_hex());
+        let result = Whitenoise::extract_pubkey_from_subscription_id(&subscription_id);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), test_pubkey);
     }
 }

@@ -19,7 +19,6 @@ White Noise is an implementation of the [NIP-EE](https://github.com/nostr-protoc
 ## Releases
 
 Coming soon
-<!-- For the easist, quickest way to get started using White Noise, check out [the releases page](https://github.com/parres-hq/whitenoise/releases). -->
 
 ## Building White Noise Yourself
 
@@ -27,7 +26,7 @@ White Noise is a standard rust crate. Check it out and use it like you would any
 
 1. Clone the repo: `git clone https://github.com/parres-hq/whitenoise.git` and `cd whitenoise`.
 
-In addition, there is a `test-backend` binary in the codebase that runs through much of the API and functions as a sort of integration test. Run it with the following
+In addition, there is a `integration_test` binary in the codebase that runs through much of the API and functions as a sort of integration test. Run it with the following
 
 ```sh
 just int-test
@@ -35,8 +34,14 @@ just int-test
 
 Check formatting, clippy, and docs with the following:
 
-```
+```sh
 just check
+```
+
+Check all those things and run tests with `precommit`
+
+```sh
+just precommit
 ```
 
 ## Contributing
@@ -49,10 +54,10 @@ To get started contributing you'll need to have the [Rust](https://www.rust-lang
 
 ### Formatting, Linting, and Tests
 
-Before submitting PRs, please run the commad to check formatting and linting and run all tests:
+Before submitting PRs, please run the `precommit` command:
 
 ```sh
-just check
+just precommit
 ```
 
 ## License

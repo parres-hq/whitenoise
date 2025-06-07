@@ -7,7 +7,6 @@ use crate::nostr_manager::{NostrManager, Result};
 use nostr_sdk::prelude::*;
 
 impl NostrManager {
-
     // pub async fn fetch_for_user(
     //     &self,
     //     pubkey: PublicKey,
