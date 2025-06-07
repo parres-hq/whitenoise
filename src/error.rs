@@ -23,6 +23,9 @@ pub enum WhitenoiseError {
     #[error("Account not found")]
     AccountNotFound,
 
+    #[error("NostrMls not initialized")]
+    NostrMlsNotInitialized,
+
     #[error("Secrets store error: {0}")]
     SecretsStore(#[from] SecretsStoreError),
 
