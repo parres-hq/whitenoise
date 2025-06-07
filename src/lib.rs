@@ -271,7 +271,7 @@ impl Whitenoise {
     }
 
     /// Queue an event for processing
-    pub async fn queue_event(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
+    pub(crate) async fn queue_event(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
         match self
             .event_sender
             .send(ProcessableEvent::NostrEvent(event, subscription_id))
@@ -286,7 +286,7 @@ impl Whitenoise {
     }
 
     /// Queue a relay message for processing
-    pub async fn queue_message(&self, relay_url: RelayUrl, message_str: String) -> Result<()> {
+    pub(crate) async fn queue_message(&self, relay_url: RelayUrl, message_str: String) -> Result<()> {
         match self
             .event_sender
             .send(ProcessableEvent::RelayMessage(relay_url, message_str))
@@ -301,7 +301,7 @@ impl Whitenoise {
     }
 
     /// Shutdown event processing gracefully
-    pub async fn shutdown_event_processing(&self) -> Result<()> {
+    pub(crate) async fn shutdown_event_processing(&self) -> Result<()> {
         match self.shutdown_sender.send(()).await {
             Ok(_) => Ok(()),
             Err(_) => Ok(()), // Expected if processor already shut down
