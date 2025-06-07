@@ -270,36 +270,6 @@ impl Whitenoise {
         });
     }
 
-    /// Queue an event for processing
-    pub(crate) async fn queue_event(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
-        match self
-            .event_sender
-            .send(ProcessableEvent::NostrEvent(event, subscription_id))
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!(
-                "Failed to queue event: {}",
-                e
-            ))),
-        }
-    }
-
-    /// Queue a relay message for processing
-    pub(crate) async fn queue_message(&self, relay_url: RelayUrl, message_str: String) -> Result<()> {
-        match self
-            .event_sender
-            .send(ProcessableEvent::RelayMessage(relay_url, message_str))
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => Err(WhitenoiseError::Other(anyhow::anyhow!(
-                "Failed to queue message: {}",
-                e
-            ))),
-        }
-    }
-
     /// Shutdown event processing gracefully
     pub(crate) async fn shutdown_event_processing(&self) -> Result<()> {
         match self.shutdown_sender.send(()).await {
@@ -590,38 +560,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_queue_event() {
-        let (config, _data_temp, _logs_temp) = create_test_config();
-        let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
-
-        // Create a test event
-        let test_keys = Keys::generate();
-        let event = EventBuilder::text_note("test message")
-            .sign_with_keys(&test_keys)
-            .unwrap();
-
-        // In test mode, the event processing loop is not started, so queuing will fail
-        // This is expected behavior - we're testing that the method exists and handles errors correctly
-        let result = whitenoise
-            .queue_event(event, Some("test_subscription".to_string()))
-            .await;
-        assert!(result.is_err()); // Expected to fail because event processor is not running in tests
-    }
-
-    #[tokio::test]
-    async fn test_queue_message() {
-        let (config, _data_temp, _logs_temp) = create_test_config();
-        let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
-
-        let relay_url = RelayUrl::parse("wss://relay.example.com").unwrap();
-        let message = "test message".to_string();
-
-        // In test mode, the event processing loop is not started, so queuing will fail
-        let result = whitenoise.queue_message(relay_url, message).await;
-        assert!(result.is_err()); // Expected to fail because event processor is not running in tests
-    }
-
-    #[tokio::test]
     async fn test_shutdown_event_processing() {
         let (config, _data_temp, _logs_temp) = create_test_config();
         let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
@@ -712,15 +650,8 @@ mod tests {
         // Give a moment for shutdown to complete
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        // Try to queue an event after shutdown
-        let test_keys = Keys::generate();
-        let event = EventBuilder::text_note("test message")
-            .sign_with_keys(&test_keys)
-            .unwrap();
-
-        // This should fail since the receiver is closed
-        let result = whitenoise.queue_event(event, None).await;
-        assert!(result.is_err());
+        // Test that shutdown completed successfully
+        // (We can't test queuing operations since those methods were removed)
     }
 
     #[tokio::test]
