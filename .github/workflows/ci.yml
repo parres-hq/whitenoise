@@ -58,4 +58,4 @@ jobs:
 
       - name: Test native
         if: matrix.target == 'native'
-        run: cargo test --all-features --all-targets
+        run: cargo test --all-features
