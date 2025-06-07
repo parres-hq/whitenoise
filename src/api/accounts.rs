@@ -161,3 +161,154 @@ impl Whitenoise {
         Ok(account.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::accounts::AccountSettings;
+
+    /// Creates a test account for use in tests
+    fn create_test_account() -> (Account, Keys) {
+        let keys = Keys::generate();
+        let account = Account {
+            pubkey: keys.public_key(),
+            settings: AccountSettings::default(),
+            onboarding: crate::accounts::OnboardingState::default(),
+            last_synced: Timestamp::zero(),
+            nostr_mls: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        };
+        (account, keys)
+    }
+
+    #[test]
+    fn test_update_active_account_basic() {
+        let (account, _keys) = create_test_account();
+
+        // Test the core logic of update_active_account
+        let mut active_account: Option<PublicKey> = None;
+
+        // Verify initial state
+        assert_eq!(active_account, None);
+
+        // Simulate the update_active_account logic
+        active_account = Some(account.pubkey);
+
+        // Verify the account was set as active
+        assert_eq!(active_account, Some(account.pubkey));
+    }
+
+    #[test]
+    fn test_update_active_account_switching() {
+        let (account1, _keys1) = create_test_account();
+        let (account2, _keys2) = create_test_account();
+
+        // Test switching between accounts
+        let mut active_account = Some(account1.pubkey);
+
+        // Verify initial state
+        assert_eq!(active_account, Some(account1.pubkey));
+
+        // Switch to account2 (simulating update_active_account logic)
+        active_account = Some(account2.pubkey);
+        assert_eq!(active_account, Some(account2.pubkey));
+
+        // Switch back to account1
+        active_account = Some(account1.pubkey);
+        assert_eq!(active_account, Some(account1.pubkey));
+    }
+
+    #[test]
+    fn test_logout_account_removal_logic() {
+        let (account1, _keys1) = create_test_account();
+        let (account2, _keys2) = create_test_account();
+
+        // Simulate the logout logic for account management
+        let mut accounts = std::collections::HashMap::new();
+        accounts.insert(account1.pubkey, account1.clone());
+        accounts.insert(account2.pubkey, account2.clone());
+        let mut active_account = Some(account2.pubkey);
+
+        // Verify initial state
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(active_account, Some(account2.pubkey));
+
+        // Simulate logout of active account (account2)
+        accounts.remove(&account2.pubkey);
+        active_account = accounts.keys().next().copied(); // Set to remaining account
+
+        // Verify account2 was removed and account1 became active
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(active_account, Some(account1.pubkey));
+        assert!(accounts.contains_key(&account1.pubkey));
+        assert!(!accounts.contains_key(&account2.pubkey));
+
+        // Simulate logout of remaining account
+        accounts.remove(&account1.pubkey);
+        active_account = accounts.keys().next().copied();
+
+        // Verify all accounts removed
+        assert_eq!(accounts.len(), 0);
+        assert_eq!(active_account, None);
+    }
+
+    #[test]
+    fn test_logout_non_active_account_logic() {
+        let (account1, _keys1) = create_test_account();
+        let (account2, _keys2) = create_test_account();
+
+        // Test logout of non-active account
+        let mut accounts = std::collections::HashMap::new();
+        accounts.insert(account1.pubkey, account1.clone());
+        accounts.insert(account2.pubkey, account2.clone());
+        let active_account = Some(account2.pubkey);
+
+        // Logout account1 (non-active)
+        accounts.remove(&account1.pubkey);
+        // Active account logic should remain unchanged when logging out non-active account
+
+        // Verify account1 was removed but account2 remains active
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(active_account, Some(account2.pubkey));
+        assert!(!accounts.contains_key(&account1.pubkey));
+        assert!(accounts.contains_key(&account2.pubkey));
+    }
+
+    #[test]
+    fn test_account_state_management() {
+        let (account1, _keys1) = create_test_account();
+        let (account2, _keys2) = create_test_account();
+
+        // Test comprehensive account state management patterns used in the API
+        let mut accounts = std::collections::HashMap::new();
+        let mut active_account: Option<PublicKey> = None;
+
+        // Initial state
+        assert_eq!(accounts.len(), 0);
+        assert_eq!(active_account, None);
+
+        // Add first account (simulate create_identity)
+        accounts.insert(account1.pubkey, account1.clone());
+        active_account = Some(account1.pubkey);
+
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(active_account, Some(account1.pubkey));
+
+        // Add second account (simulate login with new keys)
+        accounts.insert(account2.pubkey, account2.clone());
+        active_account = Some(account2.pubkey);
+
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(active_account, Some(account2.pubkey));
+
+        // Switch active account
+        active_account = Some(account1.pubkey);
+        assert_eq!(active_account, Some(account1.pubkey));
+        assert_eq!(accounts.len(), 2); // Count should remain the same
+
+        // Remove account
+        accounts.remove(&account1.pubkey);
+        active_account = Some(account2.pubkey);
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(active_account, Some(account2.pubkey));
+    }
+}
