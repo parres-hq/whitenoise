@@ -8,7 +8,7 @@ clear-dev-data:
 
 # Run integration_test binary using the local relays and data dirs
 int-test:
-    cargo run --bin integration_test -- --data-dir ./dev/data/test-backend/ --logs-dir ./dev/data/test-backend/
+    cargo run --bin integration_test -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
 # Run all tests (unit tests, integration tests, and doc tests)
 test:

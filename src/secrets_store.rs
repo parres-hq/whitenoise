@@ -1,4 +1,3 @@
-use crate::Whitenoise;
 use base64::{engine::general_purpose, Engine as _};
 use keyring::Entry;
 use nostr_sdk::{Keys, PublicKey};
@@ -37,9 +36,19 @@ pub enum SecretsStoreError {
 
 const SERVICE_NAME: &str = "whitenoise";
 
-impl Whitenoise {
+pub struct SecretsStore {
+    data_dir: PathBuf,
+}
+
+impl SecretsStore {
+    pub fn new(data_dir: &Path) -> Self {
+        Self {
+            data_dir: data_dir.to_path_buf(),
+        }
+    }
+
     fn get_device_key(&self) -> Vec<u8> {
-        let uuid_file = self.config.data_dir.join("whitenoise_uuid");
+        let uuid_file = self.data_dir.join("whitenoise_uuid");
 
         let uuid = if uuid_file.exists() {
             // Read existing UUID
@@ -49,8 +58,7 @@ impl Whitenoise {
         } else {
             // Generate new UUID
             let new_uuid = Uuid::new_v4();
-            let _ = std::fs::create_dir_all(&self.config.data_dir)
-                .map_err(SecretsStoreError::FileError);
+            let _ = std::fs::create_dir_all(&self.data_dir).map_err(SecretsStoreError::FileError);
             let _ = std::fs::write(uuid_file, new_uuid.to_string())
                 .map_err(SecretsStoreError::FileError);
             Ok(new_uuid)
@@ -59,8 +67,8 @@ impl Whitenoise {
         uuid.expect("Couldn't unwrap UUID").as_bytes().to_vec()
     }
 
-    fn get_file_path(data_dir: &Path) -> PathBuf {
-        data_dir.join("whitenoise.json")
+    fn get_file_path(&self) -> PathBuf {
+        self.data_dir.join("whitenoise.json")
     }
 
     fn obfuscate(&self, data: &str) -> String {
@@ -86,7 +94,7 @@ impl Whitenoise {
     }
 
     fn read_secrets_file(&self) -> Result<Value, SecretsStoreError> {
-        let content = match fs::read_to_string(Self::get_file_path(&self.config.data_dir)) {
+        let content = match fs::read_to_string(self.get_file_path()) {
             Ok(content) => content,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::from("{}"),
             Err(e) => return Err(e.into()),
@@ -96,7 +104,7 @@ impl Whitenoise {
 
     fn write_secrets_file(&self, secrets: &Value) -> Result<(), SecretsStoreError> {
         let content = serde_json::to_string_pretty(secrets)?;
-        fs::write(Self::get_file_path(&self.config.data_dir), content)?;
+        fs::write(self.get_file_path(), content)?;
         Ok(())
     }
 
@@ -108,7 +116,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `keys` - A reference to a `Keys` object containing the keypair to store.
-    /// * `file_path` - The path to the secrets file.
     ///
     /// # Returns
     ///
@@ -120,7 +127,7 @@ impl Whitenoise {
     /// * The Entry creation fails
     /// * Setting the password in the keyring fails
     /// * The secret key cannot be retrieved from the keypair
-    pub(crate) fn store_private_key(&self, keys: &Keys) -> Result<(), SecretsStoreError> {
+    pub fn store_private_key(&self, keys: &Keys) -> Result<(), SecretsStoreError> {
         if cfg!(target_os = "android") {
             let mut secrets = self.read_secrets_file().unwrap_or(json!({}));
             let obfuscated_key = self.obfuscate(keys.secret_key().to_secret_hex().as_str());
@@ -144,8 +151,7 @@ impl Whitenoise {
     ///
     /// # Arguments
     ///
-    /// * `pubkey` - A string slice containing the public key to look up.
-    /// * `file_path` - The path to the secrets file.
+    /// * `pubkey` - A reference to the PublicKey to look up.
     ///
     /// # Returns
     ///
@@ -157,10 +163,7 @@ impl Whitenoise {
     /// * The Entry creation fails
     /// * Retrieving the password from the keyring fails
     /// * Parsing the private key into a `Keys` object fails
-    pub(crate) fn get_nostr_keys_for_pubkey(
-        &self,
-        pubkey: &PublicKey,
-    ) -> Result<Keys, SecretsStoreError> {
+    pub fn get_nostr_keys_for_pubkey(&self, pubkey: &PublicKey) -> Result<Keys, SecretsStoreError> {
         let hex_pubkey = pubkey.to_hex();
         if cfg!(target_os = "android") {
             let secrets = self.read_secrets_file()?;
@@ -187,8 +190,7 @@ impl Whitenoise {
     ///
     /// # Arguments
     ///
-    /// * `pubkey` - A string slice containing the public key for which to remove the associated private key.
-    /// * `file_path` - The path to the secrets file.
+    /// * `pubkey` - A reference to the PublicKey for which to remove the associated private key.
     ///
     /// # Returns
     ///
@@ -198,8 +200,7 @@ impl Whitenoise {
     ///
     /// This function will return an error if:
     /// * The Entry creation fails
-    #[allow(dead_code)]
-    pub(crate) fn remove_private_key_for_pubkey(
+    pub fn remove_private_key_for_pubkey(
         &self,
         pubkey: &PublicKey,
     ) -> Result<(), SecretsStoreError> {
@@ -223,7 +224,7 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Whitenoise, WhitenoiseConfig};
+    use crate::whitenoise::{Whitenoise, WhitenoiseConfig};
     use tempfile::TempDir;
 
     async fn build_whitenoise() -> Whitenoise {
@@ -245,20 +246,21 @@ mod tests {
     #[tokio::test]
     async fn test_store_and_retrieve_private_key() -> Result<(), SecretsStoreError> {
         let wn = build_whitenoise().await;
+        let secrets_store = SecretsStore::new(&wn.config.data_dir);
         let keys = Keys::generate();
         let pubkey = keys.public_key();
 
         // Store the private key
-        wn.store_private_key(&keys).unwrap();
+        secrets_store.store_private_key(&keys)?;
 
         // Retrieve the keys
-        let retrieved_keys = wn.get_nostr_keys_for_pubkey(&pubkey).unwrap();
+        let retrieved_keys = secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
 
         assert_eq!(keys.public_key(), retrieved_keys.public_key());
         assert_eq!(keys.secret_key(), retrieved_keys.secret_key());
 
         // Clean up
-        wn.remove_private_key_for_pubkey(&pubkey).unwrap();
+        secrets_store.remove_private_key_for_pubkey(&pubkey)?;
 
         Ok(())
     }
@@ -266,17 +268,18 @@ mod tests {
     #[tokio::test]
     async fn test_remove_private_key() -> Result<(), SecretsStoreError> {
         let wn = build_whitenoise().await;
+        let secrets_store = SecretsStore::new(&wn.config.data_dir);
         let keys = Keys::generate();
         let pubkey = keys.public_key();
 
         // Store the private key
-        wn.store_private_key(&keys).unwrap();
+        secrets_store.store_private_key(&keys)?;
 
         // Remove the private key
-        wn.remove_private_key_for_pubkey(&pubkey).unwrap();
+        secrets_store.remove_private_key_for_pubkey(&pubkey)?;
 
         // Attempt to retrieve the removed key
-        let result = wn.get_nostr_keys_for_pubkey(&pubkey);
+        let result = secrets_store.get_nostr_keys_for_pubkey(&pubkey);
 
         assert!(result.is_err());
 
@@ -286,39 +289,53 @@ mod tests {
     #[tokio::test]
     async fn test_get_nonexistent_key() {
         let wn = build_whitenoise().await;
+        let secrets_store = SecretsStore::new(&wn.config.data_dir);
         let keys = Keys::generate();
         let pubkey = keys.public_key();
-        let result = wn.get_nostr_keys_for_pubkey(&pubkey);
+        let result = secrets_store.get_nostr_keys_for_pubkey(&pubkey);
 
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_secrets_store_creation() {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let secrets_store = SecretsStore::new(temp_dir.path());
+
+        // Test that the file path is constructed correctly
+        assert_eq!(
+            secrets_store.get_file_path(),
+            temp_dir.path().join("whitenoise.json")
+        );
+    }
+
     #[tokio::test]
     #[cfg(target_os = "android")]
-    async fn test_android_store_and_retrieve_private_key() -> Result<()> {
+    async fn test_android_store_and_retrieve_private_key() -> Result<(), SecretsStoreError> {
         let wn = build_whitenoise().await;
+        let secrets_store = SecretsStore::new(&wn.config.data_dir);
         let keys = Keys::generate();
-        let pubkey = keys.public_key().to_hex();
+        let pubkey = keys.public_key();
 
         // Store the private key
-        wn.store_private_key(&keys).unwrap();
+        secrets_store.store_private_key(&keys)?;
 
         // Retrieve the keys
-        let retrieved_keys = wn.get_nostr_keys_for_pubkey(&pubkey).unwrap();
+        let retrieved_keys = secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
 
         assert_eq!(keys.public_key(), retrieved_keys.public_key());
         assert_eq!(keys.secret_key(), retrieved_keys.secret_key());
 
         // Verify that the key is stored in the file
-        let secrets = wn.read_secrets_file().unwrap();
-        assert!(secrets.get(&pubkey).is_some());
+        let secrets = secrets_store.read_secrets_file()?;
+        assert!(secrets.get(&pubkey.to_hex()).is_some());
 
         // Clean up
-        wn.remove_private_key_for_pubkey(&pubkey).unwrap();
+        secrets_store.remove_private_key_for_pubkey(&pubkey)?;
 
         // Verify that the key is removed from the file
-        let secrets = wn.read_secrets_file().unwrap();
-        assert!(secrets.get(&pubkey).is_none());
+        let secrets = secrets_store.read_secrets_file()?;
+        assert!(secrets.get(&pubkey.to_hex()).is_none());
 
         Ok(())
     }

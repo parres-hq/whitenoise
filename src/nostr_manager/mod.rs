@@ -8,7 +8,6 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc::Sender, Mutex};
 
-pub mod fetch;
 pub mod parser;
 pub mod query;
 // pub mod search;
@@ -56,7 +55,7 @@ impl Default for NostrManagerSettings {
         if cfg!(debug_assertions) {
             relays.push("ws://localhost:8080".to_string());
             relays.push("ws://localhost:7777".to_string());
-            relays.push("wss://purplepag.es".to_string());
+            // relays.push("wss://purplepag.es".to_string());
             // relays.push("wss://nos.lol".to_string());
         } else {
             relays.push("wss://relay.damus.io".to_string());
@@ -102,22 +101,49 @@ impl NostrManager {
 
         // let blossom = BlossomClient::new(&settings.blossom_server);
 
-        // Add the default relays and connect only when not running tests
-        if !cfg!(test) {
-            for relay in &settings.relays {
-                client.add_relay(relay).await?;
-            }
-
-            // Connect to the default relays
-            client.connect().await;
+        // Add the default relays
+        for relay in &settings.relays {
+            client.add_relay(relay).await?;
         }
 
-        // Set up notification handler only when not running tests
-        if !cfg!(test) {
-            // Set up notification handler - forward events directly to Whitenoise
-            if let Err(e) = client
+        // Connect to relays with a timeout to prevent blocking
+        let connection_timeout = Duration::from_secs(5);
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::new",
+            "Attempting to connect to relays with {}s timeout...",
+            connection_timeout.as_secs()
+        );
+
+        // Use timeout for connection to prevent indefinite blocking
+        match tokio::time::timeout(connection_timeout, client.connect()).await {
+            Ok(_) => {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::new",
+                    "Successfully connected to relays"
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    target: "whitenoise::nostr_manager::new",
+                    "Connection timeout after {}s - continuing without relay connections",
+                    connection_timeout.as_secs()
+                );
+            }
+        }
+
+        // Set up notification handler with error handling
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::new",
+            "Setting up notification handler..."
+        );
+
+        // Spawn notification handler in a background task to prevent blocking
+        let client_clone = client.clone();
+        let event_sender_clone = event_sender.clone();
+        tokio::spawn(async move {
+            if let Err(e) = client_clone
                 .handle_notifications(move |notification| {
-                    let sender = event_sender.clone();
+                    let sender = event_sender_clone.clone();
                     async move {
                         match notification {
                             RelayPoolNotification::Message { relay_url, message } => {
@@ -164,18 +190,18 @@ impl NostrManager {
                                         }
                                     }
                                 }
-                                Ok(false)
+                                Ok(false) // Continue processing notifications
                             }
                             RelayPoolNotification::Shutdown => {
                                 tracing::debug!(
                                     target: "whitenoise::nostr_client::handle_notifications",
                                     "Relay pool shutdown"
                                 );
-                                Ok(true)
+                                Ok(true) // Exit notification loop
                             }
                             _ => {
                                 // Ignore other notification types
-                                Ok(false)
+                                Ok(false) // Continue processing notifications
                             }
                         }
                     }
@@ -188,7 +214,12 @@ impl NostrManager {
                     e
                 );
             }
-        }
+        });
+
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::new",
+            "NostrManager initialization completed"
+        );
 
         Ok(Self {
             client,
@@ -428,6 +459,65 @@ impl NostrManager {
         self.client.database().wipe().await?;
         Ok(())
     }
+
+    pub async fn fetch_all_user_data(
+        &self,
+        signer: impl NostrSigner + 'static,
+        last_synced: Timestamp,
+        group_ids: Vec<String>,
+    ) -> Result<()> {
+        let pubkey = signer.get_public_key().await?;
+        self.client.set_signer(signer).await;
+
+        // Create a filter for all metadata-related events (user metadata and contacts)
+        let contacts_pubkeys = self
+            .client
+            .get_contact_list_public_keys(self.timeout().await?)
+            .await?;
+
+        let mut metadata_authors = contacts_pubkeys;
+        metadata_authors.push(pubkey);
+
+        let metadata_filter = Filter::new().kind(Kind::Metadata).authors(metadata_authors);
+
+        // Create a filter for all relay-related events
+        let relay_filter = Filter::new().author(pubkey).kinds(vec![
+            Kind::RelayList,
+            Kind::InboxRelays,
+            Kind::MlsKeyPackageRelays,
+        ]);
+
+        // Create a filter for all MLS-related events
+        let mls_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
+
+        // Create a filter for gift wrapped events
+        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
+
+        // Create a filter for group messages
+        let group_messages_filter = Filter::new()
+            .kind(Kind::MlsGroupMessage)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
+            .since(last_synced)
+            .until(Timestamp::now());
+
+        // Fetch all events in parallel
+        // We don't need to handle the events, they'll be processed in the background by the event processor.
+        let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
+            self.client
+                .fetch_events(metadata_filter, self.timeout().await?),
+            self.client
+                .fetch_events(relay_filter, self.timeout().await?),
+            self.client.fetch_events(mls_filter, self.timeout().await?),
+            self.client
+                .fetch_events(giftwrap_filter, self.timeout().await?),
+            self.client
+                .fetch_events(group_messages_filter, self.timeout().await?)
+        );
+
+        self.client.unset_signer().await;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -451,7 +541,6 @@ mod tests {
         if cfg!(debug_assertions) {
             assert!(settings.relays.contains(&"ws://localhost:8080".to_string()));
             assert!(settings.relays.contains(&"ws://localhost:7777".to_string()));
-            assert!(settings.relays.contains(&"wss://purplepag.es".to_string()));
         } else {
             assert!(settings
                 .relays
