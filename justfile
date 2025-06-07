@@ -31,6 +31,9 @@ check-docs:
 check:
     @bash scripts/check-all.sh
 
+# Run pre-commit checks (linting, formatting, docs, and tests)
+precommit: check test
+
 
 ######################
 # Build
