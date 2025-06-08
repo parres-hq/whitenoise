@@ -3,10 +3,11 @@ use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::Mutex;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::accounts::{Account, AccountRow, AccountSettings, OnboardingState};
 use crate::database::Database;
@@ -636,10 +637,7 @@ impl Whitenoise {
 
         let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(mls_storage_dir)?);
         {
-            let mut nostr_mls_guard = account
-                .nostr_mls
-                .lock()
-                .map_err(|_| WhitenoiseError::NostrMlsNotInitialized)?;
+            let mut nostr_mls_guard = account.nostr_mls.lock().await;
             *nostr_mls_guard = Some(nostr_mls);
         }
         tracing::debug!(target: "whitenoise::api::accounts::login", "NostrMls initialized for account: {}", account.pubkey.to_hex());
@@ -815,11 +813,7 @@ impl Whitenoise {
         let (encoded_key_package, tags) = {
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Attempting to acquire nostr_mls lock");
 
-            let nostr_mls_guard = account.nostr_mls.lock()
-                .map_err(|_| {
-                    tracing::error!(target: "whitenoise::accounts::publish_key_package_for_account", "Timeout waiting for nostr_mls lock");
-                    WhitenoiseError::NostrMlsNotInitialized
-                })?;
+            let nostr_mls_guard = account.nostr_mls.lock().await;
 
             tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock acquired");
 
@@ -895,7 +889,7 @@ impl Whitenoise {
     /// // Method returns immediately, data fetch continues in background
     /// ```
     async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
-        let group_ids = account.groups_nostr_group_ids()?;
+        let group_ids = account.groups_nostr_group_ids().await?;
         let nostr = self.nostr.clone();
         let signer = self
             .secrets_store
@@ -1261,7 +1255,7 @@ mod tests {
             settings: AccountSettings::default(),
             onboarding: crate::accounts::OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            nostr_mls: std::sync::Arc::new(Mutex::new(None)),
         };
         (account, keys)
     }

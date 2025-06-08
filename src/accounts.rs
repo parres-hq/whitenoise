@@ -3,7 +3,8 @@ use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::nostr_manager::NostrManagerError;
 
@@ -106,17 +107,16 @@ impl Account {
             settings: AccountSettings::default(),
             onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(Mutex::new(None)),
+            nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
         };
 
         Ok((account, keys))
     }
 
-    pub(crate) fn groups_nostr_group_ids(&self) -> core::result::Result<Vec<String>, AccountError> {
-        let nostr_mls_guard = self
-            .nostr_mls
-            .lock()
-            .map_err(|_| AccountError::NostrMlsNotInitialized)?;
+    pub(crate) async fn groups_nostr_group_ids(
+        &self,
+    ) -> core::result::Result<Vec<String>, AccountError> {
+        let nostr_mls_guard = self.nostr_mls.lock().await;
 
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             let groups = nostr_mls.get_groups()?;
@@ -133,7 +133,7 @@ impl Account {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_account_new_creates_account_and_keys() {
@@ -172,7 +172,7 @@ mod tests {
             settings: AccountSettings::default(),
             onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(Mutex::new(None)),
+            nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
         };
 
         let debug_str = format!("{:?}", account);
@@ -182,18 +182,18 @@ mod tests {
         assert!(!debug_str.contains("NostrMls"));
     }
 
-    #[test]
-    fn test_groups_nostr_group_ids_when_nostr_mls_none() {
+    #[tokio::test]
+    async fn test_groups_nostr_group_ids_when_nostr_mls_none() {
         let keys = Keys::generate();
         let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
             onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(Mutex::new(None)),
+            nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
         };
 
-        let group_ids = account.groups_nostr_group_ids().unwrap();
+        let group_ids = account.groups_nostr_group_ids().await.unwrap();
         assert!(group_ids.is_empty());
     }
 
@@ -279,7 +279,7 @@ mod tests {
                 },
                 onboarding: OnboardingState::default(),
                 last_synced: Timestamp::zero(),
-                nostr_mls: Arc::new(Mutex::new(None)),
+                nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
             };
             (account, keys)
         }
