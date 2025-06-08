@@ -8,7 +8,6 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc::Sender, Mutex};
 
-pub mod fetch;
 pub mod parser;
 pub mod query;
 // pub mod search;
@@ -34,6 +33,8 @@ pub enum NostrManagerError {
     IoError(String),
     #[error("Account error: {0}")]
     AccountError(String),
+    #[error("Failed to connect to any relays")]
+    NoRelayConnections,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +57,7 @@ impl Default for NostrManagerSettings {
         if cfg!(debug_assertions) {
             relays.push("ws://localhost:8080".to_string());
             relays.push("ws://localhost:7777".to_string());
-            relays.push("wss://purplepag.es".to_string());
+            // relays.push("wss://purplepag.es".to_string());
             // relays.push("wss://nos.lol".to_string());
         } else {
             relays.push("wss://relay.damus.io".to_string());
@@ -85,9 +86,11 @@ impl NostrManager {
     ///
     /// * `db_path` - The path to the nostr cache database
     /// * `event_sender` - Channel sender for forwarding events to Whitenoise for processing
-    pub async fn new(
+    /// * `connect_to_relays` - Whether to attempt connecting to relays (false for testing)
+    async fn new(
         db_path: PathBuf,
         event_sender: Sender<crate::types::ProcessableEvent>,
+        connect_to_relays: bool,
     ) -> Result<Self> {
         let opts = Options::default();
 
@@ -100,24 +103,38 @@ impl NostrManager {
 
         let settings = NostrManagerSettings::default();
 
-        // let blossom = BlossomClient::new(&settings.blossom_server);
-
-        // Add the default relays and connect only when not running tests
-        if !cfg!(test) {
-            for relay in &settings.relays {
-                client.add_relay(relay).await?;
-            }
-
-            // Connect to the default relays
-            client.connect().await;
+        // Add the default relays
+        for relay in &settings.relays {
+            client.add_relay(relay).await?;
         }
 
-        // Set up notification handler only when not running tests
-        if !cfg!(test) {
-            // Set up notification handler - forward events directly to Whitenoise
-            if let Err(e) = client
+        // Connect to relays if requested
+        if connect_to_relays {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::new",
+                "Connecting to relays..."
+            );
+            client.connect().await;
+        } else {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::new",
+                "Created NostrManager without connecting to relays (connect_to_relays=false)"
+            );
+        }
+
+        // Set up notification handler with error handling
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::new",
+            "Setting up notification handler..."
+        );
+
+        // Spawn notification handler in a background task to prevent blocking
+        let client_clone = client.clone();
+        let event_sender_clone = event_sender.clone();
+        tokio::spawn(async move {
+            if let Err(e) = client_clone
                 .handle_notifications(move |notification| {
-                    let sender = event_sender.clone();
+                    let sender = event_sender_clone.clone();
                     async move {
                         match notification {
                             RelayPoolNotification::Message { relay_url, message } => {
@@ -164,18 +181,18 @@ impl NostrManager {
                                         }
                                     }
                                 }
-                                Ok(false)
+                                Ok(false) // Continue processing notifications
                             }
                             RelayPoolNotification::Shutdown => {
                                 tracing::debug!(
                                     target: "whitenoise::nostr_client::handle_notifications",
                                     "Relay pool shutdown"
                                 );
-                                Ok(true)
+                                Ok(true) // Exit notification loop
                             }
                             _ => {
                                 // Ignore other notification types
-                                Ok(false)
+                                Ok(false) // Continue processing notifications
                             }
                         }
                     }
@@ -188,13 +205,34 @@ impl NostrManager {
                     e
                 );
             }
-        }
+        });
+
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::new",
+            "NostrManager initialization completed"
+        );
 
         Ok(Self {
             client,
-            // blossom,
             settings: Arc::new(Mutex::new(settings)),
         })
+    }
+
+    /// Create a new Nostr manager with relay connections (for production use)
+    pub async fn new_with_connections(
+        db_path: PathBuf,
+        event_sender: Sender<crate::types::ProcessableEvent>,
+    ) -> Result<Self> {
+        Self::new(db_path, event_sender, true).await
+    }
+
+    /// Create a new Nostr manager without attempting to connect to relays (for testing)
+    #[cfg(test)]
+    pub async fn new_without_connection(
+        db_path: PathBuf,
+        event_sender: Sender<crate::types::ProcessableEvent>,
+    ) -> Result<Self> {
+        Self::new(db_path, event_sender, false).await
     }
 
     /// Get the timeout for the Nostr manager
@@ -428,6 +466,65 @@ impl NostrManager {
         self.client.database().wipe().await?;
         Ok(())
     }
+
+    pub async fn fetch_all_user_data(
+        &self,
+        signer: impl NostrSigner + 'static,
+        last_synced: Timestamp,
+        group_ids: Vec<String>,
+    ) -> Result<()> {
+        let pubkey = signer.get_public_key().await?;
+        self.client.set_signer(signer).await;
+
+        // Create a filter for all metadata-related events (user metadata and contacts)
+        let contacts_pubkeys = self
+            .client
+            .get_contact_list_public_keys(self.timeout().await?)
+            .await?;
+
+        let mut metadata_authors = contacts_pubkeys;
+        metadata_authors.push(pubkey);
+
+        let metadata_filter = Filter::new().kind(Kind::Metadata).authors(metadata_authors);
+
+        // Create a filter for all relay-related events
+        let relay_filter = Filter::new().author(pubkey).kinds(vec![
+            Kind::RelayList,
+            Kind::InboxRelays,
+            Kind::MlsKeyPackageRelays,
+        ]);
+
+        // Create a filter for all MLS-related events
+        let mls_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
+
+        // Create a filter for gift wrapped events
+        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
+
+        // Create a filter for group messages
+        let group_messages_filter = Filter::new()
+            .kind(Kind::MlsGroupMessage)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
+            .since(last_synced)
+            .until(Timestamp::now());
+
+        // Fetch all events in parallel
+        // We don't need to handle the events, they'll be processed in the background by the event processor.
+        let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
+            self.client
+                .fetch_events(metadata_filter, self.timeout().await?),
+            self.client
+                .fetch_events(relay_filter, self.timeout().await?),
+            self.client.fetch_events(mls_filter, self.timeout().await?),
+            self.client
+                .fetch_events(giftwrap_filter, self.timeout().await?),
+            self.client
+                .fetch_events(group_messages_filter, self.timeout().await?)
+        );
+
+        self.client.unset_signer().await;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -451,7 +548,6 @@ mod tests {
         if cfg!(debug_assertions) {
             assert!(settings.relays.contains(&"ws://localhost:8080".to_string()));
             assert!(settings.relays.contains(&"ws://localhost:7777".to_string()));
-            assert!(settings.relays.contains(&"wss://purplepag.es".to_string()));
         } else {
             assert!(settings
                 .relays
@@ -485,7 +581,7 @@ mod tests {
         let db_path = temp_dir.path().to_path_buf();
         let (tx, _rx) = mpsc::channel(10);
 
-        let result = NostrManager::new(db_path, tx).await;
+        let result = NostrManager::new_without_connection(db_path, tx).await;
         assert!(result.is_ok());
 
         let manager = result.unwrap();
@@ -502,7 +598,9 @@ mod tests {
         let db_path = temp_dir.path().to_path_buf();
         let (tx, _rx) = mpsc::channel(10);
 
-        let manager = NostrManager::new(db_path, tx).await.unwrap();
+        let manager = NostrManager::new_without_connection(db_path, tx)
+            .await
+            .unwrap();
         let timeout = manager.timeout().await.unwrap();
 
         assert_eq!(timeout, Duration::from_secs(3));
@@ -514,7 +612,9 @@ mod tests {
         let db_path = temp_dir.path().to_path_buf();
         let (tx, _rx) = mpsc::channel(10);
 
-        let manager = NostrManager::new(db_path, tx).await.unwrap();
+        let manager = NostrManager::new_without_connection(db_path, tx)
+            .await
+            .unwrap();
         let relays = manager.relays().await.unwrap();
 
         assert!(!relays.is_empty());
@@ -533,7 +633,9 @@ mod tests {
         let db_path = temp_dir.path().to_path_buf();
         let (tx, _rx) = mpsc::channel(10);
 
-        let manager = NostrManager::new(db_path, tx).await.unwrap();
+        let manager = NostrManager::new_without_connection(db_path, tx)
+            .await
+            .unwrap();
         let cloned_manager = manager.clone();
 
         // Test that cloned manager has the same settings
@@ -554,7 +656,9 @@ mod tests {
         let db_path = temp_dir.path().to_path_buf();
         let (tx, _rx) = mpsc::channel(10);
 
-        let manager = NostrManager::new(db_path, tx).await.unwrap();
+        let manager = NostrManager::new_without_connection(db_path, tx)
+            .await
+            .unwrap();
 
         // Test that delete_all_data succeeds
         let result = manager.delete_all_data().await;
@@ -601,7 +705,9 @@ mod tests {
         let db_path = temp_dir.path().to_path_buf();
         let (tx, _rx) = mpsc::channel(10);
 
-        let manager = NostrManager::new(db_path, tx).await.unwrap();
+        let manager = NostrManager::new_without_connection(db_path, tx)
+            .await
+            .unwrap();
 
         // Test with empty vector
         let result = manager.extract_invite_events(vec![]).await;
