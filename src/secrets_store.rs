@@ -224,29 +224,17 @@ impl SecretsStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::whitenoise::{Whitenoise, WhitenoiseConfig};
     use tempfile::TempDir;
 
-    async fn build_whitenoise() -> Whitenoise {
-        let data_temp_dir = TempDir::new()
-            .expect("Failed to create temp directory")
-            .path()
-            .to_path_buf();
-        let logs_temp_dir = TempDir::new()
-            .expect("Failed to create temp directory")
-            .path()
-            .to_path_buf();
-        let config = WhitenoiseConfig {
-            data_dir: data_temp_dir,
-            logs_dir: logs_temp_dir,
-        };
-        Whitenoise::initialize_whitenoise(config).await.unwrap()
+    fn create_test_secrets_store() -> (SecretsStore, TempDir) {
+        let data_temp = TempDir::new().expect("Failed to create temp directory");
+        let secrets_store = SecretsStore::new(data_temp.path());
+        (secrets_store, data_temp)
     }
 
     #[tokio::test]
     async fn test_store_and_retrieve_private_key() -> Result<(), SecretsStoreError> {
-        let wn = build_whitenoise().await;
-        let secrets_store = SecretsStore::new(&wn.config.data_dir);
+        let (secrets_store, _temp_dir) = create_test_secrets_store();
         let keys = Keys::generate();
         let pubkey = keys.public_key();
 
@@ -267,8 +255,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_private_key() -> Result<(), SecretsStoreError> {
-        let wn = build_whitenoise().await;
-        let secrets_store = SecretsStore::new(&wn.config.data_dir);
+        let (secrets_store, _temp_dir) = create_test_secrets_store();
         let keys = Keys::generate();
         let pubkey = keys.public_key();
 
@@ -288,8 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_nonexistent_key() {
-        let wn = build_whitenoise().await;
-        let secrets_store = SecretsStore::new(&wn.config.data_dir);
+        let (secrets_store, _temp_dir) = create_test_secrets_store();
         let keys = Keys::generate();
         let pubkey = keys.public_key();
         let result = secrets_store.get_nostr_keys_for_pubkey(&pubkey);
@@ -312,8 +298,7 @@ mod tests {
     #[tokio::test]
     #[cfg(target_os = "android")]
     async fn test_android_store_and_retrieve_private_key() -> Result<(), SecretsStoreError> {
-        let wn = build_whitenoise().await;
-        let secrets_store = SecretsStore::new(&wn.config.data_dir);
+        let (secrets_store, _temp_dir) = create_test_secrets_store();
         let keys = Keys::generate();
         let pubkey = keys.public_key();
 
