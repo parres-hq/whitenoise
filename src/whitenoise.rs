@@ -1227,6 +1227,16 @@ impl Whitenoise {
             message_type
         );
     }
+
+    pub fn export_account_nsec(&self, account: &Account) -> Result<SecretKey> {
+        match self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)
+        {
+            Ok(keys) => Ok(keys.secret_key().clone()),
+            Err(err) => Err(WhitenoiseError::from(err)),
+        }
+    }
 }
 
 #[cfg(test)]
