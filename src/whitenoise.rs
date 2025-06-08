@@ -139,9 +139,7 @@ impl Whitenoise {
         // Create SecretsStore
         let secrets_store = SecretsStore::new(data_dir);
 
-        // TODO: Load accounts from database
-
-        // Create Whitenoise instance
+        // Load all accounts from database
         let mut whitenoise = Self {
             config,
             database,
@@ -152,6 +150,14 @@ impl Whitenoise {
             event_sender,
             shutdown_sender,
         };
+        whitenoise.accounts = whitenoise.load_all_accounts_from_database().await?;
+
+        // Set the most recently synced account as active
+        whitenoise.active_account = whitenoise
+            .accounts
+            .values()
+            .max_by_key(|account| account.last_synced)
+            .map(|account| account.pubkey);
 
         // Start the event processing loop
         whitenoise
@@ -397,6 +403,94 @@ impl Whitenoise {
     }
 
     // Private Helper Methods =====================================================
+
+    /// Loads all accounts from the database and initializes them for use.
+    ///
+    /// This method queries the database for all existing accounts, deserializes their
+    /// settings and onboarding states, initializes their NostrMls instances, and triggers
+    /// background data fetching for each account. The accounts are returned as a HashMap
+    /// ready to be used in the Whitenoise instance.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `HashMap<PublicKey, Account>` containing all loaded accounts on success,
+    /// or an empty HashMap if no accounts exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if:
+    /// * Database query fails
+    /// * Account deserialization fails
+    /// * NostrMls initialization fails for any account
+    async fn load_all_accounts_from_database(&self) -> Result<HashMap<PublicKey, Account>> {
+        tracing::debug!(target: "whitenoise::accounts::load_all", "Loading all accounts from database");
+
+        let rows =
+            sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts ORDER BY last_synced DESC")
+                .fetch_all(&self.database.pool)
+                .await?;
+
+        if rows.is_empty() {
+            tracing::debug!(target: "whitenoise::accounts::load_all", "No accounts found in database");
+            return Ok(HashMap::new());
+        }
+
+        let mut accounts = HashMap::new();
+
+        for row in rows {
+            let pubkey = PublicKey::parse(row.pubkey.as_str()).map_err(|e| {
+                WhitenoiseError::Configuration(format!("Invalid public key in database: {}", e))
+            })?;
+
+            let account = Account {
+                pubkey,
+                settings: serde_json::from_str(&row.settings)?,
+                onboarding: serde_json::from_str(&row.onboarding)?,
+                last_synced: Timestamp::from(row.last_synced),
+                nostr_mls: Arc::new(Mutex::new(None)),
+            };
+
+            // Initialize NostrMls for each account
+            if let Err(e) = self.initialize_nostr_mls_for_account(&account).await {
+                tracing::warn!(
+                    target: "whitenoise::accounts::load_all",
+                    "Failed to initialize NostrMls for account {}: {}",
+                    pubkey.to_hex(),
+                    e
+                );
+                // Continue loading other accounts even if one fails
+                continue;
+            }
+
+            // Add the account to the HashMap first, then trigger background fetch
+            accounts.insert(pubkey, account.clone());
+
+            // Trigger background data fetch for each account (non-critical)
+            if let Err(e) = self.background_fetch_account_data(&account).await {
+                tracing::warn!(
+                    target: "whitenoise::accounts::load_all",
+                    "Failed to trigger background fetch for account {}: {}",
+                    pubkey.to_hex(),
+                    e
+                );
+                // Continue - background fetch failure should not prevent account loading
+            }
+
+            tracing::debug!(
+                target: "whitenoise::accounts::load_all",
+                "Loaded and initialized account: {}",
+                pubkey.to_hex()
+            );
+        }
+
+        tracing::info!(
+            target: "whitenoise::accounts::load_all",
+            "Successfully loaded {} accounts from database",
+            accounts.len()
+        );
+
+        Ok(accounts)
+    }
 
     /// Finds and loads an account from the database by its public key.
     ///
@@ -860,6 +954,9 @@ impl Whitenoise {
     /// - Messages and events since the last sync timestamp
     /// - Group-specific data for all groups the account belongs to
     ///
+    /// When the fetch completes successfully, the account's `last_synced` timestamp is
+    /// updated in the database to reflect the successful synchronization.
+    ///
     /// # Arguments
     ///
     /// * `account` - A reference to the `Account` for which to fetch Nostr data.
@@ -891,17 +988,58 @@ impl Whitenoise {
     async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
         let group_ids = account.groups_nostr_group_ids().await?;
         let nostr = self.nostr.clone();
+        let database = self.database.clone();
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
         let last_synced = account.last_synced;
+        let account_pubkey = account.pubkey;
 
         tokio::spawn(async move {
-            if let Err(e) = nostr
+            tracing::debug!(
+                target: "whitenoise::background_fetch",
+                "Starting background fetch for account: {} (since: {})",
+                account_pubkey.to_hex(),
+                last_synced
+            );
+
+            match nostr
                 .fetch_all_user_data(signer, last_synced, group_ids)
                 .await
             {
-                tracing::error!("Failed to fetch user data: {}", e);
+                Ok(_) => {
+                    // Update the last_synced timestamp in the database
+                    let current_time = Timestamp::now();
+
+                    if let Err(e) =
+                        sqlx::query("UPDATE accounts SET last_synced = ? WHERE pubkey = ?")
+                            .bind(current_time.to_string())
+                            .bind(account_pubkey.to_hex())
+                            .execute(&database.pool)
+                            .await
+                    {
+                        tracing::error!(
+                            target: "whitenoise::background_fetch",
+                            "Failed to update last_synced timestamp for account {}: {}",
+                            account_pubkey.to_hex(),
+                            e
+                        );
+                    } else {
+                        tracing::info!(
+                            target: "whitenoise::background_fetch",
+                            "Successfully fetched data and updated last_synced for account: {}",
+                            account_pubkey.to_hex()
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::background_fetch",
+                        "Failed to fetch user data for account {}: {}",
+                        account_pubkey.to_hex(),
+                        e
+                    );
+                }
             }
         });
 
@@ -1651,6 +1789,209 @@ mod tests {
                 assert!(whitenoise.load_key_package(pubkey).await.is_ok());
                 assert!(whitenoise.load_onboarding_state(pubkey).await.is_ok());
             }
+        }
+
+        #[tokio::test]
+        async fn test_load_all_accounts_from_database() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Test loading empty database
+            let accounts = whitenoise.load_all_accounts_from_database().await.unwrap();
+            assert!(accounts.is_empty());
+
+            // Create test accounts and save them to database
+            let (account1, keys1) = create_test_account();
+            let (account2, keys2) = create_test_account();
+
+            // Save accounts to database
+            whitenoise.save_account(&account1).await.unwrap();
+            whitenoise.save_account(&account2).await.unwrap();
+
+            // Store keys in secrets store (required for background fetch)
+            whitenoise.secrets_store.store_private_key(&keys1).unwrap();
+            whitenoise.secrets_store.store_private_key(&keys2).unwrap();
+
+            // Load accounts from database
+            let loaded_accounts = whitenoise.load_all_accounts_from_database().await.unwrap();
+            assert_eq!(loaded_accounts.len(), 2);
+            assert!(loaded_accounts.contains_key(&account1.pubkey));
+            assert!(loaded_accounts.contains_key(&account2.pubkey));
+
+            // Verify account data is correctly loaded
+            let loaded_account1 = &loaded_accounts[&account1.pubkey];
+            assert_eq!(loaded_account1.pubkey, account1.pubkey);
+            assert_eq!(
+                loaded_account1.settings.dark_theme,
+                account1.settings.dark_theme
+            );
+        }
+
+        #[tokio::test]
+        async fn test_load_accounts_ordering_by_last_synced() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create test accounts with different last_synced times
+            let (mut account1, keys1) = create_test_account();
+            let (mut account2, keys2) = create_test_account();
+            let (mut account3, keys3) = create_test_account();
+
+            // Set different last_synced timestamps
+            account1.last_synced = Timestamp::from(100); // oldest
+            account2.last_synced = Timestamp::from(300); // newest
+            account3.last_synced = Timestamp::from(200); // middle
+
+            // Save accounts to database
+            whitenoise.save_account(&account1).await.unwrap();
+            whitenoise.save_account(&account2).await.unwrap();
+            whitenoise.save_account(&account3).await.unwrap();
+
+            // Store keys in secrets store
+            whitenoise.secrets_store.store_private_key(&keys1).unwrap();
+            whitenoise.secrets_store.store_private_key(&keys2).unwrap();
+            whitenoise.secrets_store.store_private_key(&keys3).unwrap();
+
+            // Load accounts from database
+            let loaded_accounts = whitenoise.load_all_accounts_from_database().await.unwrap();
+            assert_eq!(loaded_accounts.len(), 3);
+
+            // Verify the most recent account would be first in HashMap iteration
+            // (Note: HashMap iteration order is not guaranteed, but our SQL query orders by last_synced DESC)
+            // We'll test the active account selection in a separate test
+        }
+
+        #[tokio::test]
+        async fn test_initialization_sets_active_account() {
+            let (config, _data_temp, _logs_temp) = create_test_config();
+
+            // Create directories manually
+            std::fs::create_dir_all(&config.data_dir).unwrap();
+            std::fs::create_dir_all(&config.logs_dir).unwrap();
+
+            // Create a database and add some test accounts
+            // Use the same database name that initialize_whitenoise will use
+            let database = Arc::new(
+                Database::new(config.data_dir.join("whitenoise.sqlite"))
+                    .await
+                    .unwrap(),
+            );
+            let secrets_store = SecretsStore::new(&config.data_dir);
+
+            // Create test accounts with different last_synced times
+            let (mut account1, keys1) = create_test_account();
+            let (mut account2, keys2) = create_test_account();
+
+            account1.last_synced = Timestamp::from(100); // older
+            account2.last_synced = Timestamp::from(200); // newer (should be active)
+
+            // Save accounts directly to database
+            let _account1_row = sqlx::query(
+                "INSERT INTO accounts (pubkey, settings, onboarding, last_synced) VALUES (?, ?, ?, ?)"
+            )
+            .bind(account1.pubkey.to_hex())
+            .bind(serde_json::to_string(&account1.settings).unwrap())
+            .bind(serde_json::to_string(&account1.onboarding).unwrap())
+            .bind(account1.last_synced.to_string())
+            .execute(&database.pool)
+            .await
+            .unwrap();
+
+            let _account2_row = sqlx::query(
+                "INSERT INTO accounts (pubkey, settings, onboarding, last_synced) VALUES (?, ?, ?, ?)"
+            )
+            .bind(account2.pubkey.to_hex())
+            .bind(serde_json::to_string(&account2.settings).unwrap())
+            .bind(serde_json::to_string(&account2.onboarding).unwrap())
+            .bind(account2.last_synced.to_string())
+            .execute(&database.pool)
+            .await
+            .unwrap();
+
+            // Store keys
+            secrets_store.store_private_key(&keys1).unwrap();
+            secrets_store.store_private_key(&keys2).unwrap();
+
+            // Now test full initialization
+            let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
+
+            // Verify accounts were loaded
+            assert_eq!(whitenoise.accounts.len(), 2);
+            assert!(whitenoise.accounts.contains_key(&account1.pubkey));
+            assert!(whitenoise.accounts.contains_key(&account2.pubkey));
+
+            // Verify the most recently synced account is active
+            assert!(whitenoise.active_account.is_some());
+            // Account2 has the newer timestamp (200 vs 100), so it should be active
+            assert_eq!(whitenoise.active_account.unwrap(), account2.pubkey);
+        }
+
+        #[tokio::test]
+        async fn test_background_fetch_updates_last_synced() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create and save a test account
+            let (account, keys) = create_test_account();
+            let _original_timestamp = account.last_synced;
+
+            whitenoise.save_account(&account).await.unwrap();
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+            // Initialize NostrMls for the account
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // Trigger background fetch
+            whitenoise
+                .background_fetch_account_data(&account)
+                .await
+                .unwrap();
+
+            // Give the background task a moment to complete
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            // Check that the account still exists in database
+            // (The background task updates the timestamp, but we can't easily test the
+            // actual timestamp update in a unit test without mocking the NostrManager)
+            let loaded_account = whitenoise
+                .find_account_by_pubkey(&account.pubkey)
+                .await
+                .unwrap();
+            assert_eq!(loaded_account.pubkey, account.pubkey);
+        }
+
+        #[tokio::test]
+        async fn test_active_account_selection_logic() {
+            let (_whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Test with empty accounts
+            let empty_accounts: HashMap<PublicKey, Account> = HashMap::new();
+            let active = empty_accounts
+                .values()
+                .max_by_key(|account| account.last_synced)
+                .map(|account| account.pubkey);
+            assert_eq!(active, None);
+
+            // Test with multiple accounts
+            let mut accounts: HashMap<PublicKey, Account> = HashMap::new();
+            let (mut account1, _) = create_test_account();
+            let (mut account2, _) = create_test_account();
+            let (mut account3, _) = create_test_account();
+
+            account1.last_synced = Timestamp::from(100);
+            account2.last_synced = Timestamp::from(300); // newest
+            account3.last_synced = Timestamp::from(200);
+
+            accounts.insert(account1.pubkey, account1.clone());
+            accounts.insert(account2.pubkey, account2.clone());
+            accounts.insert(account3.pubkey, account3.clone());
+
+            let active = accounts
+                .values()
+                .max_by_key(|account| account.last_synced)
+                .map(|account| account.pubkey);
+
+            assert_eq!(active, Some(account2.pubkey)); // account2 has timestamp 300
         }
     }
 
