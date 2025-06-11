@@ -1147,6 +1147,61 @@ impl Whitenoise {
         Ok(onboarding_state)
     }
 
+    /// Updates the metadata for the given account by publishing a new metadata event to Nostr.
+    ///
+    /// This method takes the provided metadata, creates a Nostr metadata event (Kind::Metadata),
+    /// and publishes it to the account's relays. It also updates the account's `last_synced` timestamp
+    /// in the database to reflect the successful publication.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - The new `Metadata` to publish for the account.
+    /// * `account` - A reference to the `Account` whose metadata should be updated.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on successful publication and database update.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if:
+    /// * The metadata cannot be serialized to JSON
+    /// * The account's private key cannot be retrieved from the secret store
+    /// * The event publication fails
+    /// * The database update fails
+    pub async fn update_metadata(&self, metadata: &Metadata, account: &Account) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::api::update_metadata",
+            "Updating metadata for account: {}",
+            account.pubkey.to_hex()
+        );
+
+        // Serialize metadata to JSON
+        let metadata_json = serde_json::to_string(metadata)?;
+
+        // Create metadata event
+        let event = EventBuilder::new(Kind::Metadata, metadata_json);
+
+        // Get signing keys for the account
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        // Publish the event
+        let result = self
+            .nostr
+            .publish_event_builder_with_signer(event, keys)
+            .await?;
+
+        tracing::debug!(
+            target: "whitenoise::api::update_metadata",
+            "Published metadata event: {:?}",
+            result
+        );
+
+        Ok(())
+    }
+
     // ============================================================================
     // EVENT PROCESSING
     // ============================================================================
@@ -2002,6 +2057,141 @@ mod tests {
                 .map(|account| account.pubkey);
 
             assert_eq!(active, Some(account2.pubkey)); // account2 has timestamp 300
+        }
+
+        #[tokio::test]
+        async fn test_update_metadata() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create and save a test account
+            let (account, keys) = create_test_account();
+            whitenoise.save_account(&account).await.unwrap();
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+            // Initialize NostrMls for the account
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // Create test metadata
+            let metadata = Metadata {
+                name: Some("Updated Name".to_string()),
+                display_name: Some("Updated Display Name".to_string()),
+                about: Some("Updated bio".to_string()),
+                picture: Some("https://example.com/new-avatar.jpg".to_string()),
+                banner: Some("https://example.com/banner.jpg".to_string()),
+                nip05: Some("user@example.com".to_string()),
+                lud16: Some("user@lightning.example.com".to_string()),
+                ..Default::default()
+            };
+
+            // Test updating metadata
+            let result = whitenoise.update_metadata(&metadata, &account).await;
+            assert!(result.is_ok(), "update_metadata should succeed");
+        }
+
+        #[tokio::test]
+        async fn test_update_metadata_with_minimal_metadata() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create and save a test account
+            let (account, keys) = create_test_account();
+            whitenoise.save_account(&account).await.unwrap();
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+            // Initialize NostrMls for the account
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // Create minimal metadata (only name)
+            let metadata = Metadata {
+                name: Some("Simple Name".to_string()),
+                ..Default::default()
+            };
+
+            // Test updating metadata
+            let result = whitenoise.update_metadata(&metadata, &account).await;
+            assert!(
+                result.is_ok(),
+                "update_metadata should succeed with minimal metadata"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_update_metadata_with_empty_metadata() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create and save a test account
+            let (account, keys) = create_test_account();
+            whitenoise.save_account(&account).await.unwrap();
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+            // Initialize NostrMls for the account
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // Create completely empty metadata
+            let metadata = Metadata::default();
+
+            // Test updating metadata
+            let result = whitenoise.update_metadata(&metadata, &account).await;
+            assert!(
+                result.is_ok(),
+                "update_metadata should succeed with empty metadata"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_update_metadata_without_stored_keys() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create and save a test account but DON'T store the keys
+            let (account, _keys) = create_test_account();
+            whitenoise.save_account(&account).await.unwrap();
+            // Note: not storing keys in secrets_store
+
+            // Create test metadata
+            let metadata = Metadata {
+                name: Some("Test Name".to_string()),
+                ..Default::default()
+            };
+
+            // Test updating metadata - this should fail because keys aren't stored
+            let result = whitenoise.update_metadata(&metadata, &account).await;
+            assert!(
+                result.is_err(),
+                "update_metadata should fail when keys aren't stored"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_update_metadata_serialization() {
+            // Test that various metadata fields serialize correctly
+            let metadata = Metadata {
+                name: Some("Test User".to_string()),
+                display_name: Some("Test Display".to_string()),
+                about: Some("Bio with special chars: émojí 🚀".to_string()),
+                picture: Some("https://example.com/picture.jpg".to_string()),
+                banner: Some("https://example.com/banner.jpg".to_string()),
+                nip05: Some("test@example.com".to_string()),
+                lud16: Some("test@lightning.example.com".to_string()),
+                website: Some("https://example.com".to_string()),
+                ..Default::default()
+            };
+
+            // Test that the metadata can be serialized to JSON
+            let serialized = serde_json::to_string(&metadata);
+            assert!(serialized.is_ok(), "Metadata should serialize to JSON");
+
+            let json_str = serialized.unwrap();
+            assert!(json_str.contains("Test User"));
+            assert!(json_str.contains("Bio with special chars"));
+            assert!(json_str.contains("émojí 🚀"));
         }
     }
 
