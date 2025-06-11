@@ -103,7 +103,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     test_client.set_signer(known_keys.clone()).await;
 
     // Wait a moment for connections to establish
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Create and publish a metadata event
     let metadata = Metadata {
@@ -182,7 +182,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Wait a moment for background fetch to complete
     tracing::info!("Pausing for background fetch to complete...");
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Re-query the onboarding state to check if background fetch updated the cached data
     tracing::info!("Re-querying onboarding state after background fetch...");
@@ -265,7 +265,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Wait a moment for the event to propagate
     tracing::info!("Waiting for metadata update to propagate...");
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Verify the metadata was updated by loading it again
     tracing::info!("Verifying metadata update...");
@@ -326,7 +326,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Wait for the event to propagate
     tracing::info!("Waiting for contact list update to propagate...");
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Verify the contact was added by reloading the contact list
     let updated_contacts = whitenoise.load_contact_list(active_account.pubkey).await?;
@@ -366,7 +366,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // Wait for the event to propagate
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Test removing a contact
     tracing::info!("Testing remove_contact...");
@@ -384,7 +384,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // Wait for the event to propagate
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Test bulk contact update
     let test_contact_3_keys = Keys::generate();
@@ -419,7 +419,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // Wait for the event to propagate
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Test error handling - try to add a contact that already exists
     tracing::info!("Testing error handling for duplicate contact...");
