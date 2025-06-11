@@ -310,6 +310,8 @@ async fn main() -> Result<(), WhitenoiseError> {
         initial_contacts.len()
     );
 
+    assert_eq!(initial_contacts.len(), 0);
+
     // Add a contact and publish to relays
     match whitenoise
         .add_contact(&active_account, test_contact_pubkey)

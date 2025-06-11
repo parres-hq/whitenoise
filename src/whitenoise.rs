@@ -1102,51 +1102,6 @@ impl Whitenoise {
         Ok(relays)
     }
 
-    /// Loads a user's contact list from the Nostr network.
-    ///
-    /// This method retrieves the user's contact list, which contains the public keys
-    /// of other users they follow. For each contact, it also includes their metadata
-    /// if available.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - The `PublicKey` of the user whose contact list should be fetched.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(HashMap<PublicKey, Option<Metadata>>)` where the keys are the public keys
-    /// of contacts and the values are their associated metadata (if available).
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if the contact list query fails.
-    pub async fn load_contact_list(
-        &self,
-        pubkey: PublicKey,
-    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        let contacts = self.nostr.query_user_contact_list(pubkey).await?;
-        Ok(contacts)
-    }
-
-    pub async fn load_key_package(&self, pubkey: PublicKey) -> Result<Option<Event>> {
-        let key_package = self.nostr.query_user_key_package(pubkey).await?;
-        Ok(key_package)
-    }
-
-    pub async fn load_onboarding_state(&self, pubkey: PublicKey) -> Result<OnboardingState> {
-        let mut onboarding_state = OnboardingState::default();
-
-        let inbox_relays = self.load_relays(pubkey, RelayType::Inbox).await?;
-        let key_package_relays = self.load_relays(pubkey, RelayType::KeyPackage).await?;
-        let key_package_published = self.load_key_package(pubkey).await?;
-
-        onboarding_state.inbox_relays = !inbox_relays.is_empty();
-        onboarding_state.key_package_relays = !key_package_relays.is_empty();
-        onboarding_state.key_package_published = key_package_published.is_some();
-
-        Ok(onboarding_state)
-    }
-
     /// Updates the metadata for the given account by publishing a new metadata event to Nostr.
     ///
     /// This method takes the provided metadata, creates a Nostr metadata event (Kind::Metadata),
@@ -1205,6 +1160,51 @@ impl Whitenoise {
     // ============================================================================
     // CONTACT MANAGEMENT
     // ============================================================================
+
+    /// Loads a user's contact list from the Nostr network.
+    ///
+    /// This method retrieves the user's contact list, which contains the public keys
+    /// of other users they follow. For each contact, it also includes their metadata
+    /// if available.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The `PublicKey` of the user whose contact list should be fetched.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(HashMap<PublicKey, Option<Metadata>>)` where the keys are the public keys
+    /// of contacts and the values are their associated metadata (if available).
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if the contact list query fails.
+    pub async fn load_contact_list(
+        &self,
+        pubkey: PublicKey,
+    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
+        let contacts = self.nostr.query_user_contact_list(pubkey).await?;
+        Ok(contacts)
+    }
+
+    pub async fn load_key_package(&self, pubkey: PublicKey) -> Result<Option<Event>> {
+        let key_package = self.nostr.query_user_key_package(pubkey).await?;
+        Ok(key_package)
+    }
+
+    pub async fn load_onboarding_state(&self, pubkey: PublicKey) -> Result<OnboardingState> {
+        let mut onboarding_state = OnboardingState::default();
+
+        let inbox_relays = self.load_relays(pubkey, RelayType::Inbox).await?;
+        let key_package_relays = self.load_relays(pubkey, RelayType::KeyPackage).await?;
+        let key_package_published = self.load_key_package(pubkey).await?;
+
+        onboarding_state.inbox_relays = !inbox_relays.is_empty();
+        onboarding_state.key_package_relays = !key_package_relays.is_empty();
+        onboarding_state.key_package_published = key_package_published.is_some();
+
+        Ok(onboarding_state)
+    }
 
     /// Adds a contact to the user's contact list and publishes the updated list to Nostr.
     ///
