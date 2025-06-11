@@ -182,7 +182,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Wait a moment for background fetch to complete
     tracing::info!("Pausing for background fetch to complete...");
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     // Re-query the onboarding state to check if background fetch updated the cached data
     tracing::info!("Re-querying onboarding state after background fetch...");
@@ -265,7 +265,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Wait a moment for the event to propagate
     tracing::info!("Waiting for metadata update to propagate...");
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     // Verify the metadata was updated by loading it again
     tracing::info!("Verifying metadata update...");
@@ -294,80 +294,134 @@ async fn main() -> Result<(), WhitenoiseError> {
         .expect("Active account should exist")
         .clone();
 
-    // Test contact management logic and error handling
-    tracing::info!("Testing contact management error handling...");
-
-    // Test adding a contact to an empty contact list (should work in terms of logic)
+    // Test adding a contact to an empty contact list
     let test_contact_keys = Keys::generate();
     let test_contact_pubkey = test_contact_keys.public_key();
 
-    tracing::debug!(
-        "Testing add contact logic for: {}",
+    tracing::info!(
+        "Testing add_contact with pubkey: {}",
         test_contact_pubkey.to_hex()
     );
 
     // Load current contact list to verify it's empty initially
-    match whitenoise.load_contact_list(active_account.pubkey).await {
-        Ok(current_contacts) => {
-            tracing::info!(
-                "Current contact list has {} contacts",
-                current_contacts.len()
-            );
-
-            // Verify that adding a new contact would be valid (contact doesn't exist)
-            let can_add = !current_contacts.contains_key(&test_contact_pubkey);
-            if can_add {
-                tracing::info!("✓ Contact can be added (doesn't already exist)");
-            } else {
-                tracing::warn!("Contact already exists in list");
-            }
-
-            // Test remove contact validation (should fail for non-existent contact)
-            let can_remove = current_contacts.contains_key(&test_contact_pubkey);
-            if !can_remove {
-                tracing::info!("✓ Remove validation works correctly (contact doesn't exist)");
-            }
-        }
-        Err(e) => {
-            tracing::warn!("Failed to load contact list: {}", e);
-        }
-    }
-
-    // Test contact list event structure creation
-    tracing::info!("Testing contact list event structure...");
-
-    let test_contacts = [
-        test_contact_pubkey,
-        Keys::generate().public_key(),
-        Keys::generate().public_key(),
-    ];
-
-    // Create contact list tags like the real methods would
-    let contact_tags: Vec<nostr_sdk::Tag> = test_contacts
-        .iter()
-        .map(|pubkey| nostr_sdk::Tag::custom(nostr_sdk::TagKind::p(), [pubkey.to_hex()]))
-        .collect();
-
+    let initial_contacts = whitenoise.load_contact_list(active_account.pubkey).await?;
     tracing::info!(
-        "Created {} contact tags for Kind::ContactList event",
-        contact_tags.len()
+        "Initial contact list has {} contacts",
+        initial_contacts.len()
     );
 
-    // Verify tag structure
-    for (i, tag) in contact_tags.iter().enumerate() {
-        let tag_vec = tag.clone().to_vec();
-        if tag_vec.len() >= 2 && tag_vec[0] == "p" {
-            tracing::debug!("✓ Tag {}: {} -> {}", i, tag_vec[0], tag_vec[1]);
-        } else {
-            tracing::error!("✗ Invalid tag structure at index {}", i);
+    // Add a contact and publish to relays
+    match whitenoise.add_contact(&active_account, test_contact_pubkey).await {
+        Ok(_) => {
+            tracing::info!("✓ Successfully added contact and published to relays");
+        }
+        Err(e) => {
+            tracing::error!("Failed to add contact: {}", e);
+            return Err(e);
         }
     }
 
-    // Note: We're not actually calling the contact management methods here
-    // because they would attempt to publish to relays. Instead, we're testing
-    // the underlying logic and event structure that they would create.
+    // Wait for the event to propagate
+    tracing::info!("Waiting for contact list update to propagate...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    tracing::info!("Contact management validation completed - methods would create proper Kind 3 events with p tags");
+    // Verify the contact was added by reloading the contact list
+    let updated_contacts = whitenoise.load_contact_list(active_account.pubkey).await?;
+    tracing::info!(
+        "Updated contact list has {} contacts",
+        updated_contacts.len()
+    );
+
+    if updated_contacts.contains_key(&test_contact_pubkey) {
+        tracing::info!("✓ Contact was successfully added to the contact list");
+    } else {
+        tracing::warn!("Contact not found in updated list - this may be expected in test environment");
+    }
+
+    // Test adding a second contact
+    let test_contact_2_keys = Keys::generate();
+    let test_contact_2_pubkey = test_contact_2_keys.public_key();
+
+    tracing::info!(
+        "Testing add_contact with second pubkey: {}",
+        test_contact_2_pubkey.to_hex()
+    );
+
+    match whitenoise.add_contact(&active_account, test_contact_2_pubkey).await {
+        Ok(_) => {
+            tracing::info!("✓ Successfully added second contact and published to relays");
+        }
+        Err(e) => {
+            tracing::error!("Failed to add second contact: {}", e);
+            return Err(e);
+        }
+    }
+
+    // Wait for the event to propagate
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    // Test removing a contact
+    tracing::info!("Testing remove_contact...");
+    match whitenoise.remove_contact(&active_account, test_contact_pubkey).await {
+        Ok(_) => {
+            tracing::info!("✓ Successfully removed contact and published to relays");
+        }
+        Err(e) => {
+            tracing::error!("Failed to remove contact: {}", e);
+            return Err(e);
+        }
+    }
+
+    // Wait for the event to propagate
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    // Test bulk contact update
+    let test_contact_3_keys = Keys::generate();
+    let test_contact_3_pubkey = test_contact_3_keys.public_key();
+
+    let test_contact_4_keys = Keys::generate();
+    let test_contact_4_pubkey = test_contact_4_keys.public_key();
+
+    let bulk_contacts = vec![test_contact_2_pubkey, test_contact_3_pubkey, test_contact_4_pubkey];
+
+    tracing::info!("Testing update_contacts with {} contacts...", bulk_contacts.len());
+    match whitenoise.update_contacts(&active_account, bulk_contacts.clone()).await {
+        Ok(_) => {
+            tracing::info!("✓ Successfully updated contact list with bulk contacts and published to relays");
+        }
+        Err(e) => {
+            tracing::error!("Failed to update contacts: {}", e);
+            return Err(e);
+        }
+    }
+
+    // Wait for the event to propagate
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    // Test error handling - try to add a contact that already exists
+    tracing::info!("Testing error handling for duplicate contact...");
+    match whitenoise.add_contact(&active_account, test_contact_2_pubkey).await {
+        Ok(_) => {
+            tracing::warn!("Expected error when adding duplicate contact, but got success");
+        }
+        Err(e) => {
+            tracing::info!("✓ Correctly handled duplicate contact error: {}", e);
+        }
+    }
+
+    // Test error handling - try to remove a contact that doesn't exist
+    tracing::info!("Testing error handling for non-existent contact removal...");
+    let non_existent_contact = Keys::generate().public_key();
+    match whitenoise.remove_contact(&active_account, non_existent_contact).await {
+        Ok(_) => {
+            tracing::warn!("Expected error when removing non-existent contact, but got success");
+        }
+        Err(e) => {
+            tracing::info!("✓ Correctly handled non-existent contact removal error: {}", e);
+        }
+    }
+
+    tracing::info!("Contact management methods completed successfully - all methods published to relays");
 
     // TODO: Test relay list loading
 

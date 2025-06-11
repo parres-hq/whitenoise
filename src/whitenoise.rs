@@ -1232,7 +1232,7 @@ impl Whitenoise {
 
         // Check if contact already exists
         if current_contacts.contains_key(&contact_pubkey) {
-            return Err(WhitenoiseError::Configuration(format!(
+            return Err(WhitenoiseError::ContactList(format!(
                 "Contact {} already exists in contact list",
                 contact_pubkey.to_hex()
             )));
@@ -1281,7 +1281,7 @@ impl Whitenoise {
 
         // Check if contact exists
         if !current_contacts.contains_key(&contact_pubkey) {
-            return Err(WhitenoiseError::Configuration(format!(
+            return Err(WhitenoiseError::ContactList(format!(
                 "Contact {} not found in contact list",
                 contact_pubkey.to_hex()
             )));
