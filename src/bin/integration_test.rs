@@ -273,18 +273,8 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     if let Some(metadata) = reloaded_metadata {
         tracing::debug!("Reloaded metadata after update: {:?}", metadata);
-
-        // Check if any of the updated fields are present
-        // Note: In a test environment, the metadata might not actually propagate
-        // through the network, so we'll just verify the method executed successfully
-        tracing::info!("Metadata update verification completed");
-
-        // If we did get updated metadata, verify some fields
-        if metadata.name == updated_metadata.name {
-            tracing::info!("Metadata name was successfully updated");
-        }
-        if metadata.about == updated_metadata.about {
-            tracing::info!("Metadata about field was successfully updated");
+        if metadata == updated_metadata {
+            tracing::info!("Metadata was successfully updated");
         }
     } else {
         tracing::warn!("No metadata found after update - this may be expected in test environment");
