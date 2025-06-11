@@ -15,6 +15,7 @@ mod types;
 pub mod whitenoise;
 
 // Re-export main types for library users
+pub use accounts::{Account, AccountSettings, OnboardingState};
 pub use error::WhitenoiseError;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 
