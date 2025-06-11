@@ -17,6 +17,9 @@ pub enum WhitenoiseError {
     #[error("Configuration error: {0}")]
     Configuration(String),
 
+    #[error("Contact list error: {0}")]
+    ContactList(String),
+
     #[error("Nostr MLS SQLite storage error: {0}")]
     NostrMlsSqliteStorage(#[from] nostr_mls_sqlite_storage::error::Error),
 
