@@ -16,8 +16,27 @@ pub mod whitenoise;
 
 // Re-export main types for library users
 pub use accounts::{Account, AccountSettings, OnboardingState};
+pub use relays::RelayType;
 pub use error::WhitenoiseError;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
+
+// Re-export nostr types with documentation
+//
+// Note: These types are re-exported from the `nostr` crate for convenience
+// and to ensure version compatibility. Whitenoise is tested with nostr crate
+// version as specified in Cargo.toml.
+//
+/// Nostr public key for user identification. Re-exported from [`nostr::PublicKey`](https://docs.rs/nostr/latest/nostr/struct.PublicKey.html).
+#[doc(alias = "pubkey")]
+#[doc(alias = "public_key")]
+pub use nostr::PublicKey;
+
+/// Nostr event containing signed data. Re-exported from [`nostr::Event`](https://docs.rs/nostr/latest/nostr/struct.Event.html).
+pub use nostr::Event;
+
+/// User profile metadata (name, bio, etc.). Re-exported from [`nostr::Metadata`](https://docs.rs/nostr/latest/nostr/struct.Metadata.html).
+#[doc(alias = "profile")]
+pub use nostr::Metadata;
 
 static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
 static TRACING_INIT: OnceCell<()> = OnceCell::new();
