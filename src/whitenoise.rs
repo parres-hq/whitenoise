@@ -1616,12 +1616,16 @@ impl Whitenoise {
     }
 
     pub fn export_account_nsec(&self, account: &Account) -> Result<String> {
-        self
+        Ok(self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?
             .secret_key()
             .to_bech32()
-            .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!(e)))
+            .unwrap())
+    }
+
+    pub fn export_account_npub(&self, account: &Account) -> Result<String> {
+        Ok(account.pubkey.to_bech32().unwrap())
     }
 }
 
