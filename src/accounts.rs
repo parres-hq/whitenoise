@@ -26,7 +26,7 @@ pub enum AccountError {
     NostrMlsNotInitialized,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct AccountSettings {
     pub dark_theme: bool,
     pub dev_mode: bool,
@@ -43,20 +43,11 @@ impl Default for AccountSettings {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct OnboardingState {
     pub inbox_relays: bool,
     pub key_package_relays: bool,
     pub key_package_published: bool,
-}
-
-/// This is an intermediate struct representing an account in the database
-#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
-pub(crate) struct AccountRow {
-    pub pubkey: String,
-    pub settings: String,   // JSON string
-    pub onboarding: String, // JSON string
-    pub last_synced: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -68,6 +59,53 @@ pub struct Account {
     #[serde(skip)]
     #[doc(hidden)]
     pub(crate) nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
+}
+
+impl<'r, R> sqlx::FromRow<'r, R> for Account
+where
+    R: sqlx::Row,
+    &'r str: sqlx::ColumnIndex<R>,
+    String: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    i64: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+{
+    fn from_row(row: &'r R) -> Result<Self, sqlx::Error> {
+        // Extract raw values from the database row
+        let pubkey_str: String = row.try_get("pubkey")?;
+        let settings_json: String = row.try_get("settings")?;
+        let onboarding_json: String = row.try_get("onboarding")?;
+        let last_synced_i64: i64 = row.try_get("last_synced")?;
+
+        // Parse pubkey from hex string
+        let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| sqlx::Error::ColumnDecode {
+            index: "pubkey".to_string(),
+            source: Box::new(e),
+        })?;
+
+        // Parse settings from JSON
+        let settings: AccountSettings =
+            serde_json::from_str(&settings_json).map_err(|e| sqlx::Error::ColumnDecode {
+                index: "settings".to_string(),
+                source: Box::new(e),
+            })?;
+
+        // Parse onboarding from JSON
+        let onboarding: OnboardingState =
+            serde_json::from_str(&onboarding_json).map_err(|e| sqlx::Error::ColumnDecode {
+                index: "onboarding".to_string(),
+                source: Box::new(e),
+            })?;
+
+        // Convert last_synced from i64 to Timestamp
+        let last_synced = Timestamp::from(last_synced_i64 as u64);
+
+        Ok(Account {
+            pubkey,
+            settings,
+            onboarding,
+            last_synced,
+            nostr_mls: Arc::new(Mutex::new(None)),
+        })
+    }
 }
 
 impl std::fmt::Debug for Account {
@@ -107,7 +145,7 @@ impl Account {
             settings: AccountSettings::default(),
             onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
+            nostr_mls: Arc::new(Mutex::new(None)),
         };
 
         Ok((account, keys))
@@ -225,6 +263,57 @@ mod tests {
         assert_ne!(account1.pubkey, account2.pubkey);
         assert_ne!(keys1.public_key(), keys2.public_key());
         assert_ne!(keys1.secret_key(), keys2.secret_key());
+    }
+
+    #[tokio::test]
+    async fn test_from_row_implementation() {
+        use sqlx::SqlitePool;
+
+        // Create an in-memory database for testing
+        let pool = SqlitePool::connect(":memory:").await.unwrap();
+
+        // Apply the accounts table schema
+        sqlx::query(
+            "CREATE TABLE accounts (
+                pubkey TEXT PRIMARY KEY,
+                settings TEXT NOT NULL,
+                onboarding TEXT NOT NULL,
+                last_synced INTEGER NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Insert a test account
+        let test_pubkey = Keys::generate().public_key();
+        let test_settings = serde_json::to_string(&AccountSettings::default()).unwrap();
+        let test_onboarding = serde_json::to_string(&OnboardingState::default()).unwrap();
+        let test_timestamp = 1234567890u64;
+
+        sqlx::query(
+            "INSERT INTO accounts (pubkey, settings, onboarding, last_synced) VALUES (?, ?, ?, ?)",
+        )
+        .bind(test_pubkey.to_hex())
+        .bind(&test_settings)
+        .bind(&test_onboarding)
+        .bind(test_timestamp as i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Test FromRow implementation by querying the account
+        let account: Account = sqlx::query_as("SELECT * FROM accounts WHERE pubkey = ?")
+            .bind(test_pubkey.to_hex())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        // Verify the account was correctly parsed
+        assert_eq!(account.pubkey, test_pubkey);
+        assert_eq!(account.settings, AccountSettings::default());
+        assert_eq!(account.onboarding, OnboardingState::default());
+        assert_eq!(account.last_synced.as_u64(), test_timestamp);
     }
 
     #[test]
