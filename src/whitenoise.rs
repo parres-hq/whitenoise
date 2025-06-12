@@ -1615,14 +1615,13 @@ impl Whitenoise {
         );
     }
 
-    pub fn export_account_nsec(&self, account: &Account) -> Result<SecretKey> {
-        match self
+    pub fn export_account_nsec(&self, account: &Account) -> Result<String> {
+        self
             .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)
-        {
-            Ok(keys) => Ok(keys.secret_key().clone()),
-            Err(err) => Err(WhitenoiseError::from(err)),
-        }
+            .get_nostr_keys_for_pubkey(&account.pubkey)?
+            .secret_key()
+            .to_bech32()
+            .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!(e)))
     }
 }
 
