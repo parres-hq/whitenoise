@@ -36,6 +36,7 @@ pub use nostr::PublicKey;
 #[doc(alias = "private_key")]
 #[doc(alias = "nsec")]
 pub use nostr::SecretKey;
+pub use nostr::nips::nip19::ToBech32;
 
 /// Nostr event containing signed data. Re-exported from [`nostr::Event`](https://docs.rs/nostr/latest/nostr/struct.Event.html).
 pub use nostr::Event;
