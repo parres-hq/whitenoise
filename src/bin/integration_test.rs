@@ -3,7 +3,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 use nostr_sdk::prelude::*;
-use whitenoise::{Whitenoise, WhitenoiseConfig, WhitenoiseError};
+use whitenoise::{AccountSettings, Whitenoise, WhitenoiseConfig, WhitenoiseError};
 
 /// Test backend for Whitenoise
 #[derive(Parser, Debug)]
@@ -459,7 +459,51 @@ async fn main() -> Result<(), WhitenoiseError> {
         "Contact management methods completed successfully - all methods published to relays"
     );
 
+    test_account_settings_update(&mut whitenoise).await?;
+
     // TODO: Test relay list loading
 
+    Ok(())
+}
+
+async fn test_account_settings_update(whitenoise: &mut Whitenoise) -> Result<(), WhitenoiseError> {
+    let public_key =
+        PublicKey::parse("nostr:npub14f8usejl26twx0dhuxjh9cas7keav9vr0v8nvtwtrjqx3vycc76qqh9nsy")
+            .unwrap();
+
+    tracing::info!("Testing empty table scenario");
+    let res = whitenoise.fetch_account_settings(&public_key).await;
+    assert!(matches!(res, Err(WhitenoiseError::AccountNotFound)));
+
+    let res = whitenoise
+        .update_account_settings(&public_key, &AccountSettings::default())
+        .await;
+    assert!(matches!(res, Err(WhitenoiseError::AccountNotFound)));
+
+    tracing::info!("Creating an account for update settings testing");
+    let account = whitenoise.create_identity().await?;
+
+    tracing::info!("Fetch account settings for the created account");
+    let settings = whitenoise.fetch_account_settings(&account.pubkey).await?;
+    assert_eq!(settings, AccountSettings::default());
+
+    let new_settings = AccountSettings {
+        dark_theme: false, // default true,
+        dev_mode: false,
+        lockdown_mode: false,
+    };
+
+    tracing::info!(
+        "Updating settings for the pubkey {}",
+        account.pubkey.to_hex()
+    );
+    whitenoise
+        .update_account_settings(&account.pubkey, &new_settings)
+        .await?;
+
+    tracing::info!("Fetching the settings of the updated account");
+    let settings = whitenoise.fetch_account_settings(&account.pubkey).await?;
+
+    assert_eq!(settings, new_settings);
     Ok(())
 }
