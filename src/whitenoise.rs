@@ -77,8 +77,8 @@ impl Whitenoise {
     /// Initializes the Whitenoise application with the provided configuration.
     ///
     /// This method sets up the necessary data and log directories, configures logging,
-    /// initializes the database, and sets up the Nostr client with appropriate relays
-    /// based on the build environment (development or release).
+    /// initializes the database, creates event processing channels, sets up the Nostr client,
+    /// loads existing accounts, and starts the event processing loop.
     ///
     /// # Arguments
     ///
@@ -93,9 +93,9 @@ impl Whitenoise {
     ///
     /// This function will return an error if:
     /// - The data or log directories cannot be created.
-    /// - Logging cannot be set up.
     /// - The database cannot be initialized.
-    /// - The Nostr client cannot be configured or fails to connect to relays.
+    /// - The NostrManager cannot be created.
+    /// - Accounts cannot be loaded from the database.
     ///
     /// # Example
     ///
@@ -123,7 +123,7 @@ impl Whitenoise {
         // Only initialize tracing once
         init_tracing(logs_dir);
 
-        tracing::debug!("Logging initialized in directory: {:?}", logs_dir);
+        tracing::debug!(target: "whitenoise::initialize_whitenoise", "Logging initialized in directory: {:?}", logs_dir);
 
         let database = Arc::new(Database::new(data_dir.join("whitenoise.sqlite")).await?);
 
@@ -150,7 +150,7 @@ impl Whitenoise {
             event_sender,
             shutdown_sender,
         };
-        whitenoise.accounts = whitenoise.load_all_accounts_from_database().await?;
+        whitenoise.accounts = whitenoise.fetch_accounts().await?;
 
         // Set the most recently synced account as active
         whitenoise.active_account = whitenoise
@@ -177,8 +177,8 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns a `Result` which is `Ok(())` if all data is successfully deleted, or an error boxed as
-    /// [`Box<dyn std::error::Error>`] if any step fails.
+    /// Returns a `Result` which is `Ok(())` if all data is successfully deleted, or a
+    /// [`WhitenoiseError`] if any step fails.
     ///
     /// # Errors
     ///
@@ -320,11 +320,11 @@ impl Whitenoise {
 
         let account = match self.find_account_by_pubkey(&pubkey).await {
             Ok(account) => {
-                tracing::debug!(target: "whitenoise::api::accounts::login", "Account found");
+                tracing::debug!(target: "whitenoise::login", "Account found");
                 Ok(account)
             }
             Err(WhitenoiseError::AccountNotFound) => {
-                tracing::debug!(target: "whitenoise::api::accounts::login", "Account not found, adding from keys");
+                tracing::debug!(target: "whitenoise::login", "Account not found, adding from keys");
                 let account = self.add_account_from_keys(&keys).await?;
                 Ok(account)
             }
@@ -348,10 +348,9 @@ impl Whitenoise {
         Ok(account)
     }
 
-    /// Logs out the user associated with the given public key.
+    /// Logs out the user associated with the given account.
     ///
     /// This method performs the following steps:
-    /// - Finds the account associated with the provided public key.
     /// - Removes the account from the database.
     /// - Removes the private key from the secret store.
     /// - Updates the active account if the logged-out account was active.
@@ -369,7 +368,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if the account cannot be found, or if there is a failure in removing the account or its private key.
+    /// Returns a [`WhitenoiseError`] if there is a failure in removing the account or its private key.
     pub async fn logout(&mut self, account: &Account) -> Result<()> {
         // Delete the account from the database
         self.delete_account(account).await?;
@@ -422,8 +421,8 @@ impl Whitenoise {
     /// * Database query fails
     /// * Account deserialization fails
     /// * NostrMls initialization fails for any account
-    async fn load_all_accounts_from_database(&self) -> Result<HashMap<PublicKey, Account>> {
-        tracing::debug!(target: "whitenoise::accounts::load_all", "Loading all accounts from database");
+    async fn fetch_accounts(&self) -> Result<HashMap<PublicKey, Account>> {
+        tracing::debug!(target: "whitenoise::fetch_accounts", "Loading all accounts from database");
 
         let accounts =
             sqlx::query_as::<_, Account>("SELECT * FROM accounts ORDER BY last_synced DESC")
@@ -431,7 +430,7 @@ impl Whitenoise {
                 .await?;
 
         if accounts.is_empty() {
-            tracing::debug!(target: "whitenoise::accounts::load_all", "No accounts found in database");
+            tracing::debug!(target: "whitenoise::fetch_accounts", "No accounts found in database");
             return Ok(HashMap::new());
         }
 
@@ -441,7 +440,7 @@ impl Whitenoise {
             // Initialize NostrMls for each account
             if let Err(e) = self.initialize_nostr_mls_for_account(&account).await {
                 tracing::warn!(
-                    target: "whitenoise::accounts::load_all",
+                    target: "whitenoise::fetch_accounts",
                     "Failed to initialize NostrMls for account {}: {}",
                     account.pubkey.to_hex(),
                     e
@@ -456,7 +455,7 @@ impl Whitenoise {
             // Trigger background data fetch for each account (non-critical)
             if let Err(e) = self.background_fetch_account_data(&account).await {
                 tracing::warn!(
-                    target: "whitenoise::accounts::load_all",
+                    target: "whitenoise::fetch_accounts",
                     "Failed to trigger background fetch for account {}: {}",
                     account.pubkey.to_hex(),
                     e
@@ -465,14 +464,14 @@ impl Whitenoise {
             }
 
             tracing::debug!(
-                target: "whitenoise::accounts::load_all",
+                target: "whitenoise::fetch_accounts",
                 "Loaded and initialized account: {}",
                 account.pubkey.to_hex()
             );
         }
 
         tracing::info!(
-            target: "whitenoise::accounts::load_all",
+            target: "whitenoise::fetch_accounts",
             "Successfully loaded {} accounts from database",
             accounts_map.len()
         );
@@ -482,10 +481,8 @@ impl Whitenoise {
 
     /// Finds and loads an account from the database by its public key.
     ///
-    /// This method queries the database for an account matching the provided public key,
-    /// deserializes its settings, onboarding, and initializes the account's
-    /// NostrManager and NostrMls instances. The account is returned fully initialized and ready
-    /// for use in the application.
+    /// This method queries the database for an account matching the provided public key
+    /// and returns the account if found.
     ///
     /// # Arguments
     ///
@@ -497,8 +494,8 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a `WhitenoiseError` if the account is not found, if deserialization fails,
-    /// or if initialization of the NostrManager or NostrMls fails.
+    /// Returns a `WhitenoiseError::AccountNotFound` if the account is not found in the database,
+    /// or another `WhitenoiseError` if the database query fails.
     async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
         sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
@@ -538,22 +535,22 @@ impl Whitenoise {
     ///
     /// On failure, any partial state (e.g., stored private keys) is automatically cleaned up.
     async fn add_account_from_keys(&self, keys: &Keys) -> Result<Account> {
-        tracing::debug!(target: "whitenoise::accounts", "Adding account for pubkey: {}", keys.public_key().to_hex());
+        tracing::debug!(target: "whitenoise::add_account_from_keys", "Adding account for pubkey: {}", keys.public_key().to_hex());
 
         // Step 1: Try to store private key first (most likely to fail)
         // If this fails, we haven't persisted anything yet
         self.secrets_store.store_private_key(keys).map_err(|e| {
-            tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to store private key: {}", e);
+            tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to store private key: {}", e);
             e
         })?;
-        tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Keys stored in secret store");
+        tracing::debug!(target: "whitenoise::add_account_from_keys", "Keys stored in secret store");
 
         // Step 2: Load onboarding state (read-only operation)
-        let onboarding_state = self.load_onboarding_state(keys.public_key()).await.map_err(|e| {
-            tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to load onboarding state: {}", e);
+        let onboarding_state = self.fetch_onboarding_state(keys.public_key()).await.map_err(|e| {
+            tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to load onboarding state: {}", e);
             // Try to clean up stored private key
             if let Err(cleanup_err) = self.secrets_store.remove_private_key_for_pubkey(&keys.public_key()) {
-                tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to cleanup private key after onboarding state failure: {}", cleanup_err);
+                tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to cleanup private key after onboarding state failure: {}", cleanup_err);
             }
             e
         })?;
@@ -568,19 +565,19 @@ impl Whitenoise {
         };
 
         self.save_account(&account).await.map_err(|e| {
-            tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to save account: {}", e);
+            tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to save account: {}", e);
             // Try to clean up stored private key
             if let Err(cleanup_err) = self.secrets_store.remove_private_key_for_pubkey(&keys.public_key()) {
-                tracing::error!(target: "whitenoise::accounts::add_account_from_keys", "Failed to cleanup private key after account save failure: {}", cleanup_err);
+                tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to cleanup private key after account save failure: {}", cleanup_err);
             }
             e
         })?;
-        tracing::debug!(target: "whitenoise::accounts::add_account_from_keys", "Account saved to database");
+        tracing::debug!(target: "whitenoise::add_account_from_keys", "Account saved to database");
 
         // Step 4: Trigger fetch of nostr events on another thread (least critical)
         // Don't fail the whole operation if this fails
         if let Err(e) = self.background_fetch_account_data(&account).await {
-            tracing::warn!(target: "whitenoise::accounts::add_account_from_keys", "Failed to trigger background fetch (non-critical): {}", e);
+            tracing::warn!(target: "whitenoise::add_account_from_keys", "Failed to trigger background fetch (non-critical): {}", e);
         }
 
         Ok(account)
@@ -605,7 +602,7 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the database operation fails or if serialization fails.
     async fn save_account(&self, account: &Account) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::accounts::save_account",
+            target: "whitenoise::save_account",
             "Beginning save transaction for pubkey: {}",
             account.pubkey.to_hex()
         );
@@ -628,7 +625,7 @@ impl Whitenoise {
         .await?;
 
         tracing::debug!(
-            target: "whitenoise::accounts::save",
+            target: "whitenoise::save_account",
             "Query executed. Rows affected: {}",
             result.rows_affected()
         );
@@ -636,7 +633,7 @@ impl Whitenoise {
         txn.commit().await?;
 
         tracing::debug!(
-            target: "whitenoise::accounts::save",
+            target: "whitenoise::save_account",
             "Account saved successfully for pubkey: {}",
             account.pubkey.to_hex()
         );
@@ -665,15 +662,15 @@ impl Whitenoise {
 
         txn.commit().await?;
 
-        tracing::debug!(target: "whitenoise::accounts::remove_account", "Account removed from database for pubkey: {}", account.pubkey.to_hex());
+        tracing::debug!(target: "whitenoise::delete_account", "Account removed from database for pubkey: {}", account.pubkey.to_hex());
 
         Ok(())
     }
 
     /// Saves the provided `AccountSettings` to the database.
     ///
-    /// This method updates the settings field of the account record in the database, serializing all
-    /// relevant fields as JSON. If an account with the same public key already exists.
+    /// This method updates the settings field of the account record in the database, serializing
+    /// the settings as JSON.
     ///
     /// # Arguments
     ///
@@ -764,7 +761,7 @@ impl Whitenoise {
             let mut nostr_mls_guard = account.nostr_mls.lock().await;
             *nostr_mls_guard = Some(nostr_mls);
         }
-        tracing::debug!(target: "whitenoise::api::accounts::login", "NostrMls initialized for account: {}", account.pubkey.to_hex());
+        tracing::debug!(target: "whitenoise::initialize_nostr_mls_for_account", "NostrMls initialized for account: {}", account.pubkey.to_hex());
         Ok(())
     }
 
@@ -786,7 +783,7 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if any database or Nostr operation fails.
     async fn onboard_new_account(&self, account: &mut Account) -> Result<Account> {
-        tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Starting onboarding process");
+        tracing::debug!(target: "whitenoise::onboard_new_account", "Starting onboarding process");
 
         // Set onboarding flags
         account.onboarding.inbox_relays = false;
@@ -828,7 +825,7 @@ impl Whitenoise {
             .nostr
             .publish_event_builder_with_signer(event.clone(), keys)
             .await?;
-        tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
+        tracing::debug!(target: "whitenoise::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
 
         // Also publish relay lists to Nostr
         self.publish_relay_list_for_account(account, default_relays.clone(), RelayType::Nostr)
@@ -843,16 +840,16 @@ impl Whitenoise {
             Ok(_) => {
                 account.onboarding.key_package_published = true;
                 self.save_account(account).await?;
-                tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Published key package to relays");
+                tracing::debug!(target: "whitenoise::onboard_new_account", "Published key package to relays");
             }
             Err(e) => {
                 account.onboarding.key_package_published = false;
                 self.save_account(account).await?;
-                tracing::warn!(target: "whitenoise::accounts::onboard_new_account", "Failed to publish key package: {}", e);
+                tracing::warn!(target: "whitenoise::onboard_new_account", "Failed to publish key package: {}", e);
             }
         }
 
-        tracing::debug!(target: "whitenoise::accounts::onboard_new_account", "Onboarding complete for new account: {:?}", account);
+        tracing::debug!(target: "whitenoise::onboard_new_account", "Onboarding complete for new account: {:?}", account);
         Ok(account.clone())
     }
 
@@ -905,7 +902,7 @@ impl Whitenoise {
             .nostr
             .publish_event_builder_with_signer(event.clone(), keys)
             .await?;
-        tracing::debug!(target: "whitenoise::accounts::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
+        tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
 
         Ok(())
     }
@@ -930,20 +927,20 @@ impl Whitenoise {
     /// or if publishing to Nostr fails.
     async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
         let key_package_relays = self
-            .load_relays(account.pubkey, RelayType::KeyPackage)
+            .fetch_relays(account.pubkey, RelayType::KeyPackage)
             .await?;
 
         // Extract key package data while holding the lock
         let (encoded_key_package, tags) = {
-            tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Attempting to acquire nostr_mls lock");
+            tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Attempting to acquire nostr_mls lock");
 
             let nostr_mls_guard = account.nostr_mls.lock().await;
 
-            tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock acquired");
+            tracing::debug!(target: "whitenoise::publish_key_package_for_account", "nostr_mls lock acquired");
 
             let nostr_mls = nostr_mls_guard.as_ref()
                 .ok_or_else(|| {
-                    tracing::error!(target: "whitenoise::accounts::publish_key_package_for_account", "NostrMls not initialized for account");
+                    tracing::error!(target: "whitenoise::publish_key_package_for_account", "NostrMls not initialized for account");
                     WhitenoiseError::NostrMlsNotInitialized
                 })?;
 
@@ -951,7 +948,7 @@ impl Whitenoise {
                 .create_key_package_for_event(&account.pubkey, key_package_relays)
                 .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
 
-            tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "nostr_mls lock released");
+            tracing::debug!(target: "whitenoise::publish_key_package_for_account", "nostr_mls lock released");
             result
         };
 
@@ -966,7 +963,7 @@ impl Whitenoise {
             .publish_event_builder_with_signer(key_package_event_builder, signer)
             .await?;
 
-        tracing::debug!(target: "whitenoise::accounts::publish_key_package_for_account", "Published key package to relays: {:?}", result);
+        tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
 
         Ok(())
     }
@@ -1027,7 +1024,7 @@ impl Whitenoise {
 
         tokio::spawn(async move {
             tracing::debug!(
-                target: "whitenoise::background_fetch",
+                target: "whitenoise::background_fetch_account_data",
                 "Starting background fetch for account: {} (since: {})",
                 account_pubkey.to_hex(),
                 last_synced
@@ -1049,14 +1046,14 @@ impl Whitenoise {
                             .await
                     {
                         tracing::error!(
-                            target: "whitenoise::background_fetch",
+                            target: "whitenoise::background_fetch_account_data",
                             "Failed to update last_synced timestamp for account {}: {}",
                             account_pubkey.to_hex(),
                             e
                         );
                     } else {
                         tracing::info!(
-                            target: "whitenoise::background_fetch",
+                            target: "whitenoise::background_fetch_account_data",
                             "Successfully fetched data and updated last_synced for account: {}",
                             account_pubkey.to_hex()
                         );
@@ -1064,7 +1061,7 @@ impl Whitenoise {
                 }
                 Err(e) => {
                     tracing::error!(
-                        target: "whitenoise::background_fetch",
+                        target: "whitenoise::background_fetch_account_data",
                         "Failed to fetch user data for account {}: {}",
                         account_pubkey.to_hex(),
                         e
@@ -1100,7 +1097,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the metadata query fails.
-    pub async fn load_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
+    pub async fn fetch_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
         let metadata = self.nostr.query_user_metadata(pubkey).await?;
         Ok(metadata)
     }
@@ -1123,7 +1120,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the relay query fails.
-    pub async fn load_relays(
+    pub async fn fetch_relays(
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
@@ -1156,7 +1153,7 @@ impl Whitenoise {
     /// * The database update fails
     pub async fn update_metadata(&self, metadata: &Metadata, account: &Account) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::api::update_metadata",
+            target: "whitenoise::update_metadata",
             "Updating metadata for account: {}",
             account.pubkey.to_hex()
         );
@@ -1179,7 +1176,7 @@ impl Whitenoise {
             .await?;
 
         tracing::debug!(
-            target: "whitenoise::api::update_metadata",
+            target: "whitenoise::update_metadata",
             "Published metadata event: {:?}",
             result
         );
@@ -1209,7 +1206,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the contact list query fails.
-    pub async fn load_contact_list(
+    pub async fn fetch_contacts(
         &self,
         pubkey: PublicKey,
     ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
@@ -1217,17 +1214,17 @@ impl Whitenoise {
         Ok(contacts)
     }
 
-    pub async fn load_key_package(&self, pubkey: PublicKey) -> Result<Option<Event>> {
+    pub async fn fetch_key_package(&self, pubkey: PublicKey) -> Result<Option<Event>> {
         let key_package = self.nostr.query_user_key_package(pubkey).await?;
         Ok(key_package)
     }
 
-    pub async fn load_onboarding_state(&self, pubkey: PublicKey) -> Result<OnboardingState> {
+    pub async fn fetch_onboarding_state(&self, pubkey: PublicKey) -> Result<OnboardingState> {
         let mut onboarding_state = OnboardingState::default();
 
-        let inbox_relays = self.load_relays(pubkey, RelayType::Inbox).await?;
-        let key_package_relays = self.load_relays(pubkey, RelayType::KeyPackage).await?;
-        let key_package_published = self.load_key_package(pubkey).await?;
+        let inbox_relays = self.fetch_relays(pubkey, RelayType::Inbox).await?;
+        let key_package_relays = self.fetch_relays(pubkey, RelayType::KeyPackage).await?;
+        let key_package_published = self.fetch_key_package(pubkey).await?;
 
         onboarding_state.inbox_relays = !inbox_relays.is_empty();
         onboarding_state.key_package_relays = !key_package_relays.is_empty();
@@ -1258,7 +1255,7 @@ impl Whitenoise {
     /// * Failed to publish the updated contact list event
     pub async fn add_contact(&self, account: &Account, contact_pubkey: PublicKey) -> Result<()> {
         // Load current contact list
-        let current_contacts = self.load_contact_list(account.pubkey).await?;
+        let current_contacts = self.fetch_contacts(account.pubkey).await?;
 
         // Check if contact already exists
         if current_contacts.contains_key(&contact_pubkey) {
@@ -1276,7 +1273,7 @@ impl Whitenoise {
         self.publish_contact_list(account, new_contacts).await?;
 
         tracing::info!(
-            target: "whitenoise::contacts::add_contact",
+            target: "whitenoise::add_contact",
             "Added contact {} to account {}",
             contact_pubkey.to_hex(),
             account.pubkey.to_hex()
@@ -1307,7 +1304,7 @@ impl Whitenoise {
     /// * Failed to publish the updated contact list event
     pub async fn remove_contact(&self, account: &Account, contact_pubkey: PublicKey) -> Result<()> {
         // Load current contact list
-        let current_contacts = self.load_contact_list(account.pubkey).await?;
+        let current_contacts = self.fetch_contacts(account.pubkey).await?;
 
         // Check if contact exists
         if !current_contacts.contains_key(&contact_pubkey) {
@@ -1328,7 +1325,7 @@ impl Whitenoise {
         self.publish_contact_list(account, new_contacts).await?;
 
         tracing::info!(
-            target: "whitenoise::contacts::remove_contact",
+            target: "whitenoise::remove_contact",
             "Removed contact {} from account {}",
             contact_pubkey.to_hex(),
             account.pubkey.to_hex()
@@ -1364,7 +1361,7 @@ impl Whitenoise {
             .await?;
 
         tracing::info!(
-            target: "whitenoise::contacts::update_contacts",
+            target: "whitenoise::update_contacts",
             "Updated contact list for account {} with {} contacts",
             account.pubkey.to_hex(),
             contact_pubkeys.len()
@@ -1418,7 +1415,7 @@ impl Whitenoise {
             .await?;
 
         tracing::debug!(
-            target: "whitenoise::contacts::publish_contact_list",
+            target: "whitenoise::publish_contact_list",
             "Published contact list event: {:?}",
             result
         );
@@ -1465,7 +1462,7 @@ impl Whitenoise {
     /// Main event processing loop
     async fn process_events(mut receiver: Receiver<ProcessableEvent>, mut shutdown: Receiver<()>) {
         tracing::debug!(
-            target: "whitenoise::event_processing",
+            target: "whitenoise::process_events",
             "Starting event processing loop"
         );
 
@@ -1475,7 +1472,7 @@ impl Whitenoise {
             tokio::select! {
                 Some(event) = receiver.recv() => {
                     tracing::debug!(
-                        target: "whitenoise::event_processing",
+                        target: "whitenoise::process_events",
                         "Received event for processing"
                     );
 
@@ -1487,7 +1484,7 @@ impl Whitenoise {
                                 Kind::GiftWrap => {
                                     if let Err(e) = Self::process_giftwrap(event, subscription_id).await {
                                         tracing::error!(
-                                            target: "whitenoise::event_processing",
+                                            target: "whitenoise::process_events",
                                             "Error processing giftwrap: {}",
                                             e
                                         );
@@ -1496,7 +1493,7 @@ impl Whitenoise {
                                 Kind::MlsGroupMessage => {
                                     if let Err(e) = Self::process_mls_message(event, subscription_id).await {
                                         tracing::error!(
-                                            target: "whitenoise::event_processing",
+                                            target: "whitenoise::process_events",
                                             "Error processing MLS message: {}",
                                             e
                                         );
@@ -1505,7 +1502,7 @@ impl Whitenoise {
                                 _ => {
                                     // For now, just log other event types
                                     tracing::debug!(
-                                        target: "whitenoise::event_processing",
+                                        target: "whitenoise::process_events",
                                         "Received unhandled event of kind: {:?}",
                                         event.kind
                                     );
@@ -1519,7 +1516,7 @@ impl Whitenoise {
                 }
                 Some(_) = shutdown.recv(), if !shutting_down => {
                     tracing::info!(
-                        target: "whitenoise::event_processing",
+                        target: "whitenoise::process_events",
                         "Received shutdown signal, finishing current queue..."
                     );
                     shutting_down = true;
@@ -1528,12 +1525,12 @@ impl Whitenoise {
                 else => {
                     if shutting_down {
                         tracing::debug!(
-                            target: "whitenoise::event_processing",
+                            target: "whitenoise::process_events",
                             "Queue flushed, shutting down event processor"
                         );
                     } else {
                         tracing::debug!(
-                            target: "whitenoise::event_processing",
+                            target: "whitenoise::process_events",
                             "All channels closed, exiting event processing loop"
                         );
                     }
@@ -1546,7 +1543,7 @@ impl Whitenoise {
     /// Process giftwrap events with account awareness
     async fn process_giftwrap(event: Event, subscription_id: Option<String>) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::event_processing",
+            target: "whitenoise::process_giftwrap",
             "Processing giftwrap: {:?}",
             event
         );
@@ -1564,7 +1561,7 @@ impl Whitenoise {
             Some(pk) => pk,
             None => {
                 tracing::warn!(
-                    target: "whitenoise::event_processing",
+                    target: "whitenoise::process_giftwrap",
                     "No target pubkey found in 'p' tag for giftwrap event"
                 );
                 return Ok(());
@@ -1572,7 +1569,7 @@ impl Whitenoise {
         };
 
         tracing::debug!(
-            target: "whitenoise::event_processing",
+            target: "whitenoise::process_giftwrap",
             "Processing giftwrap for target account: {} (author: {})",
             target_pubkey.to_hex(),
             event.pubkey.to_hex()
@@ -1583,7 +1580,7 @@ impl Whitenoise {
             if let Some(sub_pubkey) = Self::extract_pubkey_from_subscription_id(&sub_id) {
                 if target_pubkey != sub_pubkey {
                     tracing::warn!(
-                        target: "whitenoise::event_processing",
+                        target: "whitenoise::process_giftwrap",
                         "Giftwrap target pubkey {} does not match subscription pubkey {} - possible routing error",
                         target_pubkey.to_hex(),
                         sub_pubkey.to_hex()
@@ -1597,7 +1594,7 @@ impl Whitenoise {
         // This requires access to self.accounts and self.get_nostr_keys_for_pubkey()
         // For now, just log that we received it
         tracing::info!(
-            target: "whitenoise::event_processing",
+            target: "whitenoise::process_giftwrap",
             "Giftwrap processing not yet implemented for account: {}",
             target_pubkey.to_hex()
         );
@@ -1608,7 +1605,7 @@ impl Whitenoise {
     /// Process MLS group messages with account awareness
     async fn process_mls_message(event: Event, subscription_id: Option<String>) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::event_processing",
+            target: "whitenoise::process_mls_message",
             "Processing MLS message: {:?}",
             event
         );
@@ -1617,7 +1614,7 @@ impl Whitenoise {
         if let Some(sub_id) = subscription_id {
             if let Some(target_pubkey) = Self::extract_pubkey_from_subscription_id(&sub_id) {
                 tracing::debug!(
-                    target: "whitenoise::event_processing",
+                    target: "whitenoise::process_mls_message",
                     "Processing MLS message for account: {}",
                     target_pubkey.to_hex()
                 );
@@ -1628,7 +1625,7 @@ impl Whitenoise {
         // This requires access to self.accounts and MLS state
         // For now, just log that we received it
         tracing::info!(
-            target: "whitenoise::event_processing",
+            target: "whitenoise::process_mls_message",
             "MLS message processing not yet implemented"
         );
 
@@ -1638,7 +1635,7 @@ impl Whitenoise {
     /// Process relay messages for logging/monitoring
     fn process_relay_message(relay_url: RelayUrl, message_type: String) {
         tracing::debug!(
-            target: "whitenoise::event_processing::relay_message",
+            target: "whitenoise::process_relay_message",
             "Processing message from {}: {}",
             relay_url,
             message_type
@@ -1988,37 +1985,37 @@ mod tests {
         use super::*;
 
         #[tokio::test]
-        async fn test_load_methods_return_types() {
+        async fn test_fetch_methods_return_types() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let test_keys = create_test_keys();
             let pubkey = test_keys.public_key();
 
             // Test all load methods return expected types (though they may be empty in test env)
-            let metadata = whitenoise.load_metadata(pubkey).await;
+            let metadata = whitenoise.fetch_metadata(pubkey).await;
             assert!(metadata.is_ok());
 
-            let relays = whitenoise.load_relays(pubkey, RelayType::Inbox).await;
+            let relays = whitenoise.fetch_relays(pubkey, RelayType::Inbox).await;
             assert!(relays.is_ok());
 
-            let contacts = whitenoise.load_contact_list(pubkey).await;
+            let contacts = whitenoise.fetch_contacts(pubkey).await;
             assert!(contacts.is_ok());
 
-            let key_package = whitenoise.load_key_package(pubkey).await;
+            let key_package = whitenoise.fetch_key_package(pubkey).await;
             assert!(key_package.is_ok());
 
-            let onboarding = whitenoise.load_onboarding_state(pubkey).await;
+            let onboarding = whitenoise.fetch_onboarding_state(pubkey).await;
             assert!(onboarding.is_ok());
         }
 
         #[tokio::test]
-        async fn test_load_all_relay_types() {
+        async fn test_fetch_all_relay_types() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let test_keys = create_test_keys();
             let pubkey = test_keys.public_key();
 
             let relay_types = [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage];
             for relay_type in relay_types {
-                let result = whitenoise.load_relays(pubkey, relay_type).await;
+                let result = whitenoise.fetch_relays(pubkey, relay_type).await;
                 assert!(result.is_ok());
                 let relays = result.unwrap();
                 assert!(relays.is_empty()); // Empty in test environment
@@ -2026,12 +2023,12 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn test_load_onboarding_state_structure() {
+        async fn test_fetch_onboarding_state_structure() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let test_keys = create_test_keys();
             let pubkey = test_keys.public_key();
 
-            let result = whitenoise.load_onboarding_state(pubkey).await;
+            let result = whitenoise.fetch_onboarding_state(pubkey).await;
             assert!(result.is_ok());
 
             let onboarding_state = result.unwrap();
@@ -2049,11 +2046,11 @@ mod tests {
 
             // Test concurrent API calls
             let results = tokio::join!(
-                whitenoise.load_metadata(pubkey),
-                whitenoise.load_relays(pubkey, RelayType::Inbox),
-                whitenoise.load_contact_list(pubkey),
-                whitenoise.load_key_package(pubkey),
-                whitenoise.load_onboarding_state(pubkey)
+                whitenoise.fetch_metadata(pubkey),
+                whitenoise.fetch_relays(pubkey, RelayType::Inbox),
+                whitenoise.fetch_contacts(pubkey),
+                whitenoise.fetch_key_package(pubkey),
+                whitenoise.fetch_onboarding_state(pubkey)
             );
 
             assert!(results.0.is_ok());
@@ -2072,23 +2069,23 @@ mod tests {
                 let pubkey = key.public_key();
 
                 // Test that all methods work with different pubkeys
-                assert!(whitenoise.load_metadata(pubkey).await.is_ok());
+                assert!(whitenoise.fetch_metadata(pubkey).await.is_ok());
                 assert!(whitenoise
-                    .load_relays(pubkey, RelayType::Inbox)
+                    .fetch_relays(pubkey, RelayType::Inbox)
                     .await
                     .is_ok());
-                assert!(whitenoise.load_contact_list(pubkey).await.is_ok());
-                assert!(whitenoise.load_key_package(pubkey).await.is_ok());
-                assert!(whitenoise.load_onboarding_state(pubkey).await.is_ok());
+                assert!(whitenoise.fetch_contacts(pubkey).await.is_ok());
+                assert!(whitenoise.fetch_key_package(pubkey).await.is_ok());
+                assert!(whitenoise.fetch_onboarding_state(pubkey).await.is_ok());
             }
         }
 
         #[tokio::test]
-        async fn test_load_all_accounts_from_database() {
+        async fn test_fetch_accounts() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
             // Test loading empty database
-            let accounts = whitenoise.load_all_accounts_from_database().await.unwrap();
+            let accounts = whitenoise.fetch_accounts().await.unwrap();
             assert!(accounts.is_empty());
 
             // Create test accounts and save them to database
@@ -2104,7 +2101,7 @@ mod tests {
             whitenoise.secrets_store.store_private_key(&keys2).unwrap();
 
             // Load accounts from database
-            let loaded_accounts = whitenoise.load_all_accounts_from_database().await.unwrap();
+            let loaded_accounts = whitenoise.fetch_accounts().await.unwrap();
             assert_eq!(loaded_accounts.len(), 2);
             assert!(loaded_accounts.contains_key(&account1.pubkey));
             assert!(loaded_accounts.contains_key(&account2.pubkey));
@@ -2119,7 +2116,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn test_load_accounts_ordering_by_last_synced() {
+        async fn test_fetch_accounts_ordering_by_last_synced() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
             // Create test accounts with different last_synced times
@@ -2143,7 +2140,7 @@ mod tests {
             whitenoise.secrets_store.store_private_key(&keys3).unwrap();
 
             // Load accounts from database
-            let loaded_accounts = whitenoise.load_all_accounts_from_database().await.unwrap();
+            let loaded_accounts = whitenoise.fetch_accounts().await.unwrap();
             assert_eq!(loaded_accounts.len(), 3);
 
             // Verify the most recent account would be first in HashMap iteration
@@ -2467,8 +2464,6 @@ mod tests {
                 assert_eq!(tag_vec[0], "p"); // Should be 'p' tag
                 assert_eq!(tag_vec[1], contacts[i].to_hex()); // Should be the contact pubkey
             }
-
-            tracing::info!("Contact list event structure test passed");
         }
 
         #[tokio::test]
@@ -2482,7 +2477,7 @@ mod tests {
 
             // Test the logic of adding a contact (without actual network calls)
             // Load current contact list (will be empty in test environment)
-            let current_contacts = whitenoise.load_contact_list(account.pubkey).await.unwrap();
+            let current_contacts = whitenoise.fetch_contacts(account.pubkey).await.unwrap();
 
             // Verify contact doesn't already exist
             assert!(!current_contacts.contains_key(&contact_pubkey));
@@ -2494,8 +2489,6 @@ mod tests {
             // Verify the contact was added to the list
             assert!(new_contacts.contains(&contact_pubkey));
             assert_eq!(new_contacts.len(), current_contacts.len() + 1);
-
-            tracing::info!("Add contact logic test passed");
         }
 
         #[tokio::test]
@@ -2511,7 +2504,7 @@ mod tests {
             let contact2 = create_test_keys().public_key();
             let contact3 = create_test_keys().public_key();
 
-            // Simulate current contacts (in a real scenario, this would come from load_contact_list)
+            // Simulate current contacts (in a real scenario, this would come from fetch_contacts)
             let mut simulated_current_contacts: std::collections::HashMap<
                 PublicKey,
                 Option<Metadata>,
@@ -2535,8 +2528,6 @@ mod tests {
             assert_eq!(new_contacts.len(), simulated_current_contacts.len() - 1);
             assert!(new_contacts.contains(&contact1));
             assert!(new_contacts.contains(&contact3));
-
-            tracing::info!("Remove contact logic test passed");
         }
 
         #[tokio::test]
@@ -2586,8 +2577,6 @@ mod tests {
             assert!(tag_pubkeys.contains(&contact1.to_hex()));
             assert!(tag_pubkeys.contains(&contact2.to_hex()));
             assert!(tag_pubkeys.contains(&contact3.to_hex()));
-
-            tracing::info!("Update contacts logic test passed");
         }
 
         #[tokio::test]
@@ -2601,7 +2590,7 @@ mod tests {
             let contact_pubkey = create_test_keys().public_key();
 
             // Test add contact validation (contact doesn't exist)
-            let current_contacts = whitenoise.load_contact_list(account.pubkey).await.unwrap();
+            let current_contacts = whitenoise.fetch_contacts(account.pubkey).await.unwrap();
 
             // Should be able to add new contact (empty list)
             let can_add = !current_contacts.contains_key(&contact_pubkey);
@@ -2617,8 +2606,6 @@ mod tests {
             simulated_contacts.insert(contact_pubkey, None);
             let can_remove_existing = simulated_contacts.contains_key(&contact_pubkey);
             assert!(can_remove_existing);
-
-            tracing::info!("Contact validation logic test passed");
         }
 
         #[tokio::test]
@@ -2648,8 +2635,6 @@ mod tests {
             let _multi_event = EventBuilder::new(Kind::ContactList, "").tags(multi_tags.clone());
             // Verify tag structure
             assert_eq!(multi_tags.len(), 2);
-
-            tracing::info!("Contact event builder creation test passed");
         }
 
         #[tokio::test]
@@ -2663,10 +2648,6 @@ mod tests {
                 .secrets_store
                 .get_nostr_keys_for_pubkey(&account.pubkey);
             assert!(signing_keys_result.is_err());
-
-            // The actual contact management methods would fail with this setup
-            // but we're testing the validation logic here
-            tracing::info!("Contact management without keys test passed");
         }
     }
 
