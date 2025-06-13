@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::accounts::{Account, AccountRow, AccountSettings, OnboardingState};
+use crate::accounts::{Account, AccountSettings, OnboardingState};
 use crate::database::Database;
 use crate::error::{Result, WhitenoiseError};
 use crate::init_tracing;
@@ -425,37 +425,25 @@ impl Whitenoise {
     async fn load_all_accounts_from_database(&self) -> Result<HashMap<PublicKey, Account>> {
         tracing::debug!(target: "whitenoise::accounts::load_all", "Loading all accounts from database");
 
-        let rows =
-            sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts ORDER BY last_synced DESC")
+        let accounts =
+            sqlx::query_as::<_, Account>("SELECT * FROM accounts ORDER BY last_synced DESC")
                 .fetch_all(&self.database.pool)
                 .await?;
 
-        if rows.is_empty() {
+        if accounts.is_empty() {
             tracing::debug!(target: "whitenoise::accounts::load_all", "No accounts found in database");
             return Ok(HashMap::new());
         }
 
-        let mut accounts = HashMap::new();
+        let mut accounts_map = HashMap::new();
 
-        for row in rows {
-            let pubkey = PublicKey::parse(row.pubkey.as_str()).map_err(|e| {
-                WhitenoiseError::Configuration(format!("Invalid public key in database: {}", e))
-            })?;
-
-            let account = Account {
-                pubkey,
-                settings: serde_json::from_str(&row.settings)?,
-                onboarding: serde_json::from_str(&row.onboarding)?,
-                last_synced: Timestamp::from(row.last_synced),
-                nostr_mls: Arc::new(Mutex::new(None)),
-            };
-
+        for account in accounts {
             // Initialize NostrMls for each account
             if let Err(e) = self.initialize_nostr_mls_for_account(&account).await {
                 tracing::warn!(
                     target: "whitenoise::accounts::load_all",
                     "Failed to initialize NostrMls for account {}: {}",
-                    pubkey.to_hex(),
+                    account.pubkey.to_hex(),
                     e
                 );
                 // Continue loading other accounts even if one fails
@@ -463,14 +451,14 @@ impl Whitenoise {
             }
 
             // Add the account to the HashMap first, then trigger background fetch
-            accounts.insert(pubkey, account.clone());
+            accounts_map.insert(account.pubkey, account.clone());
 
             // Trigger background data fetch for each account (non-critical)
             if let Err(e) = self.background_fetch_account_data(&account).await {
                 tracing::warn!(
                     target: "whitenoise::accounts::load_all",
                     "Failed to trigger background fetch for account {}: {}",
-                    pubkey.to_hex(),
+                    account.pubkey.to_hex(),
                     e
                 );
                 // Continue - background fetch failure should not prevent account loading
@@ -479,17 +467,17 @@ impl Whitenoise {
             tracing::debug!(
                 target: "whitenoise::accounts::load_all",
                 "Loaded and initialized account: {}",
-                pubkey.to_hex()
+                account.pubkey.to_hex()
             );
         }
 
         tracing::info!(
             target: "whitenoise::accounts::load_all",
             "Successfully loaded {} accounts from database",
-            accounts.len()
+            accounts_map.len()
         );
 
-        Ok(accounts)
+        Ok(accounts_map)
     }
 
     /// Finds and loads an account from the database by its public key.
@@ -512,29 +500,12 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the account is not found, if deserialization fails,
     /// or if initialization of the NostrManager or NostrMls fails.
     async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
-        let row = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
-            .bind(pubkey.to_hex().as_str())
-            .fetch_optional(&self.database.pool)
-            .await?;
-
-        match row {
-            Some(row) => {
-                let account = Account {
-                    pubkey: PublicKey::parse(row.pubkey.as_str()).map_err(|e| {
-                        WhitenoiseError::Configuration(format!(
-                            "Invalid public key in database: {}",
-                            e
-                        ))
-                    })?,
-                    settings: serde_json::from_str(&row.settings)?,
-                    onboarding: serde_json::from_str(&row.onboarding)?,
-                    last_synced: Timestamp::from(row.last_synced),
-                    nostr_mls: Arc::new(Mutex::new(None)),
-                };
-                Ok(account)
-            }
-            None => Err(WhitenoiseError::AccountNotFound),
-        }
+        Ok(
+            sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE pubkey = ?")
+                .bind(pubkey.to_hex().as_str())
+                .fetch_one(&self.database.pool)
+                .await?,
+        )
     }
 
     /// Adds a new account to the database using the provided Nostr keys (atomic operation).

@@ -16,8 +16,8 @@ pub mod whitenoise;
 
 // Re-export main types for library users
 pub use accounts::{Account, AccountSettings, OnboardingState};
-pub use relays::RelayType;
 pub use error::WhitenoiseError;
+pub use relays::RelayType;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 
 // Re-export nostr types with documentation
@@ -40,8 +40,6 @@ pub use nostr::Metadata;
 
 /// Nostr relay URL. Re-exported from [`nostr::RelayUrl`](https://docs.rs/nostr/latest/nostr/struct.RelayUrl.html).
 pub use nostr::RelayUrl;
-
-
 
 static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
 static TRACING_INIT: OnceCell<()> = OnceCell::new();
