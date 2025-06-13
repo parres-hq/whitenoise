@@ -187,7 +187,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Re-query the onboarding state to check if background fetch updated the cached data
     tracing::info!("Re-querying onboarding state after background fetch...");
     let updated_onboarding_state = whitenoise
-        .load_onboarding_state(restored_account.pubkey)
+        .fetch_onboarding_state(restored_account.pubkey)
         .await?;
     tracing::debug!(
         "Updated onboarding state after background fetch: {:?}",
@@ -200,7 +200,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Load the metadata for the restored account to verify it was fetched via background fetch
     tracing::info!("Loading metadata for restored account to test background fetch...");
-    let loaded_metadata = whitenoise.load_metadata(restored_account.pubkey).await?;
+    let loaded_metadata = whitenoise.fetch_metadata(restored_account.pubkey).await?;
 
     if let Some(metadata) = loaded_metadata {
         tracing::debug!("Loaded metadata: {:?}", metadata);
@@ -269,7 +269,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Verify the metadata was updated by loading it again
     tracing::info!("Verifying metadata update...");
-    let reloaded_metadata = whitenoise.load_metadata(restored_account.pubkey).await?;
+    let reloaded_metadata = whitenoise.fetch_metadata(restored_account.pubkey).await?;
 
     if let Some(metadata) = reloaded_metadata {
         tracing::debug!("Reloaded metadata after update: {:?}", metadata);
@@ -304,7 +304,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     );
 
     // Load current contact list to verify it's empty initially
-    let initial_contacts = whitenoise.load_contact_list(active_account.pubkey).await?;
+    let initial_contacts = whitenoise.fetch_contacts(active_account.pubkey).await?;
     tracing::info!(
         "Initial contact list has {} contacts",
         initial_contacts.len()
@@ -331,7 +331,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Verify the contact was added by reloading the contact list
-    let updated_contacts = whitenoise.load_contact_list(active_account.pubkey).await?;
+    let updated_contacts = whitenoise.fetch_contacts(active_account.pubkey).await?;
     tracing::info!(
         "Updated contact list has {} contacts",
         updated_contacts.len()
