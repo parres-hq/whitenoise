@@ -268,10 +268,10 @@ impl Whitenoise {
     /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
     pub async fn create_identity(&mut self) -> Result<Account> {
         // Create a new account with a generated keypair and a petname
-        let (initial_account, keys) = Account::new().await?;
+        let (mut account, keys) = Account::new().await?;
 
         // Save the account to the database
-        let mut account = self.save_account(&initial_account).await?;
+        self.save_account(&account).await?;
 
         // Add the keys to the secret store
         self.secrets_store.store_private_key(&keys)?;
@@ -500,12 +500,11 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the account is not found, if deserialization fails,
     /// or if initialization of the NostrManager or NostrMls fails.
     async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
-        Ok(
-            sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE pubkey = ?")
-                .bind(pubkey.to_hex().as_str())
-                .fetch_one(&self.database.pool)
-                .await?,
-        )
+        sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE pubkey = ?")
+            .bind(pubkey.to_hex().as_str())
+            .fetch_one(&self.database.pool)
+            .await
+            .map_err(|_| WhitenoiseError::AccountNotFound)
     }
 
     /// Adds a new account to the database using the provided Nostr keys (atomic operation).
@@ -599,12 +598,12 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns the saved `Account` on success.
+    /// Returns `Ok(())` on success.
     ///
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the database operation fails or if serialization fails.
-    async fn save_account(&self, account: &Account) -> Result<Account> {
+    async fn save_account(&self, account: &Account) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::accounts::save_account",
             "Beginning save transaction for pubkey: {}",
@@ -642,7 +641,7 @@ impl Whitenoise {
             account.pubkey.to_hex()
         );
 
-        Ok(account.clone())
+        Ok(())
     }
 
     /// Deletes the specified account from the database.
@@ -669,6 +668,66 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::accounts::remove_account", "Account removed from database for pubkey: {}", account.pubkey.to_hex());
 
         Ok(())
+    }
+
+    /// Saves the provided `AccountSettings` to the database.
+    ///
+    /// This method updates the settings field of the account record in the database, serializing all
+    /// relevant fields as JSON. If an account with the same public key already exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` of the account to update
+    /// * `settings` - A reference to the `AccountSettings` to be updated.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if the account does not exist or database operation fails or if serialization fails.
+    pub async fn update_account_settings(
+        &self,
+        pubkey: &PublicKey,
+        settings: &AccountSettings,
+    ) -> Result<()> {
+        // Serialize AccountSettings to JSON
+        let settings_json = serde_json::to_value(settings)?;
+
+        // Execute the update query
+        let result = sqlx::query("UPDATE accounts SET settings = ? WHERE pubkey = ?")
+            .bind(settings_json)
+            .bind(pubkey.to_hex())
+            .execute(&self.database.pool)
+            .await?;
+
+        if result.rows_affected() < 1 {
+            Err(WhitenoiseError::AccountNotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Fetches the `AccountSettings` from the database
+    ///
+    /// # Arguments
+    /// * pubkey
+    ///
+    /// # Returns
+    /// Returns `AccountSettings` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if account does not exist or database operation fails or if serialization fails
+    pub async fn fetch_account_settings(&self, pubkey: &PublicKey) -> Result<AccountSettings> {
+        let settings_json: Value =
+            sqlx::query_scalar("SELECT settings FROM accounts WHERE pubkey = ?")
+                .bind(pubkey.to_hex())
+                .fetch_one(&self.database.pool)
+                .await
+                .map_err(|_| WhitenoiseError::AccountNotFound)?;
+        serde_json::from_value(settings_json).map_err(WhitenoiseError::from)
     }
 
     /// Initializes the Nostr MLS (Message Layer Security) instance for a given account.
