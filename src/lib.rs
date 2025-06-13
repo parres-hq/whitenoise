@@ -31,12 +31,6 @@ pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 #[doc(alias = "public_key")]
 pub use nostr::PublicKey;
 
-/// Nostr private key for signing and verifying Nostr events. Re-exported from [`nostr::SecretKey`](https://docs.rs/nostr/latest/nostr/struct.SecretKey.html).
-#[doc(alias = "secret_key")]
-#[doc(alias = "private_key")]
-#[doc(alias = "nsec")]
-pub use nostr::SecretKey;
-
 /// Nostr event containing signed data. Re-exported from [`nostr::Event`](https://docs.rs/nostr/latest/nostr/struct.Event.html).
 pub use nostr::Event;
 
