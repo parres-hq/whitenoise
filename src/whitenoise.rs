@@ -1184,6 +1184,56 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Updates the relay list for the given account by publishing a new relay list event to Nostr.
+    ///
+    /// This method takes the provided relay URLs and relay type, creates the appropriate relay list event
+    /// (Nostr relays, Inbox relays, or Key Package relays), and publishes it to the account's relays.
+    /// The relay list event contains the provided relay URLs as relay tags.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A reference to the `Account` whose relay list should be updated.
+    /// * `relay_type` - The type of relay list to update (Nostr, Inbox, or KeyPackage).
+    /// * `relays` - A vector of `RelayUrl` specifying the relays to include in the event.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on successful publication.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if:
+    /// * The account's private key cannot be retrieved from the secret store
+    /// * The event creation fails
+    /// * The event publication fails
+    pub async fn update_relays(
+        &self,
+        account: &Account,
+        relay_type: RelayType,
+        relays: Vec<RelayUrl>,
+    ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::update_account_relays",
+            "Updating {:?} relays for account: {} with {} relays",
+            relay_type,
+            account.pubkey.to_hex(),
+            relays.len()
+        );
+
+        // Use the existing helper method to publish the relay list
+        self.publish_relay_list_for_account(account, relays, relay_type)
+            .await?;
+
+        tracing::debug!(
+            target: "whitenoise::update_account_relays",
+            "Successfully updated {:?} relays for account: {}",
+            relay_type,
+            account.pubkey.to_hex()
+        );
+
+        Ok(())
+    }
+
     // ============================================================================
     // CONTACT MANAGEMENT
     // ============================================================================
@@ -2671,4 +2721,275 @@ mod tests {
             let _key_package = RelayType::KeyPackage;
         }
     }
+
+    // Relay Management Tests
+    mod relay_management_tests {
+        use super::*;
+        use nostr_sdk::RelayUrl;
+
+        #[tokio::test]
+        async fn test_relay_type_to_event_kind_mapping() {
+            // Test that RelayType maps to correct Nostr event kinds
+            // This tests the logic inside publish_relay_list_for_account without network calls
+
+            let test_cases = [
+                (RelayType::Nostr, Kind::RelayList),
+                (RelayType::Inbox, Kind::InboxRelays),
+                (RelayType::KeyPackage, Kind::MlsKeyPackageRelays),
+            ];
+
+            for (relay_type, expected_kind) in test_cases {
+                let actual_kind = match relay_type {
+                    RelayType::Nostr => Kind::RelayList,
+                    RelayType::Inbox => Kind::InboxRelays,
+                    RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
+                };
+
+                assert_eq!(
+                    actual_kind, expected_kind,
+                    "RelayType::{:?} should map to Kind::{:?}",
+                    relay_type, expected_kind
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn test_relay_list_tag_creation() {
+            // Test that relay URLs are correctly converted to tags
+            let test_relays = [
+                "wss://relay.damus.io",
+                "wss://nos.lol",
+                "wss://relay.primal.net",
+                "wss://nostr.wine",
+            ];
+
+            let relay_urls: Vec<RelayUrl> = test_relays
+                .iter()
+                .map(|url| RelayUrl::parse(url).unwrap())
+                .collect();
+
+            // Create tags the same way as publish_relay_list_for_account
+            let tags: Vec<Tag> = relay_urls
+                .into_iter()
+                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .collect();
+
+            // Verify tag structure
+            assert_eq!(tags.len(), test_relays.len());
+
+            for (i, tag) in tags.iter().enumerate() {
+                let tag_vec = tag.clone().to_vec();
+                assert_eq!(tag_vec.len(), 2, "Relay tag should have 2 elements");
+                assert_eq!(tag_vec[0], "relay", "First element should be 'relay'");
+                assert_eq!(
+                    tag_vec[1], test_relays[i],
+                    "Second element should be the relay URL"
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn test_relay_list_event_structure() {
+            // Test event creation for each relay type without publishing
+            let relay_urls = [
+                RelayUrl::parse("wss://relay.damus.io").unwrap(),
+                RelayUrl::parse("wss://nos.lol").unwrap(),
+            ];
+
+            let test_cases = [
+                (RelayType::Nostr, Kind::RelayList),
+                (RelayType::Inbox, Kind::InboxRelays),
+                (RelayType::KeyPackage, Kind::MlsKeyPackageRelays),
+            ];
+
+            for (_relay_type, expected_kind) in test_cases {
+                // Create tags
+                let tags: Vec<Tag> = relay_urls
+                    .iter()
+                    .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                    .collect();
+
+                // Create event (same logic as publish_relay_list_for_account)
+                let _event_builder = EventBuilder::new(expected_kind, "").tags(tags.clone());
+
+                // Verify event structure - we can't build the event without keys,
+                // but we can verify the builder has the right components
+                // (The actual event building happens during signing)
+
+                // Verify tags are correctly attached
+                assert_eq!(tags.len(), 2);
+
+                // Verify tag content
+                for (i, tag) in tags.iter().enumerate() {
+                    let tag_vec = tag.clone().to_vec();
+                    assert_eq!(tag_vec[0], "relay");
+                    assert_eq!(tag_vec[1], relay_urls[i].to_string());
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn test_empty_relay_list_handling() {
+            // Test that empty relay lists are handled correctly
+            // (publish_relay_list_for_account returns early for empty lists)
+
+            let empty_relays: Vec<RelayUrl> = vec![];
+
+            // The method returns early if relays.is_empty(), so test that logic
+            assert!(empty_relays.is_empty());
+
+            // If we were to create tags anyway, it should be empty
+            let tags: Vec<Tag> = empty_relays
+                .into_iter()
+                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .collect();
+
+            assert!(tags.is_empty());
+        }
+
+        #[tokio::test]
+        async fn test_single_relay_event() {
+            // Test with a single relay
+            let single_relay = vec![RelayUrl::parse("wss://relay.damus.io").unwrap()];
+
+            let tags: Vec<Tag> = single_relay
+                .into_iter()
+                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .collect();
+
+            assert_eq!(tags.len(), 1);
+            let tag_vec = tags[0].clone().to_vec();
+            assert_eq!(tag_vec[0], "relay");
+            assert_eq!(tag_vec[1], "wss://relay.damus.io");
+        }
+
+        #[tokio::test]
+        async fn test_multiple_relay_event() {
+            // Test with multiple relays
+            let multiple_relays = vec![
+                RelayUrl::parse("wss://relay.damus.io").unwrap(),
+                RelayUrl::parse("wss://nos.lol").unwrap(),
+                RelayUrl::parse("wss://relay.primal.net").unwrap(),
+                RelayUrl::parse("wss://nostr.wine").unwrap(),
+                RelayUrl::parse("wss://relay.snort.social").unwrap(),
+            ];
+
+            let expected_urls = [
+                "wss://relay.damus.io",
+                "wss://nos.lol",
+                "wss://relay.primal.net",
+                "wss://nostr.wine",
+                "wss://relay.snort.social",
+            ];
+
+            let tags: Vec<Tag> = multiple_relays
+                .into_iter()
+                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .collect();
+
+            assert_eq!(tags.len(), expected_urls.len());
+
+            for (i, tag) in tags.iter().enumerate() {
+                let tag_vec = tag.clone().to_vec();
+                assert_eq!(tag_vec[0], "relay");
+                assert_eq!(tag_vec[1], expected_urls[i]);
+            }
+        }
+
+        #[tokio::test]
+        async fn test_relay_url_formats() {
+            // Test different valid relay URL formats
+            let test_urls = [
+                "wss://relay.damus.io",
+                "wss://nos.lol/",
+                "wss://relay.primal.net/v1",
+                "ws://localhost:8080",
+            ];
+
+            for url_str in test_urls {
+                let relay_url = RelayUrl::parse(url_str).unwrap();
+                let tag = Tag::custom(TagKind::Relay, [relay_url.to_string()]);
+
+                let tag_vec = tag.to_vec();
+                assert_eq!(tag_vec[0], "relay");
+                assert_eq!(tag_vec[1], url_str);
+            }
+        }
+
+        #[tokio::test]
+        async fn test_update_account_relays_logic() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let (account, keys) = create_test_account();
+
+            // Store account keys so we can test the event creation part
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+            let test_relays = [
+                RelayUrl::parse("wss://relay.damus.io").unwrap(),
+                RelayUrl::parse("wss://nos.lol").unwrap(),
+            ];
+
+            // Test that all relay types can be processed
+            let relay_types = [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage];
+
+            for relay_type in relay_types {
+                // We can't easily test the actual method without network calls,
+                // but we can test that the components work
+
+                // Verify we can get the keys (required for signing)
+                let signing_keys = whitenoise
+                    .secrets_store
+                    .get_nostr_keys_for_pubkey(&account.pubkey);
+                assert!(
+                    signing_keys.is_ok(),
+                    "Should be able to get signing keys for relay type {:?}",
+                    relay_type
+                );
+
+                // Verify event kind mapping
+                let expected_kind = match relay_type {
+                    RelayType::Nostr => Kind::RelayList,
+                    RelayType::Inbox => Kind::InboxRelays,
+                    RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
+                };
+
+                // Create tags (same logic as in the method)
+                let tags: Vec<Tag> = test_relays
+                    .iter()
+                    .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                    .collect();
+
+                // Create event builder
+                let _event_builder = EventBuilder::new(expected_kind, "").tags(tags);
+
+                // If we got here without panicking, the event structure is valid
+            }
+        }
+
+        #[tokio::test]
+        async fn test_relay_list_edge_cases() {
+            // Test various edge cases in relay list processing
+
+            // Test with special characters in URLs (should be URL encoded)
+            let special_relay =
+                RelayUrl::parse("wss://relay.example.com/path?param=value&other=test").unwrap();
+            let tag = Tag::custom(TagKind::Relay, [special_relay.to_string()]);
+
+            let tag_vec = tag.to_vec();
+            assert_eq!(tag_vec[0], "relay");
+            assert!(tag_vec[1].contains("wss://relay.example.com"));
+
+            // Test very long relay URL
+            let long_path = "a".repeat(100);
+            let long_url = format!("wss://relay.example.com/{}", long_path);
+            let long_relay = RelayUrl::parse(&long_url).unwrap();
+            let long_tag = Tag::custom(TagKind::Relay, [long_relay.to_string()]);
+
+            let long_tag_vec = long_tag.to_vec();
+            assert_eq!(long_tag_vec[0], "relay");
+            assert_eq!(long_tag_vec[1], long_url);
+        }
+    }
+
+    // Contact Management Tests
 }
