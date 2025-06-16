@@ -38,6 +38,9 @@ pub enum WhitenoiseError {
     #[error("Nostr key error: {0}")]
     NostrKey(#[from] nostr_sdk::key::Error),
 
+    #[error("Nostr url error: {0}")]
+    NostrUrl(#[from] nostr::types::url::Error),
+
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
 
