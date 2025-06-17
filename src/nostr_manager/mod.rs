@@ -11,7 +11,7 @@ use tokio::sync::{mpsc::Sender, Mutex};
 pub mod parser;
 pub mod query;
 // pub mod search;
-// pub mod subscriptions;
+pub mod subscriptions;
 // pub mod sync;
 
 #[derive(Error, Debug)]

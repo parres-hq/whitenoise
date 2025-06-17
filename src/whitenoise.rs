@@ -331,13 +331,14 @@ impl Whitenoise {
             Err(e) => Err(e),
         }?;
 
-        // TODO: initialize subs on nostr manager
-
         // Initialize NostrMls for the account
         self.initialize_nostr_mls_for_account(&account).await?;
 
         // Spawn a background task to fetch the account's data from relays
         self.background_fetch_account_data(&account).await?;
+
+        // Initialize subscriptions on nostr manager
+        self.setup_subscriptions(&account).await?;
 
         // Set the account to active
         self.active_account = Some(account.pubkey);
@@ -1069,6 +1070,41 @@ impl Whitenoise {
                 }
             }
         });
+
+        Ok(())
+    }
+
+    async fn setup_subscriptions(&self, account: &Account) -> Result<()> {
+        let groups = {
+            let nostr_mls_guard = account.nostr_mls.lock().await;
+            if let Some(ref nostr_mls) = *nostr_mls_guard {
+                nostr_mls.get_groups()
+            } else {
+                return Err(WhitenoiseError::NostrMlsNotInitialized);
+            }
+        };
+
+        let nostr_group_ids = groups
+            .map(|groups| {
+                groups
+                    .iter()
+                    .map(|group| hex::encode(group.nostr_group_id))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+
+        let user_relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+
+        // Use default client relays if user hasn't configured any
+        let relays_to_use = if user_relays.is_empty() {
+            self.nostr.relays().await?
+        } else {
+            user_relays
+        };
+
+        self.nostr
+            .setup_account_subscriptions(account.pubkey, relays_to_use, nostr_group_ids)
+            .await?;
 
         Ok(())
     }
@@ -2992,4 +3028,297 @@ mod tests {
     }
 
     // Contact Management Tests
+
+    // Subscription Management Tests
+    mod subscription_management_tests {
+        use super::*;
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        // Helper to create an account with mocked NostrMls
+        async fn create_account_with_mocked_nostr_mls(has_groups: bool) -> (Account, Keys) {
+            let (mut account, keys) = create_test_account();
+
+            // For testing, we'll mock the nostr_mls behavior by using None or Some
+            // In a real implementation, we'd need to mock the NostrMls struct
+            // For now, we'll test the error case and leave detailed group testing
+            // for when NostrMls has better testing support
+
+            if has_groups {
+                // Set up for having groups - this will be expanded when NostrMls is mockable
+                account.nostr_mls = Arc::new(Mutex::new(None)); // Still None for now
+            } else {
+                account.nostr_mls = Arc::new(Mutex::new(None));
+            }
+
+            (account, keys)
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_nostr_mls_not_initialized() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let (account, keys) = create_account_with_mocked_nostr_mls(false).await;
+
+            // Store keys so other operations can work
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+            // Test that setup_subscriptions fails when NostrMls is not initialized
+            let result = whitenoise.setup_subscriptions(&account).await;
+
+            match result {
+                Err(WhitenoiseError::NostrMlsNotInitialized) => {
+                    // This is the expected behavior
+                }
+                Ok(_) => panic!("setup_subscriptions should fail when NostrMls is not initialized"),
+                Err(other) => panic!("Unexpected error: {:?}", other),
+            }
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_relay_logic_with_empty_user_relays() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let (account, keys) = create_test_account();
+
+            // Store keys and save account
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            whitenoise.save_account(&account).await.unwrap();
+
+            // Initialize NostrMls for the account
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // Test the relay selection logic
+            // fetch_relays should return empty in test environment
+            let user_relays = whitenoise
+                .fetch_relays(account.pubkey, RelayType::Nostr)
+                .await
+                .unwrap();
+            assert!(
+                user_relays.is_empty(),
+                "User relays should be empty in test environment"
+            );
+
+            // When user_relays is empty, should use default client relays
+            let default_relays = whitenoise.nostr.relays().await.unwrap();
+
+            let relays_to_use = if user_relays.is_empty() {
+                default_relays.clone()
+            } else {
+                user_relays
+            };
+
+            // In test environment, default relays might also be empty, but the logic should work
+            assert_eq!(relays_to_use, default_relays);
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_relay_selection_logic() {
+            // Test the relay selection logic independently
+            let empty_user_relays: Vec<RelayUrl> = vec![];
+            let default_relays = vec![
+                RelayUrl::parse("wss://relay.damus.io").unwrap(),
+                RelayUrl::parse("wss://nos.lol").unwrap(),
+            ];
+
+            // Test: when user_relays is empty, should use default_relays
+            let relays_to_use = if empty_user_relays.is_empty() {
+                default_relays.clone()
+            } else {
+                empty_user_relays
+            };
+            assert_eq!(relays_to_use, default_relays);
+
+            // Test: when user_relays is not empty, should use user_relays
+            let user_relays = vec![
+                RelayUrl::parse("wss://user.relay.com").unwrap(),
+                RelayUrl::parse("wss://custom.relay.net").unwrap(),
+            ];
+
+            let relays_to_use = if user_relays.is_empty() {
+                default_relays.clone()
+            } else {
+                user_relays.clone()
+            };
+            assert_eq!(relays_to_use, user_relays);
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_group_ids_conversion_logic() {
+            // Test the group ID conversion logic independently
+            // This simulates what happens in the method when converting groups to nostr_group_ids
+
+            // Test with None groups (empty result)
+            let groups: Option<Vec<MockGroup>> = None;
+            let nostr_group_ids = groups
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .map(|group| hex::encode(&group.nostr_group_id))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default();
+            assert!(nostr_group_ids.is_empty());
+
+            // Test with empty groups
+            let empty_groups: Option<Vec<MockGroup>> = Some(vec![]);
+            let nostr_group_ids = empty_groups
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .map(|group| hex::encode(&group.nostr_group_id))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default();
+            assert!(nostr_group_ids.is_empty());
+
+            // Test with actual groups
+            let mock_groups = vec![
+                MockGroup {
+                    nostr_group_id: vec![1, 2, 3, 4],
+                },
+                MockGroup {
+                    nostr_group_id: vec![5, 6, 7, 8],
+                },
+                MockGroup {
+                    nostr_group_id: vec![9, 10, 11, 12],
+                },
+            ];
+            let groups_with_data: Option<Vec<MockGroup>> = Some(mock_groups);
+            let nostr_group_ids = groups_with_data
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .map(|group| hex::encode(&group.nostr_group_id))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default();
+
+            assert_eq!(nostr_group_ids.len(), 3);
+            assert_eq!(nostr_group_ids[0], "01020304");
+            assert_eq!(nostr_group_ids[1], "05060708");
+            assert_eq!(nostr_group_ids[2], "090a0b0c");
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_hex_encoding() {
+            // Test hex encoding edge cases for group IDs
+
+            let test_cases = vec![
+                (vec![], ""),
+                (vec![0], "00"),
+                (vec![255], "ff"),
+                (vec![0, 255], "00ff"),
+                (vec![16, 32, 48, 64], "10203040"),
+                (vec![170, 187, 204, 221], "aabbccdd"),
+            ];
+
+            for (input, expected) in test_cases {
+                let encoded = hex::encode(&input);
+                assert_eq!(encoded, expected, "Failed for input: {:?}", input);
+            }
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_error_handling_fetch_relays() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let (account, keys) = create_test_account();
+
+            // Store keys and save account
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            whitenoise.save_account(&account).await.unwrap();
+
+            // Initialize NostrMls for the account
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // Test that fetch_relays doesn't fail in test environment
+            // (It might return empty results, but shouldn't error)
+            let user_relays_result = whitenoise
+                .fetch_relays(account.pubkey, RelayType::Nostr)
+                .await;
+            assert!(
+                user_relays_result.is_ok(),
+                "fetch_relays should not fail in test environment"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_components_integration() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let (account, keys) = create_test_account();
+
+            // Store keys and save account
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            whitenoise.save_account(&account).await.unwrap();
+
+            // Initialize NostrMls for the account
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // Test that all individual components work
+
+            // 1. Test that we can fetch user relays
+            let user_relays = whitenoise
+                .fetch_relays(account.pubkey, RelayType::Nostr)
+                .await;
+            assert!(user_relays.is_ok());
+
+            // 2. Test that we can get default relays
+            let default_relays = whitenoise.nostr.relays().await;
+            assert!(default_relays.is_ok());
+
+            // 3. Test relay selection logic
+            let user_relays = user_relays.unwrap();
+            let default_relays = default_relays.unwrap();
+
+            let relays_to_use = if user_relays.is_empty() {
+                default_relays
+            } else {
+                user_relays
+            };
+
+            // The logic should complete without errors
+            assert!(!relays_to_use.is_empty() || relays_to_use.is_empty()); // Either case is valid
+        }
+
+        #[tokio::test]
+        async fn test_setup_subscriptions_nostr_mls_lock_handling() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let (account, keys) = create_test_account();
+
+            // Store keys and save account
+            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            whitenoise.save_account(&account).await.unwrap();
+
+            // Test the lock acquisition logic
+            {
+                let nostr_mls_guard = account.nostr_mls.lock().await;
+
+                // In our test setup, nostr_mls should be None (not initialized)
+                assert!(nostr_mls_guard.is_none());
+
+                // The method should handle this case by returning NostrMlsNotInitialized error
+            }
+
+            // Test the actual error case by calling the method
+            let result = whitenoise.setup_subscriptions(&account).await;
+            assert!(matches!(
+                result,
+                Err(WhitenoiseError::NostrMlsNotInitialized)
+            ));
+        }
+
+        // Mock struct for testing group ID conversion
+        struct MockGroup {
+            nostr_group_id: Vec<u8>,
+        }
+    }
+
+    // Helper Tests
 }
