@@ -276,14 +276,13 @@ impl Whitenoise {
         // Add the keys to the secret store
         self.secrets_store.store_private_key(&keys)?;
 
-        // TODO: initialize subs on nostr manager
-
         self.initialize_nostr_mls_for_account(&account).await?;
 
         // Onboard the account
         self.onboard_new_account(&mut account).await?;
 
-        // initialize subs on nostr manager
+        // Initialize subscriptions on nostr manager
+        self.setup_subscriptions(&account).await?;
 
         // Add the account to the in-memory accounts list
         self.accounts.insert(account.pubkey, account.clone());
