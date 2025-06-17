@@ -279,6 +279,36 @@ impl NostrManager {
         Ok(result)
     }
 
+    /// Sets up account subscriptions using a temporary signer.
+    ///
+    /// This method allows setting up subscriptions with a signer that is only used for this specific operation.
+    /// The signer is set before subscription setup and unset immediately after.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The public key of the account to set up subscriptions for
+    /// * `user_relays` - The relays to use for subscriptions
+    /// * `nostr_group_ids` - Group IDs for MLS message subscriptions
+    /// * `signer` - A signer that implements `NostrSigner` and has a 'static lifetime
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Success if subscriptions were set up, or an error if setup fails
+    pub(crate) async fn setup_account_subscriptions_with_signer(
+        &self,
+        pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
+        nostr_group_ids: Vec<String>,
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        self.client.set_signer(signer).await;
+        let result = self
+            .setup_account_subscriptions(pubkey, user_relays, nostr_group_ids)
+            .await;
+        self.client.unset_signer().await;
+        result
+    }
+
     /// Extracts welcome events from a list of giftwrapped events.
     ///
     /// This function processes a list of giftwrapped events and extracts the welcome events

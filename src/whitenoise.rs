@@ -3,7 +3,7 @@ use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,8 +46,8 @@ impl WhitenoiseConfig {
 
 pub struct Whitenoise {
     pub config: WhitenoiseConfig,
-    pub accounts: HashMap<PublicKey, Account>,
-    pub active_account: Option<PublicKey>,
+    pub accounts: Arc<RwLock<HashMap<PublicKey, Account>>>,
+    pub active_account: Arc<RwLock<Option<PublicKey>>>,
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,
@@ -70,6 +70,98 @@ impl std::fmt::Debug for Whitenoise {
 }
 
 impl Whitenoise {
+    // ============================================================================
+    // HELPER METHODS FOR THREAD-SAFE ACCESS
+    // ============================================================================
+
+    /// Get a read lock on the accounts HashMap
+    async fn read_accounts(&self) -> tokio::sync::RwLockReadGuard<'_, HashMap<PublicKey, Account>> {
+        self.accounts.read().await
+    }
+
+    /// Get a write lock on the accounts HashMap
+    async fn write_accounts(
+        &self,
+    ) -> tokio::sync::RwLockWriteGuard<'_, HashMap<PublicKey, Account>> {
+        self.accounts.write().await
+    }
+
+    /// Get a read lock on the active account
+    #[allow(dead_code)]
+    async fn read_active_account(&self) -> tokio::sync::RwLockReadGuard<'_, Option<PublicKey>> {
+        self.active_account.read().await
+    }
+
+    /// Get a write lock on the active account
+    async fn write_active_account(&self) -> tokio::sync::RwLockWriteGuard<'_, Option<PublicKey>> {
+        self.active_account.write().await
+    }
+
+    /// Convenience method to get the active account's public key
+    #[allow(dead_code)]
+    pub async fn get_active_account_pubkey(&self) -> Option<PublicKey> {
+        *self.read_active_account().await
+    }
+
+    /// Convenience method to set the active account
+    async fn set_active_account(&self, pubkey: Option<PublicKey>) {
+        *self.write_active_account().await = pubkey;
+    }
+
+    /// Test helper: Check if accounts is empty
+    #[cfg(test)]
+    pub async fn accounts_is_empty(&self) -> bool {
+        self.read_accounts().await.is_empty()
+    }
+
+    /// Test helper: Check if active account is set
+    #[cfg(test)]
+    pub async fn has_active_account(&self) -> bool {
+        self.get_active_account_pubkey().await.is_some()
+    }
+
+    /// Test helper: Get accounts length
+    #[cfg(test)]
+    pub async fn accounts_len(&self) -> usize {
+        self.read_accounts().await.len()
+    }
+
+    /// Test helper: Check if account exists
+    #[cfg(test)]
+    pub async fn has_account(&self, pubkey: &PublicKey) -> bool {
+        self.read_accounts().await.contains_key(pubkey)
+    }
+
+    /// Integration test helper: Get accounts length (public version)
+    pub async fn get_accounts_count(&self) -> usize {
+        self.read_accounts().await.len()
+    }
+
+    /// Integration test helper: Check if active account is set (public version)
+    pub async fn has_active_account_set(&self) -> bool {
+        self.get_active_account_pubkey().await.is_some()
+    }
+
+    /// Integration test helper: Get active account pubkey (public version)
+    pub async fn get_active_pubkey(&self) -> Option<PublicKey> {
+        self.get_active_account_pubkey().await
+    }
+
+    /// Integration test helper: Check if account exists (public version)
+    pub async fn account_exists(&self, pubkey: &PublicKey) -> bool {
+        self.read_accounts().await.contains_key(pubkey)
+    }
+
+    /// Integration test helper: Get account by active pubkey
+    pub async fn get_active_account(&self) -> Option<Account> {
+        if let Some(pubkey) = self.get_active_pubkey().await {
+            let accounts = self.read_accounts().await;
+            accounts.get(&pubkey).cloned()
+        } else {
+            None
+        }
+    }
+
     // ============================================================================
     // INITIALIZATION & LIFECYCLE
     // ============================================================================
@@ -108,7 +200,7 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Self> {
+    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Arc<Self>> {
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
 
@@ -139,33 +231,50 @@ impl Whitenoise {
         // Create SecretsStore
         let secrets_store = SecretsStore::new(data_dir);
 
-        // Load all accounts from database
-        let mut whitenoise = Self {
+        // Create the whitenoise instance
+        let whitenoise = Self {
             config,
             database,
             nostr,
             secrets_store,
-            accounts: HashMap::new(),
-            active_account: None,
+            accounts: Arc::new(RwLock::new(HashMap::new())),
+            active_account: Arc::new(RwLock::new(None)),
             event_sender,
             shutdown_sender,
         };
-        whitenoise.accounts = whitenoise.fetch_accounts().await?;
+
+        // Load all accounts from database
+        let loaded_accounts = whitenoise.fetch_accounts().await?;
+        {
+            let mut accounts = whitenoise.write_accounts().await;
+            *accounts = loaded_accounts;
+        }
 
         // Set the most recently synced account as active
-        whitenoise.active_account = whitenoise
-            .accounts
-            .values()
-            .max_by_key(|account| account.last_synced)
-            .map(|account| account.pubkey);
+        {
+            let accounts = whitenoise.read_accounts().await;
+            let most_recent = accounts
+                .values()
+                .max_by_key(|account| account.last_synced)
+                .map(|account| account.pubkey);
+            drop(accounts);
 
-        // Start the event processing loop
-        whitenoise
-            .start_event_processing_loop(event_receiver, shutdown_receiver)
+            whitenoise.set_active_account(most_recent).await;
+        }
+
+        // Create Arc and start event processing loop (after accounts are loaded)
+        let whitenoise_arc = Arc::new(whitenoise);
+        let whitenoise_for_loop = whitenoise_arc.clone();
+
+        tracing::debug!(
+            target: "whitenoise::initialize_whitenoise",
+            "Starting event processing loop for loaded accounts"
+        );
+
+        Self::start_event_processing_loop(whitenoise_for_loop, event_receiver, shutdown_receiver)
             .await;
 
-        // Return fully configured, ready-to-go instance
-        Ok(whitenoise)
+        Ok(whitenoise_arc)
     }
 
     /// Deletes all application data, including the database, MLS data, and log files.
@@ -198,7 +307,7 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn delete_all_data(&mut self) -> Result<()> {
+    pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
         // Remove nostr cache first
@@ -237,8 +346,11 @@ impl Whitenoise {
         self.shutdown_event_processing().await?;
 
         // Clear the accounts map
-        self.accounts.clear();
-        self.active_account = None;
+        {
+            let mut accounts = self.write_accounts().await;
+            accounts.clear();
+        }
+        self.set_active_account(None).await;
 
         Ok(())
     }
@@ -266,7 +378,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
-    pub async fn create_identity(&mut self) -> Result<Account> {
+    pub async fn create_identity(&self) -> Result<Account> {
         // Create a new account with a generated keypair and a petname
         let (mut account, keys) = Account::new().await?;
 
@@ -285,10 +397,13 @@ impl Whitenoise {
         self.setup_subscriptions(&account).await?;
 
         // Add the account to the in-memory accounts list
-        self.accounts.insert(account.pubkey, account.clone());
+        {
+            let mut accounts = self.write_accounts().await;
+            accounts.insert(account.pubkey, account.clone());
+        }
 
         // Set the account to active
-        self.active_account = Some(account.pubkey);
+        self.set_active_account(Some(account.pubkey)).await;
 
         Ok(account)
     }
@@ -313,7 +428,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if the private key is invalid, or if there is a failure in finding or adding the account.
-    pub async fn login(&mut self, nsec_or_hex_privkey: String) -> Result<Account> {
+    pub async fn login(&self, nsec_or_hex_privkey: String) -> Result<Account> {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
 
@@ -340,10 +455,13 @@ impl Whitenoise {
         self.setup_subscriptions(&account).await?;
 
         // Set the account to active
-        self.active_account = Some(account.pubkey);
+        self.set_active_account(Some(account.pubkey)).await;
 
         // Add the account to the in-memory accounts list
-        self.accounts.insert(account.pubkey, account.clone());
+        {
+            let mut accounts = self.write_accounts().await;
+            accounts.insert(account.pubkey, account.clone());
+        }
 
         Ok(account)
     }
@@ -369,7 +487,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if there is a failure in removing the account or its private key.
-    pub async fn logout(&mut self, account: &Account) -> Result<()> {
+    pub async fn logout(&self, account: &Account) -> Result<()> {
         // Delete the account from the database
         self.delete_account(account).await?;
 
@@ -378,8 +496,15 @@ impl Whitenoise {
             .remove_private_key_for_pubkey(&account.pubkey)?;
 
         // Remove the account from the Whitenoise struct and update the active account
-        self.accounts.remove(&account.pubkey);
-        self.active_account = self.accounts.keys().next().copied();
+        {
+            let mut accounts = self.write_accounts().await;
+            accounts.remove(&account.pubkey);
+
+            let new_active = accounts.keys().next().copied();
+            drop(accounts); // Release the write lock before acquiring active account write lock
+
+            self.set_active_account(new_active).await;
+        }
 
         Ok(())
     }
@@ -396,8 +521,8 @@ impl Whitenoise {
     /// # Returns
     ///
     /// Returns the `Account` that was set as active.
-    pub fn update_active_account(&mut self, account: &Account) -> Result<Account> {
-        self.active_account = Some(account.pubkey);
+    pub async fn update_active_account(&self, account: &Account) -> Result<Account> {
+        self.set_active_account(Some(account.pubkey)).await;
         Ok(account.clone())
     }
 
@@ -1101,8 +1226,18 @@ impl Whitenoise {
             user_relays
         };
 
+        // Use the signer-aware subscription setup method
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
         self.nostr
-            .setup_account_subscriptions(account.pubkey, relays_to_use, nostr_group_ids)
+            .setup_account_subscriptions_with_signer(
+                account.pubkey,
+                relays_to_use,
+                nostr_group_ids,
+                keys,
+            )
             .await?;
 
         Ok(())
@@ -1516,12 +1651,12 @@ impl Whitenoise {
 
     /// Start the event processing loop in a background task
     async fn start_event_processing_loop(
-        &mut self,
+        whitenoise: Arc<Whitenoise>,
         receiver: Receiver<ProcessableEvent>,
         shutdown_receiver: Receiver<()>,
     ) {
         tokio::spawn(async move {
-            Self::process_events(receiver, shutdown_receiver).await;
+            Self::process_events(whitenoise, receiver, shutdown_receiver).await;
         });
     }
 
@@ -1545,7 +1680,11 @@ impl Whitenoise {
     }
 
     /// Main event processing loop
-    async fn process_events(mut receiver: Receiver<ProcessableEvent>, mut shutdown: Receiver<()>) {
+    async fn process_events(
+        whitenoise: Arc<Whitenoise>,
+        mut receiver: Receiver<ProcessableEvent>,
+        mut shutdown: Receiver<()>,
+    ) {
         tracing::debug!(
             target: "whitenoise::process_events",
             "Starting event processing loop"
@@ -1567,7 +1706,7 @@ impl Whitenoise {
                             // Filter and route nostr events based on kind
                             match event.kind {
                                 Kind::GiftWrap => {
-                                    if let Err(e) = Self::process_giftwrap(event, subscription_id).await {
+                                    if let Err(e) = whitenoise.process_giftwrap(event, subscription_id).await {
                                         tracing::error!(
                                             target: "whitenoise::process_events",
                                             "Error processing giftwrap: {}",
@@ -1576,7 +1715,7 @@ impl Whitenoise {
                                     }
                                 }
                                 Kind::MlsGroupMessage => {
-                                    if let Err(e) = Self::process_mls_message(event, subscription_id).await {
+                                    if let Err(e) = whitenoise.process_mls_message(event, subscription_id).await {
                                         tracing::error!(
                                             target: "whitenoise::process_events",
                                             "Error processing MLS message: {}",
@@ -1585,17 +1724,17 @@ impl Whitenoise {
                                     }
                                 }
                                 _ => {
-                                    // For now, just log other event types
+                                    // TODO: Add more event types as needed
                                     tracing::debug!(
                                         target: "whitenoise::process_events",
-                                        "Received unhandled event of kind: {:?}",
+                                        "Received unhandled event of kind: {:?} - add handler if needed",
                                         event.kind
                                     );
                                 }
                             }
                         }
                         ProcessableEvent::RelayMessage(relay_url, message) => {
-                            Self::process_relay_message(relay_url, message);
+                            whitenoise.process_relay_message(relay_url, message).await;
                         }
                     }
                 }
@@ -1626,7 +1765,7 @@ impl Whitenoise {
     }
 
     /// Process giftwrap events with account awareness
-    async fn process_giftwrap(event: Event, subscription_id: Option<String>) -> Result<()> {
+    async fn process_giftwrap(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::process_giftwrap",
             "Processing giftwrap: {:?}",
@@ -1675,12 +1814,25 @@ impl Whitenoise {
             }
         }
 
-        // TODO: Implement account-aware giftwrap processing
-        // This requires access to self.accounts and self.get_nostr_keys_for_pubkey()
-        // For now, just log that we received it
+        // Now we have access to Whitenoise state for processing!
+        let accounts = self.read_accounts().await;
+        let target_account = accounts.get(&target_pubkey);
+
+        if target_account.is_none() {
+            tracing::warn!(
+                target: "whitenoise::process_giftwrap",
+                "Giftwrap received for unknown account: {}",
+                target_pubkey.to_hex()
+            );
+            return Ok(());
+        }
+
+        drop(accounts); // Release read lock
+
+        // TODO: Implement actual giftwrap processing:
         tracing::info!(
             target: "whitenoise::process_giftwrap",
-            "Giftwrap processing not yet implemented for account: {}",
+            "Giftwrap received for account: {} - processing not yet implemented",
             target_pubkey.to_hex()
         );
 
@@ -1688,7 +1840,11 @@ impl Whitenoise {
     }
 
     /// Process MLS group messages with account awareness
-    async fn process_mls_message(event: Event, subscription_id: Option<String>) -> Result<()> {
+    async fn process_mls_message(
+        &self,
+        event: Event,
+        subscription_id: Option<String>,
+    ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::process_mls_message",
             "Processing MLS message: {:?}",
@@ -1696,29 +1852,55 @@ impl Whitenoise {
         );
 
         // Extract the account pubkey from the subscription_id if available
-        if let Some(sub_id) = subscription_id {
+        let target_pubkey = if let Some(sub_id) = subscription_id {
             if let Some(target_pubkey) = Self::extract_pubkey_from_subscription_id(&sub_id) {
                 tracing::debug!(
                     target: "whitenoise::process_mls_message",
                     "Processing MLS message for account: {}",
                     target_pubkey.to_hex()
                 );
+                Some(target_pubkey)
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
-        // TODO: Implement account-aware MLS message processing
-        // This requires access to self.accounts and MLS state
-        // For now, just log that we received it
-        tracing::info!(
-            target: "whitenoise::process_mls_message",
-            "MLS message processing not yet implemented"
-        );
+        // Now we have access to Whitenoise state for processing!
+        if let Some(target_pubkey) = target_pubkey {
+            let accounts = self.read_accounts().await;
+            let target_account = accounts.get(&target_pubkey);
+
+            if target_account.is_none() {
+                tracing::warn!(
+                    target: "whitenoise::process_mls_message",
+                    "MLS message received for unknown account: {}",
+                    target_pubkey.to_hex()
+                );
+                return Ok(());
+            }
+
+            drop(accounts); // Release read lock
+
+            // TODO: Implement actual MLS message processing:
+            tracing::info!(
+                target: "whitenoise::process_mls_message",
+                "MLS message received for account: {} - processing not yet implemented",
+                target_pubkey.to_hex()
+            );
+        } else {
+            tracing::warn!(
+                target: "whitenoise::process_mls_message",
+                "MLS message received without valid subscription ID"
+            );
+        }
 
         Ok(())
     }
 
     /// Process relay messages for logging/monitoring
-    fn process_relay_message(relay_url: RelayUrl, message_type: String) {
+    async fn process_relay_message(&self, relay_url: RelayUrl, message_type: String) {
         tracing::debug!(
             target: "whitenoise::process_relay_message",
             "Processing message from {}: {}",
@@ -1813,8 +1995,8 @@ mod tests {
             database,
             nostr,
             secrets_store,
-            accounts: HashMap::new(),
-            active_account: None,
+            accounts: Arc::new(RwLock::new(HashMap::new())),
+            active_account: Arc::new(RwLock::new(None)),
             event_sender,
             shutdown_sender,
         };
@@ -1862,8 +2044,8 @@ mod tests {
         #[tokio::test]
         async fn test_whitenoise_initialization() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            assert!(whitenoise.accounts.is_empty());
-            assert!(whitenoise.active_account.is_none());
+            assert!(whitenoise.accounts_is_empty().await);
+            assert!(!whitenoise.has_active_account().await);
 
             // Verify directories were created
             assert!(whitenoise.config.data_dir.exists());
@@ -1891,8 +2073,8 @@ mod tests {
             // Both should have valid configurations (they'll be different temp dirs, which is fine)
             assert!(whitenoise1.config.data_dir.exists());
             assert!(whitenoise2.config.data_dir.exists());
-            assert!(whitenoise1.accounts.is_empty());
-            assert!(whitenoise2.accounts.is_empty());
+            assert!(whitenoise1.accounts_is_empty().await);
+            assert!(whitenoise2.accounts_is_empty().await);
         }
     }
 
@@ -1960,7 +2142,7 @@ mod tests {
 
         #[tokio::test]
         async fn test_delete_all_data() {
-            let (mut whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
             // Create test files in the whitenoise directories
             let test_data_file = whitenoise.config.data_dir.join("test_data.txt");
@@ -1975,18 +2157,21 @@ mod tests {
             // Add test account
             let (test_account, test_keys) = create_test_account();
             let pubkey = test_keys.public_key();
-            whitenoise.accounts.insert(pubkey, test_account);
-            whitenoise.active_account = Some(pubkey);
-            assert!(!whitenoise.accounts.is_empty());
-            assert!(whitenoise.active_account.is_some());
+            {
+                let mut accounts = whitenoise.write_accounts().await;
+                accounts.insert(pubkey, test_account);
+            }
+            whitenoise.set_active_account(Some(pubkey)).await;
+            assert!(!whitenoise.accounts_is_empty().await);
+            assert!(whitenoise.has_active_account().await);
 
             // Delete all data
             let result = whitenoise.delete_all_data().await;
             assert!(result.is_ok());
 
             // Verify cleanup
-            assert!(whitenoise.accounts.is_empty());
-            assert!(whitenoise.active_account.is_none());
+            assert!(whitenoise.accounts_is_empty().await);
+            assert!(!whitenoise.has_active_account().await);
             assert!(!test_log_file.exists());
 
             // MLS directory should be recreated as empty
@@ -2288,14 +2473,17 @@ mod tests {
             let whitenoise = Whitenoise::initialize_whitenoise(config).await.unwrap();
 
             // Verify accounts were loaded
-            assert_eq!(whitenoise.accounts.len(), 2);
-            assert!(whitenoise.accounts.contains_key(&account1.pubkey));
-            assert!(whitenoise.accounts.contains_key(&account2.pubkey));
+            assert_eq!(whitenoise.accounts_len().await, 2);
+            assert!(whitenoise.has_account(&account1.pubkey).await);
+            assert!(whitenoise.has_account(&account2.pubkey).await);
 
             // Verify the most recently synced account is active
-            assert!(whitenoise.active_account.is_some());
+            assert!(whitenoise.has_active_account().await);
             // Account2 has the newer timestamp (200 vs 100), so it should be active
-            assert_eq!(whitenoise.active_account.unwrap(), account2.pubkey);
+            assert_eq!(
+                whitenoise.get_active_account_pubkey().await.unwrap(),
+                account2.pubkey
+            );
         }
 
         #[tokio::test]
