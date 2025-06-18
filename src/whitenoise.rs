@@ -1676,7 +1676,13 @@ impl Whitenoise {
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, keys)
+            .publish_event_builder_with_signer(event, keys.clone())
+            .await?;
+
+        // Update subscription for contact list metadata
+        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+        self.nostr
+            .update_contacts_metadata_subscription_with_signer(account.pubkey, relays, keys)
             .await?;
 
         tracing::debug!(

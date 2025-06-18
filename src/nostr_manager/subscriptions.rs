@@ -88,7 +88,7 @@ impl NostrManager {
     }
 
     /// Set up subscription for contacts' metadata - can be updated when contacts change
-    async fn setup_contacts_metadata_subscription(
+    pub(crate) async fn setup_contacts_metadata_subscription(
         &self,
         pubkey: PublicKey,
         user_relays: Vec<RelayUrl>,
