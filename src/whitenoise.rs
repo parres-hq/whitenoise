@@ -257,8 +257,6 @@ impl Whitenoise {
                 .values()
                 .max_by_key(|account| account.last_synced)
                 .map(|account| account.pubkey);
-            drop(accounts);
-
             whitenoise.set_active_account(most_recent).await;
         }
 
@@ -273,6 +271,59 @@ impl Whitenoise {
 
         Self::start_event_processing_loop(whitenoise_for_loop, event_receiver, shutdown_receiver)
             .await;
+
+        // Fetch events and setup subscriptions for all accounts after event processing has started
+        {
+            let accounts = whitenoise_arc.read_accounts().await;
+            let account_list: Vec<Account> = accounts.values().cloned().collect();
+            drop(accounts); // Release the read lock early
+            for account in account_list {
+                // Fetch account data
+                match whitenoise_arc.background_fetch_account_data(&account).await {
+                    Ok(()) => {
+                        tracing::debug!(
+                            target: "whitenoise::initialize_whitenoise",
+                            "Successfully fetched account data for account: {}",
+                            account.pubkey.to_hex()
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "whitenoise::initialize_whitenoise",
+                            "Failed to fetch account data for account {}: {}",
+                            account.pubkey.to_hex(),
+                            e
+                        );
+                        // Continue with other accounts instead of failing completely
+                    }
+                }
+
+                // Setup subscriptions for this account
+                match whitenoise_arc.setup_subscriptions(&account).await {
+                    Ok(()) => {
+                        tracing::debug!(
+                            target: "whitenoise::initialize_whitenoise",
+                            "Successfully set up subscriptions for account: {}",
+                            account.pubkey.to_hex()
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "whitenoise::initialize_whitenoise",
+                            "Failed to set up subscriptions for account {}: {}",
+                            account.pubkey.to_hex(),
+                            e
+                        );
+                        // Continue with other accounts instead of failing completely
+                    }
+                }
+            }
+        }
+
+        tracing::debug!(
+            target: "whitenoise::initialize_whitenoise",
+            "Completed initialization for all loaded accounts"
+        );
 
         Ok(whitenoise_arc)
     }
@@ -432,24 +483,26 @@ impl Whitenoise {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
 
-        let account = match self.find_account_by_pubkey(&pubkey).await {
+        let (account, added_from_keys) = match self.find_account_by_pubkey(&pubkey).await {
             Ok(account) => {
                 tracing::debug!(target: "whitenoise::login", "Account found");
-                Ok(account)
+                (account, false)
             }
             Err(WhitenoiseError::AccountNotFound) => {
                 tracing::debug!(target: "whitenoise::login", "Account not found, adding from keys");
                 let account = self.add_account_from_keys(&keys).await?;
-                Ok(account)
+                (account, true)
             }
-            Err(e) => Err(e),
-        }?;
+            Err(e) => return Err(e),
+        };
 
         // Initialize NostrMls for the account
         self.initialize_nostr_mls_for_account(&account).await?;
 
-        // Spawn a background task to fetch the account's data from relays
-        self.background_fetch_account_data(&account).await?;
+        // Spawn a background task to fetch the account's data from relays (only if not newly created)
+        if !added_from_keys {
+            self.background_fetch_account_data(&account).await?;
+        }
 
         // Initialize subscriptions on nostr manager
         self.setup_subscriptions(&account).await?;
@@ -637,11 +690,9 @@ impl Whitenoise {
     /// 1. **Store private key** - Saves the private key to the system keychain/secret store
     /// 2. **Load onboarding state** - Queries cached Nostr data to determine account setup status
     /// 3. **Save account to database** - Persists the account record with settings and onboarding info
-    /// 4. **Trigger background sync** - Initiates async fetch of account data (non-critical)
     ///
     /// If any critical step (1-3) fails, all previous operations are automatically rolled back
-    /// to ensure no partial account state is left in the system. The background sync step (4)
-    /// is non-critical and will not cause the operation to fail.
+    /// to ensure no partial account state is left in the system.
     ///
     /// # Arguments
     ///
@@ -698,12 +749,6 @@ impl Whitenoise {
             e
         })?;
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Account saved to database");
-
-        // Step 4: Trigger fetch of nostr events on another thread (least critical)
-        // Don't fail the whole operation if this fails
-        if let Err(e) = self.background_fetch_account_data(&account).await {
-            tracing::warn!(target: "whitenoise::add_account_from_keys", "Failed to trigger background fetch (non-critical): {}", e);
-        }
 
         Ok(account)
     }
