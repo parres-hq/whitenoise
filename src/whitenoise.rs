@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::accounts::{Account, AccountSettings, OnboardingState};
+use crate::accounts::{Account, AccountError, AccountSettings, OnboardingState};
 use crate::database::Database;
 use crate::error::{Result, WhitenoiseError};
 use crate::init_tracing;
@@ -1481,8 +1481,8 @@ impl Whitenoise {
         Ok(contacts)
     }
 
-    pub async fn fetch_key_package(&self, pubkey: PublicKey) -> Result<Option<Event>> {
-        let key_package = self.nostr.query_user_key_package(pubkey).await?;
+    pub async fn fetch_key_package_event(&self, pubkey: PublicKey) -> Result<Option<Event>> {
+        let key_package = self.nostr.query_user_key_package(pubkey.clone()).await?;
         Ok(key_package)
     }
 
@@ -1491,7 +1491,7 @@ impl Whitenoise {
 
         let inbox_relays = self.fetch_relays(pubkey, RelayType::Inbox).await?;
         let key_package_relays = self.fetch_relays(pubkey, RelayType::KeyPackage).await?;
-        let key_package_published = self.fetch_key_package(pubkey).await?;
+        let key_package_published = self.fetch_key_package_event(pubkey).await?;
 
         onboarding_state.inbox_relays = !inbox_relays.is_empty();
         onboarding_state.key_package_relays = !key_package_relays.is_empty();
@@ -1972,6 +1972,154 @@ impl Whitenoise {
     pub fn export_account_npub(&self, account: &Account) -> Result<String> {
         Ok(account.pubkey.to_bech32().unwrap())
     }
+
+    /// Creates a new MLS group with the specified members and settings
+    ///
+    /// # Arguments
+    /// * `creator_pubkey` - Public key of the group creator (must be the active account)
+    /// * `member_pubkeys` - List of public keys for group members
+    /// * `admin_pubkeys` - List of public keys for group admins
+    /// * `group_name` - Name of the group
+    /// * `description` - Description of the group
+    /// * `wn` - Whitenoise state
+    /// * `app_handle` - Tauri app handle
+    ///
+    /// # Returns
+    /// * `Ok(Group)` - The newly created group
+    /// * `Err(String)` - Error message if group creation fails
+    ///
+    /// # Flow
+    /// 1. Validates that active account is the creator and signer
+    /// 2. Validates member and admin lists
+    /// 3. Fetches key packages for all members
+    /// 4. Creates MLS group with NostrMls
+    /// 5. Sends welcome messages to all members via Nostr
+    /// 6. Adds group to GroupManager database
+    /// 7. Updates account with new group ID
+    /// 8. Emits group_added event
+    ///
+    /// # Errors
+    /// Returns error if:
+    /// - Active account is not the creator
+    /// - Member/admin validation fails
+    /// - Key package fetching fails
+    /// - MLS group creation fails
+    /// - Welcome message sending fails
+    /// - Database operations fail
+    pub async fn create_group(
+        &self,
+        creator_pubkey: PublicKey,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: String,
+        description: String,
+    ) -> Result<group_types::Group> {
+        let active_account = self.get_active_account().await.ok_or(WhitenoiseError::AccountNotFound)?;
+
+        // Check that active account is the creator
+        if active_account.pubkey != creator_pubkey
+        {
+            return Err(WhitenoiseError::AccountNotAuthorized);
+        }
+
+        // TODO: Add ability to specify relays for the group
+        let group_relays = self
+            .nostr
+            .relays()
+            .await?;
+
+        let group: group_types::Group;
+        let serialized_welcome_message: Vec<u8>;
+        let group_ids: Vec<String>;
+        let mut member_key_package_events : Vec<(EventId, KeyPackage)> = Vec::new();
+
+        let nostr_mls_guard = active_account.nostr_mls.lock().await;
+
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            // Fetch key packages for all members
+            for pk in member_pubkeys.iter() {
+                let some_event = self.fetch_key_package_event(pk.clone()).await?;
+                let event = some_event.ok_or(WhitenoiseError::NostrMlsError(nostr_mls::Error::KeyPackage("Does not exist".to_owned())))?;
+                let key_package = nostr_mls.parse_key_package(&event).map_err(WhitenoiseError::from)?;
+                member_key_package_events.push((event.id, key_package));
+            }
+
+            let create_group_result = nostr_mls
+                .create_group(
+                    group_name,
+                    description,
+                    &creator_pubkey,
+                    &member_pubkeys,
+                    member_key_package_events
+                        .iter()
+                        .map(|(_, kp)| kp.clone())
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                    admin_pubkeys,
+                    group_relays.clone(),
+                )
+                .map_err(WhitenoiseError::from)?;
+
+            group = create_group_result.group;
+            serialized_welcome_message = create_group_result.serialized_welcome_message;
+            group_ids = nostr_mls
+                .get_groups()
+                .map_err(WhitenoiseError::from)?
+                .into_iter()
+                .map(|g| hex::encode(g.nostr_group_id))
+                .collect::<Vec<_>>();
+        } else {
+            return Err(WhitenoiseError::NostrMlsNotInitialized);
+        }
+
+        tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
+
+        // Fan out the welcome message to all members
+        for (i, (event_id, _)) in member_key_package_events.into_iter().enumerate() {
+            let member_pubkey = member_pubkeys[i];
+
+            let welcome_rumor =
+                EventBuilder::new(Kind::MlsWelcome, hex::encode(&serialized_welcome_message))
+                    .tags(vec![
+                        Tag::from_standardized(TagStandard::Relays(
+                            group_relays.clone()
+                        )),
+                        Tag::event(event_id),
+                    ])
+                    .build(active_account.pubkey);
+
+            tracing::debug!(
+                target: "whitenoise::groups::create_group",
+                "Welcome rumor: {:?}",
+                welcome_rumor
+            );
+
+            // Create a timestamp 1 month in the future
+            use std::ops::Add;
+            let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
+
+            // sign and publish welcome rumor as a gift wrap
+            let signer = &self.nostr.client.signer().await.map_err(WhitenoiseError::from)?;
+            let wrapped_event = EventBuilder::gift_wrap(
+                    signer,          
+                &member_pubkey,
+                welcome_rumor,
+                vec![Tag::expiration(one_month_future)],
+            )
+            .await
+            .map_err(WhitenoiseError::from)?;
+
+            self.nostr.client.send_event_to(group_relays.clone(), &wrapped_event).await.map_err(WhitenoiseError::from)?;
+        }
+
+        self.nostr
+            .setup_account_subscriptions(active_account.pubkey, group_relays, group_ids)
+            .await
+            .map_err(WhitenoiseError::from)?;
+
+        Ok(group)
+    }
+
 }
 
 #[cfg(test)]
@@ -2313,7 +2461,7 @@ mod tests {
             let contacts = whitenoise.fetch_contacts(pubkey).await;
             assert!(contacts.is_ok());
 
-            let key_package = whitenoise.fetch_key_package(pubkey).await;
+            let key_package = whitenoise.fetch_key_package_event(pubkey).await;
             assert!(key_package.is_ok());
 
             let onboarding = whitenoise.fetch_onboarding_state(pubkey).await;
@@ -2362,7 +2510,7 @@ mod tests {
                 whitenoise.fetch_metadata(pubkey),
                 whitenoise.fetch_relays(pubkey, RelayType::Inbox),
                 whitenoise.fetch_contacts(pubkey),
-                whitenoise.fetch_key_package(pubkey),
+                whitenoise.fetch_key_package_event(pubkey),
                 whitenoise.fetch_onboarding_state(pubkey)
             );
 
@@ -2388,7 +2536,7 @@ mod tests {
                     .await
                     .is_ok());
                 assert!(whitenoise.fetch_contacts(pubkey).await.is_ok());
-                assert!(whitenoise.fetch_key_package(pubkey).await.is_ok());
+                assert!(whitenoise.fetch_key_package_event(pubkey).await.is_ok());
                 assert!(whitenoise.fetch_onboarding_state(pubkey).await.is_ok());
             }
         }
