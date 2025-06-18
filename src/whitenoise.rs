@@ -1717,7 +1717,7 @@ impl Whitenoise {
 
     /// Extract the account pubkey from a subscription_id
     /// Subscription IDs follow the format: {hashed_pubkey}_{subscription_type}
-    /// where hashed_pubkey is a 12-character SHA256 hash of the pubkey + session salt
+    /// where hashed_pubkey = SHA256(session salt || accouny_pubkey)[..12]
     async fn extract_pubkey_from_subscription_id(
         &self,
         subscription_id: &str,
@@ -1726,7 +1726,7 @@ impl Whitenoise {
             let hash_str = &subscription_id[..underscore_pos];
             // Get all accounts and find the one whose hash matches
             let accounts = self.accounts.read().await;
-            for (pubkey, _) in accounts.iter() {
+            for pubkey in accounts.keys() {
                 let mut hasher = Sha256::new();
                 hasher.update(self.nostr.session_salt());
                 hasher.update(pubkey.to_bytes());
