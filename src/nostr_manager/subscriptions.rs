@@ -119,7 +119,7 @@ impl NostrManager {
     }
 
     /// Set up subscription for group messages - can be updated when groups change
-    async fn setup_group_messages_subscription(
+    pub(crate) async fn setup_group_messages_subscription(
         &self,
         pubkey: PublicKey,
         nostr_group_ids: Vec<String>,

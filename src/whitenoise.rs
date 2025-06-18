@@ -1981,22 +1981,10 @@ impl Whitenoise {
     /// * `admin_pubkeys` - List of public keys for group admins
     /// * `group_name` - Name of the group
     /// * `description` - Description of the group
-    /// * `wn` - Whitenoise state
-    /// * `app_handle` - Tauri app handle
     ///
     /// # Returns
     /// * `Ok(Group)` - The newly created group
     /// * `Err(String)` - Error message if group creation fails
-    ///
-    /// # Flow
-    /// 1. Validates that active account is the creator and signer
-    /// 2. Validates member and admin lists
-    /// 3. Fetches key packages for all members
-    /// 4. Creates MLS group with NostrMls
-    /// 5. Sends welcome messages to all members via Nostr
-    /// 6. Adds group to GroupManager database
-    /// 7. Updates account with new group ID
-    /// 8. Emits group_added event
     ///
     /// # Errors
     /// Returns error if:
@@ -2019,18 +2007,20 @@ impl Whitenoise {
             .await
             .ok_or(WhitenoiseError::AccountNotFound)?;
 
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&creator_pubkey)?;
         // Check that active account is the creator
         if active_account.pubkey != creator_pubkey {
             return Err(WhitenoiseError::AccountNotAuthorized);
         }
 
-        // TODO: Add ability to specify relays for the group
         let group_relays = self.nostr.relays().await?;
 
         let group: group_types::Group;
         let serialized_welcome_message: Vec<u8>;
         let group_ids: Vec<String>;
-        let mut member_key_package_events: Vec<(EventId, KeyPackage)> = Vec::new();
+        let mut eventid_keypackage_list: Vec<(EventId, KeyPackage)> = Vec::new();
 
         let nostr_mls_guard = active_account.nostr_mls.lock().await;
 
@@ -2044,7 +2034,7 @@ impl Whitenoise {
                 let key_package = nostr_mls
                     .parse_key_package(&event)
                     .map_err(WhitenoiseError::from)?;
-                member_key_package_events.push((event.id, key_package));
+                eventid_keypackage_list.push((event.id, key_package));
             }
 
             let create_group_result = nostr_mls
@@ -2053,7 +2043,7 @@ impl Whitenoise {
                     description,
                     &creator_pubkey,
                     &member_pubkeys,
-                    member_key_package_events
+                    eventid_keypackage_list
                         .iter()
                         .map(|(_, kp)| kp.clone())
                         .collect::<Vec<_>>()
@@ -2078,7 +2068,7 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
 
         // Fan out the welcome message to all members
-        for (i, (event_id, _)) in member_key_package_events.into_iter().enumerate() {
+        for (i, (event_id, _)) in eventid_keypackage_list.into_iter().enumerate() {
             let member_pubkey = member_pubkeys[i];
 
             let welcome_rumor =
@@ -2098,32 +2088,25 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-
-            // sign and publish welcome rumor as a gift wrap
-            let signer = &self
-                .nostr
-                .client
-                .signer()
-                .await
-                .map_err(WhitenoiseError::from)?;
-            let wrapped_event = EventBuilder::gift_wrap(
-                signer,
-                &member_pubkey,
-                welcome_rumor,
-                vec![Tag::expiration(one_month_future)],
-            )
-            .await
-            .map_err(WhitenoiseError::from)?;
-
             self.nostr
-                .client
-                .send_event_to(group_relays.clone(), &wrapped_event)
+                .publish_gift_wrap_with_signer(
+                    &member_pubkey,
+                    welcome_rumor,
+                    vec![Tag::expiration(one_month_future)],
+                    &group_relays,
+                    keys.clone(),
+                )
                 .await
                 .map_err(WhitenoiseError::from)?;
         }
 
         self.nostr
-            .setup_account_subscriptions(active_account.pubkey, group_relays, group_ids)
+            .setup_group_messages_subscriptions_with_signer(
+                active_account.pubkey,
+                group_relays,
+                group_ids,
+                keys,
+            )
             .await
             .map_err(WhitenoiseError::from)?;
 
