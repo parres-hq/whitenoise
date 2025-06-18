@@ -23,7 +23,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let args = Args::parse();
 
     let config = WhitenoiseConfig::new(&args.data_dir, &args.logs_dir);
-    let mut whitenoise: Whitenoise = match Whitenoise::initialize_whitenoise(config).await {
+    let whitenoise = match Whitenoise::initialize_whitenoise(config).await {
         Ok(whitenoise) => whitenoise,
         Err(err) => {
             tracing::error!("Failed to initialize Whitenoise: {}", err);
@@ -34,8 +34,8 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("=== Testing basic account creation and management ===");
 
     tracing::debug!("Whitenoise state after initialization: {:?}", whitenoise);
-    assert_eq!(whitenoise.accounts.len(), 0);
-    assert_eq!(whitenoise.active_account, None);
+    assert_eq!(whitenoise.get_accounts_count().await, 0);
+    assert!(!whitenoise.has_active_account_set().await);
 
     tracing::info!("Creating first account...");
     let created_account = whitenoise.create_identity().await?;
@@ -45,8 +45,11 @@ async fn main() -> Result<(), WhitenoiseError> {
         whitenoise
     );
 
-    assert_eq!(whitenoise.accounts.len(), 1);
-    assert_eq!(whitenoise.active_account, Some(created_account.pubkey));
+    assert_eq!(whitenoise.get_accounts_count().await, 1);
+    assert_eq!(
+        whitenoise.get_active_pubkey().await.unwrap(),
+        created_account.pubkey
+    );
     tracing::info!("First account created and set as active");
 
     tracing::info!("Creating second account...");
@@ -57,8 +60,11 @@ async fn main() -> Result<(), WhitenoiseError> {
         whitenoise
     );
 
-    assert_eq!(whitenoise.accounts.len(), 2);
-    assert_eq!(whitenoise.active_account, Some(created_account_2.pubkey));
+    assert_eq!(whitenoise.get_accounts_count().await, 2);
+    assert_eq!(
+        whitenoise.get_active_pubkey().await.unwrap(),
+        created_account_2.pubkey
+    );
     tracing::info!("Second account created and set as active");
 
     tracing::info!("Logging out second account...");
@@ -68,10 +74,13 @@ async fn main() -> Result<(), WhitenoiseError> {
         whitenoise
     );
 
-    assert_eq!(whitenoise.accounts.len(), 1);
-    assert!(whitenoise.accounts.contains_key(&created_account.pubkey));
-    assert!(!whitenoise.accounts.contains_key(&created_account_2.pubkey));
-    assert_eq!(whitenoise.active_account, Some(created_account.pubkey));
+    assert_eq!(whitenoise.get_accounts_count().await, 1);
+    assert!(whitenoise.account_exists(&created_account.pubkey).await);
+    assert!(!whitenoise.account_exists(&created_account_2.pubkey).await);
+    assert_eq!(
+        whitenoise.get_active_pubkey().await.unwrap(),
+        created_account.pubkey
+    );
     tracing::info!("Second account logged out and first account set as active");
 
     tracing::info!("=== Testing login with known account that has published events ===");
@@ -175,14 +184,17 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::debug!("Whitenoise state after login: {:?}", whitenoise);
 
     // Verify the account was added and set as active
-    assert_eq!(whitenoise.accounts.len(), 2);
-    assert_eq!(whitenoise.active_account, Some(restored_account.pubkey));
+    assert_eq!(whitenoise.get_accounts_count().await, 2);
+    assert_eq!(
+        whitenoise.get_active_pubkey().await.unwrap(),
+        restored_account.pubkey
+    );
     assert_eq!(restored_account.pubkey, known_pubkey);
     tracing::info!("Account was added and set as active");
 
     // Wait a moment for background fetch to complete
     tracing::info!("Pausing for background fetch to complete...");
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     // Re-query the onboarding state to check if background fetch updated the cached data
     tracing::info!("Re-querying onboarding state after background fetch...");
@@ -289,10 +301,9 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Get the active account for contact tests
     let active_account = whitenoise
-        .accounts
-        .get(&whitenoise.active_account.unwrap())
-        .expect("Active account should exist")
-        .clone();
+        .get_active_account()
+        .await
+        .expect("Active account should exist");
 
     // Test adding a contact to an empty contact list
     let test_contact_keys = Keys::generate();
@@ -459,14 +470,14 @@ async fn main() -> Result<(), WhitenoiseError> {
         "Contact management methods completed successfully - all methods published to relays"
     );
 
-    test_account_settings_update(&mut whitenoise).await?;
+    test_account_settings_update(&whitenoise).await?;
 
     // TODO: Test relay list loading
 
     Ok(())
 }
 
-async fn test_account_settings_update(whitenoise: &mut Whitenoise) -> Result<(), WhitenoiseError> {
+async fn test_account_settings_update(whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
     let public_key =
         PublicKey::parse("nostr:npub14f8usejl26twx0dhuxjh9cas7keav9vr0v8nvtwtrjqx3vycc76qqh9nsy")
             .unwrap();

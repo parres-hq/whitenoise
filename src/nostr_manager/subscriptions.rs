@@ -1,107 +1,147 @@
 //! Subscription functions for NostrManager
 //! This mostly handles subscribing and processing events as they come in while the user is active.
 
-use crate::nostr_manager::event_processor::ProcessableEvent;
-use crate::nostr_manager::{NostrManager, NostrManagerError, Result};
+use crate::nostr_manager::{NostrManager, Result};
 use nostr_sdk::prelude::*;
+use sha2::{Digest, Sha256};
 
 impl NostrManager {
-    async fn setup_account_subscriptions(
+    /// Create a short hash from a pubkey for use in subscription IDs
+    /// Uses first 12 characters of SHA256 hash for privacy and collision resistance, salted per session
+    fn create_pubkey_hash(&self, pubkey: &PublicKey) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.session_salt());
+        hasher.update(pubkey.to_bytes());
+        let hash = hasher.finalize();
+        format!("{:x}", hash)[..12].to_string()
+    }
+
+    pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
         nostr_group_ids: Vec<String>,
     ) -> Result<()> {
-        // Get user's relays to ensure we're subscribing on the right relays
-        let user_relays = self.client.get_relays().await?;
+        // Set up core subscriptions in parallel
+        let (user_events_result, giftwrap_result, contacts_result, groups_result) = tokio::join!(
+            self.setup_user_events_subscription(pubkey, user_relays.clone()),
+            self.setup_giftwrap_subscription(pubkey, user_relays.clone()),
+            self.setup_contacts_metadata_subscription(pubkey, user_relays.clone()),
+            self.setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays.clone())
+        );
 
-        // Create subscription IDs for each type of subscription
-        let contact_list_sub = SubscriptionId::new(format!("{}_contact_list", pubkey.to_hex()));
-        let metadata_sub = SubscriptionId::new(format!("{}_metadata", pubkey.to_hex()));
-        let contacts_metadata_sub = SubscriptionId::new(format!("{}_contacts_metadata", pubkey.to_hex()));
-        let relay_list_sub = SubscriptionId::new(format!("{}_relay_list", pubkey.to_hex()));
-        let giftwrap_sub = SubscriptionId::new(format!("{}_giftwrap", pubkey.to_hex()));
-        let mls_messages_sub = SubscriptionId::new(format!("{}_mls_messages", pubkey.to_hex()));
+        // Handle results
+        user_events_result?;
+        giftwrap_result?;
+        contacts_result?;
+        groups_result?;
 
-        // Create filters for each subscription type
-        let contact_list_filter = Filter::new()
-            .kind(Kind::ContactList)
+        Ok(())
+    }
+
+    /// Set up subscription for user's own events (contact list, metadata, relay lists)
+    async fn setup_user_events_subscription(
+        &self,
+        pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
+    ) -> Result<()> {
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
+
+        // Combine all user event types into a single subscription
+        let user_events_filter = Filter::new()
+            .kinds([
+                Kind::ContactList,
+                Kind::Metadata,
+                Kind::RelayList,
+                Kind::InboxRelays,
+            ])
             .author(pubkey)
             .since(Timestamp::now());
 
-        let contacts_pubkeys = self
-            .client
-            .get_contact_list_public_keys(self.timeout().await?)
+        self.client
+            .subscribe_with_id_to(user_relays, subscription_id, user_events_filter, None)
             .await?;
 
-        // Separate filter for user's own metadata
-        let metadata_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .author(pubkey)
-            .since(Timestamp::now());
+        Ok(())
+    }
 
-        // Separate filter for contacts' metadata
-        let contacts_metadata_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(contacts_pubkeys)
-            .since(Timestamp::now());
-
-        let relay_list_filter = Filter::new()
-            .kind(Kind::RelayList)
-            .author(pubkey)
-            .since(Timestamp::now());
-
-        let inbox_relay_list_filter = Filter::new()
-            .kind(Kind::InboxRelays)
-            .author(pubkey)
-            .since(Timestamp::now());
+    /// Set up subscription for giftwrap messages to the user
+    async fn setup_giftwrap_subscription(
+        &self,
+        pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
+    ) -> Result<()> {
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
 
         let giftwrap_filter = Filter::new()
             .kind(Kind::GiftWrap)
             .pubkey(pubkey)
             .since(Timestamp::now());
 
-        // Set up all subscriptions in parallel
-        let (contact_list_result, metadata_result, contacts_metadata_result, relay_list_result, inbox_relay_result, giftwrap_result) = tokio::join!(
-            self.client.subscribe_with_id_to(contact_list_sub, contact_list_filter, user_relays.clone()),
-            self.client.subscribe_with_id_to(metadata_sub, metadata_filter, user_relays.clone()),
-            self.client.subscribe_with_id_to(contacts_metadata_sub, contacts_metadata_filter, user_relays.clone()),
-            self.client.subscribe_with_id_to(relay_list_sub, relay_list_filter, user_relays.clone()),
-            self.client.subscribe_with_id_to(relay_list_sub.clone(), inbox_relay_list_filter, user_relays.clone()),
-            self.client.subscribe_with_id_to(giftwrap_sub, giftwrap_filter, user_relays.clone())
-        );
-
-        // Handle results
-        contact_list_result?;
-        metadata_result?;
-        contacts_metadata_result?;
-        relay_list_result?;
-        inbox_relay_result?;
-        giftwrap_result?;
-
-        // Set up MLS group messages subscription if needed
-        if !nostr_group_ids.is_empty() {
-            let mls_message_filter = Filter::new()
-                .kind(Kind::MlsGroupMessage)
-                .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids)
-                .since(Timestamp::now());
-
-            self.client
-                .subscribe_with_id_to(mls_messages_sub, mls_message_filter, user_relays)
-                .await?;
-        }
+        self.client
+            .subscribe_with_id_to(user_relays, subscription_id, giftwrap_filter, None)
+            .await?;
 
         Ok(())
     }
 
-    pub async fn setup_subscriptions(
+    /// Set up subscription for contacts' metadata - can be updated when contacts change
+    async fn setup_contacts_metadata_subscription(
+        &self,
+        pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
+    ) -> Result<()> {
+        let contacts_pubkeys = self
+            .client
+            .get_contact_list_public_keys(self.timeout().await?)
+            .await?;
+
+        if contacts_pubkeys.is_empty() {
+            // No contacts yet, skip subscription
+            return Ok(());
+        }
+
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
+
+        let contacts_metadata_filter = Filter::new()
+            .kind(Kind::Metadata)
+            .authors(contacts_pubkeys)
+            .since(Timestamp::now());
+
+        self.client
+            .subscribe_with_id_to(user_relays, subscription_id, contacts_metadata_filter, None)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Set up subscription for group messages - can be updated when groups change
+    async fn setup_group_messages_subscription(
         &self,
         pubkey: PublicKey,
         nostr_group_ids: Vec<String>,
+        user_relays: Vec<RelayUrl>,
     ) -> Result<()> {
-        // Set up all subscriptions for the account
-        self.setup_account_subscriptions(pubkey, nostr_group_ids).await?;
+        if nostr_group_ids.is_empty() {
+            // No groups yet, skip subscription
+            return Ok(());
+        }
+
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));
+
+        let mls_message_filter = Filter::new()
+            .kind(Kind::MlsGroupMessage)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids)
+            .since(Timestamp::now());
+
+        self.client
+            .subscribe_with_id_to(user_relays, subscription_id, mls_message_filter, None)
+            .await?;
 
         Ok(())
     }
 }
-

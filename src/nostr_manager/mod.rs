@@ -1,6 +1,7 @@
 // use crate::media::blossom::BlossomClient;
 use crate::types::{NostrEncryptionMethod, ProcessableEvent};
 
+use ::rand::RngCore;
 use nostr_sdk::prelude::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use tokio::sync::{mpsc::Sender, Mutex};
 pub mod parser;
 pub mod query;
 // pub mod search;
-// pub mod subscriptions;
+pub mod subscriptions;
 // pub mod sync;
 
 #[derive(Error, Debug)]
@@ -48,6 +49,7 @@ pub struct NostrManagerSettings {
 pub struct NostrManager {
     pub settings: Arc<Mutex<NostrManagerSettings>>,
     client: Client,
+    session_salt: [u8; 16],
     // blossom: BlossomClient,
 }
 
@@ -102,6 +104,10 @@ impl NostrManager {
         };
 
         let settings = NostrManagerSettings::default();
+
+        // Generate a random session salt
+        let mut session_salt = [0u8; 16];
+        ::rand::rng().fill_bytes(&mut session_salt);
 
         // Add the default relays
         for relay in &settings.relays {
@@ -215,6 +221,7 @@ impl NostrManager {
         Ok(Self {
             client,
             settings: Arc::new(Mutex::new(settings)),
+            session_salt,
         })
     }
 
@@ -277,6 +284,36 @@ impl NostrManager {
             .await?;
         self.client.unset_signer().await;
         Ok(result)
+    }
+
+    /// Sets up account subscriptions using a temporary signer.
+    ///
+    /// This method allows setting up subscriptions with a signer that is only used for this specific operation.
+    /// The signer is set before subscription setup and unset immediately after.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The public key of the account to set up subscriptions for
+    /// * `user_relays` - The relays to use for subscriptions
+    /// * `nostr_group_ids` - Group IDs for MLS message subscriptions
+    /// * `signer` - A signer that implements `NostrSigner` and has a 'static lifetime
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Success if subscriptions were set up, or an error if setup fails
+    pub(crate) async fn setup_account_subscriptions_with_signer(
+        &self,
+        pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
+        nostr_group_ids: Vec<String>,
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        self.client.set_signer(signer).await;
+        let result = self
+            .setup_account_subscriptions(pubkey, user_relays, nostr_group_ids)
+            .await;
+        self.client.unset_signer().await;
+        result
     }
 
     /// Extracts welcome events from a list of giftwrapped events.
@@ -524,6 +561,11 @@ impl NostrManager {
         self.client.unset_signer().await;
 
         Ok(())
+    }
+
+    /// Expose session_salt for use in subscriptions
+    pub fn session_salt(&self) -> &[u8; 16] {
+        &self.session_salt
     }
 }
 
