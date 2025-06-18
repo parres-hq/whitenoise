@@ -26,8 +26,17 @@ pub enum WhitenoiseError {
     #[error("Account not found")]
     AccountNotFound,
 
+    #[error("Account not authorized")]
+    AccountNotAuthorized,
+
     #[error("NostrMls not initialized")]
     NostrMlsNotInitialized,
+
+    #[error("Nostr Mls error: {0}")]
+    NostrMlsError(#[from] nostr_mls::Error),
+
+    #[error("Nostr Event error: {0}")]
+    NostrEventBuilderError(#[from] nostr::event::builder::Error),
 
     #[error("Secrets store error: {0}")]
     SecretsStore(#[from] SecretsStoreError),
