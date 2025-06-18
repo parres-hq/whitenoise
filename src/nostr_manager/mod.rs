@@ -36,6 +36,8 @@ pub enum NostrManagerError {
     AccountError(String),
     #[error("Failed to connect to any relays")]
     NoRelayConnections,
+    #[error("Nostr Event error: {0}")]
+    NostrEventBuilderError(#[from] nostr::event::builder::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -286,6 +288,49 @@ impl NostrManager {
         Ok(result)
     }
 
+    /// Constructs and publishes a Nostr gift wrap event using a temporary signer.
+    ///
+    /// This method creates a gift-wrapped Nostr event and publishes it to specified relays using a
+    /// temporary signer. Gift wrapping provides privacy by encrypting the inner event (rumor) and
+    /// hiding the recipient's identity from relay operators and other observers.
+    ///
+    /// The signer is set before publishing and automatically unset immediately after the operation
+    /// completes, ensuring it doesn't persist in the client state.
+    ///
+    /// # Arguments
+    ///
+    /// * `receiver` - The public key of the intended recipient of the gift wrapped message
+    /// * `rumor` - The `UnsignedEvent` that will be encrypted and wrapped inside the gift wrap
+    /// * `extra_tags` - Additional tags to include in the gift wrap event for metadata or routing
+    /// * `relays` - The specific relay URLs where the gift wrap event should be published
+    /// * `signer` - A signer that implements `NostrSigner` and has a 'static lifetime
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Output<EventId>>` - The published event ID if successful, or an error if publishing fails
+    ///
+    /// # Privacy Notes
+    ///
+    /// Gift wrapping provides the following privacy benefits:
+    /// - The inner event content is encrypted and only readable by the receiver
+    /// - The receiver's identity is hidden from relay operators
+    /// - Metadata about the communication is minimized
+    pub(crate) async fn publish_gift_wrap_with_signer(
+        &self,
+        receiver: &PublicKey,
+        rumor: UnsignedEvent,
+        extra_tags: Vec<Tag>,
+        relays: &[RelayUrl],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<Output<EventId>> {
+        let wrapped_event = EventBuilder::gift_wrap(&signer, receiver, rumor, extra_tags).await?;
+
+        self.client.set_signer(signer).await;
+        let result = self.client.send_event_to(relays, &wrapped_event).await?;
+        self.client.unset_signer().await;
+        Ok(result)
+    }
+
     /// Sets up account subscriptions using a temporary signer.
     ///
     /// This method allows setting up subscriptions with a signer that is only used for this specific operation.
@@ -311,6 +356,21 @@ impl NostrManager {
         self.client.set_signer(signer).await;
         let result = self
             .setup_account_subscriptions(pubkey, user_relays, nostr_group_ids)
+            .await;
+        self.client.unset_signer().await;
+        result
+    }
+
+    pub(crate) async fn setup_group_messages_subscriptions_with_signer(
+        &self,
+        pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
+        nostr_group_ids: Vec<String>,
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        self.client.set_signer(signer).await;
+        let result = self
+            .setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays)
             .await;
         self.client.unset_signer().await;
         result
