@@ -1537,12 +1537,6 @@ impl Whitenoise {
         // Publish the updated contact list
         self.publish_contact_list(account, new_contacts).await?;
 
-        // Update subscription for contact list metadata
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
-        self.nostr
-            .setup_contacts_metadata_subscription(account.pubkey, relays)
-            .await?;
-
         tracing::info!(
             target: "whitenoise::add_contact",
             "Added contact {} to account {}",
@@ -1595,12 +1589,6 @@ impl Whitenoise {
         // Publish the updated contact list
         self.publish_contact_list(account, new_contacts).await?;
 
-        // Update subscription for contact list metadata
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
-        self.nostr
-            .setup_contacts_metadata_subscription(account.pubkey, relays)
-            .await?;
-
         tracing::info!(
             target: "whitenoise::remove_contact",
             "Removed contact {} from account {}",
@@ -1635,12 +1623,6 @@ impl Whitenoise {
     ) -> Result<()> {
         // Publish the new contact list
         self.publish_contact_list(account, contact_pubkeys.clone())
-            .await?;
-
-        // Update subscription for contact list metadata
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
-        self.nostr
-            .setup_contacts_metadata_subscription(account.pubkey, relays)
             .await?;
 
         tracing::info!(
@@ -1694,7 +1676,13 @@ impl Whitenoise {
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, keys)
+            .publish_event_builder_with_signer(event, keys.clone())
+            .await?;
+
+        // Update subscription for contact list metadata
+        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+        self.nostr
+            .update_contacts_metadata_subscription_with_signer(account.pubkey, relays, keys)
             .await?;
 
         tracing::debug!(

@@ -316,6 +316,49 @@ impl NostrManager {
         result
     }
 
+    /// Updates the metadata subscription for a user's contacts using a temporary signer.
+    ///
+    /// This method allows updating the metadata subscription for a user's contacts with a signer
+    /// that is only used for this specific operation. The signer is set before subscription setup
+    /// and unset immediately after.
+    ///
+    /// The method performs the following operations:
+    /// 1. Sets the provided signer for the client
+    /// 2. Sets up a subscription to receive metadata updates for the user's contacts
+    /// 3. Unsets the signer after the operation is complete
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The public key of the user whose contacts' metadata should be subscribed to
+    /// * `user_relays` - The list of relay URLs to use for the subscription
+    /// * `signer` - A signer that implements `NostrSigner` and has a 'static lifetime
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Success if the subscription was updated, or an error if the operation fails
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let pubkey = PublicKey::from_hex("...").unwrap();
+    /// let relays = vec![RelayUrl::parse("wss://relay.example.com").unwrap()];
+    /// let signer = MySigner::new();
+    /// nostr_manager.update_contacts_metadata_subscription_with_signer(pubkey, relays, signer).await?;
+    /// ```
+    pub(crate) async fn update_contacts_metadata_subscription_with_signer(
+        &self,
+        pubkey: PublicKey,
+        user_relays: Vec<RelayUrl>,
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        self.client.set_signer(signer).await;
+        let result = self
+            .setup_contacts_metadata_subscription(pubkey, user_relays)
+            .await;
+        self.client.unset_signer().await;
+        result
+    }
+
     /// Extracts welcome events from a list of giftwrapped events.
     ///
     /// This function processes a list of giftwrapped events and extracts the welcome events
