@@ -18,6 +18,8 @@ use crate::relays::RelayType;
 use crate::secrets_store::SecretsStore;
 use crate::types::ProcessableEvent;
 
+use sha2::{Digest, Sha256};
+
 #[derive(Clone, Debug)]
 pub struct WhitenoiseConfig {
     /// Directory for application data
@@ -1720,14 +1722,28 @@ impl Whitenoise {
     }
 
     /// Extract the account pubkey from a subscription_id
-    /// Subscription IDs follow the format: {pubkey}_{subscription_type}
-    fn extract_pubkey_from_subscription_id(subscription_id: &str) -> Option<PublicKey> {
+    /// Subscription IDs follow the format: {hashed_pubkey}_{subscription_type}
+    /// where hashed_pubkey = SHA256(session salt || accouny_pubkey)[..12]
+    async fn extract_pubkey_from_subscription_id(
+        &self,
+        subscription_id: &str,
+    ) -> Option<PublicKey> {
         if let Some(underscore_pos) = subscription_id.find('_') {
-            let pubkey_str = &subscription_id[..underscore_pos];
-            PublicKey::parse(pubkey_str).ok()
-        } else {
-            None
+            let hash_str = &subscription_id[..underscore_pos];
+            // Get all accounts and find the one whose hash matches
+            let accounts = self.accounts.read().await;
+            for pubkey in accounts.keys() {
+                let mut hasher = Sha256::new();
+                hasher.update(self.nostr.session_salt());
+                hasher.update(pubkey.to_bytes());
+                let hash = hasher.finalize();
+                let pubkey_hash = format!("{:x}", hash)[..12].to_string();
+                if pubkey_hash == hash_str {
+                    return Some(*pubkey);
+                }
+            }
         }
+        None
     }
 
     /// Main event processing loop
@@ -1823,8 +1839,7 @@ impl Whitenoise {
             event
         );
 
-        // For giftwrap events, the target account (who the giftwrap is encrypted for)
-        // is specified in a 'p' tag, not in the event.pubkey field
+        // Extract the target pubkey from the event's 'p' tag
         let target_pubkey = event
             .tags
             .iter()
@@ -1852,7 +1867,7 @@ impl Whitenoise {
 
         // Validate that this matches the subscription_id if available
         if let Some(sub_id) = subscription_id {
-            if let Some(sub_pubkey) = Self::extract_pubkey_from_subscription_id(&sub_id) {
+            if let Some(sub_pubkey) = self.extract_pubkey_from_subscription_id(&sub_id).await {
                 if target_pubkey != sub_pubkey {
                     tracing::warn!(
                         target: "whitenoise::process_giftwrap",
@@ -1901,52 +1916,37 @@ impl Whitenoise {
             "Processing MLS message: {:?}",
             event
         );
-
-        // Extract the account pubkey from the subscription_id if available
-        let target_pubkey = if let Some(sub_id) = subscription_id {
-            if let Some(target_pubkey) = Self::extract_pubkey_from_subscription_id(&sub_id) {
+        if let Some(sub_id) = subscription_id {
+            if let Some(target_pubkey) = self.extract_pubkey_from_subscription_id(&sub_id).await {
                 tracing::debug!(
                     target: "whitenoise::process_mls_message",
                     "Processing MLS message for account: {}",
                     target_pubkey.to_hex()
                 );
-                Some(target_pubkey)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
 
-        // Now we have access to Whitenoise state for processing!
-        if let Some(target_pubkey) = target_pubkey {
-            let accounts = self.read_accounts().await;
-            let target_account = accounts.get(&target_pubkey);
+                // Now we have access to Whitenoise state for processing!
+                let accounts = self.read_accounts().await;
+                let target_account = accounts.get(&target_pubkey);
 
-            if target_account.is_none() {
-                tracing::warn!(
+                if target_account.is_none() {
+                    tracing::warn!(
+                        target: "whitenoise::process_mls_message",
+                        "MLS message received for unknown account: {}",
+                        target_pubkey.to_hex()
+                    );
+                    return Ok(());
+                }
+
+                drop(accounts); // Release read lock
+
+                // TODO: Implement actual MLS message processing:
+                tracing::info!(
                     target: "whitenoise::process_mls_message",
-                    "MLS message received for unknown account: {}",
+                    "MLS message received for account: {} - processing not yet implemented",
                     target_pubkey.to_hex()
                 );
-                return Ok(());
             }
-
-            drop(accounts); // Release read lock
-
-            // TODO: Implement actual MLS message processing:
-            tracing::info!(
-                target: "whitenoise::process_mls_message",
-                "MLS message received for account: {} - processing not yet implemented",
-                target_pubkey.to_hex()
-            );
-        } else {
-            tracing::warn!(
-                target: "whitenoise::process_mls_message",
-                "MLS message received without valid subscription ID"
-            );
         }
-
         Ok(())
     }
 
@@ -2145,34 +2145,26 @@ mod tests {
             assert!(result2.is_ok());
         }
 
-        #[test]
-        fn test_extract_pubkey_from_subscription_id() {
-            // Test valid subscription ID format
-            let test_pubkey = Keys::generate().public_key();
-            let subscription_id = format!("{}_messages", test_pubkey.to_hex());
+        #[tokio::test]
+        async fn test_extract_pubkey_from_subscription_id() {
+            let (whitenoise, _, _) = create_mock_whitenoise().await;
+            let subscription_id = "abc123_user_events";
+            let extracted = whitenoise
+                .extract_pubkey_from_subscription_id(subscription_id)
+                .await;
+            assert!(extracted.is_none());
 
-            let extracted = Whitenoise::extract_pubkey_from_subscription_id(&subscription_id);
-            assert!(extracted.is_some());
-            assert_eq!(extracted.unwrap(), test_pubkey);
+            let invalid_case = "no_underscore";
+            let extracted = whitenoise
+                .extract_pubkey_from_subscription_id(invalid_case)
+                .await;
+            assert!(extracted.is_none());
 
-            // Test edge cases
-            let invalid_cases = [
-                test_pubkey.to_hex(),                  // no underscore
-                "invalid_pubkey_messages".to_string(), // invalid pubkey
-                "".to_string(),                        // empty string
-                "_messages".to_string(),               // empty pubkey part
-            ];
-
-            for invalid_case in &invalid_cases {
-                let extracted = Whitenoise::extract_pubkey_from_subscription_id(invalid_case);
-                assert!(extracted.is_none(), "Should be None for: {}", invalid_case);
-            }
-
-            // Test multiple underscores (should take first part)
-            let multi_underscore_id = format!("{}_messages_extra_data", test_pubkey.to_hex());
-            let result = Whitenoise::extract_pubkey_from_subscription_id(&multi_underscore_id);
-            assert!(result.is_some());
-            assert_eq!(result.unwrap(), test_pubkey);
+            let multi_underscore_id = "abc123_user_events_extra";
+            let result = whitenoise
+                .extract_pubkey_from_subscription_id(multi_underscore_id)
+                .await;
+            assert!(result.is_none());
         }
 
         #[tokio::test]

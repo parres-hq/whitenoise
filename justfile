@@ -32,8 +32,8 @@ check-docs:
 check:
     @bash scripts/check-all.sh
 
-# Run pre-commit checks (linting, formatting, docs, and tests)
-precommit: check test
+# Run pre-commit checks (linting, formatting, docs, tests, integration tests)
+precommit: check test int-test
 
 
 ######################
