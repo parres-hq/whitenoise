@@ -1,6 +1,7 @@
 // use crate::media::blossom::BlossomClient;
 use crate::types::{NostrEncryptionMethod, ProcessableEvent};
 
+use ::rand::RngCore;
 use nostr_sdk::prelude::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -48,6 +49,7 @@ pub struct NostrManagerSettings {
 pub struct NostrManager {
     pub settings: Arc<Mutex<NostrManagerSettings>>,
     client: Client,
+    session_salt: [u8; 16],
     // blossom: BlossomClient,
 }
 
@@ -102,6 +104,10 @@ impl NostrManager {
         };
 
         let settings = NostrManagerSettings::default();
+
+        // Generate a random session salt
+        let mut session_salt = [0u8; 16];
+        ::rand::rng().fill_bytes(&mut session_salt);
 
         // Add the default relays
         for relay in &settings.relays {
@@ -215,6 +221,7 @@ impl NostrManager {
         Ok(Self {
             client,
             settings: Arc::new(Mutex::new(settings)),
+            session_salt,
         })
     }
 
@@ -554,6 +561,11 @@ impl NostrManager {
         self.client.unset_signer().await;
 
         Ok(())
+    }
+
+    /// Expose session_salt for use in subscriptions
+    pub fn session_salt(&self) -> &[u8; 16] {
+        &self.session_salt
     }
 }
 

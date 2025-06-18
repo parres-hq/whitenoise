@@ -499,8 +499,8 @@ impl Whitenoise {
         // Initialize NostrMls for the account
         self.initialize_nostr_mls_for_account(&account).await?;
 
-        // Spawn a background task to fetch the account's data from relays (only if not newly created)
-        if !added_from_keys {
+        // Spawn a background task to fetch the account's data from relays (only if newly added)
+        if added_from_keys {
             self.background_fetch_account_data(&account).await?;
         }
 

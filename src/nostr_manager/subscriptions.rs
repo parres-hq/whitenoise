@@ -3,8 +3,19 @@
 
 use crate::nostr_manager::{NostrManager, Result};
 use nostr_sdk::prelude::*;
+use sha2::{Digest, Sha256};
 
 impl NostrManager {
+    /// Create a short hash from a pubkey for use in subscription IDs
+    /// Uses first 12 characters of SHA256 hash for privacy and collision resistance, salted per session
+    fn create_pubkey_hash(&self, pubkey: &PublicKey) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.session_salt());
+        hasher.update(pubkey.to_bytes());
+        let hash = hasher.finalize();
+        format!("{:x}", hash)[..12].to_string()
+    }
+
     pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
@@ -34,7 +45,8 @@ impl NostrManager {
         pubkey: PublicKey,
         user_relays: Vec<RelayUrl>,
     ) -> Result<()> {
-        let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey.to_hex()));
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
 
         // Combine all user event types into a single subscription
         let user_events_filter = Filter::new()
@@ -60,7 +72,8 @@ impl NostrManager {
         pubkey: PublicKey,
         user_relays: Vec<RelayUrl>,
     ) -> Result<()> {
-        let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey.to_hex()));
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
 
         let giftwrap_filter = Filter::new()
             .kind(Kind::GiftWrap)
@@ -90,7 +103,8 @@ impl NostrManager {
             return Ok(());
         }
 
-        let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey.to_hex()));
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
 
         let contacts_metadata_filter = Filter::new()
             .kind(Kind::Metadata)
@@ -116,7 +130,8 @@ impl NostrManager {
             return Ok(());
         }
 
-        let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey.to_hex()));
+        let pubkey_hash = self.create_pubkey_hash(&pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));
 
         let mls_message_filter = Filter::new()
             .kind(Kind::MlsGroupMessage)

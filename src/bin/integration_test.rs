@@ -194,7 +194,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Wait a moment for background fetch to complete
     tracing::info!("Pausing for background fetch to complete...");
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     // Re-query the onboarding state to check if background fetch updated the cached data
     tracing::info!("Re-querying onboarding state after background fetch...");
