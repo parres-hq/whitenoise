@@ -88,7 +88,7 @@ impl NostrManager {
     }
 
     /// Set up subscription for contacts' metadata - can be updated when contacts change
-    async fn setup_contacts_metadata_subscription(
+    pub async fn setup_contacts_metadata_subscription(
         &self,
         pubkey: PublicKey,
         user_relays: Vec<RelayUrl>,
@@ -119,7 +119,7 @@ impl NostrManager {
     }
 
     /// Set up subscription for group messages - can be updated when groups change
-    async fn setup_group_messages_subscription(
+    pub async fn setup_group_messages_subscription(
         &self,
         pubkey: PublicKey,
         nostr_group_ids: Vec<String>,
