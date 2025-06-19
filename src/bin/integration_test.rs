@@ -35,7 +35,6 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     tracing::debug!("Whitenoise state after initialization: {:?}", whitenoise);
     assert_eq!(whitenoise.get_accounts_count().await, 0);
-    assert!(!whitenoise.has_active_account_set().await);
 
     tracing::info!("Creating first account...");
     let created_account = whitenoise.create_identity().await?;
@@ -46,10 +45,6 @@ async fn main() -> Result<(), WhitenoiseError> {
     );
 
     assert_eq!(whitenoise.get_accounts_count().await, 1);
-    assert_eq!(
-        whitenoise.get_active_pubkey().await.unwrap(),
-        created_account.pubkey
-    );
     tracing::info!("First account created and set as active");
 
     tracing::info!("Creating second account...");
@@ -61,26 +56,18 @@ async fn main() -> Result<(), WhitenoiseError> {
     );
 
     assert_eq!(whitenoise.get_accounts_count().await, 2);
-    assert_eq!(
-        whitenoise.get_active_pubkey().await.unwrap(),
-        created_account_2.pubkey
-    );
     tracing::info!("Second account created and set as active");
 
     tracing::info!("Logging out second account...");
-    whitenoise.logout(&created_account_2).await?;
+    whitenoise.logout(&created_account_2.pubkey).await?;
     tracing::debug!(
         "Whitenoise state after logging out second account: {:?}",
         whitenoise
     );
 
     assert_eq!(whitenoise.get_accounts_count().await, 1);
-    assert!(whitenoise.account_exists(&created_account.pubkey).await);
-    assert!(!whitenoise.account_exists(&created_account_2.pubkey).await);
-    assert_eq!(
-        whitenoise.get_active_pubkey().await.unwrap(),
-        created_account.pubkey
-    );
+    assert!(whitenoise.logged_in(&created_account.pubkey).await);
+    assert!(!whitenoise.logged_in(&created_account_2.pubkey).await);
     tracing::info!("Second account logged out and first account set as active");
 
     tracing::info!("=== Testing login with known account that has published events ===");
@@ -178,18 +165,14 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Now login with the known keys and verify that the background fetch retrieves the published events
     tracing::info!("Logging in with known keys to test background fetch...");
     let private_key_hex = known_keys.secret_key().to_secret_hex();
-    let restored_account = whitenoise.login(private_key_hex).await?;
+    let active_account = whitenoise.login(private_key_hex).await?;
 
-    tracing::debug!("Logged in account: {:?}", restored_account);
+    tracing::debug!("Logged in account: {:?}", active_account);
     tracing::debug!("Whitenoise state after login: {:?}", whitenoise);
 
     // Verify the account was added and set as active
     assert_eq!(whitenoise.get_accounts_count().await, 2);
-    assert_eq!(
-        whitenoise.get_active_pubkey().await.unwrap(),
-        restored_account.pubkey
-    );
-    assert_eq!(restored_account.pubkey, known_pubkey);
+    assert_eq!(active_account.pubkey, known_pubkey);
     tracing::info!("Account was added and set as active");
 
     // Wait a moment for background fetch to complete
@@ -199,7 +182,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Re-query the onboarding state to check if background fetch updated the cached data
     tracing::info!("Re-querying onboarding state after background fetch...");
     let updated_onboarding_state = whitenoise
-        .fetch_onboarding_state(restored_account.pubkey)
+        .fetch_onboarding_state(active_account.pubkey)
         .await?;
     tracing::debug!(
         "Updated onboarding state after background fetch: {:?}",
@@ -212,7 +195,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Load the metadata for the restored account to verify it was fetched via background fetch
     tracing::info!("Loading metadata for restored account to test background fetch...");
-    let loaded_metadata = whitenoise.fetch_metadata(restored_account.pubkey).await?;
+    let loaded_metadata = whitenoise.fetch_metadata(active_account.pubkey).await?;
 
     if let Some(metadata) = loaded_metadata {
         tracing::debug!("Loaded metadata: {:?}", metadata);
@@ -262,7 +245,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Update the metadata
     let update_result = whitenoise
-        .update_metadata(&updated_metadata, &restored_account)
+        .update_metadata(&updated_metadata, &active_account)
         .await;
 
     match update_result {
@@ -281,7 +264,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Verify the metadata was updated by loading it again
     tracing::info!("Verifying metadata update...");
-    let reloaded_metadata = whitenoise.fetch_metadata(restored_account.pubkey).await?;
+    let reloaded_metadata = whitenoise.fetch_metadata(active_account.pubkey).await?;
 
     if let Some(metadata) = reloaded_metadata {
         tracing::debug!("Reloaded metadata after update: {:?}", metadata);
@@ -298,12 +281,6 @@ async fn main() -> Result<(), WhitenoiseError> {
     // TODO: Test nsec export
 
     tracing::info!("=== Testing contact management methods ===");
-
-    // Get the active account for contact tests
-    let active_account = whitenoise
-        .get_active_account()
-        .await
-        .expect("Active account should exist");
 
     // Test adding a contact to an empty contact list
     let test_contact_keys = Keys::generate();
