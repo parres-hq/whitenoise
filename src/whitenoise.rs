@@ -2100,6 +2100,72 @@ impl Whitenoise {
 
         Ok(group)
     }
+
+    pub async fn fetch_groups(
+        &self,
+        account: &Account,
+        active_filter: bool,
+    ) -> Result<Vec<group_types::Group>> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        let nostr_mls_guard = account.nostr_mls.lock().await;
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            Ok(nostr_mls
+                .get_groups()
+                .map_err(WhitenoiseError::from)?
+                .into_iter()
+                .filter(|group| !active_filter || group.state == group_types::GroupState::Active)
+                .collect())
+        } else {
+            Err(WhitenoiseError::NostrMlsNotInitialized)
+        }
+    }
+
+    pub async fn fetch_group_members(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+    ) -> Result<Vec<PublicKey>> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        let nostr_mls_guard = account.nostr_mls.lock().await;
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            Ok(nostr_mls
+                .get_members(group_id)
+                .map_err(WhitenoiseError::from)?
+                .into_iter()
+                .collect())
+        } else {
+            Err(WhitenoiseError::NostrMlsNotInitialized)
+        }
+    }
+
+    pub async fn fetch_group_admins(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+    ) -> Result<Vec<PublicKey>> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        let nostr_mls_guard = account.nostr_mls.lock().await;
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            Ok(nostr_mls
+                .get_group(group_id)
+                .map_err(WhitenoiseError::from)?
+                .ok_or(WhitenoiseError::GroupNotFound)?
+                .admin_pubkeys
+                .into_iter()
+                .collect())
+        } else {
+            Err(WhitenoiseError::NostrMlsNotInitialized)
+        }
+    }
 }
 
 #[cfg(test)]
