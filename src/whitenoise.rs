@@ -2148,6 +2148,26 @@ impl Whitenoise {
             Err(WhitenoiseError::NostrMlsNotInitialized)
         }
     }
+
+    pub async fn fetch_group_admins(&self, group_id: &GroupId) -> Result<Vec<PublicKey>> {
+        let active_account = self
+            .get_active_account()
+            .await
+            .ok_or(WhitenoiseError::AccountNotFound)?;
+        let nostr_mls_guard = active_account.nostr_mls.lock().await;
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            Ok(nostr_mls
+                .get_group(group_id)
+                .map_err(WhitenoiseError::from)?
+                .ok_or(WhitenoiseError::GroupNotFound)?
+                .admin_pubkeys
+                .into_iter()
+                .collect()
+            )
+        } else {
+            Err(WhitenoiseError::NostrMlsNotInitialized)
+        }
+    }
 }
 
 #[cfg(test)]

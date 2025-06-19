@@ -23,6 +23,9 @@ pub enum WhitenoiseError {
     #[error("Nostr MLS SQLite storage error: {0}")]
     NostrMlsSqliteStorage(#[from] nostr_mls_sqlite_storage::error::Error),
 
+    #[error("Group not found")]
+    GroupNotFound,
+
     #[error("Account not found")]
     AccountNotFound,
 
