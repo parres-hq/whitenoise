@@ -1,3 +1,4 @@
+use derivative::Derivative;
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,8 @@ pub struct OnboardingState {
     pub key_package_published: bool,
 }
 
+#[derive(Derivative)]
+#[derivative(PartialEq)]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Account {
     pub pubkey: PublicKey,
@@ -58,6 +61,7 @@ pub struct Account {
     pub last_synced: Timestamp,
     #[serde(skip)]
     #[doc(hidden)]
+    #[derivative(PartialEq = "ignore")]
     pub(crate) nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
 }
 

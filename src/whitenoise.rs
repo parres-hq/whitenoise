@@ -49,7 +49,6 @@ impl WhitenoiseConfig {
 pub struct Whitenoise {
     pub config: WhitenoiseConfig,
     pub accounts: Arc<RwLock<HashMap<PublicKey, Account>>>,
-    pub active_account: Arc<RwLock<Option<PublicKey>>>,
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,
@@ -63,7 +62,6 @@ impl std::fmt::Debug for Whitenoise {
         f.debug_struct("Whitenoise")
             .field("config", &self.config)
             .field("accounts", &self.accounts)
-            .field("active_account", &self.active_account)
             .field("database", &"<REDACTED>")
             .field("nostr", &"<REDACTED>")
             .field("secrets_store", &"<REDACTED>")
@@ -88,38 +86,10 @@ impl Whitenoise {
         self.accounts.write().await
     }
 
-    /// Get a read lock on the active account
-    #[allow(dead_code)]
-    async fn read_active_account(&self) -> tokio::sync::RwLockReadGuard<'_, Option<PublicKey>> {
-        self.active_account.read().await
-    }
-
-    /// Get a write lock on the active account
-    async fn write_active_account(&self) -> tokio::sync::RwLockWriteGuard<'_, Option<PublicKey>> {
-        self.active_account.write().await
-    }
-
-    /// Convenience method to get the active account's public key
-    #[allow(dead_code)]
-    pub async fn get_active_account_pubkey(&self) -> Option<PublicKey> {
-        *self.read_active_account().await
-    }
-
-    /// Convenience method to set the active account
-    async fn set_active_account(&self, pubkey: Option<PublicKey>) {
-        *self.write_active_account().await = pubkey;
-    }
-
     /// Test helper: Check if accounts is empty
     #[cfg(test)]
     pub async fn accounts_is_empty(&self) -> bool {
         self.read_accounts().await.is_empty()
-    }
-
-    /// Test helper: Check if active account is set
-    #[cfg(test)]
-    pub async fn has_active_account(&self) -> bool {
-        self.get_active_account_pubkey().await.is_some()
     }
 
     /// Test helper: Get accounts length
@@ -139,29 +109,8 @@ impl Whitenoise {
         self.read_accounts().await.len()
     }
 
-    /// Integration test helper: Check if active account is set (public version)
-    pub async fn has_active_account_set(&self) -> bool {
-        self.get_active_account_pubkey().await.is_some()
-    }
-
-    /// Integration test helper: Get active account pubkey (public version)
-    pub async fn get_active_pubkey(&self) -> Option<PublicKey> {
-        self.get_active_account_pubkey().await
-    }
-
-    /// Integration test helper: Check if account exists (public version)
-    pub async fn account_exists(&self, pubkey: &PublicKey) -> bool {
+    pub async fn logged_in(&self, pubkey: &PublicKey) -> bool {
         self.read_accounts().await.contains_key(pubkey)
-    }
-
-    /// Integration test helper: Get account by active pubkey
-    pub async fn get_active_account(&self) -> Option<Account> {
-        if let Some(pubkey) = self.get_active_pubkey().await {
-            let accounts = self.read_accounts().await;
-            accounts.get(&pubkey).cloned()
-        } else {
-            None
-        }
     }
 
     // ============================================================================
@@ -240,7 +189,6 @@ impl Whitenoise {
             nostr,
             secrets_store,
             accounts: Arc::new(RwLock::new(HashMap::new())),
-            active_account: Arc::new(RwLock::new(None)),
             event_sender,
             shutdown_sender,
         };
@@ -250,16 +198,6 @@ impl Whitenoise {
         {
             let mut accounts = whitenoise.write_accounts().await;
             *accounts = loaded_accounts;
-        }
-
-        // Set the most recently synced account as active
-        {
-            let accounts = whitenoise.read_accounts().await;
-            let most_recent = accounts
-                .values()
-                .max_by_key(|account| account.last_synced)
-                .map(|account| account.pubkey);
-            whitenoise.set_active_account(most_recent).await;
         }
 
         // Create Arc and start event processing loop (after accounts are loaded)
@@ -403,7 +341,6 @@ impl Whitenoise {
             let mut accounts = self.write_accounts().await;
             accounts.clear();
         }
-        self.set_active_account(None).await;
 
         Ok(())
     }
@@ -441,6 +378,9 @@ impl Whitenoise {
         // Add the keys to the secret store
         self.secrets_store.store_private_key(&keys)?;
 
+        let log_account = self.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+
         self.initialize_nostr_mls_for_account(&account).await?;
 
         // Onboard the account
@@ -454,9 +394,6 @@ impl Whitenoise {
             let mut accounts = self.write_accounts().await;
             accounts.insert(account.pubkey, account.clone());
         }
-
-        // Set the account to active
-        self.set_active_account(Some(account.pubkey)).await;
 
         Ok(account)
     }
@@ -498,6 +435,12 @@ impl Whitenoise {
             Err(e) => return Err(e),
         };
 
+        // Add the account to the in-memory accounts list
+        {
+            let mut accounts = self.write_accounts().await;
+            accounts.insert(account.pubkey, account.clone());
+        }
+
         // Initialize NostrMls for the account
         self.initialize_nostr_mls_for_account(&account).await?;
 
@@ -508,15 +451,6 @@ impl Whitenoise {
 
         // Initialize subscriptions on nostr manager
         self.setup_subscriptions(&account).await?;
-
-        // Set the account to active
-        self.set_active_account(Some(account.pubkey)).await;
-
-        // Add the account to the in-memory accounts list
-        {
-            let mut accounts = self.write_accounts().await;
-            accounts.insert(account.pubkey, account.clone());
-        }
 
         Ok(account)
     }
@@ -542,43 +476,26 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if there is a failure in removing the account or its private key.
-    pub async fn logout(&self, account: &Account) -> Result<()> {
+    pub async fn logout(&self, pubkey: &PublicKey) -> Result<()> {
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         // Delete the account from the database
-        self.delete_account(account).await?;
+        self.delete_account(pubkey).await?;
 
         // Remove the private key from the secret store
-        self.secrets_store
-            .remove_private_key_for_pubkey(&account.pubkey)?;
+        self.secrets_store.remove_private_key_for_pubkey(pubkey)?;
 
         // Remove the account from the Whitenoise struct and update the active account
         {
             let mut accounts = self.write_accounts().await;
-            accounts.remove(&account.pubkey);
+            accounts.remove(pubkey);
 
-            let new_active = accounts.keys().next().copied();
             drop(accounts); // Release the write lock before acquiring active account write lock
-
-            self.set_active_account(new_active).await;
         }
 
         Ok(())
-    }
-
-    /// Sets the provided account as the active account in the Whitenoise instance.
-    ///
-    /// This method updates the `active_account` field to the public key of the given account.
-    /// It does not perform any validation or additional logic beyond updating the active account reference.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` to be set as active.
-    ///
-    /// # Returns
-    ///
-    /// Returns the `Account` that was set as active.
-    pub async fn update_active_account(&self, account: &Account) -> Result<Account> {
-        self.set_active_account(Some(account.pubkey)).await;
-        Ok(account.clone())
     }
 
     // Private Helper Methods =====================================================
@@ -677,6 +594,10 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError::AccountNotFound` if the account is not found in the database,
     /// or another `WhitenoiseError` if the database query fails.
     async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
             .fetch_one(&self.database.pool)
@@ -825,18 +746,23 @@ impl Whitenoise {
     /// # Returns
     ///
     /// Returns `Ok(())` if the account was successfully deleted, or a `WhitenoiseError` if the operation fails.
-    async fn delete_account(&self, account: &Account) -> Result<()> {
-        let mut txn = self.database.pool.begin().await?;
-        sqlx::query("DELETE FROM accounts WHERE pubkey = ?")
-            .bind(account.pubkey.to_hex())
-            .execute(&mut *txn)
+    async fn delete_account(&self, pubkey: &PublicKey) -> Result<()> {
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        let result = sqlx::query("DELETE FROM accounts WHERE pubkey = ?")
+            .bind(pubkey.to_hex())
+            .execute(&self.database.pool)
             .await?;
 
-        txn.commit().await?;
+        tracing::debug!(target: "whitenoise::delete_account", "Account removed from database for pubkey: {}", pubkey.to_hex());
 
-        tracing::debug!(target: "whitenoise::delete_account", "Account removed from database for pubkey: {}", account.pubkey.to_hex());
-
-        Ok(())
+        if result.rows_affected() < 1 {
+            Err(WhitenoiseError::AccountNotFound)
+        } else {
+            Ok(())
+        }
     }
 
     /// Saves the provided `AccountSettings` to the database.
@@ -861,6 +787,10 @@ impl Whitenoise {
         pubkey: &PublicKey,
         settings: &AccountSettings,
     ) -> Result<()> {
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         // Serialize AccountSettings to JSON
         let settings_json = serde_json::to_value(settings)?;
 
@@ -890,6 +820,10 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if account does not exist or database operation fails or if serialization fails
     pub async fn fetch_account_settings(&self, pubkey: &PublicKey) -> Result<AccountSettings> {
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         let settings_json: Value =
             sqlx::query_scalar("SELECT settings FROM accounts WHERE pubkey = ?")
                 .bind(pubkey.to_hex())
@@ -1049,6 +983,10 @@ impl Whitenoise {
         relays: Vec<RelayUrl>,
         relay_type: RelayType,
     ) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         if relays.is_empty() {
             return Ok(());
         }
@@ -1098,6 +1036,10 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the lock cannot be acquired, if the key package cannot be generated,
     /// or if publishing to Nostr fails.
     async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         let key_package_relays = self
             .fetch_relays(account.pubkey, RelayType::KeyPackage)
             .await?;
@@ -1185,6 +1127,11 @@ impl Whitenoise {
     /// // Method returns immediately, data fetch continues in background
     /// ```
     async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            tracing::info!("BACKGROUND");
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         let group_ids = account.groups_nostr_group_ids().await?;
         let nostr = self.nostr.clone();
         let database = self.database.clone();
@@ -1246,6 +1193,11 @@ impl Whitenoise {
     }
 
     async fn setup_subscriptions(&self, account: &Account) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            tracing::info!("SETUP");
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         let groups = {
             let nostr_mls_guard = account.nostr_mls.lock().await;
             if let Some(ref nostr_mls) = *nostr_mls_guard {
@@ -1315,6 +1267,10 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if the metadata query fails.
     pub async fn fetch_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
+        if !self.logged_in(&pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         let metadata = self.nostr.query_user_metadata(pubkey).await?;
         Ok(metadata)
     }
@@ -1369,6 +1325,10 @@ impl Whitenoise {
     /// * The event publication fails
     /// * The database update fails
     pub async fn update_metadata(&self, metadata: &Metadata, account: &Account) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         tracing::debug!(
             target: "whitenoise::update_metadata",
             "Updating metadata for account: {}",
@@ -1429,6 +1389,10 @@ impl Whitenoise {
         relay_type: RelayType,
         relays: Vec<RelayUrl>,
     ) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         tracing::debug!(
             target: "whitenoise::update_account_relays",
             "Updating {:?} relays for account: {} with {} relays",
@@ -1477,6 +1441,10 @@ impl Whitenoise {
         &self,
         pubkey: PublicKey,
     ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
+        if !self.logged_in(&pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         let contacts = self.nostr.query_user_contact_list(pubkey).await?;
         Ok(contacts)
     }
@@ -1521,6 +1489,10 @@ impl Whitenoise {
     /// * Failed to load the current contact list
     /// * Failed to publish the updated contact list event
     pub async fn add_contact(&self, account: &Account, contact_pubkey: PublicKey) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         // Load current contact list
         let current_contacts = self.fetch_contacts(account.pubkey).await?;
 
@@ -1570,6 +1542,10 @@ impl Whitenoise {
     /// * Failed to load the current contact list
     /// * Failed to publish the updated contact list event
     pub async fn remove_contact(&self, account: &Account, contact_pubkey: PublicKey) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         // Load current contact list
         let current_contacts = self.fetch_contacts(account.pubkey).await?;
 
@@ -1623,6 +1599,10 @@ impl Whitenoise {
         account: &Account,
         contact_pubkeys: Vec<PublicKey>,
     ) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         // Publish the new contact list
         self.publish_contact_list(account, contact_pubkeys.clone())
             .await?;
@@ -1661,6 +1641,10 @@ impl Whitenoise {
         account: &Account,
         contact_pubkeys: Vec<PublicKey>,
     ) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         // Create p tags for each contact
         let tags: Vec<Tag> = contact_pubkeys
             .into_iter()
@@ -1960,7 +1944,11 @@ impl Whitenoise {
         );
     }
 
-    pub fn export_account_nsec(&self, account: &Account) -> Result<String> {
+    pub async fn export_account_nsec(&self, account: &Account) -> Result<String> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         Ok(self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?
@@ -1969,7 +1957,11 @@ impl Whitenoise {
             .unwrap())
     }
 
-    pub fn export_account_npub(&self, account: &Account) -> Result<String> {
+    pub async fn export_account_npub(&self, account: &Account) -> Result<String> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
         Ok(account.pubkey.to_bech32().unwrap())
     }
 
@@ -1996,24 +1988,20 @@ impl Whitenoise {
     /// - Database operations fail
     pub async fn create_group(
         &self,
-        creator_pubkey: PublicKey,
+        creator_account: Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
         group_name: String,
         description: String,
     ) -> Result<group_types::Group> {
-        let active_account = self
-            .get_active_account()
-            .await
-            .ok_or(WhitenoiseError::AccountNotFound)?;
+        let creator_pubkey = creator_account.pubkey;
+        if !self.logged_in(&creator_pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
 
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&creator_pubkey)?;
-        // Check that active account is the creator
-        if active_account.pubkey != creator_pubkey {
-            return Err(WhitenoiseError::AccountNotAuthorized);
-        }
 
         let group_relays = self.nostr.relays().await?;
 
@@ -2022,7 +2010,7 @@ impl Whitenoise {
         let group_ids: Vec<String>;
         let mut eventid_keypackage_list: Vec<(EventId, KeyPackage)> = Vec::new();
 
-        let nostr_mls_guard = active_account.nostr_mls.lock().await;
+        let nostr_mls_guard = creator_account.nostr_mls.lock().await;
 
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             // Fetch key packages for all members
@@ -2077,7 +2065,7 @@ impl Whitenoise {
                         Tag::from_standardized(TagStandard::Relays(group_relays.clone())),
                         Tag::event(event_id),
                     ])
-                    .build(active_account.pubkey);
+                    .build(creator_pubkey);
 
             tracing::debug!(
                 target: "whitenoise::groups::create_group",
@@ -2102,7 +2090,7 @@ impl Whitenoise {
 
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
-                active_account.pubkey,
+                creator_pubkey,
                 group_relays,
                 group_ids,
                 keys,
@@ -2187,7 +2175,6 @@ mod tests {
             nostr,
             secrets_store,
             accounts: Arc::new(RwLock::new(HashMap::new())),
-            active_account: Arc::new(RwLock::new(None)),
             event_sender,
             shutdown_sender,
         };
@@ -2236,7 +2223,6 @@ mod tests {
         async fn test_whitenoise_initialization() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             assert!(whitenoise.accounts_is_empty().await);
-            assert!(!whitenoise.has_active_account().await);
 
             // Verify directories were created
             assert!(whitenoise.config.data_dir.exists());
@@ -2251,7 +2237,6 @@ mod tests {
             assert!(debug_str.contains("Whitenoise"));
             assert!(debug_str.contains("config"));
             assert!(debug_str.contains("accounts"));
-            assert!(debug_str.contains("active_account"));
             assert!(debug_str.contains("<REDACTED>"));
         }
 
@@ -2344,9 +2329,7 @@ mod tests {
                 let mut accounts = whitenoise.write_accounts().await;
                 accounts.insert(pubkey, test_account);
             }
-            whitenoise.set_active_account(Some(pubkey)).await;
             assert!(!whitenoise.accounts_is_empty().await);
-            assert!(whitenoise.has_active_account().await);
 
             // Delete all data
             let result = whitenoise.delete_all_data().await;
@@ -2354,7 +2337,6 @@ mod tests {
 
             // Verify cleanup
             assert!(whitenoise.accounts_is_empty().await);
-            assert!(!whitenoise.has_active_account().await);
             assert!(!test_log_file.exists());
 
             // MLS directory should be recreated as empty
@@ -2442,6 +2424,10 @@ mod tests {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let test_keys = create_test_keys();
             let pubkey = test_keys.public_key();
+            let account = whitenoise
+                .login(test_keys.secret_key().to_secret_hex())
+                .await;
+            assert!(account.is_ok());
 
             // Test all load methods return expected types (though they may be empty in test env)
             let metadata = whitenoise.fetch_metadata(pubkey).await;
@@ -2481,6 +2467,11 @@ mod tests {
             let test_keys = create_test_keys();
             let pubkey = test_keys.public_key();
 
+            let account = whitenoise
+                .login(test_keys.secret_key().to_secret_hex())
+                .await;
+            assert!(account.is_ok(), "{:?}", account);
+
             let result = whitenoise.fetch_onboarding_state(pubkey).await;
             assert!(result.is_ok());
 
@@ -2496,6 +2487,10 @@ mod tests {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let test_keys = create_test_keys();
             let pubkey = test_keys.public_key();
+            let account = whitenoise
+                .login(test_keys.secret_key().to_secret_hex())
+                .await;
+            assert!(account.is_ok());
 
             // Test concurrent API calls
             let results = tokio::join!(
@@ -2520,6 +2515,8 @@ mod tests {
 
             for key in keys {
                 let pubkey = key.public_key();
+                let account = whitenoise.login(key.secret_key().to_secret_hex()).await;
+                assert!(account.is_ok());
 
                 // Test that all methods work with different pubkeys
                 assert!(whitenoise.fetch_metadata(pubkey).await.is_ok());
@@ -2659,14 +2656,6 @@ mod tests {
             assert_eq!(whitenoise.accounts_len().await, 2);
             assert!(whitenoise.has_account(&account1.pubkey).await);
             assert!(whitenoise.has_account(&account2.pubkey).await);
-
-            // Verify the most recently synced account is active
-            assert!(whitenoise.has_active_account().await);
-            // Account2 has the newer timestamp (200 vs 100), so it should be active
-            assert_eq!(
-                whitenoise.get_active_account_pubkey().await.unwrap(),
-                account2.pubkey
-            );
         }
 
         #[tokio::test]
@@ -2675,10 +2664,14 @@ mod tests {
 
             // Create and save a test account
             let (account, keys) = create_test_account();
-            let _original_timestamp = account.last_synced;
-
             whitenoise.save_account(&account).await.unwrap();
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+            assert!(log_account.is_ok());
+            assert_eq!(log_account.unwrap(), account);
+
+            let _original_timestamp = account.last_synced;
 
             // Initialize NostrMls for the account
             whitenoise
@@ -2744,9 +2737,18 @@ mod tests {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
             // Create and save a test account
-            let (account, keys) = create_test_account();
+            let (account, test_keys) = create_test_account();
             whitenoise.save_account(&account).await.unwrap();
-            whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            whitenoise
+                .secrets_store
+                .store_private_key(&test_keys)
+                .unwrap();
+
+            let log_account = whitenoise
+                .login(test_keys.secret_key().to_secret_hex())
+                .await;
+            assert!(log_account.is_ok());
+            assert_eq!(log_account.unwrap(), account);
 
             // Initialize NostrMls for the account
             whitenoise
@@ -2779,6 +2781,9 @@ mod tests {
             let (account, keys) = create_test_account();
             whitenoise.save_account(&account).await.unwrap();
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+            assert!(log_account.is_ok());
+            assert_eq!(log_account.unwrap(), account);
 
             // Initialize NostrMls for the account
             whitenoise
@@ -2808,6 +2813,9 @@ mod tests {
             let (account, keys) = create_test_account();
             whitenoise.save_account(&account).await.unwrap();
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+            assert!(log_account.is_ok());
+            assert_eq!(log_account.unwrap(), account);
 
             // Initialize NostrMls for the account
             whitenoise
@@ -2930,6 +2938,8 @@ mod tests {
 
             // Store account keys
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+            assert!(log_account.is_ok());
 
             // Test the logic of adding a contact (without actual network calls)
             // Load current contact list (will be empty in test environment)
@@ -3042,6 +3052,8 @@ mod tests {
 
             // Store account keys
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+            assert!(log_account.is_ok());
 
             let contact_pubkey = create_test_keys().public_key();
 
@@ -3431,6 +3443,8 @@ mod tests {
 
             // Store keys so other operations can work
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
+            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+            assert!(log_account.is_ok());
 
             // Test that setup_subscriptions fails when NostrMls is not initialized
             let result = whitenoise.setup_subscriptions(&account).await;
@@ -3665,6 +3679,8 @@ mod tests {
             // Store keys and save account
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
             whitenoise.save_account(&account).await.unwrap();
+            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+            assert!(log_account.is_ok());
 
             // Test the lock acquisition logic
             {
