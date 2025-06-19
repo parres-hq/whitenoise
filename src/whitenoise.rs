@@ -2114,22 +2114,18 @@ impl Whitenoise {
     }
 
     pub async fn fetch_groups(&self, active_filter: bool) -> Result<Vec<group_types::Group>> {
-        tracing::debug!(target: "whitenoise::get_groups", "Attempting to acquire nostr_mls lock");
         let active_account = self
             .get_active_account()
             .await
             .ok_or(WhitenoiseError::AccountNotFound)?;
         let nostr_mls_guard = active_account.nostr_mls.lock().await;
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            tracing::debug!(target: "whitenoise::get_groups", "Fetching groups");
-            let groups = nostr_mls
+            Ok(nostr_mls
                 .get_groups()
                 .map_err(WhitenoiseError::from)?
                 .into_iter()
                 .filter(|group| !active_filter || group.state == group_types::GroupState::Active)
-                .collect();
-            tracing::debug!(target: "whitenoise::get_groups", "nostr_mls lock released");
-            Ok(groups)
+                .collect())
         } else {
             Err(WhitenoiseError::NostrMlsNotInitialized)
         }
