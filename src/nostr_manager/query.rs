@@ -2,7 +2,7 @@
 //! This handles fetching events from the database cache.
 
 use crate::nostr_manager::{NostrManager, Result};
-use crate::relays::RelayType;
+use crate::whitenoise::accounts::relays::RelayType;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 

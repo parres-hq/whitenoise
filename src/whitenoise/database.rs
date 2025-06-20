@@ -8,11 +8,11 @@ use thiserror::Error;
 const MIGRATION_FILES: &[(&str, &[u8])] = &[
     (
         "0001_accounts.sql",
-        include_bytes!("../db_migrations/0001_accounts.sql"),
+        include_bytes!("../../db_migrations/0001_accounts.sql"),
     ),
     (
         "0002_add_media_files.sql",
-        include_bytes!("../db_migrations/0002_add_media_files.sql"),
+        include_bytes!("../../db_migrations/0002_add_media_files.sql"),
     ),
     // Add new migrations here in order, for example:
     // ("000X_something.sql", include_bytes!("../db_migrations/000X_something.sql")),
