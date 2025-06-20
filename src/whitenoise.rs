@@ -80,7 +80,11 @@ impl Whitenoise {
     }
 
     async fn read_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
-        self.read_accounts().await.get(pubkey).cloned().ok_or(WhitenoiseError::AccountNotFound)
+        self.read_accounts()
+            .await
+            .get(pubkey)
+            .cloned()
+            .ok_or(WhitenoiseError::AccountNotFound)
     }
 
     /// Get a write lock on the accounts HashMap
@@ -931,10 +935,15 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+
+        // Get relays with fallback to defaults (expected during onboarding)
+        let relays_to_use = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
+            .await?;
+
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event.clone(), &relays, keys)
+            .publish_event_builder_with_signer(event.clone(), &relays_to_use, keys)
             .await?;
         tracing::debug!(target: "whitenoise::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
 
@@ -1013,10 +1022,15 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+
+        // Get relays with fallback to defaults if user hasn't configured any
+        let relays_to_use = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
+            .await?;
+
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event.clone(), &relays, keys)
+            .publish_event_builder_with_signer(event.clone(), &relays_to_use, keys)
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
 
@@ -1077,13 +1091,15 @@ impl Whitenoise {
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
         let key_package_event_builder =
             EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package).tags(tags);
-        let relays = self
-            .fetch_relays(account.pubkey, RelayType::KeyPackage)
+
+        // Get relays with fallback to defaults if user hasn't configured key package relays
+        let relays_to_use = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
             .await?;
 
         let result = self
             .nostr
-            .publish_event_builder_with_signer(key_package_event_builder, &relays, signer)
+            .publish_event_builder_with_signer(key_package_event_builder, &relays_to_use, signer)
             .await?;
 
         tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
@@ -1145,9 +1161,19 @@ impl Whitenoise {
             }
 
             let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
-            self.nostr
-                .publish_event_builder_with_signer(builder, &key_package_relays, signer)
-                .await?;
+
+            // Only try to delete if we have key package relays configured
+            if !key_package_relays.is_empty() {
+                self.nostr
+                    .publish_event_builder_with_signer(builder, &key_package_relays, signer)
+                    .await?;
+            } else {
+                tracing::warn!(
+                    target: "whitenoise::delete_key_package_from_relays_for_account",
+                    "No key package relays configured for account {}, cannot delete key package",
+                    account.pubkey.to_hex()
+                );
+            }
         } else {
             tracing::warn!(target: "whitenoise::delete_key_package_from_relays_for_account", "Key package event not found for account: {}", account.pubkey.to_hex());
             return Ok(());
@@ -1290,14 +1316,10 @@ impl Whitenoise {
             })
             .unwrap_or_default();
 
-        let user_relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
-
-        // Use default client relays if user hasn't configured any
-        let relays_to_use = if user_relays.is_empty() {
-            self.nostr.relays().await?
-        } else {
-            user_relays
-        };
+        // Get relays with fallback to defaults if user hasn't configured any
+        let relays_to_use = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
+            .await?;
 
         // Use the signer-aware subscription setup method
         let keys = self
@@ -1376,6 +1398,39 @@ impl Whitenoise {
         Ok(relays)
     }
 
+    /// Fetches user relays for the specified type, falling back to default client relays if empty.
+    ///
+    /// This helper method abstracts the common pattern of checking if user-specific relays
+    /// are configured and falling back to default client relays when they're not available.
+    /// This is particularly useful during onboarding and in test environments where users
+    /// haven't configured relays yet.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The `PublicKey` of the user whose relays should be fetched.
+    /// * `relay_type` - The type of relays to fetch (Nostr, Inbox, or KeyPackage).
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Vec<RelayUrl>)` containing user relays if available, otherwise default client relays.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if either the relay query or default relay fetch fails.
+    async fn fetch_relays_with_fallback(
+        &self,
+        pubkey: PublicKey,
+        relay_type: RelayType,
+    ) -> Result<Vec<RelayUrl>> {
+        let user_relays = self.fetch_relays(pubkey, relay_type).await?;
+
+        if user_relays.is_empty() {
+            self.nostr.relays().await.map_err(WhitenoiseError::from)
+        } else {
+            Ok(user_relays)
+        }
+    }
+
     /// Updates the metadata for the given account by publishing a new metadata event to Nostr.
     ///
     /// This method takes the provided metadata, creates a Nostr metadata event (Kind::Metadata),
@@ -1419,12 +1474,16 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+
+        // Get relays with fallback to defaults if user hasn't configured any
+        let relays_to_use = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
+            .await?;
 
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &relays, keys)
+            .publish_event_builder_with_signer(event, &relays_to_use, keys)
             .await?;
 
         tracing::debug!(
@@ -1734,18 +1793,20 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+        // Get relays with fallback to defaults if user hasn't configured any
+        let relays_to_use = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
+            .await?;
 
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &relays, keys.clone())
+            .publish_event_builder_with_signer(event, &relays_to_use, keys.clone())
             .await?;
 
-        // Update subscription for contact list metadata
-        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+        // Update subscription for contact list metadata - use same relay logic
         self.nostr
-            .update_contacts_metadata_subscription_with_signer(account.pubkey, relays, keys)
+            .update_contacts_metadata_subscription_with_signer(account.pubkey, relays_to_use, keys)
             .await?;
 
         tracing::debug!(
