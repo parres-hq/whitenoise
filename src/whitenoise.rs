@@ -2220,22 +2220,21 @@ impl Whitenoise {
     /// - Database operations fail
     pub async fn create_group(
         &self,
-        creator_account: Account,
+        creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
         group_name: String,
         description: String,
     ) -> Result<group_types::Group> {
-        let creator_pubkey = creator_account.pubkey;
-        if !self.logged_in(&creator_pubkey).await {
+        if !self.logged_in(&creator_account.pubkey).await {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
         let keys = self
             .secrets_store
-            .get_nostr_keys_for_pubkey(&creator_pubkey)?;
+            .get_nostr_keys_for_pubkey(&creator_account.pubkey)?;
 
-        let group_relays = self.fetch_relays(creator_pubkey, RelayType::Nostr).await?;
+        let group_relays = self.fetch_relays(creator_account.pubkey, RelayType::Nostr).await?;
 
         let group: group_types::Group;
         let serialized_welcome_message: Vec<u8>;
@@ -2261,7 +2260,7 @@ impl Whitenoise {
                 .create_group(
                     group_name,
                     description,
-                    &creator_pubkey,
+                    &creator_account.pubkey,
                     &member_pubkeys,
                     eventid_keypackage_list
                         .iter()
@@ -2297,7 +2296,7 @@ impl Whitenoise {
                         Tag::from_standardized(TagStandard::Relays(group_relays.clone())),
                         Tag::event(event_id),
                     ])
-                    .build(creator_pubkey);
+                    .build(creator_account.pubkey);
 
             tracing::debug!(
                 target: "whitenoise::groups::create_group",
@@ -2322,7 +2321,7 @@ impl Whitenoise {
 
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
-                creator_pubkey,
+                creator_account.pubkey,
                 group_relays,
                 group_ids,
                 keys,
