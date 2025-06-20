@@ -150,7 +150,7 @@ impl NostrManager {
                                 match message {
                                     RelayMessage::Event { subscription_id, event } => {
                                         if let Err(e) = sender
-                                            .send(ProcessableEvent::NostrEvent(
+                                            .send(ProcessableEvent::new_nostr_event(
                                                 event.as_ref().clone(),
                                                 Some(subscription_id.to_string()),
                                             ))
@@ -261,6 +261,20 @@ impl NostrManager {
             .collect())
     }
 
+    /// Fetch an event (first from database, then from relays) with a filter
+    pub(crate) async fn fetch_events_with_filter(&self, filter: Filter) -> Result<Events> {
+        let events = self.client.database().query(filter.clone()).await?;
+        if events.is_empty() {
+            let events = self
+                .client
+                .fetch_events(filter, self.timeout().await.unwrap())
+                .await?;
+            Ok(events)
+        } else {
+            Ok(events)
+        }
+    }
+
     /// Publishes a Nostr event using a temporary signer.
     ///
     /// This method allows publishing an event with a signer that is only used for this specific operation.
@@ -277,12 +291,13 @@ impl NostrManager {
     pub(crate) async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
+        relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         self.client.set_signer(signer).await;
         let result = self
             .client
-            .send_event_builder(event_builder.clone())
+            .send_event_builder_to(relays, event_builder.clone())
             .await?;
         self.client.unset_signer().await;
         Ok(result)

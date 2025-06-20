@@ -24,11 +24,73 @@ pub enum NostrEncryptionMethod {
     Nip44,
 }
 
+/// Retry information for failed event processing
+#[derive(Debug, Clone)]
+pub struct RetryInfo {
+    /// Number of times this event has been retried
+    pub attempt: u32,
+    /// Maximum number of retry attempts allowed
+    pub max_attempts: u32,
+    /// Base delay in milliseconds for exponential backoff
+    pub base_delay_ms: u64,
+}
+
+impl RetryInfo {
+    pub fn new() -> Self {
+        Self {
+            attempt: 0,
+            max_attempts: 10,
+            base_delay_ms: 1000,
+        }
+    }
+
+    pub fn next_attempt(&self) -> Option<Self> {
+        if self.attempt >= self.max_attempts {
+            None
+        } else {
+            Some(Self {
+                attempt: self.attempt + 1,
+                max_attempts: self.max_attempts,
+                base_delay_ms: self.base_delay_ms,
+            })
+        }
+    }
+
+    pub fn delay_ms(&self) -> u64 {
+        self.base_delay_ms * (2_u64.pow(self.attempt))
+    }
+
+    pub fn should_retry(&self) -> bool {
+        self.attempt < self.max_attempts
+    }
+}
+
+impl Default for RetryInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Events that can be processed by the Whitenoise event processing system
 #[derive(Debug)]
 pub enum ProcessableEvent {
     /// A Nostr event with an optional subscription ID for account-aware processing
-    NostrEvent(Event, Option<String>), // Event and optional subscription_id
+    NostrEvent {
+        event: Event,
+        subscription_id: Option<String>,
+        retry_info: RetryInfo,
+    },
     /// A relay message for logging/monitoring purposes
     RelayMessage(RelayUrl, String),
+}
+
+impl ProcessableEvent {
+    /// Create a new NostrEvent with default retry settings
+    pub fn new_nostr_event(event: Event, subscription_id: Option<String>) -> Self {
+        Self::NostrEvent {
+            event,
+            subscription_id,
+            retry_info: RetryInfo::new(),
+        }
+    }
 }
