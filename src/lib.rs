@@ -43,7 +43,7 @@ pub use nostr::RelayUrl;
 
 // Nostr MLS Types
 /// Nostr MLS Group. Re-exported from [`nostr_mls::group_types::Group`](https://docs.rs/nostr-mls/latest/nostr_mls/group_types/struct.Group.html)
-pub use nostr_mls::prelude::group_types::Group;
+pub use nostr_mls::prelude::group_types::{Group, GroupState, GroupType};
 
 /// Nostr MLS Group ID. Re-exported from [`open_mls::group::GroupId`](https://latest.openmls.tech/doc/openmls/group/struct.GroupId.html)
 pub use nostr_mls::prelude::GroupId;

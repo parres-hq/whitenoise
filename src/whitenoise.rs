@@ -2234,7 +2234,9 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&creator_account.pubkey)?;
 
-        let group_relays = self.fetch_relays(creator_account.pubkey, RelayType::Nostr).await?;
+        let group_relays = self
+            .fetch_relays(creator_account.pubkey, RelayType::Nostr)
+            .await?;
 
         let group: group_types::Group;
         let serialized_welcome_message: Vec<u8>;
