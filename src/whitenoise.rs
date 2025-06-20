@@ -79,6 +79,10 @@ impl Whitenoise {
         self.accounts.read().await
     }
 
+    async fn read_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
+        self.read_accounts().await.get(pubkey).cloned().ok_or(WhitenoiseError::AccountNotFound)
+    }
+
     /// Get a write lock on the accounts HashMap
     async fn write_accounts(
         &self,
@@ -927,9 +931,10 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event.clone(), keys)
+            .publish_event_builder_with_signer(event.clone(), &relays, keys)
             .await?;
         tracing::debug!(target: "whitenoise::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
 
@@ -1008,9 +1013,10 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event.clone(), keys)
+            .publish_event_builder_with_signer(event.clone(), &relays, keys)
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
 
@@ -1071,13 +1077,81 @@ impl Whitenoise {
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
         let key_package_event_builder =
             EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package).tags(tags);
+        let relays = self
+            .fetch_relays(account.pubkey, RelayType::KeyPackage)
+            .await?;
 
         let result = self
             .nostr
-            .publish_event_builder_with_signer(key_package_event_builder, signer)
+            .publish_event_builder_with_signer(key_package_event_builder, &relays, signer)
             .await?;
 
         tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
+
+        Ok(())
+    }
+
+    /// Deletes the key package from the relays for the given account.
+    ///
+    /// This method deletes the key package from the relays for the given account.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - A reference to the `Account` whose key package will be deleted.
+    /// * `event_id` - The `EventId` of the key package to delete.
+    /// * `key_package_relays` - A vector of `RelayUrl` specifying the relays to delete the key package from.
+    /// * `delete_mls_stored_keys` - A boolean indicating whether to delete the key package from MLS storage.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    async fn delete_key_package_from_relays_for_account(
+        &self,
+        account: &Account,
+        event_id: &EventId,
+        delete_mls_stored_keys: bool,
+    ) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        let key_package_relays = self
+            .fetch_relays(account.pubkey, RelayType::KeyPackage)
+            .await?;
+
+        let key_package_filter = Filter::new()
+            .id(*event_id)
+            .kind(Kind::MlsKeyPackage)
+            .author(account.pubkey);
+
+        let key_package_events = self
+            .nostr
+            .fetch_events_with_filter(key_package_filter)
+            .await?;
+        let signer = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        if let Some(event) = key_package_events.first() {
+            if delete_mls_stored_keys {
+                let nostr_mls_guard = account.nostr_mls.lock().await;
+                if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+                    let key_package = nostr_mls.parse_key_package(event)?;
+
+                    nostr_mls.delete_key_package_from_storage(&key_package)?;
+                } else {
+                    return Err(WhitenoiseError::NostrMlsNotInitialized);
+                }
+            }
+
+            let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
+            self.nostr
+                .publish_event_builder_with_signer(builder, &key_package_relays, signer)
+                .await?;
+        } else {
+            tracing::warn!(target: "whitenoise::delete_key_package_from_relays_for_account", "Key package event not found for account: {}", account.pubkey.to_hex());
+            return Ok(());
+        }
 
         Ok(())
     }
@@ -1345,11 +1419,12 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
 
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, keys)
+            .publish_event_builder_with_signer(event, &relays, keys)
             .await?;
 
         tracing::debug!(
@@ -1659,10 +1734,12 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
+        let relays = self.fetch_relays(account.pubkey, RelayType::Nostr).await?;
+
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, keys.clone())
+            .publish_event_builder_with_signer(event, &relays, keys.clone())
             .await?;
 
         // Update subscription for contact list metadata
@@ -1753,26 +1830,14 @@ impl Whitenoise {
 
                     // Process the event
                     match event {
-                        ProcessableEvent::NostrEvent(event, subscription_id) => {
+                        ProcessableEvent::NostrEvent { event, subscription_id, retry_info } => {
                             // Filter and route nostr events based on kind
-                            match event.kind {
+                            let result = match event.kind {
                                 Kind::GiftWrap => {
-                                    if let Err(e) = whitenoise.process_giftwrap(event, subscription_id).await {
-                                        tracing::error!(
-                                            target: "whitenoise::process_events",
-                                            "Error processing giftwrap: {}",
-                                            e
-                                        );
-                                    }
+                                    whitenoise.process_giftwrap(event.clone(), subscription_id.clone()).await
                                 }
                                 Kind::MlsGroupMessage => {
-                                    if let Err(e) = whitenoise.process_mls_message(event, subscription_id).await {
-                                        tracing::error!(
-                                            target: "whitenoise::process_events",
-                                            "Error processing MLS message: {}",
-                                            e
-                                        );
-                                    }
+                                    whitenoise.process_mls_message(event.clone(), subscription_id.clone()).await
                                 }
                                 _ => {
                                     // TODO: Add more event types as needed
@@ -1780,6 +1845,49 @@ impl Whitenoise {
                                         target: "whitenoise::process_events",
                                         "Received unhandled event of kind: {:?} - add handler if needed",
                                         event.kind
+                                    );
+                                    Ok(()) // Unhandled events are not errors
+                                }
+                            };
+
+                            // Handle retry logic
+                            if let Err(e) = result {
+                                if retry_info.should_retry() {
+                                    if let Some(next_retry) = retry_info.next_attempt() {
+                                        let delay_ms = next_retry.delay_ms();
+                                        tracing::warn!(
+                                            target: "whitenoise::process_events",
+                                            "Event processing failed (attempt {}/{}), retrying in {}ms: {}",
+                                            next_retry.attempt,
+                                            next_retry.max_attempts,
+                                            delay_ms,
+                                            e
+                                        );
+
+                                        let retry_event = ProcessableEvent::NostrEvent {
+                                            event,
+                                            subscription_id,
+                                            retry_info: next_retry,
+                                        };
+                                        let sender = whitenoise.event_sender.clone();
+
+                                        tokio::spawn(async move {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                            if let Err(send_err) = sender.send(retry_event).await {
+                                                tracing::error!(
+                                                    target: "whitenoise::process_events",
+                                                    "Failed to requeue event for retry: {}",
+                                                    send_err
+                                                );
+                                            }
+                                        });
+                                    }
+                                } else {
+                                    tracing::error!(
+                                        target: "whitenoise::process_events",
+                                        "Event processing failed after {} attempts, giving up: {}",
+                                        retry_info.max_attempts,
+                                        e
                                     );
                                 }
                             }
@@ -1829,18 +1937,12 @@ impl Whitenoise {
             .iter()
             .find(|tag| tag.kind() == TagKind::p())
             .and_then(|tag| tag.content())
-            .and_then(|pubkey_str| PublicKey::parse(pubkey_str).ok());
-
-        let target_pubkey = match target_pubkey {
-            Some(pk) => pk,
-            None => {
-                tracing::warn!(
-                    target: "whitenoise::process_giftwrap",
-                    "No target pubkey found in 'p' tag for giftwrap event"
-                );
-                return Ok(());
-            }
-        };
+            .and_then(|pubkey_str| PublicKey::parse(pubkey_str).ok())
+            .ok_or_else(|| {
+                WhitenoiseError::InvalidEvent(
+                    "No valid target pubkey found in 'p' tag for giftwrap event".to_string(),
+                )
+            })?;
 
         tracing::debug!(
             target: "whitenoise::process_giftwrap",
@@ -1853,38 +1955,98 @@ impl Whitenoise {
         if let Some(sub_id) = subscription_id {
             if let Some(sub_pubkey) = self.extract_pubkey_from_subscription_id(&sub_id).await {
                 if target_pubkey != sub_pubkey {
-                    tracing::warn!(
-                        target: "whitenoise::process_giftwrap",
+                    return Err(WhitenoiseError::InvalidEvent(format!(
                         "Giftwrap target pubkey {} does not match subscription pubkey {} - possible routing error",
                         target_pubkey.to_hex(),
                         sub_pubkey.to_hex()
-                    );
-                    return Ok(());
+                    )));
                 }
             }
         }
 
-        // Now we have access to Whitenoise state for processing!
-        let accounts = self.read_accounts().await;
-        let target_account = accounts.get(&target_pubkey);
+        let target_account = self.read_account_by_pubkey(&target_pubkey).await?;
 
-        if target_account.is_none() {
-            tracing::warn!(
-                target: "whitenoise::process_giftwrap",
-                "Giftwrap received for unknown account: {}",
-                target_pubkey.to_hex()
-            );
-            return Ok(());
-        }
-
-        drop(accounts); // Release read lock
-
-        // TODO: Implement actual giftwrap processing:
         tracing::info!(
             target: "whitenoise::process_giftwrap",
             "Giftwrap received for account: {} - processing not yet implemented",
             target_pubkey.to_hex()
         );
+
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&target_pubkey)?;
+
+        let unwrapped = extract_rumor(&keys, &event).await.map_err(|e| {
+            WhitenoiseError::Configuration(format!("Failed to decrypt giftwrap: {}", e))
+        })?;
+
+        match unwrapped.rumor.kind {
+            Kind::MlsWelcome => {
+                self.process_welcome(&target_account, event, unwrapped.rumor)
+                    .await?;
+            }
+            Kind::PrivateDirectMessage => {
+                tracing::debug!(
+                    target: "whitenoise::process_giftwrap",
+                    "Received private direct message: {:?}",
+                    unwrapped.rumor
+                );
+            }
+            _ => {
+                tracing::debug!(
+                    target: "whitenoise::process_giftwrap",
+                    "Received unhandled giftwrap of kind {:?}",
+                    unwrapped.rumor.kind
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn process_welcome(
+        &self,
+        account: &Account,
+        event: Event,
+        rumor: UnsignedEvent,
+    ) -> Result<()> {
+        // Process the welcome message - lock scope is minimal
+        {
+            let nostr_mls_guard = account.nostr_mls.lock().await;
+            if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+                nostr_mls
+                    .process_welcome(&event.id, &rumor)
+                    .map_err(WhitenoiseError::NostrMlsError)?;
+                tracing::debug!(target: "whitenoise::process_welcome", "Processed welcome event");
+            } else {
+                tracing::error!(target: "whitenoise::process_welcome", "Nostr MLS not initialized");
+                return Err(WhitenoiseError::NostrMlsNotInitialized);
+            }
+        } // nostr_mls lock released here
+
+        let key_package_event_id: Option<EventId> = rumor
+            .tags
+            .iter()
+            .find(|tag| {
+                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E))
+            })
+            .and_then(|tag| tag.content())
+            .and_then(|content| EventId::parse(content).ok());
+
+        if let Some(key_package_event_id) = key_package_event_id {
+            self.delete_key_package_from_relays_for_account(
+                account,
+                &key_package_event_id,
+                false, // For now we don't want to delete the key packages from MLS storage
+            )
+            .await?;
+            tracing::debug!(target: "whitenoise::process_welcome", "Deleted used key package from relays");
+
+            self.publish_key_package_for_account(account).await?;
+            tracing::debug!(target: "whitenoise::process_welcome", "Published new key package");
+        } else {
+            tracing::warn!(target: "whitenoise::process_welcome", "No key package event id found in welcome event");
+        }
 
         Ok(())
     }
@@ -1900,38 +2062,47 @@ impl Whitenoise {
             "Processing MLS message: {:?}",
             event
         );
-        if let Some(sub_id) = subscription_id {
-            if let Some(target_pubkey) = self.extract_pubkey_from_subscription_id(&sub_id).await {
-                tracing::debug!(
-                    target: "whitenoise::process_mls_message",
-                    "Processing MLS message for account: {}",
-                    target_pubkey.to_hex()
-                );
 
-                // Now we have access to Whitenoise state for processing!
-                let accounts = self.read_accounts().await;
-                let target_account = accounts.get(&target_pubkey);
+        let sub_id = subscription_id.ok_or_else(|| {
+            WhitenoiseError::InvalidEvent(
+                "MLS message received without subscription ID".to_string(),
+            )
+        })?;
 
-                if target_account.is_none() {
-                    tracing::warn!(
-                        target: "whitenoise::process_mls_message",
-                        "MLS message received for unknown account: {}",
-                        target_pubkey.to_hex()
-                    );
-                    return Ok(());
+        let target_pubkey = self
+            .extract_pubkey_from_subscription_id(&sub_id)
+            .await
+            .ok_or_else(|| {
+                WhitenoiseError::InvalidEvent(format!(
+                    "Cannot extract pubkey from subscription ID: {}",
+                    sub_id
+                ))
+            })?;
+
+        tracing::debug!(
+            target: "whitenoise::process_mls_message",
+            "Processing MLS message for account: {}",
+            target_pubkey.to_hex()
+        );
+
+        let target_account = self.read_account_by_pubkey(&target_pubkey).await?;
+
+        let nostr_mls_guard = target_account.nostr_mls.lock().await;
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            match nostr_mls.process_message(&event) {
+                Ok(_message) => {
+                    tracing::debug!(target: "whitenoise::process_mls_message", "Processed MLS message");
+                    Ok(())
                 }
-
-                drop(accounts); // Release read lock
-
-                // TODO: Implement actual MLS message processing:
-                tracing::info!(
-                    target: "whitenoise::process_mls_message",
-                    "MLS message received for account: {} - processing not yet implemented",
-                    target_pubkey.to_hex()
-                );
+                Err(e) => {
+                    tracing::error!(target: "whitenoise::process_mls_message", "MLS message processing failed: {}", e);
+                    Err(WhitenoiseError::NostrMlsError(e))
+                }
             }
+        } else {
+            tracing::error!(target: "whitenoise::process_mls_message", "Nostr MLS not initialized");
+            Err(WhitenoiseError::NostrMlsNotInitialized)
         }
-        Ok(())
     }
 
     /// Process relay messages for logging/monitoring
@@ -2003,7 +2174,7 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&creator_pubkey)?;
 
-        let group_relays = self.nostr.relays().await?;
+        let group_relays = self.fetch_relays(creator_pubkey, RelayType::Nostr).await?;
 
         let group: group_types::Group;
         let serialized_welcome_message: Vec<u8>;

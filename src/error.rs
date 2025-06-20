@@ -38,6 +38,9 @@ pub enum WhitenoiseError {
     #[error("Nostr Mls error: {0}")]
     NostrMlsError(#[from] nostr_mls::Error),
 
+    #[error("Invalid event: {0}")]
+    InvalidEvent(String),
+
     #[error("Secrets store error: {0}")]
     SecretsStore(#[from] SecretsStoreError),
 
