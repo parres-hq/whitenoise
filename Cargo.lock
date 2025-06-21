@@ -4305,7 +4305,6 @@ dependencies = [
  "nostr-mls-sqlite-storage",
  "nostr-sdk",
  "nwc",
- "once_cell",
  "petname",
  "rand 0.9.1",
  "reqwest",

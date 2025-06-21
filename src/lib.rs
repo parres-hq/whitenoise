@@ -1,4 +1,4 @@
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
 
@@ -43,8 +43,8 @@ pub use nostr_mls::prelude::group_types::{Group, GroupState, GroupType};
 /// Nostr MLS Group ID. Re-exported from [`open_mls::group::GroupId`](https://latest.openmls.tech/doc/openmls/group/struct.GroupId.html)
 pub use nostr_mls::prelude::GroupId;
 
-static TRACING_GUARDS: OnceCell<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceCell::new();
-static TRACING_INIT: OnceCell<()> = OnceCell::new();
+static TRACING_GUARDS: OnceLock<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceLock::new();
+static TRACING_INIT: OnceLock<()> = OnceLock::new();
 
 fn init_tracing(logs_dir: &std::path::Path) {
     TRACING_INIT.get_or_init(|| {
