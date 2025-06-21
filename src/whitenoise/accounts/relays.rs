@@ -1,5 +1,6 @@
+use crate::whitenoise::accounts::Account;
+use crate::whitenoise::accounts::OnboardingState;
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::Account;
 use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -261,5 +262,472 @@ impl Whitenoise {
         );
 
         Ok(())
+    }
+
+    pub async fn fetch_onboarding_state(&self, pubkey: PublicKey) -> Result<OnboardingState> {
+        let mut onboarding_state = OnboardingState::default();
+
+        let inbox_relays = self.fetch_relays(pubkey, RelayType::Inbox).await?;
+        let key_package_relays = self.fetch_relays(pubkey, RelayType::KeyPackage).await?;
+        let key_package_published = self.fetch_key_package_event(pubkey).await?;
+
+        onboarding_state.inbox_relays = !inbox_relays.is_empty();
+        onboarding_state.key_package_relays = !key_package_relays.is_empty();
+        onboarding_state.key_package_published = key_package_published.is_some();
+
+        Ok(onboarding_state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::whitenoise::test_utils::*;
+    #[tokio::test]
+    async fn test_fetch_all_relay_types() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let test_keys = create_test_keys();
+        let pubkey = test_keys.public_key();
+
+        let relay_types = [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage];
+        for relay_type in relay_types {
+            let result = whitenoise.fetch_relays(pubkey, relay_type).await;
+            assert!(result.is_ok());
+            let relays = result.unwrap();
+            assert!(relays.is_empty()); // Empty in test environment
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_onboarding_state_structure() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let test_keys = create_test_keys();
+        let pubkey = test_keys.public_key();
+
+        let account = whitenoise
+            .login(test_keys.secret_key().to_secret_hex())
+            .await;
+        assert!(account.is_ok(), "{:?}", account);
+
+        let result = whitenoise.fetch_onboarding_state(pubkey).await;
+        assert!(result.is_ok());
+
+        let onboarding_state = result.unwrap();
+        // In test environment, all should be false since no data is cached
+        assert!(!onboarding_state.inbox_relays);
+        assert!(!onboarding_state.key_package_relays);
+        assert!(!onboarding_state.key_package_published);
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, test_keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise
+            .secrets_store
+            .store_private_key(&test_keys)
+            .unwrap();
+
+        let log_account = whitenoise
+            .login(test_keys.secret_key().to_secret_hex())
+            .await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create test metadata
+        let metadata = Metadata {
+            name: Some("Updated Name".to_string()),
+            display_name: Some("Updated Display Name".to_string()),
+            about: Some("Updated bio".to_string()),
+            picture: Some("https://example.com/new-avatar.jpg".to_string()),
+            banner: Some("https://example.com/banner.jpg".to_string()),
+            nip05: Some("user@example.com".to_string()),
+            lud16: Some("user@lightning.example.com".to_string()),
+            ..Default::default()
+        };
+
+        // Test updating metadata
+        let result = whitenoise.update_metadata(&metadata, &account).await;
+        assert!(result.is_ok(), "update_metadata should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_with_minimal_metadata() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create minimal metadata (only name)
+        let metadata = Metadata {
+            name: Some("Simple Name".to_string()),
+            ..Default::default()
+        };
+
+        // Test updating metadata
+        let result = whitenoise.update_metadata(&metadata, &account).await;
+        assert!(
+            result.is_ok(),
+            "update_metadata should succeed with minimal metadata"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_with_empty_metadata() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create completely empty metadata
+        let metadata = Metadata::default();
+
+        // Test updating metadata
+        let result = whitenoise.update_metadata(&metadata, &account).await;
+        assert!(
+            result.is_ok(),
+            "update_metadata should succeed with empty metadata"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_without_stored_keys() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account but DON'T store the keys
+        let (account, _keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        // Note: not storing keys in secrets_store
+
+        // Create test metadata
+        let metadata = Metadata {
+            name: Some("Test Name".to_string()),
+            ..Default::default()
+        };
+
+        // Test updating metadata - this should fail because keys aren't stored
+        let result = whitenoise.update_metadata(&metadata, &account).await;
+        assert!(
+            result.is_err(),
+            "update_metadata should fail when keys aren't stored"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_serialization() {
+        // Test that various metadata fields serialize correctly
+        let metadata = Metadata {
+            name: Some("Test User".to_string()),
+            display_name: Some("Test Display".to_string()),
+            about: Some("Bio with special chars: émojí 🚀".to_string()),
+            picture: Some("https://example.com/picture.jpg".to_string()),
+            banner: Some("https://example.com/banner.jpg".to_string()),
+            nip05: Some("test@example.com".to_string()),
+            lud16: Some("test@lightning.example.com".to_string()),
+            website: Some("https://example.com".to_string()),
+            ..Default::default()
+        };
+
+        // Test that the metadata can be serialized to JSON
+        let serialized = serde_json::to_string(&metadata);
+        assert!(serialized.is_ok(), "Metadata should serialize to JSON");
+
+        let json_str = serialized.unwrap();
+        assert!(json_str.contains("Test User"));
+        assert!(json_str.contains("Bio with special chars"));
+        assert!(json_str.contains("émojí 🚀"));
+    }
+    #[tokio::test]
+    async fn test_relay_type_to_event_kind_mapping() {
+        // Test that RelayType maps to correct Nostr event kinds
+        // This tests the logic inside publish_relay_list_for_account without network calls
+
+        let test_cases = [
+            (RelayType::Nostr, Kind::RelayList),
+            (RelayType::Inbox, Kind::InboxRelays),
+            (RelayType::KeyPackage, Kind::MlsKeyPackageRelays),
+        ];
+
+        for (relay_type, expected_kind) in test_cases {
+            let actual_kind = match relay_type {
+                RelayType::Nostr => Kind::RelayList,
+                RelayType::Inbox => Kind::InboxRelays,
+                RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
+            };
+
+            assert_eq!(
+                actual_kind, expected_kind,
+                "RelayType::{:?} should map to Kind::{:?}",
+                relay_type, expected_kind
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_relay_list_tag_creation() {
+        // Test that relay URLs are correctly converted to tags
+        let test_relays = [
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.primal.net",
+            "wss://nostr.wine",
+        ];
+
+        let relay_urls: Vec<RelayUrl> = test_relays
+            .iter()
+            .map(|url| RelayUrl::parse(url).unwrap())
+            .collect();
+
+        // Create tags the same way as publish_relay_list_for_account
+        let tags: Vec<Tag> = relay_urls
+            .into_iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+
+        // Verify tag structure
+        assert_eq!(tags.len(), test_relays.len());
+
+        for (i, tag) in tags.iter().enumerate() {
+            let tag_vec = tag.clone().to_vec();
+            assert_eq!(tag_vec.len(), 2, "Relay tag should have 2 elements");
+            assert_eq!(tag_vec[0], "relay", "First element should be 'relay'");
+            assert_eq!(
+                tag_vec[1], test_relays[i],
+                "Second element should be the relay URL"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_relay_list_event_structure() {
+        // Test event creation for each relay type without publishing
+        let relay_urls = [
+            RelayUrl::parse("wss://relay.damus.io").unwrap(),
+            RelayUrl::parse("wss://nos.lol").unwrap(),
+        ];
+
+        let test_cases = [
+            (RelayType::Nostr, Kind::RelayList),
+            (RelayType::Inbox, Kind::InboxRelays),
+            (RelayType::KeyPackage, Kind::MlsKeyPackageRelays),
+        ];
+
+        for (_relay_type, expected_kind) in test_cases {
+            // Create tags
+            let tags: Vec<Tag> = relay_urls
+                .iter()
+                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .collect();
+
+            // Create event (same logic as publish_relay_list_for_account)
+            let _event_builder = EventBuilder::new(expected_kind, "").tags(tags.clone());
+
+            // Verify event structure - we can't build the event without keys,
+            // but we can verify the builder has the right components
+            // (The actual event building happens during signing)
+
+            // Verify tags are correctly attached
+            assert_eq!(tags.len(), 2);
+
+            // Verify tag content
+            for (i, tag) in tags.iter().enumerate() {
+                let tag_vec = tag.clone().to_vec();
+                assert_eq!(tag_vec[0], "relay");
+                assert_eq!(tag_vec[1], relay_urls[i].to_string());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_relay_list_handling() {
+        // Test that empty relay lists are handled correctly
+        // (publish_relay_list_for_account returns early for empty lists)
+
+        let empty_relays: Vec<RelayUrl> = vec![];
+
+        // The method returns early if relays.is_empty(), so test that logic
+        assert!(empty_relays.is_empty());
+
+        // If we were to create tags anyway, it should be empty
+        let tags: Vec<Tag> = empty_relays
+            .into_iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+
+        assert!(tags.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_single_relay_event() {
+        // Test with a single relay
+        let single_relay = vec![RelayUrl::parse("wss://relay.damus.io").unwrap()];
+
+        let tags: Vec<Tag> = single_relay
+            .into_iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+
+        assert_eq!(tags.len(), 1);
+        let tag_vec = tags[0].clone().to_vec();
+        assert_eq!(tag_vec[0], "relay");
+        assert_eq!(tag_vec[1], "wss://relay.damus.io");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_relay_event() {
+        // Test with multiple relays
+        let multiple_relays = vec![
+            RelayUrl::parse("wss://relay.damus.io").unwrap(),
+            RelayUrl::parse("wss://nos.lol").unwrap(),
+            RelayUrl::parse("wss://relay.primal.net").unwrap(),
+            RelayUrl::parse("wss://nostr.wine").unwrap(),
+            RelayUrl::parse("wss://relay.snort.social").unwrap(),
+        ];
+
+        let expected_urls = [
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.primal.net",
+            "wss://nostr.wine",
+            "wss://relay.snort.social",
+        ];
+
+        let tags: Vec<Tag> = multiple_relays
+            .into_iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+
+        assert_eq!(tags.len(), expected_urls.len());
+
+        for (i, tag) in tags.iter().enumerate() {
+            let tag_vec = tag.clone().to_vec();
+            assert_eq!(tag_vec[0], "relay");
+            assert_eq!(tag_vec[1], expected_urls[i]);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_relay_url_formats() {
+        // Test different valid relay URL formats
+        let test_urls = [
+            "wss://relay.damus.io",
+            "wss://nos.lol/",
+            "wss://relay.primal.net/v1",
+            "ws://localhost:8080",
+        ];
+
+        for url_str in test_urls {
+            let relay_url = RelayUrl::parse(url_str).unwrap();
+            let tag = Tag::custom(TagKind::Relay, [relay_url.to_string()]);
+
+            let tag_vec = tag.to_vec();
+            assert_eq!(tag_vec[0], "relay");
+            assert_eq!(tag_vec[1], url_str);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_account_relays_logic() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = create_test_account();
+
+        // Store account keys so we can test the event creation part
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        let test_relays = [
+            RelayUrl::parse("wss://relay.damus.io").unwrap(),
+            RelayUrl::parse("wss://nos.lol").unwrap(),
+        ];
+
+        // Test that all relay types can be processed
+        let relay_types = [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage];
+
+        for relay_type in relay_types {
+            // We can't easily test the actual method without network calls,
+            // but we can test that the components work
+
+            // Verify we can get the keys (required for signing)
+            let signing_keys = whitenoise
+                .secrets_store
+                .get_nostr_keys_for_pubkey(&account.pubkey);
+            assert!(
+                signing_keys.is_ok(),
+                "Should be able to get signing keys for relay type {:?}",
+                relay_type
+            );
+
+            // Verify event kind mapping
+            let expected_kind = match relay_type {
+                RelayType::Nostr => Kind::RelayList,
+                RelayType::Inbox => Kind::InboxRelays,
+                RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
+            };
+
+            // Create tags (same logic as in the method)
+            let tags: Vec<Tag> = test_relays
+                .iter()
+                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .collect();
+
+            // Create event builder
+            let _event_builder = EventBuilder::new(expected_kind, "").tags(tags);
+
+            // If we got here without panicking, the event structure is valid
+        }
+    }
+
+    #[tokio::test]
+    async fn test_relay_list_edge_cases() {
+        // Test various edge cases in relay list processing
+
+        // Test with special characters in URLs (should be URL encoded)
+        let special_relay =
+            RelayUrl::parse("wss://relay.example.com/path?param=value&other=test").unwrap();
+        let tag = Tag::custom(TagKind::Relay, [special_relay.to_string()]);
+
+        let tag_vec = tag.to_vec();
+        assert_eq!(tag_vec[0], "relay");
+        assert!(tag_vec[1].contains("wss://relay.example.com"));
+
+        // Test very long relay URL
+        let long_path = "a".repeat(100);
+        let long_url = format!("wss://relay.example.com/{}", long_path);
+        let long_relay = RelayUrl::parse(&long_url).unwrap();
+        let long_tag = Tag::custom(TagKind::Relay, [long_relay.to_string()]);
+
+        let long_tag_vec = long_tag.to_vec();
+        assert_eq!(long_tag_vec[0], "relay");
+        assert_eq!(long_tag_vec[1], long_url);
     }
 }

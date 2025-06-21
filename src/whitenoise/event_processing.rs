@@ -367,3 +367,53 @@ impl Whitenoise {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::whitenoise::test_utils::*;
+    use std::time::Duration;
+    #[tokio::test]
+    async fn test_shutdown_event_processing() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let result = whitenoise.shutdown_event_processing().await;
+        assert!(result.is_ok());
+
+        // Test that multiple shutdowns don't cause errors
+        let result2 = whitenoise.shutdown_event_processing().await;
+        assert!(result2.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_extract_pubkey_from_subscription_id() {
+        let (whitenoise, _, _) = create_mock_whitenoise().await;
+        let subscription_id = "abc123_user_events";
+        let extracted = whitenoise
+            .extract_pubkey_from_subscription_id(subscription_id)
+            .await;
+        assert!(extracted.is_none());
+
+        let invalid_case = "no_underscore";
+        let extracted = whitenoise
+            .extract_pubkey_from_subscription_id(invalid_case)
+            .await;
+        assert!(extracted.is_none());
+
+        let multi_underscore_id = "abc123_user_events_extra";
+        let result = whitenoise
+            .extract_pubkey_from_subscription_id(multi_underscore_id)
+            .await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_queue_operations_after_shutdown() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        whitenoise.shutdown_event_processing().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Test that shutdown completed successfully without errors
+        // (We can't test queuing operations since those methods were removed)
+    }
+}

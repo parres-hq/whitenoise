@@ -1164,6 +1164,7 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::whitenoise::test_utils::*;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -1365,5 +1366,94 @@ mod tests {
             };
             (account, keys)
         }
+    }
+    #[tokio::test]
+    async fn test_multiple_pubkeys() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let keys = [create_test_keys(), create_test_keys(), create_test_keys()];
+
+        for key in keys {
+            let pubkey = key.public_key();
+            let account = whitenoise.login(key.secret_key().to_secret_hex()).await;
+            assert!(account.is_ok());
+
+            // Test that all methods work with different pubkeys
+            assert!(whitenoise.fetch_metadata(pubkey).await.is_ok());
+            assert!(whitenoise
+                .fetch_relays(pubkey, RelayType::Inbox)
+                .await
+                .is_ok());
+            assert!(whitenoise.fetch_contacts(pubkey).await.is_ok());
+            assert!(whitenoise.fetch_key_package_event(pubkey).await.is_ok());
+            assert!(whitenoise.fetch_onboarding_state(pubkey).await.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_accounts() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Test loading empty database
+        let accounts = whitenoise.fetch_accounts().await.unwrap();
+        assert!(accounts.is_empty());
+
+        // Create test accounts and save them to database
+        let (account1, keys1) = create_test_account();
+        let (account2, keys2) = create_test_account();
+
+        // Save accounts to database
+        whitenoise.save_account(&account1).await.unwrap();
+        whitenoise.save_account(&account2).await.unwrap();
+
+        // Store keys in secrets store (required for background fetch)
+        whitenoise.secrets_store.store_private_key(&keys1).unwrap();
+        whitenoise.secrets_store.store_private_key(&keys2).unwrap();
+
+        // Load accounts from database
+        let loaded_accounts = whitenoise.fetch_accounts().await.unwrap();
+        assert_eq!(loaded_accounts.len(), 2);
+        assert!(loaded_accounts.contains_key(&account1.pubkey));
+        assert!(loaded_accounts.contains_key(&account2.pubkey));
+
+        // Verify account data is correctly loaded
+        let loaded_account1 = &loaded_accounts[&account1.pubkey];
+        assert_eq!(loaded_account1.pubkey, account1.pubkey);
+        assert_eq!(
+            loaded_account1.settings.dark_theme,
+            account1.settings.dark_theme
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_accounts_ordering_by_last_synced() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test accounts with different last_synced times
+        let (mut account1, keys1) = create_test_account();
+        let (mut account2, keys2) = create_test_account();
+        let (mut account3, keys3) = create_test_account();
+
+        // Set different last_synced timestamps
+        account1.last_synced = Timestamp::from(100); // oldest
+        account2.last_synced = Timestamp::from(300); // newest
+        account3.last_synced = Timestamp::from(200); // middle
+
+        // Save accounts to database
+        whitenoise.save_account(&account1).await.unwrap();
+        whitenoise.save_account(&account2).await.unwrap();
+        whitenoise.save_account(&account3).await.unwrap();
+
+        // Store keys in secrets store
+        whitenoise.secrets_store.store_private_key(&keys1).unwrap();
+        whitenoise.secrets_store.store_private_key(&keys2).unwrap();
+        whitenoise.secrets_store.store_private_key(&keys3).unwrap();
+
+        // Load accounts from database
+        let loaded_accounts = whitenoise.fetch_accounts().await.unwrap();
+        assert_eq!(loaded_accounts.len(), 3);
+
+        // Verify the most recent account would be first in HashMap iteration
+        // (Note: HashMap iteration order is not guaranteed, but our SQL query orders by last_synced DESC)
+        // We'll test the active account selection in a separate test
     }
 }

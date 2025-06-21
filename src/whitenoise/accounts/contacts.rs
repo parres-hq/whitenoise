@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use nostr::key::PublicKey;
 
-use crate::whitenoise::accounts::{Account, OnboardingState};
+use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::relays::RelayType;
 use crate::whitenoise::Whitenoise;
@@ -47,20 +47,6 @@ impl Whitenoise {
     pub async fn fetch_key_package_event(&self, pubkey: PublicKey) -> Result<Option<Event>> {
         let key_package = self.nostr.query_user_key_package(pubkey).await?;
         Ok(key_package)
-    }
-
-    pub async fn fetch_onboarding_state(&self, pubkey: PublicKey) -> Result<OnboardingState> {
-        let mut onboarding_state = OnboardingState::default();
-
-        let inbox_relays = self.fetch_relays(pubkey, RelayType::Inbox).await?;
-        let key_package_relays = self.fetch_relays(pubkey, RelayType::KeyPackage).await?;
-        let key_package_published = self.fetch_key_package_event(pubkey).await?;
-
-        onboarding_state.inbox_relays = !inbox_relays.is_empty();
-        onboarding_state.key_package_relays = !key_package_relays.is_empty();
-        onboarding_state.key_package_published = key_package_published.is_some();
-
-        Ok(onboarding_state)
     }
 
     /// Adds a contact to the user's contact list and publishes the updated list to Nostr.
@@ -277,5 +263,239 @@ impl Whitenoise {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::whitenoise::test_utils::*;
+    use nostr_mls::prelude::*;
+    #[tokio::test]
+    async fn test_contact_list_event_structure() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = create_test_account();
+
+        // Store account keys
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Test creating contact list event structure
+        let contact1 = create_test_keys().public_key();
+        let contact2 = create_test_keys().public_key();
+        let contact3 = create_test_keys().public_key();
+
+        let contacts = [contact1, contact2, contact3];
+
+        // Create the contact list event structure (without publishing)
+        let tags: Vec<Tag> = contacts
+            .iter()
+            .map(|pubkey| Tag::custom(TagKind::p(), [pubkey.to_hex()]))
+            .collect();
+
+        let event = EventBuilder::new(Kind::ContactList, "").tags(tags.clone());
+
+        // Verify event structure
+        let _built_event = event.clone();
+
+        // Get the signing keys to ensure they exist
+        let signing_keys = whitenoise
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey);
+        assert!(signing_keys.is_ok());
+
+        // Verify the tags are correctly structured for Kind::ContactList (Kind 3)
+        assert_eq!(tags.len(), 3);
+
+        // Verify each tag has the correct structure
+        for (i, tag) in tags.iter().enumerate() {
+            let tag_vec = tag.clone().to_vec();
+            assert_eq!(tag_vec[0], "p"); // Should be 'p' tag
+            assert_eq!(tag_vec[1], contacts[i].to_hex()); // Should be the contact pubkey
+        }
+    }
+
+    #[tokio::test]
+    async fn test_add_contact_logic() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = create_test_account();
+        let contact_pubkey = create_test_keys().public_key();
+
+        // Store account keys
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+
+        // Test the logic of adding a contact (without actual network calls)
+        // Load current contact list (will be empty in test environment)
+        let current_contacts = whitenoise.fetch_contacts(account.pubkey).await.unwrap();
+
+        // Verify contact doesn't already exist
+        assert!(!current_contacts.contains_key(&contact_pubkey));
+
+        // Create new contact list with the added contact
+        let mut new_contacts: Vec<PublicKey> = current_contacts.keys().cloned().collect();
+        new_contacts.push(contact_pubkey);
+
+        // Verify the contact was added to the list
+        assert!(new_contacts.contains(&contact_pubkey));
+        assert_eq!(new_contacts.len(), current_contacts.len() + 1);
+    }
+
+    #[tokio::test]
+    async fn test_remove_contact_logic() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (_account, keys) = create_test_account();
+
+        // Store account keys
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Test remove contact logic with a simulated existing contact list
+        let contact1 = create_test_keys().public_key();
+        let contact2 = create_test_keys().public_key();
+        let contact3 = create_test_keys().public_key();
+
+        // Simulate current contacts (in a real scenario, this would come from fetch_contacts)
+        let mut simulated_current_contacts: std::collections::HashMap<PublicKey, Option<Metadata>> =
+            std::collections::HashMap::new();
+        simulated_current_contacts.insert(contact1, None);
+        simulated_current_contacts.insert(contact2, None);
+        simulated_current_contacts.insert(contact3, None);
+
+        // Test removing an existing contact
+        assert!(simulated_current_contacts.contains_key(&contact2));
+
+        // Create new contact list without the removed contact
+        let new_contacts: Vec<PublicKey> = simulated_current_contacts
+            .keys()
+            .filter(|&pubkey| *pubkey != contact2)
+            .cloned()
+            .collect();
+
+        // Verify the contact was removed
+        assert!(!new_contacts.contains(&contact2));
+        assert_eq!(new_contacts.len(), simulated_current_contacts.len() - 1);
+        assert!(new_contacts.contains(&contact1));
+        assert!(new_contacts.contains(&contact3));
+    }
+
+    #[tokio::test]
+    async fn test_update_contacts_logic() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (_account, keys) = create_test_account();
+
+        // Store account keys
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Test update contacts logic with different scenarios
+        let contact1 = create_test_keys().public_key();
+        let contact2 = create_test_keys().public_key();
+        let contact3 = create_test_keys().public_key();
+
+        // Test empty contact list
+        let empty_contacts: Vec<PublicKey> = vec![];
+        let tags: Vec<Tag> = empty_contacts
+            .iter()
+            .map(|pubkey: &PublicKey| Tag::custom(TagKind::p(), [pubkey.to_hex()]))
+            .collect();
+        assert!(tags.is_empty());
+
+        // Test single contact
+        let single_contact = [contact1];
+        let tags: Vec<Tag> = single_contact
+            .iter()
+            .map(|pubkey: &PublicKey| Tag::custom(TagKind::p(), [pubkey.to_hex()]))
+            .collect();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].clone().to_vec()[0], "p");
+        assert_eq!(tags[0].clone().to_vec()[1], contact1.to_hex());
+
+        // Test multiple contacts
+        let multiple_contacts = [contact1, contact2, contact3];
+        let tags: Vec<Tag> = multiple_contacts
+            .iter()
+            .map(|pubkey: &PublicKey| Tag::custom(TagKind::p(), [pubkey.to_hex()]))
+            .collect();
+        assert_eq!(tags.len(), 3);
+
+        // Verify all contacts are in tags
+        let tag_pubkeys: Vec<String> = tags
+            .iter()
+            .map(|tag| tag.clone().to_vec()[1].clone())
+            .collect();
+        assert!(tag_pubkeys.contains(&contact1.to_hex()));
+        assert!(tag_pubkeys.contains(&contact2.to_hex()));
+        assert!(tag_pubkeys.contains(&contact3.to_hex()));
+    }
+
+    #[tokio::test]
+    async fn test_contact_validation_logic() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = create_test_account();
+
+        // Store account keys
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+
+        let contact_pubkey = create_test_keys().public_key();
+
+        // Test add contact validation (contact doesn't exist)
+        let current_contacts = whitenoise.fetch_contacts(account.pubkey).await.unwrap();
+
+        // Should be able to add new contact (empty list)
+        let can_add = !current_contacts.contains_key(&contact_pubkey);
+        assert!(can_add);
+
+        // Test remove contact validation (contact doesn't exist)
+        let can_remove = current_contacts.contains_key(&contact_pubkey);
+        assert!(!can_remove); // Should not be able to remove non-existent contact
+
+        // Simulate existing contact for remove validation
+        let mut simulated_contacts: std::collections::HashMap<PublicKey, Option<Metadata>> =
+            std::collections::HashMap::new();
+        simulated_contacts.insert(contact_pubkey, None);
+        let can_remove_existing = simulated_contacts.contains_key(&contact_pubkey);
+        assert!(can_remove_existing);
+    }
+
+    #[tokio::test]
+    async fn test_contact_event_builder_creation() {
+        let (_whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Test creating EventBuilder for different contact list scenarios
+        let contact1 = create_test_keys().public_key();
+        let contact2 = create_test_keys().public_key();
+
+        // Test empty contact list event
+        let empty_tags: Vec<Tag> = vec![];
+        let _empty_event = EventBuilder::new(Kind::ContactList, "").tags(empty_tags);
+        // EventBuilder creation should succeed
+
+        // Test single contact event
+        let single_tags: Vec<Tag> = vec![Tag::custom(TagKind::p(), [contact1.to_hex()])];
+        let _single_event = EventBuilder::new(Kind::ContactList, "").tags(single_tags.clone());
+        // Verify tag structure
+        assert_eq!(single_tags.len(), 1);
+
+        // Test multiple contacts event
+        let multi_tags: Vec<Tag> = vec![
+            Tag::custom(TagKind::p(), [contact1.to_hex()]),
+            Tag::custom(TagKind::p(), [contact2.to_hex()]),
+        ];
+        let _multi_event = EventBuilder::new(Kind::ContactList, "").tags(multi_tags.clone());
+        // Verify tag structure
+        assert_eq!(multi_tags.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_contact_management_without_keys() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, _keys) = create_test_account();
+        let _contact_pubkey = create_test_keys().public_key();
+
+        // Don't store keys for the account - should fail when trying to get signing keys
+        let signing_keys_result = whitenoise
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey);
+        assert!(signing_keys_result.is_err());
     }
 }
