@@ -23,13 +23,12 @@ async fn main() -> Result<(), WhitenoiseError> {
     let args = Args::parse();
 
     let config = WhitenoiseConfig::new(&args.data_dir, &args.logs_dir);
-    let whitenoise = match Whitenoise::initialize_whitenoise(config).await {
-        Ok(whitenoise) => whitenoise,
-        Err(err) => {
-            tracing::error!("Failed to initialize Whitenoise: {}", err);
-            std::process::exit(1);
-        }
-    };
+    if let Err(err) = Whitenoise::initialize_whitenoise(config).await {
+        tracing::error!("Failed to initialize Whitenoise: {}", err);
+        std::process::exit(1);
+    }
+
+    let whitenoise = Whitenoise::get_instance()?;
 
     tracing::info!("=== Testing basic account creation and management ===");
 

@@ -164,9 +164,9 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<&'static Self> {
-        if let Some(instance) = GLOBAL_WHITENOISE.get() {
-            return Ok(instance);
+    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<()> {
+        if let Some(_instance) = GLOBAL_WHITENOISE.get() {
+            return Ok(());
         }
 
         let data_dir = &config.data_dir;
@@ -211,7 +211,7 @@ impl Whitenoise {
         };
 
         // Load all accounts from database
-        let loaded_accounts = whitenoise.fetch_accounts().await?;
+        let loaded_accounts = whitenoise.load_accounts().await?;
         {
             let mut accounts = whitenoise.write_accounts().await;
             *accounts = loaded_accounts;
@@ -286,7 +286,72 @@ impl Whitenoise {
             "Completed initialization for all loaded accounts"
         );
 
-        Ok(whitenoise_ref)
+        Ok(())
+    }
+
+    /// Returns a reference to the global Whitenoise singleton instance.
+    ///
+    /// This method provides access to the globally initialized Whitenoise instance that was
+    /// created by [`initialize_whitenoise`]. The instance is stored as a static singleton
+    /// using [`OnceLock`] to ensure thread-safe access and single initialization.
+    ///
+    /// This method is particularly useful for accessing the Whitenoise instance from different
+    /// parts of the application without passing references around, such as in event handlers,
+    /// background tasks, or API endpoints.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing:
+    /// - `Ok(&'static Whitenoise)` - A static reference to the initialized Whitenoise instance
+    /// - `Err(WhitenoiseError::Initialization)` - If [`initialize_whitenoise`] has not been called yet
+    ///
+    /// # Errors
+    ///
+    /// This function will return [`WhitenoiseError::Initialization`] if:
+    /// - [`initialize_whitenoise`] has not been successfully called prior to this method
+    /// - The global instance failed to initialize during the [`initialize_whitenoise`] call
+    ///
+    /// # Thread Safety
+    ///
+    /// This method is thread-safe and can be called concurrently from multiple threads.
+    /// The underlying [`OnceLock`] ensures that access to the global instance is synchronized.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
+    /// # use std::path::Path;
+    /// # async fn example() -> Result<(), whitenoise::WhitenoiseError> {
+    /// // First, initialize Whitenoise
+    /// let config = WhitenoiseConfig::new(Path::new("./data"), Path::new("./logs"));
+    /// Whitenoise::initialize_whitenoise(config).await?;
+    ///
+    /// // Then access the instance from anywhere in your application
+    /// let whitenoise = Whitenoise::get_instance()?;
+    /// let account_count = whitenoise.get_accounts_count().await;
+    /// println!("Number of accounts: {}", account_count);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Usage in Event Handlers
+    ///
+    /// ```rust
+    /// # use whitenoise::Whitenoise;
+    /// # async fn handle_some_event() -> Result<(), whitenoise::WhitenoiseError> {
+    /// // Access Whitenoise from an event handler without dependency injection
+    /// let whitenoise = Whitenoise::get_instance()?;
+    /// // ... use whitenoise methods
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`initialize_whitenoise`]: Self::initialize_whitenoise
+    /// [`OnceLock`]: std::sync::OnceLock
+    pub fn get_instance() -> Result<&'static Self> {
+        GLOBAL_WHITENOISE
+            .get()
+            .ok_or(WhitenoiseError::Initialization)
     }
 
     /// Deletes all application data, including the database, MLS data, and log files.

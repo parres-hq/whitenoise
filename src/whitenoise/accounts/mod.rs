@@ -328,6 +328,43 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Fetches all currently loaded accounts from memory.
+    ///
+    /// This method returns a snapshot of all accounts that are currently loaded in memory.
+    /// The accounts are returned as a HashMap where the key is the account's public key
+    /// and the value is the Account struct containing all account data including settings,
+    /// onboarding state, and last sync timestamp.
+    ///
+    /// This method retrieves accounts from the in-memory cache rather than querying the
+    /// database directly, making it fast but limited to accounts that have been loaded
+    /// during the current session (either through login or startup).
+    ///
+    /// # Returns
+    ///
+    /// Returns a `HashMap<PublicKey, Account>` containing all currently loaded accounts.
+    /// The HashMap will be empty if no accounts are currently loaded in memory.
+    ///
+    /// # Errors
+    ///
+    /// This method does not typically return errors as it only reads from memory,
+    /// but it returns a `Result` for consistency with other account-related methods
+    /// and to allow for future error handling if needed.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let accounts = whitenoise.fetch_accounts().await?;
+    ///
+    /// for (pubkey, account) in accounts {
+    ///     println!("Account: {}, Dark theme: {}",
+    ///              pubkey.to_hex(),
+    ///              account.settings.dark_theme);
+    /// }
+    /// ```
+    pub async fn fetch_accounts(&self) -> Result<HashMap<PublicKey, Account>> {
+        Ok(self.read_accounts().await.clone())
+    }
+
     // Private Helper Methods =====================================================
 
     /// Loads all accounts from the database and initializes them for use.
@@ -348,8 +385,8 @@ impl Whitenoise {
     /// * Database query fails
     /// * Account deserialization fails
     /// * NostrMls initialization fails for any account
-    pub(crate) async fn fetch_accounts(&self) -> Result<HashMap<PublicKey, Account>> {
-        tracing::debug!(target: "whitenoise::fetch_accounts", "Loading all accounts from database");
+    pub(crate) async fn load_accounts(&self) -> Result<HashMap<PublicKey, Account>> {
+        tracing::debug!(target: "whitenoise::load_accounts", "Loading all accounts from database");
 
         let accounts =
             sqlx::query_as::<_, Account>("SELECT * FROM accounts ORDER BY last_synced DESC")
@@ -357,7 +394,7 @@ impl Whitenoise {
                 .await?;
 
         if accounts.is_empty() {
-            tracing::debug!(target: "whitenoise::fetch_accounts", "No accounts found in database");
+            tracing::debug!(target: "whitenoise::load_accounts", "No accounts found in database");
             return Ok(HashMap::new());
         }
 
@@ -367,7 +404,7 @@ impl Whitenoise {
             // Initialize NostrMls for each account
             if let Err(e) = self.initialize_nostr_mls_for_account(&account).await {
                 tracing::warn!(
-                    target: "whitenoise::fetch_accounts",
+                    target: "whitenoise::load_accounts",
                     "Failed to initialize NostrMls for account {}: {}",
                     account.pubkey.to_hex(),
                     e
@@ -382,7 +419,7 @@ impl Whitenoise {
             // Trigger background data fetch for each account (non-critical)
             if let Err(e) = self.background_fetch_account_data(&account).await {
                 tracing::warn!(
-                    target: "whitenoise::fetch_accounts",
+                    target: "whitenoise::load_accounts",
                     "Failed to trigger background fetch for account {}: {}",
                     account.pubkey.to_hex(),
                     e
@@ -391,14 +428,14 @@ impl Whitenoise {
             }
 
             tracing::debug!(
-                target: "whitenoise::fetch_accounts",
+                target: "whitenoise::load_accounts",
                 "Loaded and initialized account: {}",
                 account.pubkey.to_hex()
             );
         }
 
         tracing::info!(
-            target: "whitenoise::fetch_accounts",
+            target: "whitenoise::load_accounts",
             "Successfully loaded {} accounts from database",
             accounts_map.len()
         );
@@ -1390,11 +1427,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_accounts() {
+    async fn test_load_accounts() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Test loading empty database
-        let accounts = whitenoise.fetch_accounts().await.unwrap();
+        let accounts = whitenoise.load_accounts().await.unwrap();
         assert!(accounts.is_empty());
 
         // Create test accounts and save them to database
@@ -1410,7 +1447,7 @@ mod tests {
         whitenoise.secrets_store.store_private_key(&keys2).unwrap();
 
         // Load accounts from database
-        let loaded_accounts = whitenoise.fetch_accounts().await.unwrap();
+        let loaded_accounts = whitenoise.load_accounts().await.unwrap();
         assert_eq!(loaded_accounts.len(), 2);
         assert!(loaded_accounts.contains_key(&account1.pubkey));
         assert!(loaded_accounts.contains_key(&account2.pubkey));
@@ -1425,7 +1462,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_accounts_ordering_by_last_synced() {
+    async fn test_load_accounts_ordering_by_last_synced() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Create test accounts with different last_synced times
@@ -1449,7 +1486,7 @@ mod tests {
         whitenoise.secrets_store.store_private_key(&keys3).unwrap();
 
         // Load accounts from database
-        let loaded_accounts = whitenoise.fetch_accounts().await.unwrap();
+        let loaded_accounts = whitenoise.load_accounts().await.unwrap();
         assert_eq!(loaded_accounts.len(), 3);
 
         // Verify the most recent account would be first in HashMap iteration
