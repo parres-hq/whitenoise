@@ -4,20 +4,15 @@ use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Re
 
 use std::sync::Mutex;
 
-mod accounts;
-mod database;
-mod error;
 // mod media;
 mod nostr_manager;
-mod relays;
-mod secrets_store;
 mod types;
 pub mod whitenoise;
 
 // Re-export main types for library users
-pub use accounts::{Account, AccountSettings, OnboardingState};
-pub use error::WhitenoiseError;
-pub use relays::RelayType;
+pub use crate::whitenoise::accounts::relays::RelayType;
+pub use crate::whitenoise::accounts::{Account, AccountSettings, OnboardingState};
+pub use crate::whitenoise::error::WhitenoiseError;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 
 // Re-export nostr types with documentation
