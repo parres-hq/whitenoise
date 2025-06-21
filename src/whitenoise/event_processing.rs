@@ -1,6 +1,5 @@
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 use crate::types::ProcessableEvent;
@@ -17,7 +16,7 @@ impl Whitenoise {
 
     /// Start the event processing loop in a background task
     pub(crate) async fn start_event_processing_loop(
-        whitenoise: Arc<Whitenoise>,
+        whitenoise: &'static Whitenoise,
         receiver: Receiver<ProcessableEvent>,
         shutdown_receiver: Receiver<()>,
     ) {
@@ -61,7 +60,7 @@ impl Whitenoise {
 
     /// Main event processing loop
     async fn process_events(
-        whitenoise: Arc<Whitenoise>,
+        whitenoise: &'static Whitenoise,
         mut receiver: Receiver<ProcessableEvent>,
         mut shutdown: Receiver<()>,
     ) {

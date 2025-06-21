@@ -1,5 +1,6 @@
 use anyhow::Context;
 use nostr_mls::prelude::*;
+use once_cell::sync::OnceCell;
 use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::RwLock;
 
@@ -58,6 +59,8 @@ pub struct Whitenoise {
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
 }
+
+static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::new();
 
 impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -161,7 +164,11 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Arc<Self>> {
+    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<&'static Self> {
+        if let Some(instance) = GLOBAL_WHITENOISE.get() {
+            return Ok(instance);
+        }
+
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
 
@@ -211,25 +218,29 @@ impl Whitenoise {
         }
 
         // Create Arc and start event processing loop (after accounts are loaded)
-        let whitenoise_arc = Arc::new(whitenoise);
-        let whitenoise_for_loop = whitenoise_arc.clone();
+        GLOBAL_WHITENOISE
+            .set(whitenoise)
+            .expect("Whitnoise should never be initialized prior");
+
+        let whitenoise_ref = GLOBAL_WHITENOISE
+            .get()
+            .ok_or(WhitenoiseError::Initialization)?;
 
         tracing::debug!(
             target: "whitenoise::initialize_whitenoise",
             "Starting event processing loop for loaded accounts"
         );
 
-        Self::start_event_processing_loop(whitenoise_for_loop, event_receiver, shutdown_receiver)
-            .await;
+        Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
 
         // Fetch events and setup subscriptions for all accounts after event processing has started
         {
-            let accounts = whitenoise_arc.read_accounts().await;
+            let accounts = whitenoise_ref.read_accounts().await;
             let account_list: Vec<Account> = accounts.values().cloned().collect();
             drop(accounts); // Release the read lock early
             for account in account_list {
                 // Fetch account data
-                match whitenoise_arc.background_fetch_account_data(&account).await {
+                match whitenoise_ref.background_fetch_account_data(&account).await {
                     Ok(()) => {
                         tracing::debug!(
                             target: "whitenoise::initialize_whitenoise",
@@ -249,7 +260,7 @@ impl Whitenoise {
                 }
 
                 // Setup subscriptions for this account
-                match whitenoise_arc.setup_subscriptions(&account).await {
+                match whitenoise_ref.setup_subscriptions(&account).await {
                     Ok(()) => {
                         tracing::debug!(
                             target: "whitenoise::initialize_whitenoise",
@@ -275,7 +286,7 @@ impl Whitenoise {
             "Completed initialization for all loaded accounts"
         );
 
-        Ok(whitenoise_arc)
+        Ok(whitenoise_ref)
     }
 
     /// Deletes all application data, including the database, MLS data, and log files.

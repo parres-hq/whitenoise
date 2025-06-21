@@ -447,7 +447,7 @@ async fn main() -> Result<(), WhitenoiseError> {
         "Contact management methods completed successfully - all methods published to relays"
     );
 
-    test_account_settings_update(&whitenoise).await?;
+    test_account_settings_update(whitenoise).await?;
 
     // TODO: Test relay list loading
 
