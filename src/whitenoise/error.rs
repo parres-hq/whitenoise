@@ -8,6 +8,9 @@ pub type Result<T> = core::result::Result<T, WhitenoiseError>;
 
 #[derive(Error, Debug)]
 pub enum WhitenoiseError {
+    #[error("Failed to initialize Whitenoise")]
+    Initialization,
+
     #[error("Filesystem error: {0}")]
     Filesystem(#[from] std::io::Error),
 
