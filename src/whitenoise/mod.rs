@@ -1,6 +1,6 @@
 use anyhow::Context;
 use nostr_mls::prelude::*;
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::RwLock;
 
@@ -60,7 +60,7 @@ pub struct Whitenoise {
     shutdown_sender: Sender<()>,
 }
 
-static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::new();
+static GLOBAL_WHITENOISE: OnceLock<Whitenoise> = OnceLock::new();
 
 impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
