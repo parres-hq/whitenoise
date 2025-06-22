@@ -365,6 +365,45 @@ impl Whitenoise {
         Ok(self.read_accounts().await.clone())
     }
 
+    /// Fetches a specific account by its public key from memory.
+    ///
+    /// This method retrieves a single account from the in-memory cache using the provided
+    /// public key. If the account is found, it returns a clone of the Account struct.
+    /// If the account is not found in memory, it returns an error.
+    ///
+    /// This method only searches accounts that are currently loaded in memory and does
+    /// not query the database. For accounts that exist in the database but are not
+    /// currently loaded, this method will return an error.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` of the account to fetch.
+    ///
+    /// # Returns
+    ///
+    /// Returns the `Account` associated with the provided public key if found in memory,
+    /// or an error if the account is not found in memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError::AccountNotFound` if the account is not found in memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let account = whitenoise.fetch_account(&pubkey).await?;
+    ///
+    /// println!("Found account: {}", account.pubkey.to_hex());
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// Consider using methods that return proper error states (like `AccountNotFound`)
+    /// if you need to distinguish between existing and non-existing accounts.
+    pub async fn fetch_account(&self, pubkey: &PublicKey) -> Result<Account> {
+        self.read_accounts().await.get(pubkey).cloned().ok_or(WhitenoiseError::AccountNotFound)
+    }
+
     // Private Helper Methods =====================================================
 
     /// Loads all accounts from the database and initializes them for use.
