@@ -401,7 +401,11 @@ impl Whitenoise {
     /// Consider using methods that return proper error states (like `AccountNotFound`)
     /// if you need to distinguish between existing and non-existing accounts.
     pub async fn fetch_account(&self, pubkey: &PublicKey) -> Result<Account> {
-        self.read_accounts().await.get(pubkey).cloned().ok_or(WhitenoiseError::AccountNotFound)
+        self.read_accounts()
+            .await
+            .get(pubkey)
+            .cloned()
+            .ok_or(WhitenoiseError::AccountNotFound)
     }
 
     // Private Helper Methods =====================================================
