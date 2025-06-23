@@ -531,6 +531,13 @@ pub mod test_utils {
 
         (whitenoise, data_temp, logs_temp)
     }
+
+    pub(crate) async fn test_get_whitenoise() -> &'static Whitenoise {
+        // Initialize whitenoise for this specific test
+        let (config, _data_temp, _logs_temp) = create_test_config();
+        Whitenoise::initialize_whitenoise(config).await.unwrap();
+        Whitenoise::get_instance().unwrap()
+    }
 }
 
 #[cfg(test)]
