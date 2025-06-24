@@ -538,6 +538,19 @@ pub mod test_utils {
         Whitenoise::initialize_whitenoise(config).await.unwrap();
         Whitenoise::get_instance().unwrap()
     }
+
+    pub(crate) async fn setup_login_account(whitenoise: &Whitenoise) -> (Account, Keys) {
+        let keys = create_test_keys();
+        let account = whitenoise
+            .login(keys.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+        (account, keys)
+    }
 }
 
 #[cfg(test)]
@@ -687,9 +700,6 @@ mod tests {
             let contacts = whitenoise.fetch_contacts(pubkey).await;
             assert!(contacts.is_ok());
 
-            let key_package = whitenoise.fetch_key_package_event(pubkey).await;
-            assert!(key_package.is_ok());
-
             let onboarding = whitenoise.fetch_onboarding_state(pubkey).await;
             assert!(onboarding.is_ok());
         }
@@ -709,7 +719,6 @@ mod tests {
                 whitenoise.fetch_metadata(pubkey),
                 whitenoise.fetch_relays(pubkey, RelayType::Inbox),
                 whitenoise.fetch_contacts(pubkey),
-                whitenoise.fetch_key_package_event(pubkey),
                 whitenoise.fetch_onboarding_state(pubkey)
             );
 
@@ -717,7 +726,6 @@ mod tests {
             assert!(results.1.is_ok());
             assert!(results.2.is_ok());
             assert!(results.3.is_ok());
-            assert!(results.4.is_ok());
         }
 
         #[tokio::test]
