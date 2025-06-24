@@ -44,8 +44,12 @@ impl Whitenoise {
         Ok(contacts)
     }
 
-    pub async fn fetch_key_package_event(&self, pubkey: PublicKey) -> Result<Option<Event>> {
-        let key_package = self.nostr.query_user_key_package(pubkey).await?;
+    pub async fn fetch_key_package_event(
+        &self,
+        pubkey: PublicKey,
+        urls: Vec<RelayUrl>,
+    ) -> Result<Option<Event>> {
+        let key_package = self.nostr.fetch_user_key_package(pubkey, urls).await?;
         Ok(key_package)
     }
 

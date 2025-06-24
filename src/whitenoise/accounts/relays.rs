@@ -269,7 +269,12 @@ impl Whitenoise {
 
         let inbox_relays = self.fetch_relays(pubkey, RelayType::Inbox).await?;
         let key_package_relays = self.fetch_relays(pubkey, RelayType::KeyPackage).await?;
-        let key_package_published = self.fetch_key_package_event(pubkey).await?;
+        let key_package_published = if key_package_relays.is_empty() {
+            None
+        } else {
+            self.fetch_key_package_event(pubkey, key_package_relays.clone())
+                .await?
+        };
 
         onboarding_state.inbox_relays = !inbox_relays.is_empty();
         onboarding_state.key_package_relays = !key_package_relays.is_empty();
