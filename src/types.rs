@@ -1,5 +1,7 @@
-use nostr_sdk::prelude::*;
+use nostr_mls::prelude::*;
 use serde::{Deserialize, Serialize};
+
+use crate::nostr_manager::parser::SerializableToken;
 
 /// A contact enriched with Nostr metadata and relay information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,5 +94,17 @@ impl ProcessableEvent {
             subscription_id,
             retry_info: RetryInfo::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageWithTokens {
+    pub message: message_types::Message,
+    pub tokens: Vec<SerializableToken>,
+}
+
+impl MessageWithTokens {
+    pub fn new(message: message_types::Message, tokens: Vec<SerializableToken>) -> Self {
+        Self { message, tokens }
     }
 }

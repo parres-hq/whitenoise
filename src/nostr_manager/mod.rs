@@ -3,6 +3,7 @@ use crate::types::{NostrEncryptionMethod, ProcessableEvent};
 
 use ::rand::RngCore;
 use nostr_sdk::prelude::*;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -273,6 +274,27 @@ impl NostrManager {
         } else {
             Ok(events)
         }
+    }
+
+    /// Publishes a Nostr event (which is already signed) to the specified relays.
+    ///
+    /// This method allows publishing an event to a list of relay URLs. It uses the client's
+    /// built-in relay handling to send the event to the specified relays.
+    ///
+    /// # Arguments
+    ///
+    /// * `event` - The event to publish
+    /// * `relays` - The list of relay URLs to publish the event to
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Output<EventId>>` - The published event ID if successful, or an error if publishing fails
+    pub(crate) async fn publish_event_to(
+        &self,
+        event: Event,
+        relays: &BTreeSet<RelayUrl>,
+    ) -> Result<Output<EventId>> {
+        Ok(self.client.send_event_to(relays, &event).await?)
     }
 
     /// Publishes a Nostr event using a temporary signer.

@@ -15,6 +15,7 @@ use crate::whitenoise::Whitenoise;
 
 pub mod contacts;
 pub mod groups;
+pub mod messages;
 pub mod relays;
 
 #[derive(Error, Debug)]
