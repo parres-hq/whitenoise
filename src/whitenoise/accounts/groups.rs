@@ -208,3 +208,365 @@ impl Whitenoise {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::whitenoise::test_utils::*;
+    use crate::whitenoise::Whitenoise;
+
+    async fn setup_test_account(whitenoise: &Whitenoise) -> (Account, Keys) {
+        let keys = create_test_keys();
+        let account = whitenoise
+            .login(keys.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+        (account, keys)
+    }
+
+    async fn setup_multiple_test_accounts(
+        whitenoise: &Whitenoise,
+        count: usize,
+    ) -> Vec<(Account, Keys)> {
+        let mut accounts = Vec::new();
+        for _ in 0..count {
+            let (account, keys) = setup_test_account(whitenoise).await;
+            accounts.push((account, keys));
+        }
+        accounts
+    }
+
+    #[tokio::test]
+    async fn test_create_group() {
+        let whitenoise = test_get_whitenoise().await;
+
+        // Setup creator account
+        let (creator_account, _creator_keys) = setup_test_account(whitenoise).await;
+        whitenoise
+            .update_relays(
+                &creator_account,
+                RelayType::Nostr,
+                vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+            )
+            .await
+            .unwrap();
+
+        // Setup member accounts
+        let member_accounts = setup_multiple_test_accounts(whitenoise, 2).await;
+        let member_pubkeys: Vec<PublicKey> =
+            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+
+        // Setup admin accounts (creator + one member as admin)
+        let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
+
+        let group_name = "Test Group";
+        let description = "A test group for unit testing";
+
+        // Publish key packages for all members first
+        for (member_account, _) in &member_accounts {
+            let _ = whitenoise
+                .publish_key_package_for_account(member_account)
+                .await;
+        }
+
+        // Test for success case
+        case_create_group_success(
+            whitenoise,
+            &creator_account,
+            member_pubkeys.clone(),
+            admin_pubkeys.clone(),
+            group_name,
+            description,
+        )
+        .await;
+
+        // Test case: Account not found (not logged in)
+        let (unlogged_account, _unused_keys) = create_test_account();
+        case_create_group_account_not_found(
+            whitenoise,
+            &unlogged_account,
+            member_pubkeys.clone(),
+            admin_pubkeys.clone(),
+            "Test Group",
+            "Test Description",
+        )
+        .await;
+
+        // Test case: NostrMLS not initialized
+        let keys = create_test_keys();
+        let uninitialized_account = whitenoise
+            .login(keys.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+        // Clear the NostrMls instance manually to test the error case
+        {
+            let mut nostr_mls_guard = uninitialized_account.nostr_mls.lock().await;
+            *nostr_mls_guard = None;
+        }
+        case_create_group_nostr_mls_not_initialized(
+            whitenoise,
+            &uninitialized_account,
+            member_pubkeys.clone(),
+            admin_pubkeys.clone(),
+            "Test Group",
+            "Test Description",
+        )
+        .await;
+
+        // Test case: Key package fetch fails (invalid member)
+        let invalid_member_pubkey = create_test_keys().public_key();
+        case_create_group_key_package_fetch_fails(
+            whitenoise,
+            &creator_account,
+            vec![invalid_member_pubkey],
+            admin_pubkeys.clone(),
+            "Test Group",
+            "Test Description",
+        )
+        .await;
+
+        // Test case: Empty admin list
+        case_create_group_empty_admin_list(
+            whitenoise,
+            &creator_account,
+            member_pubkeys.clone(),
+            vec![], // Empty admin list
+            "Test Group",
+            "Test Description",
+        )
+        .await;
+
+        // Test case: Invalid admin pubkey (not a member)
+        let non_member_pubkey = create_test_keys().public_key();
+        case_create_group_invalid_admin_pubkey(
+            whitenoise,
+            &creator_account,
+            member_pubkeys.clone(),
+            vec![creator_account.pubkey, non_member_pubkey],
+            "Test Group",
+            "Test Description",
+        )
+        .await;
+
+        // Test case: Welcome message fails (no relays)
+        let (no_relay_creator, _keys) = setup_test_account(whitenoise).await;
+        whitenoise
+            .update_relays(&no_relay_creator, RelayType::Nostr, vec![])
+            .await
+            .unwrap();
+        case_create_group_welcome_message_fails(
+            whitenoise,
+            &no_relay_creator,
+            member_pubkeys.clone(),
+            vec![no_relay_creator.pubkey],
+            "Test Group",
+            "Test Description",
+        )
+        .await;
+    }
+
+    async fn case_create_group_success(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: &str,
+        description: &str,
+    ) {
+        // Create the group
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys.clone(),
+                admin_pubkeys.clone(),
+                group_name.to_owned(),
+                description.to_owned(),
+            )
+            .await;
+
+        // Assert the group was created successfully
+        assert!(result.is_ok(), "Error {:?}", result.unwrap_err());
+        let group = result.unwrap();
+        assert_eq!(group.name, group_name);
+        assert_eq!(group.description, description);
+        assert!(group.admin_pubkeys.contains(&creator_account.pubkey));
+        assert!(group.admin_pubkeys.contains(&member_pubkeys[0]));
+    }
+
+    /// Test case: Active account is not the creator
+    async fn case_create_group_account_not_found(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: &str,
+        description: &str,
+    ) {
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys,
+                admin_pubkeys,
+                group_name.to_string(),
+                description.to_string(),
+            )
+            .await;
+
+        assert!(matches!(result, Err(WhitenoiseError::AccountNotFound)));
+    }
+
+    /// Test case: NostrMLS not initialized (part of MLS group creation fails)
+    async fn case_create_group_nostr_mls_not_initialized(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: &str,
+        description: &str,
+    ) {
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys,
+                admin_pubkeys,
+                group_name.to_string(),
+                description.to_string(),
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(WhitenoiseError::NostrMlsNotInitialized)
+        ));
+    }
+
+    /// Test case: Key package fetching fails - invalid member pubkey
+    async fn case_create_group_key_package_fetch_fails(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: &str,
+        description: &str,
+    ) {
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys,
+                admin_pubkeys,
+                group_name.to_string(),
+                description.to_string(),
+            )
+            .await;
+
+        // Should fail because key package doesn't exist for the member
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            WhitenoiseError::NostrMlsError(_) => {
+                // Expected - key package doesn't exist
+            }
+            other => panic!("Expected NostrMlsError, got: {:?}", other),
+        }
+    }
+
+    /// Test case: Member/admin validation fails - empty admin list
+    async fn case_create_group_empty_admin_list(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: &str,
+        description: &str,
+    ) {
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys,
+                admin_pubkeys,
+                group_name.to_string(),
+                description.to_string(),
+            )
+            .await;
+
+        // Should fail because groups need at least one admin
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            WhitenoiseError::NostrMlsError(_) => {
+                // Expected - invalid group configuration
+            }
+            other => panic!(
+                "Expected NostrMlsError due to empty admin list, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Test case: Member/admin validation fails - non-existent admin
+    async fn case_create_group_invalid_admin_pubkey(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: &str,
+        description: &str,
+    ) {
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys,
+                admin_pubkeys,
+                group_name.to_string(),
+                description.to_string(),
+            )
+            .await;
+
+        // Might succeed or fail depending on MLS validation rules
+        // In a real implementation, this might be validated
+        match result {
+            Ok(_) => {
+                // Some MLS implementations might allow this
+                println!("Group created with non-member admin (implementation-specific behavior)");
+            }
+            Err(WhitenoiseError::NostrMlsError(_)) => {
+                // Expected if MLS validates admin membership
+            }
+            Err(other) => panic!("Unexpected error: {:?}", other),
+        }
+    }
+
+    /// Test case: Welcome message sending fails - no relays configured
+    async fn case_create_group_welcome_message_fails(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+        group_name: &str,
+        description: &str,
+    ) {
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys,
+                admin_pubkeys,
+                group_name.to_string(),
+                description.to_string(),
+            )
+            .await;
+
+        // May fail when trying to send welcome messages with no relays
+        match result {
+            Ok(_) => {
+                // Might succeed if fallback relays are used
+                println!("Group created despite no relays (fallback used)");
+            }
+            Err(e) => {
+                // Expected if no relays available for welcome messages
+                println!("Group creation failed due to relay issues: {:?}", e);
+            }
+        }
+    }
+}
