@@ -1,0 +1,3 @@
+# Rust build artifacts for health check utility
+target/
+Cargo.lock

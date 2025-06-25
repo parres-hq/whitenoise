@@ -59,14 +59,18 @@ jobs:
       - name: Wait for services to be ready
         if: runner.os == 'Linux'
         run: |
-          echo "Waiting for services to start..."
-          sleep 60
-          # Check if services are running
-          docker-compose ps
-          # Test connectivity to services
-          curl -f http://localhost:8080 || echo "nostr-rs-relay not ready yet"
-          curl -f http://localhost:3000 || echo "blossom not ready yet"
-          curl -f http://localhost:7777 || echo "strfry-nostr-relay not ready yet"
+          echo "Running Nostr health checks..."
+          cd .github/workflows/health_check
+          timeout 60 cargo run --bin nostr_health_check || {
+            echo "Advanced health check failed, falling back to basic connectivity tests..."
+            echo "Checking if services are running:"
+            docker-compose ps
+            echo "Testing basic connectivity:"
+            curl -f -m 5 http://localhost:8080 && echo "✓ nostr-rs-relay responding to HTTP"
+            curl -f -m 5 http://localhost:3000 && echo "✓ blossom server responding to HTTP"  
+            curl -f -m 5 http://localhost:7777 && echo "✓ strfry-nostr-relay responding to HTTP"
+            echo "Basic connectivity tests completed"
+          }
 
       - name: Check
         run: cargo check --all-targets --all-features
