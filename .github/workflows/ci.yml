@@ -18,6 +18,14 @@ jobs:
           - os: macos-14
             target: native
     runs-on: ${{ matrix.os }}
+    services:
+      nostr-rs-relay:
+        image: scsibug/nostr-rs-relay:latest
+        ports:
+          - "8080:8080"
+        volumes:
+          - ./dev/data/nostr-rs-relay:/usr/src/app/db
+          - ./dev/nostr-rs-relay-config.toml:/usr/src/app/config.toml
     steps:
       - uses: actions/checkout@v4
 
