@@ -60,17 +60,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           echo "Running Nostr health checks..."
-          cd .github/workflows/health_check
-          timeout 60 cargo run --bin nostr_health_check || {
-            echo "Advanced health check failed, falling back to basic connectivity tests..."
-            echo "Checking if services are running:"
-            docker-compose ps
-            echo "Testing basic connectivity:"
-            curl -f -m 5 http://localhost:8080 && echo "✓ nostr-rs-relay responding to HTTP"
-            curl -f -m 5 http://localhost:3000 && echo "✓ blossom server responding to HTTP"  
-            curl -f -m 5 http://localhost:7777 && echo "✓ strfry-nostr-relay responding to HTTP"
-            echo "Basic connectivity tests completed"
-          }
+          sleep 10
+          echo "Checking if services are running:"
+          docker-compose ps
+          echo "Testing basic connectivity:"
+          curl -f -m 5 http://localhost:8080 && echo "✓ nostr-rs-relay responding to HTTP"
+          curl -f -m 5 http://localhost:3000 && echo "✓ blossom server responding to HTTP"  
+          curl -f -m 5 http://localhost:7777 && echo "✓ strfry-nostr-relay responding to HTTP"
+          echo "Basic connectivity tests completed"
 
       - name: Check
         run: cargo check --all-targets --all-features

@@ -220,6 +220,7 @@ mod tests {
     use super::*;
     use crate::whitenoise::test_utils::*;
     use crate::whitenoise::Whitenoise;
+    use tokio::time::{sleep, Duration};
 
     async fn setup_multiple_test_accounts(
         whitenoise: &Whitenoise,
@@ -283,12 +284,8 @@ mod tests {
         let group_name = "Test Group";
         let description = "A test group for unit testing";
 
-        // Publish key packages for all members first
-        for (member_account, _) in &member_accounts {
-            let _ = whitenoise
-                .publish_key_package_for_account(member_account)
-                .await;
-        }
+        // Wait for the key package events to get published
+        sleep(Duration::from_secs(5)).await;
 
         // Test for success case
         case_create_group_success(
