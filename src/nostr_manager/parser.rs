@@ -1,5 +1,6 @@
 //! This module contains the logic for parsing Nostr events into tokens.
 
+use crate::nostr_manager::NostrManager;
 use nostr::parser::{NostrParser, Token};
 use serde::{Deserialize, Serialize};
 
@@ -99,41 +100,53 @@ impl<'a> From<Token<'a>> for SerializableToken {
     }
 }
 
-/// Parses a string into a vector of serializable tokens.
-///
-/// This function takes a string content and returns a vector of `SerializableToken`s,
-/// which can be used for database storage or frontend communication.
-///
-/// # Arguments
-/// * `content` - The string content to parse
-///
-/// # Returns
-/// A vector of `SerializableToken`s representing the parsed content
-#[allow(dead_code)]
-pub fn parse(content: &str) -> Vec<SerializableToken> {
-    let parser = NostrParser::new();
-    parser.parse(content).map(SerializableToken::from).collect()
+impl NostrManager {
+    /// Parses a string into a vector of serializable tokens.
+    ///
+    /// This function takes a string content and returns a vector of `SerializableToken`s,
+    /// which can be used for database storage or frontend communication.
+    ///
+    /// # Arguments
+    /// * `content` - The string content to parse
+    ///
+    /// # Returns
+    /// A vector of `SerializableToken`s representing the parsed content
+    pub fn parse(&self, content: &str) -> Vec<SerializableToken> {
+        let parser = NostrParser::new();
+        parser.parse(content).map(SerializableToken::from).collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
+    use tokio::sync::mpsc;
 
-    #[test]
-    fn test_parse_basic_text() {
+    async fn setup_nostr_manager() -> NostrManager {
+        let (event_sender, _event_receiver) = mpsc::channel(500);
+        NostrManager::new(PathBuf::from("test_db"), event_sender, false)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_parse_basic_text() {
         let content = "Hello, world!";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(
             tokens,
             vec![SerializableToken::Text("Hello, world!".to_string())]
         );
     }
 
-    #[test]
-    fn test_parse_with_whitespace() {
+    #[tokio::test]
+    async fn test_parse_with_whitespace() {
         let content = "  Hello  world  ";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(
             tokens,
             vec![
@@ -145,10 +158,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_with_line_breaks() {
+    #[tokio::test]
+    async fn test_parse_with_line_breaks() {
         let content = "Hello\nworld";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(
             tokens,
             vec![
@@ -159,10 +173,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_with_hashtags() {
+    #[tokio::test]
+    async fn test_parse_with_hashtags() {
         let content = "Hello #nostr world";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(
             tokens,
             vec![
@@ -175,11 +190,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_with_nostr_uri() {
+    #[tokio::test]
+    async fn test_parse_with_nostr_uri() {
         let content =
             "Check out nostr:npub1l2vyh47mk2p0qlsku7hg0vn29faehy9hy34ygaclpn66ukqp3afqutajft";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(
             tokens,
             vec![
@@ -193,10 +209,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_with_url() {
+    #[tokio::test]
+    async fn test_parse_with_url() {
         let content = "Visit https://example.com";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(
             tokens,
             vec![
@@ -207,17 +224,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_empty_string() {
+    #[tokio::test]
+    async fn test_parse_empty_string() {
         let content = "";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(tokens, vec![]);
     }
 
-    #[test]
-    fn test_parse_complex_content() {
+    #[tokio::test]
+    async fn test_parse_complex_content() {
         let content = "Hello #nostr! Check out https://example.com and nostr:npub1l2vyh47mk2p0qlsku7hg0vn29faehy9hy34ygaclpn66ukqp3afqutajft\n\nBye!";
-        let tokens = parse(content);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(content);
         assert_eq!(
             tokens,
             vec![
@@ -365,8 +384,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_url_edge_cases() {
+    #[tokio::test]
+    async fn test_url_edge_cases() {
+        let nostr = setup_nostr_manager().await;
         let test_cases = vec![
             (
                 "https://example.com?param=value",
@@ -401,13 +421,14 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let tokens = parse(input);
+            let tokens = nostr.parse(input);
             assert_eq!(tokens, expected, "Failed for input: {}", input);
         }
     }
 
-    #[test]
-    fn test_whitespace_edge_cases() {
+    #[tokio::test]
+    async fn test_whitespace_edge_cases() {
+        let nostr = setup_nostr_manager().await;
         let test_cases = vec![
             (
                 "\t\t",
@@ -438,13 +459,14 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let tokens = parse(input);
+            let tokens = nostr.parse(input);
             assert_eq!(tokens, expected, "Failed for input: {:?}", input);
         }
     }
 
-    #[test]
-    fn test_text_edge_cases() {
+    #[tokio::test]
+    async fn test_text_edge_cases() {
+        let nostr = setup_nostr_manager().await;
         let test_cases = vec![
             (
                 "Hello, 世界!",
@@ -467,21 +489,22 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            let tokens = parse(input);
+            let tokens = nostr.parse(input);
             assert_eq!(tokens, expected, "Failed for input: {}", input);
         }
     }
 
-    #[test]
-    fn test_error_cases() {
+    #[tokio::test]
+    async fn test_error_cases() {
         // Test with a very long string
         let long_string = "a".repeat(10000);
-        let tokens = parse(&long_string);
+        let nostr = setup_nostr_manager().await;
+        let tokens = nostr.parse(&long_string);
         assert!(!tokens.is_empty(), "Should handle long strings");
 
         // Test with a string containing null bytes
         let null_string = "text\0text";
-        let tokens = parse(null_string);
+        let tokens = nostr.parse(null_string);
         assert_eq!(
             tokens,
             vec![SerializableToken::Text("text\0text".to_string())],
@@ -490,7 +513,7 @@ mod tests {
 
         // Test with invalid UTF-8 (this will panic if not handled properly)
         let invalid_utf8 = unsafe { String::from_utf8_unchecked(vec![0xFF, 0xFF]) };
-        let tokens = parse(&invalid_utf8);
+        let tokens = nostr.parse(&invalid_utf8);
         assert!(!tokens.is_empty(), "Should handle invalid UTF-8");
     }
 }
