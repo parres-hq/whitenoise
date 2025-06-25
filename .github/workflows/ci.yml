@@ -38,6 +38,29 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
+      - name: Create dev directories
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p ./dev/data/nostr-rs-relay
+          mkdir -p ./dev/data/blossom-ts-server
+          mkdir -p ./dev/data/strfry-db
+
+      - name: Start Docker Compose services
+        if: runner.os == 'Linux'
+        run: docker-compose up -d
+
+      - name: Wait for services to be ready
+        if: runner.os == 'Linux'
+        run: |
+          echo "Waiting for services to start..."
+          sleep 30
+          # Check if services are running
+          docker-compose ps
+          # Test connectivity to services
+          curl -f http://localhost:8080 || echo "nostr-rs-relay not ready yet"
+          curl -f http://localhost:3000 || echo "blossom not ready yet"
+          curl -f http://localhost:7777 || echo "strfry-nostr-relay not ready yet"
+
       - name: Check
         run: cargo check --all-targets --all-features
 
@@ -59,3 +82,7 @@ jobs:
       - name: Test native
         if: matrix.target == 'native'
         run: cargo test --all-features
+
+      - name: Stop Docker Compose services
+        if: always() && runner.os == 'Linux'
+        run: docker-compose down -v
