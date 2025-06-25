@@ -60,7 +60,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           echo "Waiting for services to start..."
-          sleep 30
+          sleep 60
           # Check if services are running
           docker-compose ps
           # Test connectivity to services
