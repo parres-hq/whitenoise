@@ -54,7 +54,7 @@ impl Whitenoise {
         let nostr_mls_guard = creator_account.nostr_mls.lock().await;
 
         let key_package_relays = self
-            .fetch_relays_with_fallback(creator_account.pubkey, RelayType::Nostr)
+            .fetch_relays_with_fallback(creator_account.pubkey, RelayType::KeyPackage)
             .await?;
 
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
