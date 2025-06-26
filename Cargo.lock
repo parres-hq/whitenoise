@@ -2069,8 +2069,8 @@ checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
 
 [[package]]
 name = "nostr"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.1"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2082,7 +2082,6 @@ dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.16",
  "instant",
- "regex",
  "scrypt",
  "secp256k1",
  "serde",
@@ -2093,8 +2092,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-database"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "flatbuffers",
  "lru",
@@ -2104,8 +2103,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-lmdb"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "async-utility",
  "heed",
@@ -2117,8 +2116,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-mls"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -2132,8 +2131,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-mls-sqlite-storage"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -2148,8 +2147,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-mls-storage"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "nostr",
  "openmls",
@@ -2160,8 +2159,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-relay-pool"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "async-utility",
  "async-wsocket",
@@ -2176,8 +2175,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-sdk"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "async-utility",
  "nostr",
@@ -2185,7 +2184,6 @@ dependencies = [
  "nostr-lmdb",
  "nostr-relay-pool",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2253,12 +2251,13 @@ dependencies = [
 
 [[package]]
 name = "nwc"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=bee24f2de17176561889810360ce684462e8bd5a#bee24f2de17176561889810360ce684462e8bd5a"
 dependencies = [
  "async-utility",
  "nostr",
  "nostr-relay-pool",
+ "tracing",
 ]
 
 [[package]]

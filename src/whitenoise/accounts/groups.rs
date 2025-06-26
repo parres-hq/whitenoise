@@ -47,29 +47,25 @@ impl Whitenoise {
             .await?;
 
         let group: group_types::Group;
-        let serialized_welcome_message: Vec<u8>;
+        let welcome_rumors: Vec<UnsignedEvent>;
         let group_ids: Vec<String>;
-        let mut eventid_keypackage_list: Vec<(EventId, KeyPackage)> = Vec::new();
+        let mut key_package_events: Vec<Event> = Vec::new();
 
         let nostr_mls_guard = creator_account.nostr_mls.lock().await;
-
-        let key_package_relays = self
-            .fetch_relays_with_fallback(creator_account.pubkey, RelayType::KeyPackage)
-            .await?;
 
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             // Fetch key packages for all members
             for pk in member_pubkeys.iter() {
+                let user_key_package_relays = self
+                    .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
+                    .await?;
                 let some_event = self
-                    .fetch_key_package_event(*pk, key_package_relays.clone())
+                    .fetch_key_package_event(*pk, user_key_package_relays.clone())
                     .await?;
                 let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                     nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
                 ))?;
-                let key_package = nostr_mls
-                    .parse_key_package(&event)
-                    .map_err(WhitenoiseError::from)?;
-                eventid_keypackage_list.push((event.id, key_package));
+                key_package_events.push(event);
             }
 
             let create_group_result = nostr_mls
@@ -77,19 +73,14 @@ impl Whitenoise {
                     group_name,
                     description,
                     &creator_account.pubkey,
-                    &member_pubkeys,
-                    eventid_keypackage_list
-                        .iter()
-                        .map(|(_, kp)| kp.clone())
-                        .collect::<Vec<_>>()
-                        .as_slice(),
+                    key_package_events,
                     admin_pubkeys,
                     group_relays.clone(),
                 )
                 .map_err(WhitenoiseError::from)?;
 
             group = create_group_result.group;
-            serialized_welcome_message = create_group_result.serialized_welcome_message;
+            welcome_rumors = create_group_result.welcome_rumors;
             group_ids = nostr_mls
                 .get_groups()
                 .map_err(WhitenoiseError::from)?
@@ -103,16 +94,14 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
 
         // Fan out the welcome message to all members
-        for (i, (event_id, _)) in eventid_keypackage_list.into_iter().enumerate() {
-            let member_pubkey = member_pubkeys[i];
-
-            let welcome_rumor =
-                EventBuilder::new(Kind::MlsWelcome, hex::encode(&serialized_welcome_message))
-                    .tags(vec![
-                        Tag::from_standardized(TagStandard::Relays(group_relays.clone())),
-                        Tag::event(event_id),
-                    ])
-                    .build(creator_account.pubkey);
+        for welcome_rumor in welcome_rumors {
+            let member_pubkey = welcome_rumor
+                .tags
+                .public_keys()
+                .next()
+                .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                    "No recipient public key found in welcome rumor"
+                )))?;
 
             tracing::debug!(
                 target: "whitenoise::groups::create_group",
@@ -120,15 +109,17 @@ impl Whitenoise {
                 welcome_rumor
             );
 
+            let member_inbox_relays = self.fetch_relays_with_fallback(*member_pubkey, RelayType::Inbox).await?;
+
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
             self.nostr
                 .publish_gift_wrap_with_signer(
-                    &member_pubkey,
-                    welcome_rumor,
+                    member_pubkey,
+                    welcome_rumor.clone(),
                     vec![Tag::expiration(one_month_future)],
-                    &group_relays,
+                    &member_inbox_relays,
                     keys.clone(),
                 )
                 .await
