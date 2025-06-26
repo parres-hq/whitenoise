@@ -38,6 +38,37 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
+      - name: Install Docker Compose
+        if: runner.os == 'Linux'
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
+
+      - name: Create dev directories
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p ./dev/data/nostr-rs-relay
+          mkdir -p ./dev/data/blossom-ts-server
+          mkdir -p ./dev/data/strfry-db
+
+      - name: Start Docker Compose services
+        if: runner.os == 'Linux'
+        run: docker-compose up -d
+
+      - name: Wait for services to be ready
+        if: runner.os == 'Linux'
+        run: |
+          echo "Running Nostr health checks..."
+          sleep 10
+          echo "Checking if services are running:"
+          docker-compose ps
+          echo "Testing basic connectivity:"
+          curl -f -m 5 http://localhost:8080 && echo "✓ nostr-rs-relay responding to HTTP"
+          curl -f -m 5 http://localhost:3000 && echo "✓ blossom server responding to HTTP"  
+          curl -f -m 5 http://localhost:7777 && echo "✓ strfry-nostr-relay responding to HTTP"
+          echo "Basic connectivity tests completed"
+
       - name: Check
         run: cargo check --all-targets --all-features
 
@@ -59,3 +90,7 @@ jobs:
       - name: Test native
         if: matrix.target == 'native'
         run: cargo test --all-features
+
+      - name: Stop Docker Compose services
+        if: always() && runner.os == 'Linux'
+        run: docker-compose down -v

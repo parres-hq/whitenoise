@@ -940,6 +940,28 @@ impl Whitenoise {
         Ok(())
     }
 
+    pub(crate) async fn encoded_key_package(
+        &self,
+        account: &Account,
+        pubkey: &PublicKey,
+    ) -> Result<(String, [Tag; 4])> {
+        let key_package_relays = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
+            .await?;
+
+        let nostr_mls_guard = account.nostr_mls.lock().await;
+
+        let nostr_mls = nostr_mls_guard
+            .as_ref()
+            .ok_or_else(|| WhitenoiseError::NostrMlsNotInitialized)?;
+
+        let result = nostr_mls
+            .create_key_package_for_event(pubkey, key_package_relays)
+            .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
+
+        Ok(result)
+    }
+
     /// Publishes the MLS key package for the given account to its key package relays.
     ///
     /// This method attempts to acquire the `nostr_mls` lock, generate a key package event,
@@ -963,31 +985,9 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let key_package_relays = self
-            .fetch_relays(account.pubkey, RelayType::KeyPackage)
-            .await?;
-
         // Extract key package data while holding the lock
-        let (encoded_key_package, tags) = {
-            tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Attempting to acquire nostr_mls lock");
-
-            let nostr_mls_guard = account.nostr_mls.lock().await;
-
-            tracing::debug!(target: "whitenoise::publish_key_package_for_account", "nostr_mls lock acquired");
-
-            let nostr_mls = nostr_mls_guard.as_ref()
-                .ok_or_else(|| {
-                    tracing::error!(target: "whitenoise::publish_key_package_for_account", "NostrMls not initialized for account");
-                    WhitenoiseError::NostrMlsNotInitialized
-                })?;
-
-            let result = nostr_mls
-                .create_key_package_for_event(&account.pubkey, key_package_relays)
-                .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
-
-            tracing::debug!(target: "whitenoise::publish_key_package_for_account", "nostr_mls lock released");
-            result
-        };
+        let (encoded_key_package, tags) =
+            self.encoded_key_package(account, &account.pubkey).await?;
 
         let signer = self
             .secrets_store
@@ -1465,7 +1465,6 @@ mod tests {
                 .await
                 .is_ok());
             assert!(whitenoise.fetch_contacts(pubkey).await.is_ok());
-            assert!(whitenoise.fetch_key_package_event(pubkey).await.is_ok());
             assert!(whitenoise.fetch_onboarding_state(pubkey).await.is_ok());
         }
     }

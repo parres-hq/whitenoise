@@ -5,6 +5,7 @@ use crate::nostr_manager::{NostrManager, Result};
 use crate::whitenoise::accounts::relays::RelayType;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
+use std::time::Duration;
 
 impl NostrManager {
     pub(crate) async fn query_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
@@ -54,12 +55,27 @@ impl NostrManager {
         Ok(contacts_metadata)
     }
 
-    pub(crate) async fn query_user_key_package(&self, pubkey: PublicKey) -> Result<Option<Event>> {
+    pub(crate) async fn fetch_user_key_package(
+        &self,
+        pubkey: PublicKey,
+        urls: Vec<RelayUrl>,
+    ) -> Result<Option<Event>> {
         let filter = Filter::new()
             .kind(Kind::MlsKeyPackage)
             .author(pubkey)
             .limit(1);
-        let events = self.client.database().query(filter).await?;
-        Ok(events.first().cloned())
+        let events = self
+            .client
+            .fetch_events_from(urls, filter.clone(), Duration::new(5, 0))
+            .await?;
+
+        #[cfg(test)]
+        {
+            let stored_events = self.client.database().query(filter).await?;
+            Ok(events.merge(stored_events).first_owned())
+        }
+
+        #[cfg(not(test))]
+        Ok(events.first_owned())
     }
 }

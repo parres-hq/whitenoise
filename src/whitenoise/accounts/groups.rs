@@ -53,10 +53,16 @@ impl Whitenoise {
 
         let nostr_mls_guard = creator_account.nostr_mls.lock().await;
 
+        let key_package_relays = self
+            .fetch_relays_with_fallback(creator_account.pubkey, RelayType::KeyPackage)
+            .await?;
+
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             // Fetch key packages for all members
             for pk in member_pubkeys.iter() {
-                let some_event = self.fetch_key_package_event(*pk).await?;
+                let some_event = self
+                    .fetch_key_package_event(*pk, key_package_relays.clone())
+                    .await?;
                 let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                     nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
                 ))?;
@@ -215,27 +221,38 @@ mod tests {
     use crate::whitenoise::test_utils::*;
     use crate::whitenoise::Whitenoise;
 
-    async fn setup_test_account(whitenoise: &Whitenoise) -> (Account, Keys) {
-        let keys = create_test_keys();
-        let account = whitenoise
-            .login(keys.secret_key().to_secret_hex())
-            .await
-            .unwrap();
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-        (account, keys)
-    }
-
     async fn setup_multiple_test_accounts(
         whitenoise: &Whitenoise,
+        creator_account: &Account,
         count: usize,
     ) -> Vec<(Account, Keys)> {
         let mut accounts = Vec::new();
         for _ in 0..count {
-            let (account, keys) = setup_test_account(whitenoise).await;
-            accounts.push((account, keys));
+            let (account, keys) = create_test_account();
+            accounts.push((account.clone(), keys.clone()));
+            whitenoise
+                .add_contact(creator_account, keys.public_key())
+                .await
+                .unwrap();
+
+            // publish keypackage to relays
+            let (ekp, tags) = whitenoise
+                .encoded_key_package(creator_account, &account.pubkey)
+                .await
+                .unwrap();
+            let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
+
+            // Get relays with fallback to defaults if user hasn't configured key package relays
+            let relays_to_use = whitenoise
+                .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
+                .await
+                .unwrap();
+
+            let _ = whitenoise
+                .nostr
+                .publish_event_builder_with_signer(key_package_event_builder, &relays_to_use, keys)
+                .await
+                .unwrap();
         }
         accounts
     }
@@ -245,7 +262,7 @@ mod tests {
         let whitenoise = test_get_whitenoise().await;
 
         // Setup creator account
-        let (creator_account, _creator_keys) = setup_test_account(whitenoise).await;
+        let (creator_account, _creator_keys) = setup_login_account(whitenoise).await;
         whitenoise
             .update_relays(
                 &creator_account,
@@ -256,7 +273,7 @@ mod tests {
             .unwrap();
 
         // Setup member accounts
-        let member_accounts = setup_multiple_test_accounts(whitenoise, 2).await;
+        let member_accounts = setup_multiple_test_accounts(whitenoise, &creator_account, 2).await;
         let member_pubkeys: Vec<PublicKey> =
             member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
 
@@ -265,13 +282,6 @@ mod tests {
 
         let group_name = "Test Group";
         let description = "A test group for unit testing";
-
-        // Publish key packages for all members first
-        for (member_account, _) in &member_accounts {
-            let _ = whitenoise
-                .publish_key_package_for_account(member_account)
-                .await;
-        }
 
         // Test for success case
         case_create_group_success(
@@ -353,7 +363,7 @@ mod tests {
         .await;
 
         // Test case: Welcome message fails (no relays)
-        let (no_relay_creator, _keys) = setup_test_account(whitenoise).await;
+        let (no_relay_creator, _keys) = setup_login_account(whitenoise).await;
         whitenoise
             .update_relays(&no_relay_creator, RelayType::Nostr, vec![])
             .await
