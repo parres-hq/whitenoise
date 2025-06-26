@@ -47,9 +47,9 @@ impl Whitenoise {
             .await?;
 
         let group: group_types::Group;
-        let serialized_welcome_message: Vec<u8>;
         let group_ids: Vec<String>;
-        let mut eventid_keypackage_list: Vec<(EventId, KeyPackage)> = Vec::new();
+        let welcome_rumors: Vec<UnsignedEvent>;
+        let mut key_package_events: Vec<Event> = Vec::new();
 
         let nostr_mls_guard = creator_account.nostr_mls.lock().await;
 
@@ -66,10 +66,7 @@ impl Whitenoise {
                 let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                     nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
                 ))?;
-                let key_package = nostr_mls
-                    .parse_key_package(&event)
-                    .map_err(WhitenoiseError::from)?;
-                eventid_keypackage_list.push((event.id, key_package));
+                key_package_events.push(event);
             }
 
             let create_group_result = nostr_mls
@@ -77,19 +74,14 @@ impl Whitenoise {
                     group_name,
                     description,
                     &creator_account.pubkey,
-                    &member_pubkeys,
-                    eventid_keypackage_list
-                        .iter()
-                        .map(|(_, kp)| kp.clone())
-                        .collect::<Vec<_>>()
-                        .as_slice(),
+                    key_package_events,
                     admin_pubkeys,
                     group_relays.clone(),
                 )
                 .map_err(WhitenoiseError::from)?;
 
             group = create_group_result.group;
-            serialized_welcome_message = create_group_result.serialized_welcome_message;
+            welcome_rumors = create_group_result.welcome_rumors;
             group_ids = nostr_mls
                 .get_groups()
                 .map_err(WhitenoiseError::from)?
@@ -103,22 +95,8 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
 
         // Fan out the welcome message to all members
-        for (i, (event_id, _)) in eventid_keypackage_list.into_iter().enumerate() {
+        for (i, welcome_rumor) in welcome_rumors.into_iter().enumerate() {
             let member_pubkey = member_pubkeys[i];
-
-            let welcome_rumor =
-                EventBuilder::new(Kind::MlsWelcome, hex::encode(&serialized_welcome_message))
-                    .tags(vec![
-                        Tag::from_standardized(TagStandard::Relays(group_relays.clone())),
-                        Tag::event(event_id),
-                    ])
-                    .build(creator_account.pubkey);
-
-            tracing::debug!(
-                target: "whitenoise::groups::create_group",
-                "Welcome rumor: {:?}",
-                welcome_rumor
-            );
 
             // Create a timestamp 1 month in the future
             use std::ops::Add;
