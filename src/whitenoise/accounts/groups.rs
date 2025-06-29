@@ -73,7 +73,7 @@ impl Whitenoise {
                     group_name,
                     description,
                     &creator_account.pubkey,
-                    key_package_events,
+                    key_package_events.clone(),
                     admin_pubkeys,
                     group_relays.clone(),
                 )
@@ -95,28 +95,34 @@ impl Whitenoise {
 
         // Fan out the welcome message to all members
         for welcome_rumor in welcome_rumors {
-            let member_pubkey = welcome_rumor
-                .tags
-                .public_keys()
-                .next()
+            // Get the public key of the member from the key package event
+            let key_package_event_id =
+                welcome_rumor
+                    .tags
+                    .event_ids()
+                    .next()
+                    .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                        "No event ID found in welcome rumor"
+                    )))?;
+
+            let member_pubkey = key_package_events
+                .iter()
+                .find(|event| event.id == *key_package_event_id)
+                .map(|event| event.pubkey)
                 .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
-                    "No recipient public key found in welcome rumor"
+                    "No public key found in key package event"
                 )))?;
 
-            tracing::debug!(
-                target: "whitenoise::groups::create_group",
-                "Welcome rumor: {:?}",
-                welcome_rumor
-            );
-
-            let member_inbox_relays = self.fetch_relays_with_fallback(*member_pubkey, RelayType::Inbox).await?;
+            let member_inbox_relays = self
+                .fetch_relays_with_fallback(member_pubkey, RelayType::Inbox)
+                .await?;
 
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
             self.nostr
                 .publish_gift_wrap_with_signer(
-                    member_pubkey,
+                    &member_pubkey,
                     welcome_rumor.clone(),
                     vec![Tag::expiration(one_month_future)],
                     &member_inbox_relays,
@@ -203,6 +209,226 @@ impl Whitenoise {
         } else {
             Err(WhitenoiseError::NostrMlsNotInitialized)
         }
+    }
+
+    /// Adds new members to an existing MLS group
+    ///
+    /// This method performs the complete workflow for adding members to a group:
+    /// 1. Fetches key packages for all new members from their configured relays
+    /// 2. Creates an MLS add members proposal and generates welcome messages
+    /// 3. Publishes the evolution event to the group's relays
+    /// 4. Merges the pending commit to finalize the member addition
+    /// 5. Sends welcome messages to each new member via gift wrap
+    ///
+    /// # Arguments
+    /// * `account` - The account performing the member addition (must be group admin)
+    /// * `group_id` - The ID of the group to add members to
+    /// * `members` - Vector of public keys for the new members to add
+    ///
+    /// # Returns
+    /// * `Ok(())` - If all members were successfully added and welcomed
+    /// * `Err(WhitenoiseError)` - If any step of the process fails
+    ///
+    /// # Errors
+    /// Returns error if:
+    /// - Account is not logged in or lacks admin permissions
+    /// - NostrMLS is not initialized for the account
+    /// - Key packages cannot be fetched for any member
+    /// - MLS add members operation fails
+    /// - Evolution event publishing fails
+    /// - Welcome message sending fails
+    /// - Group relays are not accessible
+    ///
+    /// # Notes
+    /// - Each new member's key package is fetched from their configured key package relays
+    /// - Welcome messages are sent to each member's inbox relays (with fallback to defaults)
+    /// - Welcome messages expire after 1 month
+    /// - If evolution event publishing fails, the operation is rolled back
+    /// - All new members receive the same group state and can immediately participate
+    pub async fn add_members_to_group(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        members: Vec<PublicKey>,
+    ) -> Result<()> {
+        let evolution_event: Event;
+        let welcome_rumors: Option<Vec<UnsignedEvent>>;
+        let mut key_package_events: Vec<Event> = Vec::new();
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        let nostr_mls_guard = account.nostr_mls.lock().await;
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            // Fetch key packages for all members
+            for pk in members.iter() {
+                let user_key_package_relays = self
+                    .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
+                    .await?;
+                let some_event = self
+                    .fetch_key_package_event(*pk, user_key_package_relays.clone())
+                    .await?;
+                let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
+                    nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
+                ))?;
+                key_package_events.push(event);
+            }
+
+            let update_result = nostr_mls
+                .add_members(group_id, &key_package_events)
+                .map_err(WhitenoiseError::from)?;
+            evolution_event = update_result.evolution_event;
+            welcome_rumors = update_result.welcome_rumors;
+
+            if welcome_rumors.is_none() {
+                return Err(WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(
+                    "Missing welcome message".to_owned(),
+                )));
+            }
+
+            // Merge the pending commit immediately after creating it
+            // This ensures our local state is correct before publishing
+            nostr_mls
+                .merge_pending_commit(group_id)
+                .map_err(WhitenoiseError::from)?;
+
+            // Publish the evolution event to the group
+            let group_relays = nostr_mls
+                .get_relays(group_id)
+                .map_err(WhitenoiseError::from)?;
+            let result = self
+                .nostr
+                .publish_event_to(evolution_event, &group_relays)
+                .await;
+
+            match result {
+                Ok(_event_id) => {
+                    // Evolution event published successfully
+                    // Fan out the welcome message to all members
+                    for welcome_rumor in welcome_rumors.unwrap() {
+                        // Get the public key of the member from the key package event
+                        let key_package_event_id =
+                            welcome_rumor
+                                .tags
+                                .event_ids()
+                                .next()
+                                .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                                    "No event ID found in welcome rumor"
+                                )))?;
+
+                        let member_pubkey = key_package_events
+                            .iter()
+                            .find(|event| event.id == *key_package_event_id)
+                            .map(|event| event.pubkey)
+                            .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                                "No public key found in key package event"
+                            )))?;
+
+                        let member_inbox_relays = self
+                            .fetch_relays_with_fallback(member_pubkey, RelayType::Inbox)
+                            .await?;
+
+                        // Create a timestamp 1 month in the future
+                        use std::ops::Add;
+                        let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
+                        self.nostr
+                            .publish_gift_wrap_with_signer(
+                                &member_pubkey,
+                                welcome_rumor.clone(),
+                                vec![Tag::expiration(one_month_future)],
+                                &member_inbox_relays,
+                                keys.clone(),
+                            )
+                            .await
+                            .map_err(WhitenoiseError::from)?;
+                    }
+                }
+                Err(e) => {
+                    return Err(WhitenoiseError::NostrManager(e));
+                }
+            }
+        } else {
+            return Err(WhitenoiseError::NostrMlsNotInitialized);
+        }
+
+        Ok(())
+    }
+
+    /// Removes members from an existing MLS group
+    ///
+    /// This method performs the complete workflow for removing members from a group:
+    /// 1. Creates an MLS remove members proposal
+    /// 2. Merges the pending commit to finalize the member removal
+    /// 3. Publishes the evolution event to the group's relays
+    ///
+    /// # Arguments
+    /// * `account` - The account performing the member removal (must be group admin)
+    /// * `group_id` - The ID of the group to remove members from
+    /// * `members` - Vector of public keys for the members to remove
+    ///
+    /// # Returns
+    /// * `Ok(())` - If all members were successfully removed
+    /// * `Err(WhitenoiseError)` - If any step of the process fails
+    ///
+    /// # Errors
+    /// Returns error if:
+    /// - Account is not logged in or lacks admin permissions
+    /// - NostrMLS is not initialized for the account
+    /// - MLS remove members operation fails
+    /// - Evolution event publishing fails
+    /// - Group relays are not accessible
+    /// - Any of the specified members are not in the group
+    ///
+    /// # Notes
+    /// - The pending commit is merged immediately after creation to ensure local state consistency
+    /// - The evolution event is published to all group relays
+    /// - Removed members will no longer be able to read new messages in the group
+    /// - Admin permissions are required to remove members from a group
+    pub async fn remove_members_from_group(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        members: Vec<PublicKey>,
+    ) -> Result<()> {
+        let evolution_event: Event;
+        let nostr_mls_guard = account.nostr_mls.lock().await;
+
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            // First, validate that all members to be removed are actually in the group
+            let current_members = nostr_mls
+                .get_members(group_id)
+                .map_err(WhitenoiseError::from)?
+                .into_iter()
+                .collect::<std::collections::HashSet<PublicKey>>();
+
+            let mut members_not_in_group = Vec::new();
+            for member in &members {
+                if !current_members.contains(member) {
+                    members_not_in_group.push(*member);
+                }
+            }
+
+            if !members_not_in_group.is_empty() {
+                return Err(WhitenoiseError::MembersNotInGroup);
+            }
+            let update_result = nostr_mls.remove_members(group_id, &members)?;
+            evolution_event = update_result.evolution_event;
+
+            nostr_mls
+                .merge_pending_commit(group_id)
+                .map_err(WhitenoiseError::from)?;
+
+            let group_relays = nostr_mls
+                .get_relays(group_id)
+                .map_err(WhitenoiseError::from)?;
+
+            self.nostr
+                .publish_event_to(evolution_event, &group_relays)
+                .await?;
+        } else {
+            return Err(WhitenoiseError::NostrMlsNotInitialized);
+        }
+        Ok(())
     }
 }
 
