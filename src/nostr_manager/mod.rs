@@ -639,7 +639,8 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::delete_all_data",
             "Deleting Nostr data"
         );
-        self.client.reset().await;
+        self.client.unset_signer().await;
+        self.client.unsubscribe_all().await;
         self.client.database().wipe().await?;
         Ok(())
     }

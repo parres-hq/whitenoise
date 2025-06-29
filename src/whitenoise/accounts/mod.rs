@@ -149,7 +149,7 @@ impl Account {
     ///
     /// This function does not currently return any errors, but it is fallible to allow for
     /// future error handling and to match the expected signature for account creation.
-    pub(crate) async fn new() -> core::result::Result<(Account, Keys), AccountError> {
+    pub(crate) fn new() -> core::result::Result<(Account, Keys), AccountError> {
         tracing::debug!(target: "whitenoise::accounts::new", "Generating new keypair");
         let keys = Keys::generate();
 
@@ -201,7 +201,7 @@ impl Whitenoise {
     /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
     pub async fn create_identity(&self) -> Result<Account> {
         // Create a new account with a generated keypair and a petname
-        let (mut account, keys) = Account::new().await?;
+        let (mut account, keys) = Account::new()?;
 
         // Save the account to the database
         self.save_account(&account).await?;
@@ -1252,8 +1252,21 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
+    #[ignore] // To avoid race conditions on `whitenoise` object when tests are run in parallel
+    async fn test_login_after_delete_all_data() {
+        let whitenoise = test_get_whitenoise().await;
+
+        let account = setup_login_account(whitenoise).await;
+        whitenoise.delete_all_data().await.unwrap();
+        let _acc = whitenoise
+            .login(account.1.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn test_account_new_creates_account_and_keys() {
-        let (account, keys) = Account::new().await.unwrap();
+        let (account, keys) = Account::new().unwrap();
         assert_eq!(account.pubkey, keys.public_key());
         // Check defaults
         assert!(account.settings.dark_theme);
@@ -1335,8 +1348,8 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_account_creation() {
         // Test that Account::new() creates different accounts each time
-        let (account1, keys1) = Account::new().await.unwrap();
-        let (account2, keys2) = Account::new().await.unwrap();
+        let (account1, keys1) = Account::new().unwrap();
+        let (account2, keys2) = Account::new().unwrap();
 
         assert_ne!(account1.pubkey, account2.pubkey);
         assert_ne!(keys1.public_key(), keys2.public_key());
