@@ -51,7 +51,7 @@ pub struct NostrManagerSettings {
 #[derive(Debug, Clone)]
 pub struct NostrManager {
     pub settings: Arc<Mutex<NostrManagerSettings>>,
-    client: Client,
+    pub client: Client,
     session_salt: [u8; 16],
     // blossom: BlossomClient,
 }
@@ -639,7 +639,8 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::delete_all_data",
             "Deleting Nostr data"
         );
-        self.client.reset().await;
+        self.client.unset_signer().await;
+        self.client.unsubscribe_all().await;
         self.client.database().wipe().await?;
         Ok(())
     }
