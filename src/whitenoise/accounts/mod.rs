@@ -1249,7 +1249,7 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    #[ignore]
+    #[ignore] // To avoid race conditions on `whitenoise` object when tests are run in parallel
     async fn test_login_after_delete_all_data() {
         let whitenoise = test_get_whitenoise().await;
 
