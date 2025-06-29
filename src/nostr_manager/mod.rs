@@ -51,7 +51,7 @@ pub struct NostrManagerSettings {
 #[derive(Debug, Clone)]
 pub struct NostrManager {
     pub settings: Arc<Mutex<NostrManagerSettings>>,
-    pub client: Client,
+    client: Client,
     session_salt: [u8; 16],
     // blossom: BlossomClient,
 }
