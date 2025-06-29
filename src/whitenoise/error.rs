@@ -56,6 +56,9 @@ pub enum WhitenoiseError {
     #[error("Nostr url error: {0}")]
     NostrUrl(#[from] nostr::types::url::Error),
 
+    #[error("Nostr tag error: {0}")]
+    NostrTag(#[from] nostr::event::tag::Error),
+
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
 

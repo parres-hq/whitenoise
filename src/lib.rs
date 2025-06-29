@@ -12,6 +12,7 @@ pub mod whitenoise;
 // Re-export main types for library users
 pub use crate::whitenoise::accounts::relays::RelayType;
 pub use crate::whitenoise::accounts::{Account, AccountSettings, OnboardingState};
+pub use crate::types::MessageWithTokens;
 pub use crate::whitenoise::error::WhitenoiseError;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 
@@ -36,12 +37,21 @@ pub use nostr::Metadata;
 /// Nostr relay URL. Re-exported from [`nostr::RelayUrl`](https://docs.rs/nostr/latest/nostr/struct.RelayUrl.html).
 pub use nostr::RelayUrl;
 
+/// Nostr event kind. Re-exported from [`nostr::Kind`](https://docs.rs/nostr/latest/nostr/struct.Kind.html).
+pub use nostr::Kind;
+
+/// Nostr event tag. Re-exported from [`nostr::Tag`](https://docs.rs/nostr/latest/nostr/struct.Tag.html).
+pub use nostr::Tag;
+
 // Nostr MLS Types
 /// Nostr MLS Group. Re-exported from [`nostr_mls::group_types::Group`](https://docs.rs/nostr-mls/latest/nostr_mls/group_types/struct.Group.html)
 pub use nostr_mls::prelude::group_types::{Group, GroupState, GroupType};
 
 /// Nostr MLS Group ID. Re-exported from [`open_mls::group::GroupId`](https://latest.openmls.tech/doc/openmls/group/struct.GroupId.html)
 pub use nostr_mls::prelude::GroupId;
+
+/// Nostr MLS Message. Re-exported from [`nostr_mls::prelude::Message`](https://docs.rs/nostr-mls/latest/nostr_mls/prelude/struct.Message.html)
+pub use nostr_mls::prelude::message_types::{Message, MessageState};
 
 static TRACING_GUARDS: OnceLock<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceLock::new();
 static TRACING_INIT: OnceLock<()> = OnceLock::new();
