@@ -210,7 +210,10 @@ impl Whitenoise {
         self.secrets_store.store_private_key(&keys)?;
 
         let log_account = self.login(keys.secret_key().to_secret_hex()).await;
-        assert!(log_account.is_ok());
+        if let Err(e) = log_account {
+            tracing::error!("Failed to login during create_identity: {}", e);
+            return Err(e);
+        }
 
         self.initialize_nostr_mls_for_account(&account).await?;
 

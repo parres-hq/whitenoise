@@ -71,6 +71,9 @@ pub enum WhitenoiseError {
     #[error("Nostr manager error: {0}")]
     NostrManager(#[from] NostrManagerError),
 
+    #[error("One or more members to remove are not in the group")]
+    MembersNotInGroup,
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }

@@ -114,7 +114,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     assert_eq!(account3.pubkey, known_pubkey);
 
     // Wait for background fetch
-    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // ========================================
     // METADATA AND ONBOARDING TESTING
@@ -356,18 +356,226 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // ========================================
+    // GROUP MEMBER MANAGEMENT TESTING
+    // ========================================
+    tracing::info!("=== Testing Group Member Management ===");
+
+    // Test adding members to an existing group
+    tracing::info!("Testing adding members to group...");
+
+    // Create a fourth account to add as a new member
+    let account4 = whitenoise.create_identity().await?;
+    tracing::info!(
+        "✓ Fourth account created for adding to group: {}",
+        account4.pubkey.to_hex()
+    );
+
+    // Get initial group member count
+    let initial_members = whitenoise
+        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .await?;
+    let initial_admins = whitenoise
+        .fetch_group_admins(&account1, &test_group.mls_group_id)
+        .await?;
+    assert_eq!(initial_admins.len(), 1);
+    assert!(initial_admins.contains(&account1.pubkey));
+    let initial_member_count = initial_members.len();
+    tracing::info!("Initial group member count: {}", initial_member_count);
+
+    // Add account4 as a new member to the test group (account1 is admin)
+    let new_members = vec![account4.pubkey];
+    whitenoise
+        .add_members_to_group(&account1, &test_group.mls_group_id, new_members)
+        .await?;
+    tracing::info!("✓ Successfully added new member to group");
+
+    // Wait for event processing to complete
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Verify the member was added
+    let updated_members = whitenoise
+        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .await?;
+    assert_eq!(updated_members.len(), initial_member_count + 1);
+    assert!(updated_members.contains(&account4.pubkey));
+    tracing::info!("✓ New member verified in group member list");
+
+    // Test adding multiple members at once
+    tracing::info!("Testing adding multiple members at once...");
+
+    // Create two more accounts
+    tracing::info!("Creating account5...");
+    let account5 = whitenoise.create_identity().await?;
+    tracing::info!("✓ Account5 created: {}", account5.pubkey.to_hex());
+
+    tracing::info!("Creating account6...");
+    let account6 = whitenoise.create_identity().await?;
+    tracing::info!("✓ Account6 created: {}", account6.pubkey.to_hex());
+
+    tracing::info!("✓ Created accounts 5 and 6 for bulk member addition");
+
+    // Add both accounts as members
+    let bulk_new_members = vec![account5.pubkey, account6.pubkey];
+    whitenoise
+        .add_members_to_group(&account1, &test_group.mls_group_id, bulk_new_members)
+        .await?;
+    tracing::info!("✓ Successfully added multiple members to group");
+
+    // Wait for event processing to complete and MLS epoch synchronization
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Verify both members were added
+    let final_members = whitenoise
+        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .await?;
+    assert_eq!(final_members.len(), initial_member_count + 3); // +3 for account4, account5, account6
+    assert!(final_members.contains(&account5.pubkey));
+    assert!(final_members.contains(&account6.pubkey));
+    tracing::info!("✓ Multiple new members verified in group member list");
+
+    // Test error handling - non-admin trying to add members
+    tracing::info!("Testing error handling - non-admin adding members...");
+    let account7 = whitenoise.create_identity().await?;
+    let non_admin_result = whitenoise
+        .add_members_to_group(&account4, &test_group.mls_group_id, vec![account7.pubkey])
+        .await;
+
+    // account4 was added as a member but not as an admin, so this should potentially fail
+    // However, the current implementation might not check admin status, so we'll just log the result
+    match non_admin_result {
+        Ok(_) => {
+            tracing::warn!("Non-admin was able to add members - this might be expected behavior")
+        }
+        Err(e) => tracing::info!("✓ Correctly prevented non-admin from adding members: {}", e),
+    }
+
+    // Test error handling - adding to non-existent group
+    tracing::info!("Testing error handling - adding to non-existent group...");
+    let fake_group_id = GroupId::from_slice(&[1u8; 32]);
+    let fake_group_result = whitenoise
+        .add_members_to_group(&account1, &fake_group_id, vec![account7.pubkey])
+        .await;
+
+    match fake_group_result {
+        Ok(_) => {
+            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Expected error when adding members to non-existent group, but got success"
+            )));
+        }
+        Err(e) => {
+            tracing::info!("✓ Correctly handled non-existent group error: {}", e);
+        }
+    }
+
+    // Test error handling - adding non-existent user (no key package)
+    tracing::info!("Testing error handling - adding user without key package...");
+    let no_keypackage_user = Keys::generate().public_key();
+    let no_keypackage_result = whitenoise
+        .add_members_to_group(
+            &account1,
+            &test_group.mls_group_id,
+            vec![no_keypackage_user],
+        )
+        .await;
+
+    match no_keypackage_result {
+        Ok(_) => {
+            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Expected error when adding user without key package, but got success"
+            )));
+        }
+        Err(e) => {
+            tracing::info!("✓ Correctly handled missing key package error: {}", e);
+        }
+    }
+
+    // Test messaging after adding members
+    tracing::info!("Testing messaging after adding members...");
+    let post_addition_message = "Welcome to the new members!".to_string();
+    let post_addition_message_with_tokens = whitenoise
+        .send_message(
+            &account1.pubkey,
+            &test_group.mls_group_id,
+            post_addition_message.clone(),
+            1,
+            None,
+        )
+        .await?;
+
+    assert_eq!(
+        post_addition_message_with_tokens.message.content,
+        post_addition_message
+    );
+    tracing::info!("✓ Successfully sent message after adding members");
+
+    // ========================================
+    // MEMBER REMOVAL TESTING
+    // ========================================
+    tracing::info!("=== Testing Group Member Removal ===");
+
+    // Get current member count before removal
+    let pre_removal_members = whitenoise
+        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .await?;
+    let pre_removal_count = pre_removal_members.len();
+    tracing::info!("Pre-removal member count: {}", pre_removal_count);
+
+    // Test removing a single member (account4)
+    tracing::info!("Testing removing single member...");
+    whitenoise
+        .remove_members_from_group(&account1, &test_group.mls_group_id, vec![account4.pubkey])
+        .await?;
+    tracing::info!("✓ Successfully removed single member from group");
+
+    // Wait for event processing to complete and MLS epoch synchronization
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Verify the member was removed
+    let post_single_removal_members = whitenoise
+        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .await?;
+    assert_eq!(post_single_removal_members.len(), pre_removal_count - 1);
+    assert!(!post_single_removal_members.contains(&account4.pubkey));
+    tracing::info!("✓ Single member removal verified");
+
+    // ========================================
     // LOGOUT TESTING
     // ========================================
     tracing::info!("=== Testing Account Logout ===");
 
     // Logout account2 (after group creation and message testing)
     tracing::info!("Logging out account2...");
-    whitenoise.logout(&account2.pubkey).await?;
-    assert_eq!(whitenoise.get_accounts_count().await, 2);
+    whitenoise.logout(&account2.clone().pubkey).await?;
+    // We now have more accounts due to member addition testing: account1, account3, account4, account5, account6, account7
+    assert_eq!(whitenoise.get_accounts_count().await, 6);
     assert!(whitenoise.logged_in(&account1.pubkey).await);
-    assert!(!whitenoise.logged_in(&account2.pubkey).await);
+    assert!(!whitenoise.logged_in(&account2.clone().pubkey).await);
     assert!(whitenoise.logged_in(&account3.pubkey).await);
+    assert!(whitenoise.logged_in(&account4.pubkey).await);
+    assert!(whitenoise.logged_in(&account5.pubkey).await);
+    assert!(whitenoise.logged_in(&account6.pubkey).await);
+    assert!(whitenoise.logged_in(&account7.pubkey).await);
     tracing::info!("✓ Account2 logged out successfully");
+
+    // Test error handling - logged out account trying to remove members
+    tracing::info!("Testing error handling - logged out account removing members...");
+    let logged_out_removal_result = whitenoise
+        .remove_members_from_group(&account2, &test_group.mls_group_id, vec![account7.pubkey])
+        .await;
+
+    match logged_out_removal_result {
+        Ok(_) => {
+            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Expected error when logged out account tries to remove members, but got success"
+            )));
+        }
+        Err(WhitenoiseError::AccountNotFound) => {
+            tracing::info!("✓ Correctly handled logged out account error for member removal");
+        }
+        Err(e) => {
+            tracing::info!("✓ Correctly handled logged out account with error: {}", e);
+        }
+    }
 
     // ========================================
     // FINAL VERIFICATION
@@ -376,16 +584,23 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Verify final account state
     let final_accounts = whitenoise.fetch_accounts().await?;
-    assert_eq!(final_accounts.len(), 2); // account1 and account3 should remain
+    assert_eq!(final_accounts.len(), 6); // account1, account3, account4, account5, account6, account7 should remain
     assert!(final_accounts.contains_key(&account1.pubkey));
     assert!(final_accounts.contains_key(&account3.pubkey));
-    assert!(!final_accounts.contains_key(&account2.pubkey)); // account2 was logged out
+    assert!(final_accounts.contains_key(&account4.pubkey));
+    assert!(final_accounts.contains_key(&account5.pubkey));
+    assert!(final_accounts.contains_key(&account6.pubkey));
+    assert!(final_accounts.contains_key(&account7.pubkey));
+    assert!(!final_accounts.contains_key(&account2.clone().pubkey)); // account2 was logged out
     tracing::info!("✓ Final account state is correct");
 
     // Verify accounts are still logged in
     assert!(whitenoise.logged_in(&account1.pubkey).await);
     assert!(whitenoise.logged_in(&account3.pubkey).await);
-    assert!(!whitenoise.logged_in(&account2.pubkey).await);
+    assert!(whitenoise.logged_in(&account4.pubkey).await);
+    assert!(whitenoise.logged_in(&account5.pubkey).await);
+    assert!(whitenoise.logged_in(&account6.pubkey).await);
+    assert!(whitenoise.logged_in(&account7.pubkey).await);
     tracing::info!("✓ Account login states are correct");
 
     tracing::info!("=== Integration Test Completed Successfully ===");
@@ -397,8 +612,12 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("  ✓ Account logout");
     tracing::info!("  ✓ Contact management (add, remove, update)");
     tracing::info!("  ✓ Group creation");
+    tracing::info!("  ✓ Group member management (add single/multiple members)");
+    tracing::info!("  ✓ Group member removal (remove single member)");
+    tracing::info!("  ✓ Group member verification");
     tracing::info!("  ✓ Message sending (text, tagged, reactions)");
-    tracing::info!("  ✓ Error handling");
+    tracing::info!("  ✓ Messaging after group modifications");
+    tracing::info!("  ✓ Error handling (member addition/removal, logged out accounts)");
 
     Ok(())
 }

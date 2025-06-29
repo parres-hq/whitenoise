@@ -54,14 +54,14 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
+checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
  "once_cell",
  "version_check",
- "zerocopy 0.7.35",
+ "zerocopy",
 ]
 
 [[package]]
@@ -295,9 +295,9 @@ checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
 
 [[package]]
 name = "bip39"
-version = "2.1.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33415e24172c1b7d6066f6d999545375ab8e1d95421d6784bdfff9496f292387"
+checksum = "43d193de1f7487df1914d3a568b772458861d33f9c54249612cc2893d6915054"
 dependencies = [
  "bitcoin_hashes 0.13.0",
  "serde",
@@ -2069,8 +2069,8 @@ checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
 
 [[package]]
 name = "nostr"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.1"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2082,7 +2082,6 @@ dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.16",
  "instant",
- "regex",
  "scrypt",
  "secp256k1",
  "serde",
@@ -2093,8 +2092,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-database"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "flatbuffers",
  "lru",
@@ -2104,8 +2103,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-lmdb"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "async-utility",
  "heed",
@@ -2117,8 +2116,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-mls"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -2132,8 +2131,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-mls-sqlite-storage"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -2148,8 +2147,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-mls-storage"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "nostr",
  "openmls",
@@ -2160,8 +2159,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-relay-pool"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "async-utility",
  "async-wsocket",
@@ -2176,8 +2175,8 @@ dependencies = [
 
 [[package]]
 name = "nostr-sdk"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "async-utility",
  "nostr",
@@ -2185,7 +2184,6 @@ dependencies = [
  "nostr-lmdb",
  "nostr-relay-pool",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2253,12 +2251,13 @@ dependencies = [
 
 [[package]]
 name = "nwc"
-version = "0.41.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=02108f792d97c445eb4453a72459515ed2cdb714#02108f792d97c445eb4453a72459515ed2cdb714"
+version = "0.42.0"
+source = "git+https://github.com/rust-nostr/nostr?rev=d7b4e225704337be23b54cde8d91458972ac87c8#d7b4e225704337be23b54cde8d91458972ac87c8"
 dependencies = [
  "async-utility",
  "nostr",
  "nostr-relay-pool",
+ "tracing",
 ]
 
 [[package]]
@@ -2612,7 +2611,7 @@ version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
- "zerocopy 0.8.25",
+ "zerocopy",
 ]
 
 [[package]]
@@ -2975,14 +2974,14 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.26"
+version = "0.23.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df51b5869f3a441595eac5e8ff14d486ff285f7b8c0df8770e49c3b56351f0f0"
+checksum = "7160e3e10bf4535308537f3c4e1641468cd0e485175d6163087c0393c7d46643"
 dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.1",
+ "rustls-webpki 0.103.3",
  "subtle",
  "zeroize",
 ]
@@ -2998,9 +2997,12 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "917ce264624a4b4db1c364dcc35bfca9ded014d0a958cd47ad3e960e988ea51c"
+checksum = "229a4a4c221013e7e1f1a043678c5cc39fe5171437c88fb47151a21e6f5b5c79"
+dependencies = [
+ "zeroize",
+]
 
 [[package]]
 name = "rustls-webpki"
@@ -3014,9 +3016,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.1"
+version = "0.103.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fef8b8769aaccf73098557a87cd1816b4f9c7c16811c9c77142aa695c16f2c03"
+checksum = "e4a72fe2bcf7a6ac6fd7d0b9e5cb68aeb7d4c0a0271730218b3e92d43b4eb435"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -3192,9 +3194,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87607cb1398ed59d48732e575a4c28a7a8ebf2454b964fe3f224f2afc07909e1"
+checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
 dependencies = [
  "serde",
 ]
@@ -3820,7 +3822,7 @@ version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
 dependencies = [
- "rustls 0.23.26",
+ "rustls 0.23.28",
  "tokio",
 ]
 
@@ -3855,12 +3857,12 @@ checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
 dependencies = [
  "futures-util",
  "log",
- "rustls 0.23.26",
+ "rustls 0.23.28",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.2",
  "tungstenite",
- "webpki-roots 0.26.9",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -3878,9 +3880,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.22"
+version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05ae329d1f08c4d17a59bed7ff5b5a769d062e64a62d34a3261b219e62cd5aae"
+checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -3890,18 +3892,18 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.9"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3da5db5a963e24bc68be8b17b6fa82814bb22ee8660f192bb182771d498f09a3"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.22.26"
+version = "0.22.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "310068873db2c5b3e7659d2cc35d21855dbafa50d1ce336397c666e3cb08137e"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
 dependencies = [
  "indexmap",
  "serde",
@@ -3913,9 +3915,9 @@ dependencies = [
 
 [[package]]
 name = "toml_write"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfb942dfe1d8e29a7ee7fcbde5bd2b9a25fb89aa70caea2eba3bee836ff41076"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tower-service"
@@ -4015,7 +4017,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.1",
- "rustls 0.23.26",
+ "rustls 0.23.28",
  "rustls-pki-types",
  "sha1",
  "thiserror 2.0.12",
@@ -4269,9 +4271,18 @@ checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 
 [[package]]
 name = "webpki-roots"
-version = "0.26.9"
+version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29aad86cec885cafd03e8305fd727c418e970a521322c91688414d5b8efba16b"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.1",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8782dd5a41a24eed3a4f40b606249b3e236ca61adf1f25ea4d45c73de122b502"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -4353,7 +4364,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4571,9 +4582,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "0.7.7"
+version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb8234a863ea0e8cd7284fcdd4f145233eb00fee02bbdd9861aec44e6477bc5"
+checksum = "74c7b26e3480b707944fc872477815d29a8e429d2f93a1ce000f5fa84a15cbcd"
 dependencies = [
  "memchr",
 ]
@@ -4647,31 +4658,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.7.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
-dependencies = [
- "zerocopy-derive 0.7.35",
-]
-
-[[package]]
-name = "zerocopy"
 version = "0.8.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1702d9583232ddb9174e01bb7c15a2ab8fb1bc6f227aa1233858c351a3ba0cb"
 dependencies = [
- "zerocopy-derive 0.8.25",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.7.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
+ "zerocopy-derive",
 ]
 
 [[package]]

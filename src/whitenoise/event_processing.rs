@@ -341,12 +341,12 @@ impl Whitenoise {
         let nostr_mls_guard = target_account.nostr_mls.lock().await;
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             match nostr_mls.process_message(&event) {
-                Ok(_message) => {
-                    tracing::debug!(target: "whitenoise::process_mls_message", "Processed MLS message");
+                Ok(result) => {
+                    tracing::debug!(target: "whitenoise::process_mls_message", "Processed MLS message - Result: {:?}", result);
                     Ok(())
                 }
                 Err(e) => {
-                    tracing::error!(target: "whitenoise::process_mls_message", "MLS message processing failed: {}", e);
+                    tracing::error!(target: "whitenoise::process_mls_message", "MLS message processing failed for account {}: {}", target_pubkey.to_hex(), e);
                     Err(WhitenoiseError::NostrMlsError(e))
                 }
             }
