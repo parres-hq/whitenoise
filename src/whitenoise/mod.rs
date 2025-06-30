@@ -455,6 +455,8 @@ impl Whitenoise {
 
 #[cfg(test)]
 pub mod test_utils {
+    use crate::RelayType;
+
     use super::*;
     use accounts::AccountSettings;
     use tempfile::TempDir;
@@ -549,6 +551,15 @@ pub mod test_utils {
             .initialize_nostr_mls_for_account(&account)
             .await
             .unwrap();
+        whitenoise
+            .update_relays(
+                &account,
+                RelayType::Nostr,
+                vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+            )
+            .await
+            .unwrap();
+
         (account, keys)
     }
 }

@@ -77,9 +77,6 @@ pub enum WhitenoiseError {
     #[error("One or more members to remove are not in the group")]
     MembersNotInGroup,
 
-    #[error("Blossom server error")]
-    BlossomError(#[from] nostr_blossom::error::Error),
-
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }

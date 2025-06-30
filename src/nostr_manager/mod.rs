@@ -39,6 +39,8 @@ pub enum NostrManagerError {
     NoRelayConnections,
     #[error("Nostr Event error: {0}")]
     NostrEventBuilderError(#[from] nostr::event::builder::Error),
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +297,18 @@ impl NostrManager {
         relays: &BTreeSet<RelayUrl>,
     ) -> Result<Output<EventId>> {
         Ok(self.client.send_event_to(relays, &event).await?)
+    }
+
+    pub(crate) async fn publish_metadata_for_account(
+        &self,
+        metadata: &Metadata,
+        relays: Vec<RelayUrl>,
+        signer: impl NostrSigner + 'static,
+    ) -> Result<Output<EventId>> {
+        let metadata_json = serde_json::to_string(metadata)?;
+        let event = EventBuilder::new(Kind::Metadata, metadata_json);
+        self.publish_event_builder_with_signer(event.clone(), &relays, signer)
+            .await
     }
 
     /// Publishes a Nostr event using a temporary signer.

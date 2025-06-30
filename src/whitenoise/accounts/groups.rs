@@ -480,14 +480,6 @@ mod tests {
 
         // Setup creator account
         let (creator_account, _creator_keys) = setup_login_account(whitenoise).await;
-        whitenoise
-            .update_relays(
-                &creator_account,
-                RelayType::Nostr,
-                vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
-            )
-            .await
-            .unwrap();
 
         // Setup member accounts
         let member_accounts = setup_multiple_test_accounts(whitenoise, &creator_account, 2).await;

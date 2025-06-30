@@ -71,7 +71,6 @@ base64ct = "=1.7.3"
 derivative = "2.2.0"
 
 [dev-dependencies]
-imghdr = "0.7.0"
 mockito = "1.2"
 tempfile = "3.19.1"
 

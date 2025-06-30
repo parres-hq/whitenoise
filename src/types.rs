@@ -110,17 +110,18 @@ impl MessageWithTokens {
 }
 
 pub enum ImageType {
-    JPG,
-    JPEG,
-    PNG,
+    Jpg,
+    Jpeg,
+    Png,
 }
 
 impl ImageType {
     pub fn content_type(&self) -> String {
         match self {
-            ImageType::JPG => "image/jpg",
-            ImageType::JPEG => "image/jpeg",
-            ImageType::PNG => "image/png",
-        }.to_owned()
+            ImageType::Jpg => "image/jpg",
+            ImageType::Jpeg => "image/jpeg",
+            ImageType::Png => "image/png",
+        }
+        .to_owned()
     }
 }
