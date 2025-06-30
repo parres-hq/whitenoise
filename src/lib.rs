@@ -10,9 +10,9 @@ mod types;
 pub mod whitenoise;
 
 // Re-export main types for library users
+pub use crate::types::MessageWithTokens;
 pub use crate::whitenoise::accounts::relays::RelayType;
 pub use crate::whitenoise::accounts::{Account, AccountSettings, OnboardingState};
-pub use crate::types::MessageWithTokens;
 pub use crate::whitenoise::error::WhitenoiseError;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 
@@ -22,15 +22,15 @@ pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 // and to ensure version compatibility. Whitenoise is tested with nostr crate
 // version as specified in Cargo.toml.
 //
-/// Nostr public key for user identification. Re-exported from [`nostr::PublicKey`](https://docs.rs/nostr/latest/nostr/struct.PublicKey.html).
+/// Nostr public key for user identification. Re-exported from [`nostr::PublicKey`](https://docs.rs/nostr/latest/nostr/key/public_key/struct.PublicKey.html).
 #[doc(alias = "pubkey")]
 #[doc(alias = "public_key")]
 pub use nostr::PublicKey;
 
-/// Nostr event containing signed data. Re-exported from [`nostr::Event`](https://docs.rs/nostr/latest/nostr/struct.Event.html).
+/// Nostr event containing signed data. Re-exported from [`nostr::Event`](https://docs.rs/nostr/latest/nostr/event/struct.Event.html).
 pub use nostr::Event;
 
-/// User profile metadata (name, bio, etc.). Re-exported from [`nostr::Metadata`](https://docs.rs/nostr/latest/nostr/struct.Metadata.html).
+/// User profile metadata (name, bio, etc.). Re-exported from [`nostr::Metadata`](https://docs.rs/nostr/latest/nostr/nips/nip01/struct.Metadata.html).
 #[doc(alias = "profile")]
 pub use nostr::Metadata;
 
@@ -40,8 +40,11 @@ pub use nostr::RelayUrl;
 /// Nostr event kind. Re-exported from [`nostr::Kind`](https://docs.rs/nostr/latest/nostr/struct.Kind.html).
 pub use nostr::Kind;
 
-/// Nostr event tag. Re-exported from [`nostr::Tag`](https://docs.rs/nostr/latest/nostr/struct.Tag.html).
+/// Nostr event tag. Re-exported from [`nostr::Tag`](https://docs.rs/nostr/latest/nostr/event/tag/struct.Tag.html).
 pub use nostr::Tag;
+
+/// Nostr event tags. Re-exported from [`nostr::Tags`](https://docs.rs/nostr/latest/nostr/event/tag/list/struct.Tags.html).
+pub use nostr::Tags;
 
 // Nostr MLS Types
 /// Nostr MLS Group. Re-exported from [`nostr_mls::group_types::Group`](https://docs.rs/nostr-mls/latest/nostr_mls/group_types/struct.Group.html)

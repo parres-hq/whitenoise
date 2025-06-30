@@ -281,7 +281,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing simple text message...");
     let test_message = "Hello from integration test!".to_string();
     let message_with_tokens = whitenoise
-        .send_message(
+        .send_message_to_group(
             &account1.pubkey,
             &test_group.mls_group_id,
             test_message.clone(),
@@ -302,7 +302,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     ];
 
     let tagged_message_with_tokens = whitenoise
-        .send_message(
+        .send_message_to_group(
             &account1.pubkey,
             &test_group.mls_group_id,
             tagged_message.clone(),
@@ -318,7 +318,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing reaction message...");
     let reaction_message = "👍".to_string();
     let reaction_with_tokens = whitenoise
-        .send_message(
+        .send_message_to_group(
             &account1.pubkey,
             &test_group.mls_group_id,
             reaction_message.clone(),
@@ -335,7 +335,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing error handling for non-existent group...");
     let fake_group_id = GroupId::from_slice(&[0u8; 32]);
     let error_result = whitenoise
-        .send_message(
+        .send_message_to_group(
             &account1.pubkey,
             &fake_group_id,
             "This should fail".to_string(),
@@ -493,7 +493,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing messaging after adding members...");
     let post_addition_message = "Welcome to the new members!".to_string();
     let post_addition_message_with_tokens = whitenoise
-        .send_message(
+        .send_message_to_group(
             &account1.pubkey,
             &test_group.mls_group_id,
             post_addition_message.clone(),
