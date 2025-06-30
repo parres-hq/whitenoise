@@ -171,6 +171,7 @@ async fn main() -> Result<(), WhitenoiseError> {
         dark_theme: false,
         dev_mode: true,
         lockdown_mode: true,
+        blossom_profile: None,
     };
     whitenoise
         .update_account_settings(&account1.pubkey, &new_settings)

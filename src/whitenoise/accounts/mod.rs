@@ -1,7 +1,9 @@
 use derivative::Derivative;
 use nostr_mls::prelude::*;
+use nostr_blossom::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -9,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::nostr_manager::NostrManagerError;
+use crate::types::ImageType;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::relays::RelayType;
 use crate::whitenoise::Whitenoise;
@@ -41,6 +44,7 @@ pub struct AccountSettings {
     pub dark_theme: bool,
     pub dev_mode: bool,
     pub lockdown_mode: bool,
+    pub blossom_profile: Option<BlobDescriptor>,
 }
 
 impl Default for AccountSettings {
@@ -49,6 +53,7 @@ impl Default for AccountSettings {
             dark_theme: true,
             dev_mode: false,
             lockdown_mode: false,
+            blossom_profile: None,
         }
     }
 }
@@ -747,6 +752,72 @@ impl Whitenoise {
         serde_json::from_value(settings_json).map_err(WhitenoiseError::from)
     }
 
+    /// Uploads a profile picture to a Blossom server and updates the account settings.
+    ///
+    /// This method performs the following steps:
+    /// 1. Creates a Blossom client for the specified server
+    /// 2. Retrieves the user's Nostr keys for authentication
+    /// 3. Reads the image file from the filesystem
+    /// 4. Uploads the image blob to the Blossom server with the appropriate content type
+    /// 5. Updates the account settings with the returned blob descriptor
+    ///
+    /// The uploaded image becomes the user's profile picture and is referenced by the
+    /// blob descriptor stored in their account settings. The Blossom protocol provides
+    /// content-addressable storage, ensuring the image can be retrieved by its hash.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` of the account uploading the profile picture
+    /// * `server` - The `Url` of the Blossom server to upload to
+    /// * `file_path` - `&str` pointing to the image file to be uploaded
+    /// * `image_type` - The `ImageType` enum specifying the image format (JPG, JPEG, or PNG)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the upload and account update are successful.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if:
+    /// * The account is not found or not logged in
+    /// * The user's Nostr keys cannot be retrieved from the secrets store
+    /// * The image file cannot be read from the filesystem
+    /// * The upload to the Blossom server fails (network error, authentication failure, etc.)
+    /// * The account settings cannot be fetched from the database
+    /// * The account settings cannot be updated in the database
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use url::Url;
+    /// use crate::types::ImageType;
+    ///
+    /// let server_url = Url::parse("http://localhost:3000").unwrap();
+    /// let image_path = "./profile.png";
+    /// 
+    /// whitenoise.upload_profile_picture(
+    ///     &user_pubkey,
+    ///     server_url,
+    ///     image_path,
+    ///     ImageType::PNG
+    /// ).await?;
+    /// ```
+    pub async fn upload_profile_picture(&self, pubkey: &PublicKey, server: Url, file_path: &str, image_type: ImageType) -> Result<()> {
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+        let client = BlossomClient::new(server);
+        let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
+        let data = tokio::fs::read(file_path).await?;
+
+        let descriptor = client.upload_blob(data, Some(image_type.content_type()), None, Some(&keys)).await?;
+
+        let mut settings = self.fetch_account_settings(pubkey).await?;
+        settings.blossom_profile = Some(descriptor);
+
+        self.update_account_settings(pubkey, &settings).await
+    }
+
     /// Initializes the Nostr MLS (Message Layer Security) instance for a given account.
     ///
     /// This method sets up the MLS storage and initializes a new NostrMls instance for secure messaging.
@@ -1249,7 +1320,7 @@ impl Whitenoise {
 mod tests {
     use super::*;
     use crate::whitenoise::test_utils::*;
-    use std::sync::Arc;
+    use std::{path::Path, sync::Arc};
 
     #[tokio::test]
     #[ignore] // To avoid race conditions on `whitenoise` object when tests are run in parallel
@@ -1456,6 +1527,7 @@ mod tests {
                     dark_theme,
                     dev_mode,
                     lockdown_mode,
+                    blossom_profile: None,
                 },
                 onboarding: OnboardingState::default(),
                 last_synced: Timestamp::zero(),
@@ -1464,6 +1536,39 @@ mod tests {
             (account, keys)
         }
     }
+
+    #[tokio::test]
+    async fn test_upload_profile_picture() {
+        use base64::prelude::*;
+        
+        let whitenoise = test_get_whitenoise().await;
+        let (account, _) = setup_login_account(whitenoise).await;
+
+        let img_data = b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        let img_bytes = BASE64_STANDARD.decode(img_data).unwrap();
+        let res = imghdr::from_bytes(&img_bytes).unwrap();
+        assert_eq!(res, imghdr::Type::Png);
+
+        let dir_path = ".test";
+        let file_path = ".test/fake_image.png";
+
+        // 1. Create directory if it doesn't exist
+        if !Path::new(dir_path).exists() {
+            tokio::fs::create_dir(dir_path).await.unwrap();
+        }
+        tokio::fs::write(file_path, &img_bytes).await.unwrap();
+        
+        let server_url = url::Url::parse("https://nosto.re/").unwrap();
+        
+        let result = whitenoise.upload_profile_picture(
+            &account.pubkey,
+            server_url,
+            file_path,
+            crate::types::ImageType::PNG
+        ).await;
+        assert!(result.is_ok(), "{result:?}");
+    }
+    
     #[tokio::test]
     async fn test_multiple_pubkeys() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
