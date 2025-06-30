@@ -49,7 +49,7 @@ impl Whitenoise {
     /// let tags = Some(vec![Tag::hashtag("example")]);
     ///
     /// let message_with_tokens = whitenoise
-    ///     .send_message(&sender_pubkey, &group_id, message_content, kind, tags)
+    ///     .send_message_to_group(&sender_pubkey, &group_id, message_content, kind, tags)
     ///     .await?;
     ///
     /// println!("Sent message: {}", message_with_tokens.message.content);

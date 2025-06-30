@@ -64,7 +64,6 @@ impl NostrManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use serde_json::json;
     use tempfile::TempDir;
     use tokio::sync::mpsc;
 
