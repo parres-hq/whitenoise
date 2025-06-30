@@ -152,7 +152,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     };
 
     whitenoise
-        .update_metadata(&updated_metadata, &account3)
+        .update_metadata(&updated_metadata, &account3.pubkey)
         .await?;
     tracing::info!("✓ Metadata updated successfully");
 

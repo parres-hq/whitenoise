@@ -299,18 +299,6 @@ impl NostrManager {
         Ok(self.client.send_event_to(relays, &event).await?)
     }
 
-    pub(crate) async fn publish_metadata_for_account(
-        &self,
-        metadata: &Metadata,
-        relays: Vec<RelayUrl>,
-        signer: impl NostrSigner + 'static,
-    ) -> Result<Output<EventId>> {
-        let metadata_json = serde_json::to_string(metadata)?;
-        let event = EventBuilder::new(Kind::Metadata, metadata_json);
-        self.publish_event_builder_with_signer(event.clone(), &relays, signer)
-            .await
-    }
-
     /// Publishes a Nostr event using a temporary signer.
     ///
     /// This method allows publishing an event with a signer that is only used for this specific operation.

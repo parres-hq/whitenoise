@@ -1,7 +1,7 @@
 use anyhow::Context;
 use nostr_mls::prelude::*;
-use std::sync::OnceLock;
 use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::OnceCell;
 use tokio::sync::RwLock;
 
 use std::collections::HashMap;
@@ -60,7 +60,7 @@ pub struct Whitenoise {
     shutdown_sender: Sender<()>,
 }
 
-static GLOBAL_WHITENOISE: OnceLock<Whitenoise> = OnceLock::new();
+static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
 
 impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -165,10 +165,11 @@ impl Whitenoise {
     /// # }
     /// ```
     pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<()> {
-        if let Some(_instance) = GLOBAL_WHITENOISE.get() {
-            return Ok(());
-        }
+        // Create event processing channels
+        let (event_sender, event_receiver) = mpsc::channel(500);
+        let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
 
+        let whitenoise_res: Result<&'static Whitenoise> = GLOBAL_WHITENOISE.get_or_try_init(|| async {
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
 
@@ -186,10 +187,6 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::initialize_whitenoise", "Logging initialized in directory: {:?}", logs_dir);
 
         let database = Arc::new(Database::new(data_dir.join("whitenoise.sqlite")).await?);
-
-        // Create event processing channels
-        let (event_sender, event_receiver) = mpsc::channel(500);
-        let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
@@ -216,16 +213,10 @@ impl Whitenoise {
             let mut accounts = whitenoise.write_accounts().await;
             *accounts = loaded_accounts;
         }
+        Ok(whitenoise)
+        }).await;
 
-        // Create Arc and start event processing loop (after accounts are loaded)
-        GLOBAL_WHITENOISE
-            .set(whitenoise)
-            .expect("Whitnoise should never be initialized prior");
-
-        let whitenoise_ref = GLOBAL_WHITENOISE
-            .get()
-            .ok_or(WhitenoiseError::Initialization)?;
-
+        let whitenoise_ref = whitenoise_res?;
         tracing::debug!(
             target: "whitenoise::initialize_whitenoise",
             "Starting event processing loop for loaded accounts"

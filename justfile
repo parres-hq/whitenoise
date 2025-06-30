@@ -13,7 +13,7 @@ int-test:
 
 # Run all tests (unit tests, integration tests, and doc tests)
 test:
-    cargo test --all-features --all-targets
+    cargo test --all-features --all-targets -- --test-threads=1
     cargo test --all-features --doc
 
 # Check clippy
