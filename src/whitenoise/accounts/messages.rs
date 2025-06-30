@@ -57,7 +57,7 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_message(
+    pub async fn send_message_to_group(
         &self,
         sender_pubkey: &PublicKey,
         group_id: &GroupId,
