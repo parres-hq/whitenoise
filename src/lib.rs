@@ -13,7 +13,6 @@ pub mod whitenoise;
 pub use crate::whitenoise::accounts::relays::RelayType;
 pub use crate::whitenoise::accounts::{Account, AccountSettings, OnboardingState};
 pub use crate::types::MessageWithTokens;
-pub use crate::nostr_manager::parser::TokenObject;
 pub use crate::whitenoise::error::WhitenoiseError;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 

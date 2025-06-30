@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 /// Serializable Token
 /// This is a parallel of the `Token` enum from the `nostr` crate, modified so that we can serialize it for use in commands and the DB
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(into = "TokenObject", from = "TokenObject")]
 pub enum SerializableToken {
     /// Nostr URI converted to a string
     Nostr(String),
@@ -23,61 +22,6 @@ pub enum SerializableToken {
     LineBreak,
     /// A whitespace
     Whitespace,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-enum TokenObject {
-    Text {
-        #[serde(rename = "Text")]
-        text: String,
-    },
-    Url {
-        #[serde(rename = "Url")]
-        url: String,
-    },
-    Hashtag {
-        #[serde(rename = "Hashtag")]
-        hashtag: String,
-    },
-    Nostr {
-        #[serde(rename = "Nostr")]
-        nostr: String,
-    },
-    LineBreak {
-        #[serde(rename = "LineBreak")]
-        line_break: Option<()>,
-    },
-    Whitespace {
-        #[serde(rename = "Whitespace")]
-        whitespace: Option<()>,
-    },
-}
-
-impl From<SerializableToken> for TokenObject {
-    fn from(token: SerializableToken) -> Self {
-        match token {
-            SerializableToken::Text(s) => TokenObject::Text { text: s },
-            SerializableToken::Url(s) => TokenObject::Url { url: s },
-            SerializableToken::Hashtag(s) => TokenObject::Hashtag { hashtag: s },
-            SerializableToken::Nostr(s) => TokenObject::Nostr { nostr: s },
-            SerializableToken::LineBreak => TokenObject::LineBreak { line_break: None },
-            SerializableToken::Whitespace => TokenObject::Whitespace { whitespace: None },
-        }
-    }
-}
-
-impl From<TokenObject> for SerializableToken {
-    fn from(obj: TokenObject) -> Self {
-        match obj {
-            TokenObject::Text { text } => SerializableToken::Text(text),
-            TokenObject::Url { url } => SerializableToken::Url(url),
-            TokenObject::Hashtag { hashtag } => SerializableToken::Hashtag(hashtag),
-            TokenObject::Nostr { nostr } => SerializableToken::Nostr(nostr),
-            TokenObject::LineBreak { .. } => SerializableToken::LineBreak,
-            TokenObject::Whitespace { .. } => SerializableToken::Whitespace,
-        }
-    }
 }
 
 // We use From instead of TryFrom because we want to show an error if the underlying token enum changes.
@@ -120,7 +64,7 @@ impl NostrManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    // use serde_json::json;
     use tempfile::TempDir;
     use tokio::sync::mpsc;
 
@@ -260,130 +204,6 @@ mod tests {
                 SerializableToken::Text("Bye!".to_string()),
             ]
         );
-    }
-
-    #[test]
-    fn test_token_to_token_object_conversion() {
-        let tokens = vec![
-            SerializableToken::Text("Hello".to_string()),
-            SerializableToken::Whitespace,
-            SerializableToken::Hashtag("nostr".to_string()),
-            SerializableToken::LineBreak,
-            SerializableToken::Url("https://example.com".to_string()),
-            SerializableToken::Nostr("nostr:npub1...".to_string()),
-        ];
-
-        for token in tokens {
-            let token_object: TokenObject = token.clone().into();
-            let back_to_token: SerializableToken = token_object.into();
-            assert_eq!(token, back_to_token);
-        }
-    }
-
-    #[test]
-    fn test_token_object_serialization() {
-        let token = SerializableToken::Text("Hello".to_string());
-        let token_object: TokenObject = token.into();
-        let json = serde_json::to_value(&token_object).unwrap();
-
-        assert_eq!(
-            json,
-            json!({
-                "type": "Text",
-                "Text": "Hello"
-            })
-        );
-
-        let token = SerializableToken::Hashtag("nostr".to_string());
-        let token_object: TokenObject = token.into();
-        let json = serde_json::to_value(&token_object).unwrap();
-
-        assert_eq!(
-            json,
-            json!({
-                "type": "Hashtag",
-                "Hashtag": "nostr"
-            })
-        );
-
-        let token = SerializableToken::LineBreak;
-        let token_object: TokenObject = token.into();
-        let json = serde_json::to_value(&token_object).unwrap();
-
-        assert_eq!(
-            json,
-            json!({
-                "type": "LineBreak",
-                "LineBreak": null
-            })
-        );
-
-        let token = SerializableToken::Whitespace;
-        let token_object: TokenObject = token.into();
-        let json = serde_json::to_value(&token_object).unwrap();
-
-        assert_eq!(
-            json,
-            json!({
-                "type": "Whitespace",
-                "Whitespace": null
-            })
-        );
-    }
-
-    #[test]
-    fn test_token_object_deserialization() {
-        let json = json!({
-            "type": "Text",
-            "Text": "Hello"
-        });
-        let token_object: TokenObject = serde_json::from_value(json).unwrap();
-        let token: SerializableToken = token_object.into();
-        assert_eq!(token, SerializableToken::Text("Hello".to_string()));
-
-        let json = json!({
-            "type": "Hashtag",
-            "Hashtag": "nostr"
-        });
-        let token_object: TokenObject = serde_json::from_value(json).unwrap();
-        let token: SerializableToken = token_object.into();
-        assert_eq!(token, SerializableToken::Hashtag("nostr".to_string()));
-
-        let json = json!({
-            "type": "LineBreak",
-            "LineBreak": null
-        });
-        let token_object: TokenObject = serde_json::from_value(json).unwrap();
-        let token: SerializableToken = token_object.into();
-        assert_eq!(token, SerializableToken::LineBreak);
-
-        let json = json!({
-            "type": "Whitespace",
-            "Whitespace": null
-        });
-        let token_object: TokenObject = serde_json::from_value(json).unwrap();
-        let token: SerializableToken = token_object.into();
-        assert_eq!(token, SerializableToken::Whitespace);
-    }
-
-    #[test]
-    fn test_roundtrip_serialization() {
-        let tokens = vec![
-            SerializableToken::Text("Hello".to_string()),
-            SerializableToken::Whitespace,
-            SerializableToken::Hashtag("nostr".to_string()),
-            SerializableToken::LineBreak,
-            SerializableToken::Url("https://example.com".to_string()),
-            SerializableToken::Nostr("nostr:npub1...".to_string()),
-        ];
-
-        for token in tokens {
-            let token_object: TokenObject = token.clone().into();
-            let json = serde_json::to_value(&token_object).unwrap();
-            let deserialized_object: TokenObject = serde_json::from_value(json).unwrap();
-            let back_to_token: SerializableToken = deserialized_object.into();
-            assert_eq!(token, back_to_token, "Failed for token: {:?}", token);
-        }
     }
 
     #[tokio::test]
