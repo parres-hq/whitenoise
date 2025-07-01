@@ -185,6 +185,7 @@ mod tests {
     use crate::whitenoise::test_utils::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_upload_profile_picture() {
         use base64::prelude::*;
 

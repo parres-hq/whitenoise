@@ -488,7 +488,6 @@ pub mod test_utils {
     ///   - `Whitenoise`: The mock Whitenoise instance
     ///   - `TempDir`: The temporary directory for data storage
     ///   - `TempDir`: The temporary directory for log storage
-    ///
     pub(crate) async fn create_mock_whitenoise() -> (Whitenoise, TempDir, TempDir) {
         // Wait for local relays to be ready in test environment
         wait_for_test_relays().await;
@@ -591,7 +590,9 @@ pub mod test_utils {
     }
 
     /// Test if a relay is ready by attempting a simple connection
-    async fn test_relay_connection(relay_url: &str) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn test_relay_connection(
+        relay_url: &str,
+    ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use nostr_sdk::prelude::*;
 
         // Create a minimal client for testing connection
@@ -608,7 +609,7 @@ pub mod test_utils {
         let relay_url_parsed = RelayUrl::parse(relay_url)?;
         match client.relay(&relay_url_parsed).await {
             Ok(_) => Ok(()),
-            Err(e) => Err(e.into())
+            Err(e) => Err(e.into()),
         }
     }
 
