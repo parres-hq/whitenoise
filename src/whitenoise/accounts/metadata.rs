@@ -2,7 +2,6 @@ use crate::types::ImageType;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
 use crate::RelayType;
-use nostr::hashes::sha256::Hash as Sha256Hash;
 use nostr_blossom::prelude::*;
 use nostr_sdk::prelude::*;
 
@@ -96,29 +95,28 @@ impl Whitenoise {
         Ok(())
     }
 
-    /// Uploads a profile picture to a Blossom server and updates the account settings.
+    /// Uploads a profile picture to a Blossom server.
     ///
     /// This method performs the following steps:
     /// 1. Creates a Blossom client for the specified server
     /// 2. Retrieves the user's Nostr keys for authentication
     /// 3. Reads the image file from the filesystem
     /// 4. Uploads the image blob to the Blossom server with the appropriate content type
-    /// 5. Updates the account settings with the returned blob descriptor
     ///
-    /// The uploaded image becomes the user's profile picture and is referenced by the
-    /// blob descriptor stored in their account settings. The Blossom protocol provides
-    /// content-addressable storage, ensuring the image can be retrieved by its hash.
+    /// The Blossom protocol provides content-addressable storage, ensuring the image
+    /// can be retrieved by its hash. This method only handles the upload process and
+    /// does not automatically update the user's metadata.
     ///
     /// # Arguments
     ///
     /// * `pubkey` - A reference to the `PublicKey` of the account uploading the profile picture
     /// * `server` - The `Url` of the Blossom server to upload to
     /// * `file_path` - `&str` pointing to the image file to be uploaded
-    /// * `image_type` - The `ImageType` enum specifying the image format (JPG, JPEG, or PNG)
+    /// * `image_type` - The `ImageType` enum specifying the image format (JPG, JPEG, PNG, GIF, or WebP)
     ///
     /// # Returns
     ///
-    /// Returns Ok(Sha256Hash) of the image uploaded to blossom server
+    /// Returns `Ok(String)` containing the full URL of the uploaded image
     ///
     /// # Errors
     ///
@@ -127,8 +125,6 @@ impl Whitenoise {
     /// * The user's Nostr keys cannot be retrieved from the secrets store
     /// * The image file cannot be read from the filesystem
     /// * The upload to the Blossom server fails (network error, authentication failure, etc.)
-    /// * The account settings cannot be fetched from the database
-    /// * The account settings cannot be updated in the database
     ///
     /// # Example
     ///
@@ -139,11 +135,11 @@ impl Whitenoise {
     /// let server_url = Url::parse("http://localhost:3000").unwrap();
     /// let image_path = "./profile.png";
     ///
-    /// whitenoise.upload_profile_picture(
+    /// let image_url = whitenoise.upload_profile_picture(
     ///     &user_pubkey,
     ///     server_url,
     ///     image_path,
-    ///     ImageType::PNG
+    ///     ImageType::Png
     /// ).await?;
     /// ```
     pub async fn upload_profile_picture(
@@ -152,7 +148,7 @@ impl Whitenoise {
         server: Url,
         file_path: &str,
         image_type: ImageType,
-    ) -> Result<Sha256Hash> {
+    ) -> Result<String> {
         if !self.logged_in(&pubkey).await {
             return Err(WhitenoiseError::AccountNotFound);
         }
@@ -165,15 +161,7 @@ impl Whitenoise {
             .await
             .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
 
-        // Publish updated MetaData event
-        let some_metadata = self.fetch_metadata(pubkey).await?;
-        let mut metadata = some_metadata.ok_or(WhitenoiseError::AccountNotAuthorized)?;
-
-        metadata.picture = Some(descriptor.url.to_string());
-
-        self.update_metadata(&metadata, &pubkey).await?;
-
-        Ok(descriptor.sha256)
+        Ok(descriptor.url.to_string())
     }
 }
 
@@ -240,10 +228,13 @@ mod tests {
             .await;
         assert!(result.is_ok(), "{result:?}");
 
-        // Check if the blob is available in the blossom server
-        let hash = result.unwrap();
-        let client = BlossomClient::new(server_url);
-        assert!(client.has_blob(hash, None, Some(&keys)).await.unwrap());
+        // Verify we got a URL back
+        let image_url = result.unwrap();
+        assert!(image_url.starts_with("http"), "Should return a valid URL");
+        assert!(
+            image_url.contains("localhost:3000"),
+            "Should use the specified server"
+        );
     }
 
     #[tokio::test]
