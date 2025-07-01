@@ -39,6 +39,7 @@ nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="
     "nip59",
 ] }
 nwc = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8" }
+nostr-blossom = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8" }
 
 # LOCAL RUST_NOSTR FOR DEVELOPMENT
 # nostr = { version = "0.42", path="../rust-nostr/crates/nostr", features = [ "std" ] }

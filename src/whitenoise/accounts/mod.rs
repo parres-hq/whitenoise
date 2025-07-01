@@ -1,7 +1,9 @@
 use derivative::Derivative;
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -16,6 +18,7 @@ use crate::whitenoise::Whitenoise;
 pub mod contacts;
 pub mod groups;
 pub mod messages;
+pub mod metadata;
 pub mod relays;
 
 #[derive(Error, Debug)]
@@ -835,23 +838,8 @@ impl Whitenoise {
             display_name: Some(petname),
             ..Default::default()
         };
-        // Publish a metadata event to Nostr
-        let metadata_json = serde_json::to_string(&metadata)?;
-        let event = EventBuilder::new(Kind::Metadata, metadata_json);
-        let keys = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
-        // Get relays with fallback to defaults (expected during onboarding)
-        let relays_to_use = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
-            .await?;
-
-        let result = self
-            .nostr
-            .publish_event_builder_with_signer(event.clone(), &relays_to_use, keys)
-            .await?;
-        tracing::debug!(target: "whitenoise::onboard_new_account", "Published metadata event to Nostr: {:?}", result);
+        self.update_metadata(&metadata, &account.pubkey).await?;
 
         // Also publish relay lists to Nostr
         self.publish_relay_list_for_account(account, default_relays.clone(), RelayType::Nostr)
@@ -1252,7 +1240,6 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    #[ignore] // To avoid race conditions on `whitenoise` object when tests are run in parallel
     async fn test_login_after_delete_all_data() {
         let whitenoise = test_get_whitenoise().await;
 
@@ -1464,6 +1451,7 @@ mod tests {
             (account, keys)
         }
     }
+
     #[tokio::test]
     async fn test_multiple_pubkeys() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
