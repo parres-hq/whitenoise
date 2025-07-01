@@ -113,6 +113,8 @@ pub enum ImageType {
     Jpg,
     Jpeg,
     Png,
+    Gif,
+    Webp,
 }
 
 impl ImageType {
@@ -121,6 +123,8 @@ impl ImageType {
             ImageType::Jpg => "image/jpg",
             ImageType::Jpeg => "image/jpeg",
             ImageType::Png => "image/png",
+            ImageType::Gif => "image/gif",
+            ImageType::Webp => "image/webp",
         }
         .to_owned()
     }

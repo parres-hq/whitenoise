@@ -99,7 +99,7 @@ impl NostrManager {
         event_sender: Sender<crate::types::ProcessableEvent>,
         connect_to_relays: bool,
     ) -> Result<Self> {
-        let opts = Options::default();
+        let opts = ClientOptions::default();
 
         // Initialize the client with the appropriate database based on platform
         let client = {
