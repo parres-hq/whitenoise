@@ -28,18 +28,18 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-nostr = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8", features = [ "std" ] }
-nostr-mls = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8" }
-nostr-mls-sqlite-storage = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8" }
-nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8", features = [
+nostr = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="102388eb1d613b59e45b5b683f01da4959665692", features = [ "std" ] }
+nostr-mls = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="102388eb1d613b59e45b5b683f01da4959665692" }
+nostr-mls-sqlite-storage = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="102388eb1d613b59e45b5b683f01da4959665692" }
+nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="102388eb1d613b59e45b5b683f01da4959665692", features = [
     "lmdb",
     "nip04",
     "nip44",
     "nip47",
     "nip59",
 ] }
-nwc = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8" }
-nostr-blossom = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="d7b4e225704337be23b54cde8d91458972ac87c8" }
+nwc = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="102388eb1d613b59e45b5b683f01da4959665692" }
+nostr-blossom = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev="102388eb1d613b59e45b5b683f01da4959665692" }
 
 # LOCAL RUST_NOSTR FOR DEVELOPMENT
 # nostr = { version = "0.42", path="../rust-nostr/crates/nostr", features = [ "std" ] }

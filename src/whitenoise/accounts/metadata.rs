@@ -185,13 +185,36 @@ mod tests {
     use crate::whitenoise::test_utils::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_upload_profile_picture() {
         use base64::prelude::*;
 
-        let whitenoise = test_get_whitenoise().await;
-        let (mut account, keys) = setup_login_account(whitenoise).await;
-        whitenoise.onboard_new_account(&mut account).await.unwrap();
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Login to the account so that logged_in() returns true
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create initial metadata so that upload_profile_picture can update it
+        let initial_metadata = Metadata {
+            name: Some("Test User".to_string()),
+            ..Default::default()
+        };
+        whitenoise
+            .update_metadata(&initial_metadata, &account.pubkey)
+            .await
+            .unwrap();
 
         let img_data = b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
         let img_bytes = BASE64_STANDARD.decode(img_data).unwrap();
