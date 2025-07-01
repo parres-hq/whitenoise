@@ -476,13 +476,23 @@ pub mod test_utils {
         (account, keys)
     }
 
-    // Mock Whitenoise creation that minimizes network calls
-    // NOTE: This still creates a real NostrManager which will attempt to connect to localhost relays
-    // For true isolation, we should:
-    // 1. Create a NostrManagerTrait and MockNostrManager implementation
-    // 2. Use dependency injection in Whitenoise::new() to accept a NostrManager trait object
-    // 3. Set up test-specific relay configurations that don't attempt network connections
+    /// Creates a mock Whitenoise instance for testing.
+    ///
+    /// This function creates a Whitenoise instance with a minimal configuration and database.
+    /// It also creates a NostrManager instance that connects to the local test relays.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// - `(Whitenoise, TempDir, TempDir)`
+    ///   - `Whitenoise`: The mock Whitenoise instance
+    ///   - `TempDir`: The temporary directory for data storage
+    ///   - `TempDir`: The temporary directory for log storage
+    ///
     pub(crate) async fn create_mock_whitenoise() -> (Whitenoise, TempDir, TempDir) {
+        // Wait for local relays to be ready in test environment
+        wait_for_test_relays().await;
+
         let (config, data_temp, logs_temp) = create_test_config();
 
         // Create directories manually to avoid issues
@@ -503,9 +513,9 @@ pub mod test_utils {
         let (event_sender, _event_receiver) = mpsc::channel(10);
         let (shutdown_sender, _shutdown_receiver) = mpsc::channel(1);
 
-        // Create NostrManager for testing - use the test-friendly constructor
-        // that doesn't require relay connections
-        let nostr = NostrManager::new_without_connection(
+        // Create NostrManager for testing - now with actual relay connections
+        // to use the local development relays running in docker
+        let nostr = NostrManager::new_with_connections(
             config.data_dir.join("test_nostr"),
             event_sender.clone(),
         )
@@ -523,6 +533,83 @@ pub mod test_utils {
         };
 
         (whitenoise, data_temp, logs_temp)
+    }
+
+    /// Wait for local test relays to be ready
+    async fn wait_for_test_relays() {
+        use std::time::Duration;
+        use tokio::time::{sleep, timeout};
+
+        // Only wait for relays in debug builds (where we use localhost relays)
+        if !cfg!(debug_assertions) {
+            return;
+        }
+
+        tracing::debug!(target: "whitenoise::test_utils", "Waiting for local test relays to be ready...");
+
+        let relay_urls = vec!["ws://localhost:8080", "ws://localhost:7777"];
+
+        for relay_url in relay_urls {
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 10;
+            const WAIT_INTERVAL: Duration = Duration::from_millis(500);
+
+            while attempts < MAX_ATTEMPTS {
+                // Try to establish a WebSocket connection to test readiness
+                match timeout(Duration::from_secs(2), test_relay_connection(relay_url)).await {
+                    Ok(Ok(())) => {
+                        tracing::debug!(target: "whitenoise::test_utils", "Relay {} is ready", relay_url);
+                        break;
+                    }
+                    Ok(Err(e)) => {
+                        tracing::debug!(target: "whitenoise::test_utils",
+                            "Relay {} not ready yet (attempt {}/{}): {:?}",
+                            relay_url, attempts + 1, MAX_ATTEMPTS, e);
+                    }
+                    Err(_) => {
+                        tracing::debug!(target: "whitenoise::test_utils",
+                            "Relay {} connection timeout (attempt {}/{})",
+                            relay_url, attempts + 1, MAX_ATTEMPTS);
+                    }
+                }
+
+                attempts += 1;
+                if attempts < MAX_ATTEMPTS {
+                    sleep(WAIT_INTERVAL).await;
+                }
+            }
+
+            if attempts >= MAX_ATTEMPTS {
+                tracing::warn!(target: "whitenoise::test_utils",
+                    "Relay {} may not be fully ready after {} attempts", relay_url, MAX_ATTEMPTS);
+            }
+        }
+
+        // Give relays a bit more time to stabilize
+        sleep(Duration::from_millis(100)).await;
+        tracing::debug!(target: "whitenoise::test_utils", "Relay readiness check completed");
+    }
+
+    /// Test if a relay is ready by attempting a simple connection
+    async fn test_relay_connection(relay_url: &str) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use nostr_sdk::prelude::*;
+
+        // Create a minimal client for testing connection
+        let client = Client::default();
+        client.add_relay(relay_url).await?;
+
+        // Try to connect - this will fail if relay isn't ready
+        client.connect().await;
+
+        // Give it a moment to establish connection
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Check if we're connected
+        let relay_url_parsed = RelayUrl::parse(relay_url)?;
+        match client.relay(&relay_url_parsed).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into())
+        }
     }
 
     pub(crate) async fn test_get_whitenoise() -> &'static Whitenoise {

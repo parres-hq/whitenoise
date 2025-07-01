@@ -152,18 +152,19 @@ impl NostrManager {
                                 // Extract events and send to Whitenoise queue
                                 match message {
                                     RelayMessage::Event { subscription_id, event } => {
-                                        if let Err(e) = sender
+                                        if let Err(_e) = sender
                                             .send(ProcessableEvent::new_nostr_event(
                                                 event.as_ref().clone(),
                                                 Some(subscription_id.to_string()),
                                             ))
                                             .await
                                         {
-                                            tracing::error!(
+                                            // SendError only occurs when channel is closed, so exit gracefully
+                                            tracing::debug!(
                                                 target: "whitenoise::nostr_client::handle_notifications",
-                                                "Failed to queue event: {}",
-                                                e
+                                                "Event channel closed, exiting notification handler"
                                             );
+                                            return Ok(true); // Exit notification loop
                                         }
                                     }
                                     _ => {
@@ -180,15 +181,16 @@ impl NostrManager {
                                             _ => "Unknown".to_string(),
                                         };
 
-                                        if let Err(e) = sender
+                                        if let Err(_e) = sender
                                             .send(ProcessableEvent::RelayMessage(relay_url, message_str))
                                             .await
                                         {
-                                            tracing::error!(
+                                            // SendError only occurs when channel is closed, so exit gracefully
+                                            tracing::debug!(
                                                 target: "whitenoise::nostr_client::handle_notifications",
-                                                "Failed to queue message: {}",
-                                                e
+                                                "Message channel closed, exiting notification handler"
                                             );
+                                            return Ok(true); // Exit notification loop
                                         }
                                     }
                                 }

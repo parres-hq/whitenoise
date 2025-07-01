@@ -476,13 +476,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_group() {
-        let whitenoise = test_get_whitenoise().await;
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Setup creator account
-        let (creator_account, _creator_keys) = setup_login_account(whitenoise).await;
+        let (creator_account, _creator_keys) = setup_login_account(&whitenoise).await;
 
         // Setup member accounts
-        let member_accounts = setup_multiple_test_accounts(whitenoise, &creator_account, 2).await;
+        let member_accounts = setup_multiple_test_accounts(&whitenoise, &creator_account, 2).await;
         let member_pubkeys: Vec<PublicKey> =
             member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
 
@@ -494,7 +494,7 @@ mod tests {
 
         // Test for success case
         case_create_group_success(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
@@ -506,7 +506,7 @@ mod tests {
         // Test case: Account not found (not logged in)
         let (unlogged_account, _unused_keys) = create_test_account();
         case_create_group_account_not_found(
-            whitenoise,
+            &whitenoise,
             &unlogged_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
@@ -527,7 +527,7 @@ mod tests {
             *nostr_mls_guard = None;
         }
         case_create_group_nostr_mls_not_initialized(
-            whitenoise,
+            &whitenoise,
             &uninitialized_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
@@ -539,7 +539,7 @@ mod tests {
         // Test case: Key package fetch fails (invalid member)
         let invalid_member_pubkey = create_test_keys().public_key();
         case_create_group_key_package_fetch_fails(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             vec![invalid_member_pubkey],
             admin_pubkeys.clone(),
@@ -550,7 +550,7 @@ mod tests {
 
         // Test case: Empty admin list
         case_create_group_empty_admin_list(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             vec![], // Empty admin list
@@ -562,7 +562,7 @@ mod tests {
         // Test case: Invalid admin pubkey (not a member)
         let non_member_pubkey = create_test_keys().public_key();
         case_create_group_invalid_admin_pubkey(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             vec![creator_account.pubkey, non_member_pubkey],
@@ -572,13 +572,13 @@ mod tests {
         .await;
 
         // Test case: Welcome message fails (no relays)
-        let (no_relay_creator, _keys) = setup_login_account(whitenoise).await;
+        let (no_relay_creator, _keys) = setup_login_account(&whitenoise).await;
         whitenoise
             .update_relays(&no_relay_creator, RelayType::Nostr, vec![])
             .await
             .unwrap();
         case_create_group_welcome_message_fails(
-            whitenoise,
+            &whitenoise,
             &no_relay_creator,
             member_pubkeys.clone(),
             vec![no_relay_creator.pubkey],
