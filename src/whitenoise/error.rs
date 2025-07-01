@@ -44,6 +44,9 @@ pub enum WhitenoiseError {
     #[error("Invalid event: {0}")]
     InvalidEvent(String),
 
+    #[error("Invalid public key")]
+    InvalidPublicKey,
+
     #[error("Secrets store error: {0}")]
     SecretsStore(#[from] SecretsStoreError),
 

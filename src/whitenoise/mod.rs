@@ -13,6 +13,7 @@ pub mod database;
 pub mod error;
 mod event_processing;
 pub mod secrets_store;
+pub mod utils;
 
 use crate::init_tracing;
 use crate::nostr_manager::NostrManager;
