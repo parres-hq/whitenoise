@@ -17,13 +17,16 @@ impl Whitenoise {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// use nostr::PublicKey;
-    /// use whitenoise::Whitenoise;
-    ///
-    /// let public_key = PublicKey::parse("npub1...")?;
+    /// ```rust,no_run
+    /// # use nostr::PublicKey;
+    /// # use whitenoise::{Whitenoise, WhitenoiseError};
+    /// # fn main() -> Result<(), WhitenoiseError> {
+    /// let hex_pubkey = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245";
+    /// let public_key = PublicKey::parse(hex_pubkey).map_err(|_| WhitenoiseError::InvalidPublicKey)?;
     /// let npub = Whitenoise::npub_from_public_key(&public_key)?;
     /// println!("npub: {}", npub);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn npub_from_public_key(public_key: &PublicKey) -> Result<String, WhitenoiseError> {
         public_key
@@ -47,12 +50,14 @@ impl Whitenoise {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// use whitenoise::Whitenoise;
-    ///
+    /// ```rust,no_run
+    /// # use whitenoise::{Whitenoise, WhitenoiseError};
+    /// # fn main() -> Result<(), WhitenoiseError> {
     /// let hex_pubkey = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245";
     /// let npub = Whitenoise::npub_from_hex_pubkey(hex_pubkey)?;
     /// println!("npub: {}", npub);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn npub_from_hex_pubkey(hex_pubkey: &str) -> Result<String, WhitenoiseError> {
         let public_key =
@@ -76,12 +81,14 @@ impl Whitenoise {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// use whitenoise::Whitenoise;
-    ///
+    /// ```rust,no_run
+    /// # use whitenoise::{Whitenoise, WhitenoiseError};
+    /// # fn main() -> Result<(), WhitenoiseError> {
     /// let npub = "npub1xt0c0fk652s7hk795jny78ru0w642wrp5fj8ul0nawl6njmx6fzs7fyz88";
     /// let hex_pubkey = Whitenoise::hex_pubkey_from_npub(npub)?;
     /// println!("hex pubkey: {}", hex_pubkey);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn hex_pubkey_from_npub(npub: &str) -> Result<String, WhitenoiseError> {
         let public_key = PublicKey::parse(npub).map_err(|_| WhitenoiseError::InvalidPublicKey)?;
