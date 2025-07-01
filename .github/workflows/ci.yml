@@ -65,7 +65,7 @@ jobs:
           docker-compose ps
           echo "Testing basic connectivity:"
           curl -f -m 5 http://localhost:8080 && echo "✓ nostr-rs-relay responding to HTTP"
-          curl -f -m 5 http://localhost:3000 && echo "✓ blossom server responding to HTTP"  
+          curl -f -m 5 http://localhost:3000 && echo "✓ blossom server responding to HTTP"
           curl -f -m 5 http://localhost:7777 && echo "✓ strfry-nostr-relay responding to HTTP"
           echo "Basic connectivity tests completed"
 
@@ -87,9 +87,13 @@ jobs:
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
         run: cargo +nightly-2025-03-12 clippy --all-targets --all-features --no-deps -- -D warnings
 
-      - name: Test native
-        if: matrix.target == 'native'
-        run: cargo test --all-features
+      - name: Test
+        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
+        run: RUST_LOG=error cargo test --all-features --all-targets
+
+      - name: Test Docs
+        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
+        run: RUST_LOG=error cargo test --all-features --doc
 
       - name: Stop Docker Compose services
         if: always() && runner.os == 'Linux'
