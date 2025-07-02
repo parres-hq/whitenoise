@@ -190,6 +190,7 @@ mod tests {
             is_deleted: false,
             content_tokens: vec![],
             reactions: ReactionSummary::default(),
+            kind: 9, // Default to MLS group chat
         }
     }
 

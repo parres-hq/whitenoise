@@ -235,6 +235,7 @@ mod integration_tests {
             is_deleted: false,
             content_tokens: vec![],
             reactions: ReactionSummary::default(),
+            kind: 9, // Default to MLS group chat
         };
 
         // Test serialization
@@ -262,6 +263,7 @@ mod integration_tests {
             is_deleted: false,
             content_tokens: vec![],
             reactions: ReactionSummary::default(),
+            kind: 9, // Default to MLS group chat
         };
 
         let message2 = message1.clone();
