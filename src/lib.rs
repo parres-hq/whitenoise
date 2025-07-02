@@ -12,6 +12,7 @@ pub mod whitenoise;
 // Re-export main types for library users
 pub use crate::types::ImageType;
 pub use crate::types::MessageWithTokens;
+pub use crate::nostr_manager::parser::SerializableToken;
 pub use crate::whitenoise::accounts::relays::RelayType;
 pub use crate::whitenoise::accounts::{Account, AccountSettings, OnboardingState};
 pub use crate::whitenoise::error::WhitenoiseError;
