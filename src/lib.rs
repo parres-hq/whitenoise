@@ -19,6 +19,7 @@ pub use crate::whitenoise::error::WhitenoiseError;
 pub use nostr_mls::groups::NostrGroupConfigData;
 pub use crate::whitenoise::message_aggregator::{ChatMessage, EmojiReaction, ReactionSummary, UserReaction};
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
+pub use nostr_mls::groups::NostrGroupConfigData;
 
 // Re-export nostr types with documentation
 //
