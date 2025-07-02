@@ -178,7 +178,7 @@ impl Whitenoise {
         }
 
         self.nostr
-            .setup_group_messages_subscriptions_with_signer(pubkey, group_relays, group_ids, keys)
+            .setup_group_messages_subscriptions_with_signer(*pubkey, group_relays, group_ids, keys)
             .await
             .map_err(WhitenoiseError::from)?;
 
