@@ -31,7 +31,7 @@ impl Whitenoise {
     /// ```rust,no_run
     /// # use nostr::PublicKey;
     /// # use crate::whitenoise::Whitenoise;
-    /// # async fn example(whitenoise: &Whitenoise, pubkey: PublicKey) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, pubkey: &PublicKey) -> Result<(), Box<dyn std::error::Error>> {
     /// let welcome_event_id = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     /// let welcome = whitenoise.fetch_welcome(pubkey, welcome_event_id.to_string()).await?;
     /// println!("Found welcome invitation for group");
@@ -40,13 +40,13 @@ impl Whitenoise {
     /// ```
     pub async fn fetch_welcome(
         &self,
-        pubkey: PublicKey,
+        pubkey: &PublicKey,
         welcome_event_id: String,
     ) -> Result<welcome_types::Welcome> {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.fetch_account(&pubkey).await?;
+        let account = self.fetch_account(pubkey).await?;
 
         let nostr_mls_guard = account.nostr_mls.lock().await;
         let nostr_mls = nostr_mls_guard
@@ -83,7 +83,7 @@ impl Whitenoise {
     /// ```rust,no_run
     /// # use nostr::PublicKey;
     /// # use crate::whitenoise::Whitenoise;
-    /// # async fn example(whitenoise: &Whitenoise, pubkey: PublicKey) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, pubkey: &PublicKey) -> Result<(), Box<dyn std::error::Error>> {
     /// let welcomes = whitenoise.fetch_welcomes(pubkey).await?;
     /// println!("Found {} pending welcome invitations", welcomes.len());
     /// for welcome in welcomes {
@@ -92,8 +92,8 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn fetch_welcomes(&self, pubkey: PublicKey) -> Result<Vec<welcome_types::Welcome>> {
-        let account = self.fetch_account(&pubkey).await?;
+    pub async fn fetch_welcomes(&self, pubkey: &PublicKey) -> Result<Vec<welcome_types::Welcome>> {
+        let account = self.fetch_account(pubkey).await?;
 
         let nostr_mls_guard = account.nostr_mls.lock().await;
         let nostr_mls = nostr_mls_guard
@@ -134,17 +134,17 @@ impl Whitenoise {
     /// ```rust,no_run
     /// # use nostr::PublicKey;
     /// # use crate::whitenoise::Whitenoise;
-    /// # async fn example(whitenoise: &Whitenoise, pubkey: PublicKey) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, pubkey: &PublicKey) -> Result<(), Box<dyn std::error::Error>> {
     /// let welcome_event_id = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     /// whitenoise.accept_welcome(pubkey, welcome_event_id.to_string()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn accept_welcome(&self, pubkey: PublicKey, welcome_event_id: String) -> Result<()> {
+    pub async fn accept_welcome(&self, pubkey: &PublicKey, welcome_event_id: String) -> Result<()> {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.fetch_account(&pubkey).await?;
+        let account = self.fetch_account(pubkey).await?;
         let keys = self.secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
 
         let group_ids: Vec<String>;
@@ -213,17 +213,17 @@ impl Whitenoise {
     /// ```rust,no_run
     /// # use nostr::PublicKey;
     /// # use crate::whitenoise::Whitenoise;
-    /// # async fn example(whitenoise: &Whitenoise, pubkey: PublicKey) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, pubkey: &PublicKey) -> Result<(), Box<dyn std::error::Error>> {
     /// let welcome_event_id = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     /// whitenoise.decline_welcome(pubkey, welcome_event_id.to_string()).await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn decline_welcome(&self, pubkey: PublicKey, welcome_event_id: String) -> Result<()> {
+    pub async fn decline_welcome(&self, pubkey: &PublicKey, welcome_event_id: String) -> Result<()> {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.fetch_account(&pubkey).await?;
+        let account = self.fetch_account(pubkey).await?;
 
         let nostr_mls_guard = account.nostr_mls.lock().await;
         let nostr_mls = nostr_mls_guard
