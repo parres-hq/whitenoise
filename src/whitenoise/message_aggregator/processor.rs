@@ -182,7 +182,8 @@ async fn process_regular_message(
     };
 
     // Check if this is a reply (has e-tag)
-    let (is_reply, reply_to_id) = extract_reply_info(&message.tags);
+    let reply_to_id = extract_reply_info(&message.tags);
+    let is_reply = reply_to_id.is_some();
 
     Ok(ChatMessage {
         id: message.id.to_string(),
@@ -199,7 +200,7 @@ async fn process_regular_message(
 }
 
 /// Extract reply information from message tags
-fn extract_reply_info(tags: &Tags) -> (bool, Option<String>) {
+fn extract_reply_info(tags: &Tags) -> Option<String> {
     // Look for e-tags indicating this is a reply
     let e_tags: Vec<_> = tags
         .iter()
@@ -207,17 +208,17 @@ fn extract_reply_info(tags: &Tags) -> (bool, Option<String>) {
         .collect();
 
     if e_tags.is_empty() {
-        return (false, None);
+        return None;
     }
 
     // Use the last e-tag as per Nostr convention (NIP-10)
     if let Some(last_e_tag) = e_tags.last() {
         if let Some(event_id) = last_e_tag.content() {
-            return (true, Some(event_id.to_string()));
+            return Some(event_id.to_string());
         }
     }
 
-    (false, None)
+    None
 }
 
 /// Process deletion message (kind 5)
@@ -288,14 +289,12 @@ mod tests {
         let mut tags = Tags::new();
         tags.push(Tag::parse(vec!["e", "original_message_id"]).unwrap());
 
-        let (is_reply, reply_to_id) = extract_reply_info(&tags);
-        assert!(is_reply);
+        let reply_to_id = extract_reply_info(&tags);
         assert_eq!(reply_to_id, Some("original_message_id".to_string()));
 
         // Test with no e-tags
         let empty_tags = Tags::new();
-        let (is_reply, reply_to_id) = extract_reply_info(&empty_tags);
-        assert!(!is_reply);
+        let reply_to_id = extract_reply_info(&empty_tags);
         assert!(reply_to_id.is_none());
 
         // Test with multiple e-tags (should use last one per NIP-10)
@@ -303,8 +302,7 @@ mod tests {
         multi_tags.push(Tag::parse(vec!["e", "first_id"]).unwrap());
         multi_tags.push(Tag::parse(vec!["e", "second_id", "relay", "mention"]).unwrap());
 
-        let (is_reply, reply_to_id) = extract_reply_info(&multi_tags);
-        assert!(is_reply);
+        let reply_to_id = extract_reply_info(&multi_tags);
         assert_eq!(reply_to_id, Some("second_id".to_string()));
     }
 
@@ -368,10 +366,8 @@ mod tests {
             malformed_tags.push(tag);
         }
 
-        let (is_reply, reply_to_id) = extract_reply_info(&malformed_tags);
-        // Should handle gracefully - either not detect as reply or return None for ID
-        if is_reply {
-            assert!(reply_to_id.is_none());
-        }
+        let reply_to_id = extract_reply_info(&malformed_tags);
+        // Should handle gracefully - return None for malformed tags
+        assert!(reply_to_id.is_none());
     }
 }

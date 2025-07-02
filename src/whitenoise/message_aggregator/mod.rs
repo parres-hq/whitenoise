@@ -75,28 +75,6 @@ impl MessageAggregator {
             );
         }
 
-        // Process messages with token parsing
-        self.process_messages_internal(group_id, messages, parser)
-            .await
-    }
-
-    /// Internal method to process raw messages into aggregated chat messages
-    /// This handles the core aggregation logic and can be used for both fresh fetches
-    /// and incremental updates in the future
-    async fn process_messages_internal(
-        &self,
-        group_id: &GroupId,
-        messages: Vec<Message>,
-        parser: &dyn Parser,
-    ) -> Result<Vec<ChatMessage>, ProcessingError> {
-        if self.config.enable_debug_logging {
-            tracing::debug!(
-                "Processing {} messages for group {}",
-                messages.len(),
-                hex::encode(group_id.as_slice())
-            );
-        }
-
         // Use the processor module to handle the actual processing
         processor::process_messages(messages, parser, &self.config).await
     }
