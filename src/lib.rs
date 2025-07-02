@@ -15,8 +15,8 @@ pub use crate::types::MessageWithTokens;
 pub use crate::whitenoise::accounts::relays::RelayType;
 pub use crate::whitenoise::accounts::{Account, AccountSettings, OnboardingState};
 pub use crate::whitenoise::error::WhitenoiseError;
-pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 pub use nostr_mls::groups::NostrGroupConfigData;
+pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 
 // Re-export nostr types with documentation
 //
