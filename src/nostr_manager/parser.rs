@@ -4,6 +4,14 @@ use crate::nostr_manager::NostrManager;
 use nostr::parser::{NostrParser, Token};
 use serde::{Deserialize, Serialize};
 
+/// Parser trait for parsing content into tokens
+pub trait Parser {
+    fn parse(
+        &self,
+        content: &str,
+    ) -> Result<Vec<SerializableToken>, Box<dyn std::error::Error + Send + Sync>>;
+}
+
 /// Serializable Token
 /// This is a parallel of the `Token` enum from the `nostr` crate, modified so that we can serialize it for use in commands and the DB
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,6 +66,40 @@ impl NostrManager {
     pub fn parse(&self, content: &str) -> Vec<SerializableToken> {
         let parser = NostrParser::new();
         parser.parse(content).map(SerializableToken::from).collect()
+    }
+}
+
+impl Parser for NostrManager {
+    fn parse(
+        &self,
+        content: &str,
+    ) -> Result<Vec<SerializableToken>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.parse(content))
+    }
+}
+
+#[cfg(test)]
+pub struct MockParser;
+
+#[cfg(test)]
+impl MockParser {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Parser for MockParser {
+    fn parse(
+        &self,
+        content: &str,
+    ) -> Result<Vec<SerializableToken>, Box<dyn std::error::Error + Send + Sync>> {
+        // Simple mock that just treats everything as text for testing
+        if content.is_empty() {
+            Ok(vec![])
+        } else {
+            Ok(vec![SerializableToken::Text(content.to_string())])
+        }
     }
 }
 

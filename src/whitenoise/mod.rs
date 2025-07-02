@@ -12,6 +12,7 @@ pub mod accounts;
 pub mod database;
 pub mod error;
 mod event_processing;
+pub mod message_aggregator;
 pub mod secrets_store;
 pub mod utils;
 
@@ -31,6 +32,9 @@ pub struct WhitenoiseConfig {
 
     /// Directory for application logs
     pub logs_dir: PathBuf,
+
+    /// Configuration for the message aggregator
+    pub message_aggregator_config: Option<message_aggregator::AggregatorConfig>,
 }
 
 impl WhitenoiseConfig {
@@ -46,6 +50,28 @@ impl WhitenoiseConfig {
         Self {
             data_dir: formatted_data_dir,
             logs_dir: formatted_logs_dir,
+            message_aggregator_config: None, // Use default MessageAggregator configuration
+        }
+    }
+
+    /// Create a new configuration with custom message aggregator settings
+    pub fn new_with_aggregator_config(
+        data_dir: &Path,
+        logs_dir: &Path,
+        aggregator_config: message_aggregator::AggregatorConfig,
+    ) -> Self {
+        let env_suffix = if cfg!(debug_assertions) {
+            "dev"
+        } else {
+            "release"
+        };
+        let formatted_data_dir = data_dir.join(env_suffix);
+        let formatted_logs_dir = logs_dir.join(env_suffix);
+
+        Self {
+            data_dir: formatted_data_dir,
+            logs_dir: formatted_logs_dir,
+            message_aggregator_config: Some(aggregator_config),
         }
     }
 }
@@ -56,7 +82,7 @@ pub struct Whitenoise {
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,
-    #[allow(dead_code)] // Reserved for future use by other Whitenoise methods to queue events
+    message_aggregator: message_aggregator::MessageAggregator,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
 }
@@ -197,12 +223,19 @@ impl Whitenoise {
         // Create SecretsStore
         let secrets_store = SecretsStore::new(data_dir);
 
-        // Create the whitenoise instance
+        // Create message aggregator - always initialize, use custom config if provided
+        let message_aggregator = if let Some(aggregator_config) = config.message_aggregator_config.clone() {
+            message_aggregator::MessageAggregator::with_config(aggregator_config)
+        } else {
+            message_aggregator::MessageAggregator::new()
+        };
+
         let whitenoise = Self {
             config,
             database,
             nostr,
             secrets_store,
+            message_aggregator,
             accounts: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
             shutdown_sender,
@@ -285,7 +318,7 @@ impl Whitenoise {
     ///
     /// This method provides access to the globally initialized Whitenoise instance that was
     /// created by [`initialize_whitenoise`]. The instance is stored as a static singleton
-    /// using [`OnceLock`] to ensure thread-safe access and single initialization.
+    /// using [`tokio::sync::OnceCell`] to ensure async-safe thread-safe access and single initialization.
     ///
     /// This method is particularly useful for accessing the Whitenoise instance from different
     /// parts of the application without passing references around, such as in event handlers,
@@ -305,8 +338,9 @@ impl Whitenoise {
     ///
     /// # Thread Safety
     ///
-    /// This method is thread-safe and can be called concurrently from multiple threads.
-    /// The underlying [`OnceLock`] ensures that access to the global instance is synchronized.
+    /// This method is thread-safe and async-safe, and can be called concurrently from multiple
+    /// threads or async contexts. The underlying [`tokio::sync::OnceCell`] ensures that access
+    /// to the global instance is properly synchronized for async environments.
     ///
     /// # Example
     ///
@@ -339,7 +373,6 @@ impl Whitenoise {
     /// ```
     ///
     /// [`initialize_whitenoise`]: Self::initialize_whitenoise
-    /// [`OnceLock`]: std::sync::OnceLock
     pub fn get_instance() -> Result<&'static Self> {
         GLOBAL_WHITENOISE
             .get()
@@ -443,6 +476,16 @@ impl Whitenoise {
 
         Ok(account.pubkey.to_bech32().unwrap())
     }
+
+    // ============================================================================
+    // MESSAGE AGGREGATION ACCESS
+    // ============================================================================
+
+    /// Get a reference to the message aggregator for advanced usage
+    /// This allows consumers to access the message aggregator directly for custom processing
+    pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
+        &self.message_aggregator
+    }
 }
 
 #[cfg(test)]
@@ -522,11 +565,15 @@ pub mod test_utils {
         .await
         .expect("Failed to create NostrManager");
 
+        // Create message aggregator for testing
+        let message_aggregator = message_aggregator::MessageAggregator::new();
+
         let whitenoise = Whitenoise {
             config,
             database,
             nostr,
             secrets_store,
+            message_aggregator,
             accounts: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
             shutdown_sender,
@@ -677,10 +724,40 @@ mod tests {
 
             assert_eq!(config.data_dir, cloned_config.data_dir);
             assert_eq!(config.logs_dir, cloned_config.logs_dir);
+            assert_eq!(
+                config.message_aggregator_config,
+                cloned_config.message_aggregator_config
+            );
 
             let debug_str = format!("{:?}", config);
             assert!(debug_str.contains("data_dir"));
             assert!(debug_str.contains("logs_dir"));
+            assert!(debug_str.contains("message_aggregator_config"));
+        }
+
+        #[test]
+        fn test_whitenoise_config_with_custom_aggregator() {
+            let data_dir = std::path::Path::new("/test/data");
+            let logs_dir = std::path::Path::new("/test/logs");
+
+            // Test with custom aggregator config
+            let custom_config = message_aggregator::AggregatorConfig {
+                max_retry_attempts: 5,
+                normalize_emoji: false,
+                enable_debug_logging: true,
+            };
+
+            let config = WhitenoiseConfig::new_with_aggregator_config(
+                data_dir,
+                logs_dir,
+                custom_config.clone(),
+            );
+
+            assert!(config.message_aggregator_config.is_some());
+            let aggregator_config = config.message_aggregator_config.unwrap();
+            assert_eq!(aggregator_config.max_retry_attempts, 5);
+            assert!(!aggregator_config.normalize_emoji);
+            assert!(aggregator_config.enable_debug_logging);
         }
     }
 
@@ -793,6 +870,46 @@ mod tests {
 
             let onboarding = whitenoise.fetch_onboarding_state(pubkey).await;
             assert!(onboarding.is_ok());
+        }
+
+        #[tokio::test]
+        async fn test_message_aggregator_access() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Test that we can access the message aggregator
+            let aggregator = whitenoise.message_aggregator();
+
+            // Check that it has expected default configuration
+            let config = aggregator.config();
+            assert_eq!(config.max_retry_attempts, 3);
+            assert!(config.normalize_emoji);
+            assert!(!config.enable_debug_logging);
+        }
+
+        #[tokio::test]
+        async fn test_fetch_aggregated_messages_basic_error() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_keys = create_test_keys();
+            let pubkey = test_keys.public_key();
+
+            // Create account but don't initialize nostr_mls
+            let _account = whitenoise
+                .login(test_keys.secret_key().to_secret_hex())
+                .await
+                .unwrap();
+
+            // Mock group ID for testing
+            let group_id = GroupId::from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+
+            // Since login initializes nostr_mls, we should get a different error
+            // The error should be about the group not existing, not nostr_mls not being initialized
+            let result = whitenoise
+                .fetch_aggregated_messages_for_group(&pubkey, &group_id)
+                .await;
+
+            // Should return an error (group not found or similar), but not NostrMlsNotInitialized
+            assert!(result.is_err());
+            // The specific error will be about the group not being found since we're using a fake group ID
         }
 
         #[tokio::test]

@@ -159,6 +159,66 @@ impl Whitenoise {
         }
     }
 
+    /// Fetch and aggregate messages for a group - Main consumer API
+    /// This is the primary method that consumers should use to get chat messages
+    ///
+    /// # Arguments
+    /// * `pubkey` - The public key of the user requesting messages
+    /// * `group_id` - The group to fetch and aggregate messages for
+    ///
+    /// # Returns
+    /// A Result containing aggregated ChatMessage objects ready for frontend display
+    ///
+    /// # Example
+    /// ```rust
+    /// # use whitenoise::Whitenoise;
+    /// # use nostr_mls::prelude::*;
+    /// # async fn example(whitenoise: &Whitenoise, user_pubkey: &PublicKey, group_id: &GroupId) -> Result<(), Box<dyn std::error::Error>> {
+    /// let chat_messages = whitenoise.fetch_aggregated_messages_for_group(user_pubkey, group_id).await?;
+    /// for message in chat_messages {
+    ///     println!("Message from {}: {}", message.author.to_hex(), message.content);
+    ///     if !message.reactions.by_emoji.is_empty() {
+    ///         println!("  Reactions: {:?}", message.reactions.by_emoji.keys());
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn fetch_aggregated_messages_for_group(
+        &self,
+        pubkey: &PublicKey,
+        group_id: &GroupId,
+    ) -> Result<Vec<crate::whitenoise::message_aggregator::ChatMessage>> {
+        // Get account to access nostr_mls instance
+        let account = self.read_account_by_pubkey(pubkey).await?;
+        let nostr_mls_guard = account.nostr_mls.lock().await;
+
+        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
+            // Fetch raw messages from nostr_mls
+            let raw_messages = nostr_mls.get_messages(group_id).map_err(|e| {
+                WhitenoiseError::from(anyhow::anyhow!(
+                    "Failed to fetch messages from nostr_mls: {}",
+                    e
+                ))
+            })?;
+
+            // Use the aggregator to process the messages
+            self.message_aggregator
+                .aggregate_messages_for_group(
+                    pubkey,
+                    group_id,
+                    raw_messages,
+                    &self.nostr, // For token parsing
+                )
+                .await
+                .map_err(|e| {
+                    WhitenoiseError::from(anyhow::anyhow!("Message aggregation failed: {}", e))
+                })
+        } else {
+            Err(WhitenoiseError::NostrMlsNotInitialized)
+        }
+    }
+
     /// Creates an unsigned nostr event with the given parameters
     fn create_unsigned_nostr_event(
         &self,
