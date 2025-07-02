@@ -196,6 +196,7 @@ async fn process_regular_message(
         is_deleted: false,
         content_tokens,
         reactions: Default::default(),
+        kind: u16::from(message.kind),
     })
 }
 

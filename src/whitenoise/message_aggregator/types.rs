@@ -37,6 +37,9 @@ pub struct ChatMessage {
 
     /// Aggregated reactions on this message
     pub reactions: ReactionSummary,
+
+    /// The kind of the original Nostr event
+    pub kind: u16,
 }
 
 /// Summary of reactions on a message

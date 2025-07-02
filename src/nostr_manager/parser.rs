@@ -5,7 +5,8 @@ use nostr::parser::{NostrParser, Token};
 use serde::{Deserialize, Serialize};
 
 /// Parser trait for parsing content into tokens
-pub trait Parser {
+/// This trait is designed to be thread-safe for use with Flutter Rust Bridge (FRB)
+pub trait Parser: Send + Sync {
     fn parse(
         &self,
         content: &str,
