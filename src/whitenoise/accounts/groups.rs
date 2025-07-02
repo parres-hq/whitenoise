@@ -31,8 +31,7 @@ impl Whitenoise {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: String,
-        description: String,
+        config: NostrGroupConfigData,
     ) -> Result<group_types::Group> {
         if !self.logged_in(&creator_account.pubkey).await {
             return Err(WhitenoiseError::AccountNotFound);
@@ -42,16 +41,13 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&creator_account.pubkey)?;
 
-        let group_relays = self
-            .fetch_relays(creator_account.pubkey, RelayType::Nostr)
-            .await?;
-
         let group: group_types::Group;
         let welcome_rumors: Vec<UnsignedEvent>;
         let group_ids: Vec<String>;
         let mut key_package_events: Vec<Event> = Vec::new();
 
         let nostr_mls_guard = creator_account.nostr_mls.lock().await;
+        let group_relays = config.relays.clone();
 
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             // Fetch key packages for all members
@@ -70,12 +66,10 @@ impl Whitenoise {
 
             let create_group_result = nostr_mls
                 .create_group(
-                    group_name,
-                    description,
                     &creator_account.pubkey,
                     key_package_events.clone(),
                     admin_pubkeys,
-                    group_relays.clone(),
+                    config,
                 )
                 .map_err(WhitenoiseError::from)?;
 
@@ -438,6 +432,16 @@ mod tests {
     use crate::whitenoise::test_utils::*;
     use crate::whitenoise::Whitenoise;
 
+    fn create_nostr_group_config_data() -> NostrGroupConfigData {
+        NostrGroupConfigData {
+            name: "Test group".to_owned(),
+            description: "test description".to_owned(),
+            image_url: Some("http://test_blossom:53232/fake_img.png".to_owned()),
+            image_key: Some(b"fake key to encrypt image".to_vec()),
+            relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+        }
+    }
+
     async fn setup_multiple_test_accounts(
         whitenoise: &Whitenoise,
         creator_account: &Account,
@@ -489,17 +493,12 @@ mod tests {
         // Setup admin accounts (creator + one member as admin)
         let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
 
-        let group_name = "Test Group";
-        let description = "A test group for unit testing";
-
         // Test for success case
         case_create_group_success(
             &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
-            group_name,
-            description,
         )
         .await;
 
@@ -510,8 +509,6 @@ mod tests {
             &unlogged_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
-            "Test Group",
-            "Test Description",
         )
         .await;
 
@@ -531,8 +528,6 @@ mod tests {
             &uninitialized_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
-            "Test Group",
-            "Test Description",
         )
         .await;
 
@@ -543,8 +538,6 @@ mod tests {
             &creator_account,
             vec![invalid_member_pubkey],
             admin_pubkeys.clone(),
-            "Test Group",
-            "Test Description",
         )
         .await;
 
@@ -554,8 +547,6 @@ mod tests {
             &creator_account,
             member_pubkeys.clone(),
             vec![], // Empty admin list
-            "Test Group",
-            "Test Description",
         )
         .await;
 
@@ -566,8 +557,6 @@ mod tests {
             &creator_account,
             member_pubkeys.clone(),
             vec![creator_account.pubkey, non_member_pubkey],
-            "Test Group",
-            "Test Description",
         )
         .await;
 
@@ -582,8 +571,6 @@ mod tests {
             &no_relay_creator,
             member_pubkeys.clone(),
             vec![no_relay_creator.pubkey],
-            "Test Group",
-            "Test Description",
         )
         .await;
     }
@@ -593,25 +580,23 @@ mod tests {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: &str,
-        description: &str,
     ) {
+        let config = create_nostr_group_config_data();
         // Create the group
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys.clone(),
                 admin_pubkeys.clone(),
-                group_name.to_owned(),
-                description.to_owned(),
+                create_nostr_group_config_data(),
             )
             .await;
 
         // Assert the group was created successfully
         assert!(result.is_ok(), "Error {:?}", result.unwrap_err());
         let group = result.unwrap();
-        assert_eq!(group.name, group_name);
-        assert_eq!(group.description, description);
+        assert_eq!(group.name, config.name);
+        assert_eq!(group.description, config.description);
         assert!(group.admin_pubkeys.contains(&creator_account.pubkey));
         assert!(group.admin_pubkeys.contains(&member_pubkeys[0]));
     }
@@ -622,16 +607,13 @@ mod tests {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: &str,
-        description: &str,
     ) {
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys,
                 admin_pubkeys,
-                group_name.to_string(),
-                description.to_string(),
+                create_nostr_group_config_data(),
             )
             .await;
 
@@ -644,16 +626,13 @@ mod tests {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: &str,
-        description: &str,
     ) {
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys,
                 admin_pubkeys,
-                group_name.to_string(),
-                description.to_string(),
+                create_nostr_group_config_data(),
             )
             .await;
 
@@ -669,16 +648,13 @@ mod tests {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: &str,
-        description: &str,
     ) {
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys,
                 admin_pubkeys,
-                group_name.to_string(),
-                description.to_string(),
+                create_nostr_group_config_data(),
             )
             .await;
 
@@ -698,16 +674,13 @@ mod tests {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: &str,
-        description: &str,
     ) {
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys,
                 admin_pubkeys,
-                group_name.to_string(),
-                description.to_string(),
+                create_nostr_group_config_data(),
             )
             .await;
 
@@ -730,16 +703,13 @@ mod tests {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: &str,
-        description: &str,
     ) {
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys,
                 admin_pubkeys,
-                group_name.to_string(),
-                description.to_string(),
+                create_nostr_group_config_data(),
             )
             .await;
 
@@ -763,16 +733,13 @@ mod tests {
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
-        group_name: &str,
-        description: &str,
     ) {
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys,
                 admin_pubkeys,
-                group_name.to_string(),
-                description.to_string(),
+                create_nostr_group_config_data(),
             )
             .await;
 

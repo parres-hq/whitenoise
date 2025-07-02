@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use nostr_mls::groups::NostrGroupConfigData;
 use std::path::PathBuf;
 
 use nostr_sdk::prelude::*;
@@ -260,8 +261,13 @@ async fn main() -> Result<(), WhitenoiseError> {
             &account1,
             member_pubkeys,
             admin_pubkeys,
-            group_name.clone(),
-            group_description.clone(),
+            NostrGroupConfigData::new(
+                group_name,
+                group_description,
+                None,
+                None,
+                vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+            ),
         )
         .await?;
 
