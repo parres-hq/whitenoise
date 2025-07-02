@@ -62,6 +62,9 @@ pub use nostr_mls::prelude::GroupId;
 /// Nostr MLS Message. Re-exported from [`nostr_mls::prelude::Message`](https://docs.rs/nostr-mls/latest/nostr_mls/prelude/struct.Message.html)
 pub use nostr_mls::prelude::message_types::{Message, MessageState};
 
+/// Nostr MLS Welcome. Re-exported from [`nostr_mls::prelude::Welcome`](https://docs.rs/nostr-mls/latest/nostr_mls/prelude/struct.Welcome.html)
+pub use nostr_mls::prelude::welcome_types::{Welcome, WelcomeState};
+
 static TRACING_GUARDS: OnceLock<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceLock::new();
 static TRACING_INIT: OnceLock<()> = OnceLock::new();
 
