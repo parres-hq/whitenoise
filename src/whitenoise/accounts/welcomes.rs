@@ -1,10 +1,8 @@
-use nostr_mls::prelude::*;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
-
+use nostr_mls::prelude::*;
 
 impl Whitenoise {
-
     /// Accepts a welcome invitation to join a group.
     ///
     /// This method processes a welcome event to join a group chat. When accepting a welcome:
@@ -43,7 +41,9 @@ impl Whitenoise {
     /// # }
     /// ```
     pub async fn accept_welcome(&self, pubkey: PublicKey, welcome_event_id: String) -> Result<()> {
-        let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string()))?;
+        let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
+            WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
+        })?;
         let account = self.fetch_account(&pubkey).await?;
         let keys = self.secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
 
@@ -74,16 +74,11 @@ impl Whitenoise {
             group_relays.sort();
             group_relays.dedup();
         } else {
-            return Err(WhitenoiseError::InvalidEvent("Welcome event not found".to_string()));
+            return Err(WhitenoiseError::WelcomeNotFound);
         }
 
         self.nostr
-            .setup_group_messages_subscriptions_with_signer(
-                pubkey,
-                group_relays,
-                group_ids,
-                keys,
-            )
+            .setup_group_messages_subscriptions_with_signer(pubkey, group_relays, group_ids, keys)
             .await
             .map_err(WhitenoiseError::from)?;
 
@@ -125,7 +120,9 @@ impl Whitenoise {
     /// # }
     /// ```
     pub async fn decline_welcome(&self, pubkey: PublicKey, welcome_event_id: String) -> Result<()> {
-        let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string()))?;
+        let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
+            WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
+        })?;
         let account = self.fetch_account(&pubkey).await?;
 
         let nostr_mls_guard = account.nostr_mls.lock().await;
@@ -136,7 +133,7 @@ impl Whitenoise {
         if let Some(welcome) = welcome {
             nostr_mls.decline_welcome(&welcome)?;
         } else {
-            return Err(WhitenoiseError::InvalidEvent("Welcome event not found".to_string()));
+            return Err(WhitenoiseError::WelcomeNotFound);
         }
 
         Ok(())
