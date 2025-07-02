@@ -529,12 +529,9 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test 1: Send a proper reaction that targets the first test message
     tracing::info!("Testing reaction message with proper e-tag targeting...");
     let reaction_content = "👍".to_string();
-    let reaction_tags = vec![
-        Tag::parse(vec!["e", &test_message_id]).map_err(|e| {
-            WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e))
-        })?
-    ];
-    
+    let reaction_tags = vec![Tag::parse(vec!["e", &test_message_id])
+        .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e)))?];
+
     let targeted_reaction_with_tokens = whitenoise
         .send_message_to_group(
             &account1.pubkey, // Use account1 (group creator) to ensure group access
@@ -545,18 +542,18 @@ async fn main() -> Result<(), WhitenoiseError> {
         )
         .await?;
 
-    assert_eq!(targeted_reaction_with_tokens.message.content, reaction_content);
+    assert_eq!(
+        targeted_reaction_with_tokens.message.content,
+        reaction_content
+    );
     tracing::info!("✓ Targeted reaction message sent successfully");
 
     // Test 2: Send a reply that references the tagged message
     tracing::info!("Testing reply message with proper e-tag targeting...");
     let reply_content = "Great message with tags! I agree completely.".to_string();
-    let reply_tags = vec![
-        Tag::parse(vec!["e", &tagged_message_id]).map_err(|e| {
-            WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e))
-        })?
-    ];
-    
+    let reply_tags = vec![Tag::parse(vec!["e", &tagged_message_id])
+        .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e)))?];
+
     // Use account1 (group creator) instead of account5 to avoid MLS synchronization timing issues
     // Account5 was recently added and may not be fully synchronized yet
     let reply_message_with_tokens = whitenoise
@@ -575,12 +572,9 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test 3: Send another reaction to the post-addition message (different emoji)
     tracing::info!("Testing second reaction message with different emoji...");
     let second_reaction_content = "🎉".to_string();
-    let second_reaction_tags = vec![
-        Tag::parse(vec!["e", &post_addition_message_id]).map_err(|e| {
-            WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e))
-        })?
-    ];
-    
+    let second_reaction_tags = vec![Tag::parse(vec!["e", &post_addition_message_id])
+        .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e)))?];
+
     let second_reaction_with_tokens = whitenoise
         .send_message_to_group(
             &account1.pubkey, // Use account1 again for consistent group access
@@ -591,7 +585,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         )
         .await?;
 
-    assert_eq!(second_reaction_with_tokens.message.content, second_reaction_content);
+    assert_eq!(
+        second_reaction_with_tokens.message.content,
+        second_reaction_content
+    );
     tracing::info!("✓ Second targeted reaction message sent successfully");
 
     // Test 4: Send a message that we'll delete later
@@ -608,22 +605,22 @@ async fn main() -> Result<(), WhitenoiseError> {
         .await?;
 
     let to_be_deleted_message_id = to_be_deleted_with_tokens.message.id.to_string();
-    tracing::info!("✓ Message to be deleted sent successfully (ID: {})", to_be_deleted_message_id);
+    tracing::info!(
+        "✓ Message to be deleted sent successfully (ID: {})",
+        to_be_deleted_message_id
+    );
 
     // Test 5: Send a delete message targeting the message we just sent
     tracing::info!("Testing delete message targeting specific message...");
-    let delete_tags = vec![
-        Tag::parse(vec!["e", &to_be_deleted_message_id]).map_err(|e| {
-            WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e))
-        })?
-    ];
-    
+    let delete_tags = vec![Tag::parse(vec!["e", &to_be_deleted_message_id])
+        .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Failed to create e-tag: {}", e)))?];
+
     let _delete_message_with_tokens = whitenoise
         .send_message_to_group(
             &account1.pubkey, // Same user deletes their own message
             &test_group.mls_group_id,
             "".to_string(), // Empty content for deletion event
-            5, // Kind 5 for deletion
+            5,              // Kind 5 for deletion
             Some(delete_tags),
         )
         .await?;
@@ -649,10 +646,12 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("=== Advanced Message Testing Complete ===");
     tracing::info!("Summary of messages sent:");
     tracing::info!("  • 5 chat messages (kind 9)");
-    tracing::info!("  • 2 reactions (kind 7) with proper e-tag targeting"); 
+    tracing::info!("  • 2 reactions (kind 7) with proper e-tag targeting");
     tracing::info!("  • 1 reply (kind 9) with e-tag targeting");
     tracing::info!("  • 1 deletion (kind 5) with e-tag targeting");
-    tracing::info!("  • All advanced messages sent by account1 (group creator) for MLS timing reliability");
+    tracing::info!(
+        "  • All advanced messages sent by account1 (group creator) for MLS timing reliability"
+    );
 
     // ========================================
     // MESSAGE AGGREGATION TESTING
@@ -680,22 +679,35 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // We should have at least the messages we sent
     tracing::info!("Fetched {} aggregated messages", aggregated_messages.len());
-    
+
     // Debug: If no aggregated messages but old messages exist, there might be an aggregation issue
     if aggregated_messages.is_empty() && !old_messages.is_empty() {
-        tracing::warn!("Old method found {} messages but aggregation returned 0 - potential aggregation bug", old_messages.len());
+        tracing::warn!(
+            "Old method found {} messages but aggregation returned 0 - potential aggregation bug",
+            old_messages.len()
+        );
         for (i, msg) in old_messages.iter().enumerate() {
-            tracing::info!("  Raw message {}: '{}' from {} (kind: {}) at {}", 
-                i, msg.message.content, msg.message.pubkey.to_hex()[..8].to_string(), 
-                msg.message.kind, msg.message.created_at);
+            tracing::info!(
+                "  Raw message {}: '{}' from {} (kind: {}) at {}",
+                i,
+                msg.message.content,
+                msg.message.pubkey.to_hex()[..8].to_string(),
+                msg.message.kind,
+                msg.message.created_at
+            );
         }
     } else if aggregated_messages.is_empty() && old_messages.is_empty() {
-        tracing::warn!("Both methods returned 0 messages - messages might not be getting stored by nostr_mls");
+        tracing::warn!(
+            "Both methods returned 0 messages - messages might not be getting stored by nostr_mls"
+        );
         tracing::warn!("This could indicate:");
         tracing::warn!("  1. Messages aren't being properly saved to the MLS group");
         tracing::warn!("  2. There's a timing issue with message persistence");
         tracing::warn!("  3. The group ID used for sending vs fetching doesn't match");
-        tracing::warn!("  Group ID: {}", hex::encode(test_group.mls_group_id.as_slice()));
+        tracing::warn!(
+            "  Group ID: {}",
+            hex::encode(test_group.mls_group_id.as_slice())
+        );
     }
 
     // Verify the messages we sent are in the aggregated results
@@ -706,7 +718,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let mut found_reply_message = false;
     let mut found_final_message = false;
     let mut found_deleted_message = false;
-    
+
     let mut messages_with_reactions = 0;
     let mut messages_marked_as_reply = 0;
     let mut messages_marked_as_deleted = 0;
@@ -723,26 +735,28 @@ async fn main() -> Result<(), WhitenoiseError> {
             message.reactions.user_reactions.len()
         );
 
-        // Count reaction details if present  
+        // Count reaction details if present
         if !message.reactions.user_reactions.is_empty() {
             messages_with_reactions += 1;
             tracing::info!("  Reactions on this message:");
             for reaction in &message.reactions.user_reactions {
-                tracing::info!("    {} from {} at {}", 
-                    reaction.emoji, 
-                    reaction.user.to_hex()[..8].to_string(), 
-                    reaction.created_at);
+                tracing::info!(
+                    "    {} from {} at {}",
+                    reaction.emoji,
+                    reaction.user.to_hex()[..8].to_string(),
+                    reaction.created_at
+                );
             }
             for (emoji, details) in &message.reactions.by_emoji {
                 tracing::info!("    Emoji '{}': {} users", emoji, details.count);
             }
         }
-        
+
         if message.is_reply {
             messages_marked_as_reply += 1;
             tracing::info!("  This is a reply to: {:?}", message.reply_to_id);
         }
-        
+
         if message.is_deleted {
             messages_marked_as_deleted += 1;
             tracing::info!("  This message was deleted (content cleared)");
@@ -775,7 +789,7 @@ async fn main() -> Result<(), WhitenoiseError> {
             assert!(!message.is_deleted);
             assert!(!message.is_reply);
         }
-        
+
         if message.content == reply_content {
             found_reply_message = true;
             assert_eq!(message.author, account1.pubkey);
@@ -784,15 +798,17 @@ async fn main() -> Result<(), WhitenoiseError> {
             assert!(message.is_reply);
             assert!(message.reply_to_id.is_some());
         }
-        
+
         if message.content == final_message {
             found_final_message = true;
             assert_eq!(message.author, account1.pubkey);
             assert!(!message.is_deleted);
             assert!(!message.is_reply);
         }
-        
-        if message.content == to_be_deleted_message || (message.content.is_empty() && message.is_deleted) {
+
+        if message.content == to_be_deleted_message
+            || (message.content.is_empty() && message.is_deleted)
+        {
             found_deleted_message = true;
             assert_eq!(message.author, account1.pubkey);
             assert!(message.is_deleted);
@@ -823,33 +839,54 @@ async fn main() -> Result<(), WhitenoiseError> {
         tracing::info!("✓ Found final message in aggregated results");
     }
     if found_deleted_message {
-        tracing::info!("✓ Found deleted message in aggregated results (properly marked as deleted)");
+        tracing::info!(
+            "✓ Found deleted message in aggregated results (properly marked as deleted)"
+        );
     }
 
     // Report aggregation statistics
     tracing::info!("=== Aggregation Statistics ===");
-    tracing::info!("  Total aggregated chat messages: {}", aggregated_messages.len());
+    tracing::info!(
+        "  Total aggregated chat messages: {}",
+        aggregated_messages.len()
+    );
     tracing::info!("  Messages with reactions: {}", messages_with_reactions);
     tracing::info!("  Messages marked as replies: {}", messages_marked_as_reply);
-    tracing::info!("  Messages marked as deleted: {}", messages_marked_as_deleted);
-    
+    tracing::info!(
+        "  Messages marked as deleted: {}",
+        messages_marked_as_deleted
+    );
+
     // Validate expected results
     if messages_with_reactions > 0 {
-        tracing::info!("✓ Reaction aggregation working - {} messages have attached reactions", messages_with_reactions);
+        tracing::info!(
+            "✓ Reaction aggregation working - {} messages have attached reactions",
+            messages_with_reactions
+        );
     } else {
-        tracing::warn!("⚠ No messages found with reactions - reaction aggregation may need investigation");
+        tracing::warn!(
+            "⚠ No messages found with reactions - reaction aggregation may need investigation"
+        );
     }
-    
+
     if messages_marked_as_reply > 0 {
-        tracing::info!("✓ Reply detection working - {} messages properly marked as replies", messages_marked_as_reply);
+        tracing::info!(
+            "✓ Reply detection working - {} messages properly marked as replies",
+            messages_marked_as_reply
+        );
     } else {
         tracing::warn!("⚠ No messages marked as replies - reply processing may need investigation");
     }
-    
+
     if messages_marked_as_deleted > 0 {
-        tracing::info!("✓ Deletion processing working - {} messages properly marked as deleted", messages_marked_as_deleted);
+        tracing::info!(
+            "✓ Deletion processing working - {} messages properly marked as deleted",
+            messages_marked_as_deleted
+        );
     } else {
-        tracing::warn!("⚠ No messages marked as deleted - deletion processing may need investigation");
+        tracing::warn!(
+            "⚠ No messages marked as deleted - deletion processing may need investigation"
+        );
     }
 
     // Test aggregation from different account perspective
@@ -1039,8 +1076,12 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("  ✓ Group member removal (remove single member)");
     tracing::info!("  ✓ Group member verification");
     tracing::info!("  ✓ Message sending (chat messages, reactions, replies, deletions)");
-    tracing::info!("  ✓ Advanced message features (proper e-tag targeting, multi-user interactions)");
-    tracing::info!("  ✓ Message aggregation (fetch_aggregated_messages_for_group with comprehensive testing)");
+    tracing::info!(
+        "  ✓ Advanced message features (proper e-tag targeting, multi-user interactions)"
+    );
+    tracing::info!(
+        "  ✓ Message aggregation (fetch_aggregated_messages_for_group with comprehensive testing)"
+    );
     tracing::info!("  ✓ Reaction aggregation and processing");
     tracing::info!("  ✓ Reply detection and threading");
     tracing::info!("  ✓ Message deletion and content clearing");
