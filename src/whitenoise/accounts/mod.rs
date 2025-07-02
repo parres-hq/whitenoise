@@ -20,6 +20,7 @@ pub mod groups;
 pub mod messages;
 pub mod metadata;
 pub mod relays;
+pub mod welcomes;
 
 #[derive(Error, Debug)]
 pub enum AccountError {
