@@ -80,6 +80,9 @@ pub enum WhitenoiseError {
     #[error("One or more members to remove are not in the group")]
     MembersNotInGroup,
 
+    #[error("Welcome not found")]
+    WelcomeNotFound,
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }
