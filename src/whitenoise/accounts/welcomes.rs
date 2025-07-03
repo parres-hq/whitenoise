@@ -239,3 +239,53 @@ impl Whitenoise {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // use std::{thread::sleep, time::Duration};
+
+    use super::*;
+    use crate::whitenoise::test_utils::*;
+
+    #[tokio::test]
+    async fn test_receive_welcomes() {
+        let whitenoise = test_get_whitenoise().await;
+        let (creator_account, _creator_keys) = setup_login_account(&whitenoise).await;
+
+        // Setup member accounts
+        let member_accounts = setup_multiple_test_accounts(&whitenoise, &creator_account, 2).await;
+        let member_pubkeys: Vec<PublicKey> =
+            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+
+        // Setup admin accounts (creator + one member as admin)
+        let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
+        let config = create_nostr_group_config_data();
+
+        let group = whitenoise.create_group(
+                &creator_account,
+                member_pubkeys.clone(),
+                admin_pubkeys.clone(),
+                config,
+        ).await;
+        assert!(group.is_ok());
+
+        let result1 = whitenoise.fetch_welcomes(&creator_account.pubkey).await.unwrap();
+        assert!(result1.is_empty()); // creator should not receive welcome messages
+
+        let admin_key = &member_accounts[0].1;
+        let regular_key = &member_accounts[1].1;
+
+        let account = whitenoise.login(admin_key.secret_key().to_secret_hex()).await.unwrap();
+        // Give some time for the event processor to process welcome messages
+        // sleep(Duration::from_secs(10));
+        let result =whitenoise.fetch_welcomes(&account.pubkey).await.unwrap();
+        assert!(!result.is_empty());
+
+        let account = whitenoise.login(regular_key.secret_key().to_secret_hex()).await.unwrap();
+        // Give some time for the event processor to process welcome messages
+        // sleep(Duration::from_secs(10));
+        let result =whitenoise.fetch_welcomes(&account.pubkey).await.unwrap();
+        assert!(!result.is_empty());
+        
+    }
+}

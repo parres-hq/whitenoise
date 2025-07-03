@@ -260,7 +260,7 @@ impl Whitenoise {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
 
-        let (account, added_from_keys) = match self.find_account_by_pubkey(&pubkey).await {
+        let (mut account, added_from_keys) = match self.find_account_by_pubkey(&pubkey).await {
             Ok(account) => {
                 tracing::debug!(target: "whitenoise::login", "Account found");
                 (account, false)
@@ -286,6 +286,8 @@ impl Whitenoise {
         if added_from_keys {
             self.background_fetch_account_data(&account).await?;
         }
+
+        self.onboard_new_account(&mut account).await?;
 
         // Initialize subscriptions on nostr manager
         self.setup_subscriptions(&account).await?;
@@ -806,7 +808,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if any database or Nostr operation fails.
-    async fn onboard_new_account(&self, account: &mut Account) -> Result<Account> {
+    async fn onboard_new_account(&self, account: &mut Account) -> Result<()> {
         tracing::debug!(target: "whitenoise::onboard_new_account", "Starting onboarding process");
 
         // Set onboarding flags
@@ -864,8 +866,7 @@ impl Whitenoise {
             }
         }
 
-        tracing::debug!(target: "whitenoise::onboard_new_account", "Onboarding complete for new account: {:?}", account);
-        Ok(account.clone())
+        Ok(())
     }
 
     /// Publishes a relay list event of the specified type for the given account to Nostr.
