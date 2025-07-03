@@ -56,8 +56,7 @@ impl NostrManager {
                 Kind::RelayList,
                 Kind::InboxRelays,
             ])
-            .author(pubkey)
-            .since(Timestamp::now());
+            .author(pubkey);
 
         self.client
             .subscribe_with_id_to(user_relays, subscription_id, user_events_filter, None)
@@ -77,8 +76,7 @@ impl NostrManager {
 
         let giftwrap_filter = Filter::new()
             .kind(Kind::GiftWrap)
-            .pubkey(pubkey)
-            .since(Timestamp::now());
+            .pubkey(pubkey);
 
         self.client
             .subscribe_with_id_to(user_relays, subscription_id, giftwrap_filter, None)
@@ -108,8 +106,7 @@ impl NostrManager {
 
         let contacts_metadata_filter = Filter::new()
             .kind(Kind::Metadata)
-            .authors(contacts_pubkeys)
-            .since(Timestamp::now());
+            .authors(contacts_pubkeys);
 
         self.client
             .subscribe_with_id_to(user_relays, subscription_id, contacts_metadata_filter, None)
@@ -135,8 +132,7 @@ impl NostrManager {
 
         let mls_message_filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
-            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids)
-            .since(Timestamp::now());
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids);
 
         self.client
             .subscribe_with_id_to(user_relays, subscription_id, mls_message_filter, None)

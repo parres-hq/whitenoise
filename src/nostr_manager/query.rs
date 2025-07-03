@@ -4,6 +4,7 @@
 use crate::nostr_manager::{NostrManager, Result};
 use crate::whitenoise::accounts::relays::RelayType;
 use nostr_sdk::prelude::*;
+// use nostr_mls::prelude::*;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -78,4 +79,13 @@ impl NostrManager {
         #[cfg(not(test))]
         Ok(events.first_owned())
     }
+
+    // pub(crate) async fn fetch_welcomes(
+    //     &self,
+    //     pubkey: PublicKey,
+    //     urls: Vec<RelayUrl>,
+    // ) -> Result<Option<welcome_types::Welcome>> {
+
+    //     todo!()
+    // }
 }
