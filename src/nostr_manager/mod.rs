@@ -100,9 +100,20 @@ impl NostrManager {
 
         // Initialize the client with the appropriate database based on platform
         let client = {
-            let full_path = db_path.join("nostr_lmdb");
-            let db = NostrLMDB::open(full_path).expect("Failed to open Nostr database");
-            Client::builder().database(db).opts(opts).build()
+            #[cfg(any(target_os = "ios", target_os = "macos"))]
+            {
+                let full_path = db_path.join("nostr_ndb");
+                let db = NdbDatabase::open(full_path.to_str().expect("Invalid path"))
+                    .expect("Failed to open Nostr database");
+                Client::builder().database(db).opts(opts).build()
+            }
+
+            #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+            {
+                let full_path = db_path.join("nostr_lmdb");
+                let db = NostrLMDB::open(full_path).expect("Failed to open Nostr database");
+                Client::builder().database(db).opts(opts).build()
+            }
         };
 
         let settings = NostrManagerSettings::default();
