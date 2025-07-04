@@ -204,7 +204,7 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Vec<(RelayUrl, RelayStatus)>)` containing relay URLs and their current 
+    /// Returns `Ok(Vec<(RelayUrl, RelayStatus)>)` containing relay URLs and their current
     /// status from the nostr-sdk, or an error if the query fails.
     ///
     /// # Errors
@@ -216,7 +216,7 @@ impl Whitenoise {
     /// ```rust,ignore
     /// let pubkey = PublicKey::from_hex("...").unwrap();
     /// let relay_statuses = whitenoise.fetch_relay_status(pubkey).await?;
-    /// 
+    ///
     /// for (url, status) in relay_statuses {
     ///     println!("Relay {} status: {:?}", url, status);
     /// }
@@ -240,13 +240,13 @@ impl Whitenoise {
 
         // Get current relay statuses from the Nostr client
         let mut relay_statuses = Vec::new();
-        
+
         for relay_url in all_relays {
             // Try to get relay status from NostrManager
             match self.nostr.get_relay_status(&relay_url).await {
                 Ok(status) => {
                     relay_statuses.push((relay_url, status));
-                },
+                }
                 Err(_) => {
                     // If we can't get the relay status, it's likely not connected
                     relay_statuses.push((relay_url, RelayStatus::Disconnected));
