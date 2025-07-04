@@ -42,6 +42,7 @@ pub use nostr::Metadata;
 
 /// Nostr relay URL. Re-exported from [`nostr::RelayUrl`](https://docs.rs/nostr/latest/nostr/struct.RelayUrl.html).
 pub use nostr::RelayUrl;
+pub use nostr_sdk::RelayStatus;
 
 /// Nostr event kind. Re-exported from [`nostr::Kind`](https://docs.rs/nostr/latest/nostr/struct.Kind.html).
 pub use nostr::Kind;
