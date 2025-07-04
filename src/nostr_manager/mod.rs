@@ -64,11 +64,8 @@ impl Default for NostrManagerSettings {
         if cfg!(debug_assertions) {
             relays.push("ws://localhost:8080".to_string());
             relays.push("ws://localhost:7777".to_string());
-            // relays.push("wss://purplepag.es".to_string());
-            // relays.push("wss://nos.lol".to_string());
         } else {
             relays.push("wss://relay.damus.io".to_string());
-            relays.push("wss://purplepag.es".to_string());
             relays.push("wss://relay.primal.net".to_string());
             relays.push("wss://nos.lol".to_string());
         }
@@ -118,6 +115,8 @@ impl NostrManager {
         for relay in &settings.relays {
             client.add_relay(relay).await?;
         }
+        // Add the purplepag.es relay as read only for fetching metadata
+        client.add_read_relay("wss://purplepag.es".to_string()).await?;
 
         // Connect to relays if requested
         if connect_to_relays {
