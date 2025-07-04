@@ -712,6 +712,12 @@ impl NostrManager {
     pub fn session_salt(&self) -> &[u8; 16] {
         &self.session_salt
     }
+
+    /// Get the status of a specific relay
+    pub async fn get_relay_status(&self, relay_url: &RelayUrl) -> Result<RelayStatus> {
+        let relay = self.client.relay(relay_url).await?;
+        Ok(relay.status())
+    }
 }
 
 #[cfg(test)]

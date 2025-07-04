@@ -63,6 +63,8 @@ sha2 = "0.10"
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "migrate", "macros", "chrono", "derive", "json" ] }
 thiserror = "2.0.12"
 tokio = { version = "1.44", features = ["full"] }
+tokio-tungstenite = "0.20"
+futures = "0.3"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

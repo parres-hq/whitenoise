@@ -191,6 +191,71 @@ impl Whitenoise {
 
         Ok(onboarding_state)
     }
+
+    /// Fetches the status of relays associated with a user's public key.
+    ///
+    /// This method returns a list of relay statuses for relays that are configured
+    /// for the given account. It gets the relay URLs from the user's relay lists
+    /// and then returns the current connection status from the Nostr client.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The `PublicKey` of the user whose relay statuses should be fetched.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Vec<(RelayUrl, RelayStatus)>)` containing relay URLs and their current 
+    /// status from the nostr-sdk, or an error if the query fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if the relay query fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let pubkey = PublicKey::from_hex("...").unwrap();
+    /// let relay_statuses = whitenoise.fetch_relay_status(pubkey).await?;
+    /// 
+    /// for (url, status) in relay_statuses {
+    ///     println!("Relay {} status: {:?}", url, status);
+    /// }
+    /// ```
+    pub async fn fetch_relay_status(
+        &self,
+        pubkey: PublicKey,
+    ) -> Result<Vec<(RelayUrl, RelayStatus)>> {
+        // Get all relay URLs for this user across all types
+        let (nostr_relays, inbox_relays, key_package_relays) = tokio::try_join!(
+            self.fetch_relays(pubkey, RelayType::Nostr),
+            self.fetch_relays(pubkey, RelayType::Inbox),
+            self.fetch_relays(pubkey, RelayType::KeyPackage)
+        )?;
+
+        // Combine all relay URLs into one list, removing duplicates
+        let mut all_relays = Vec::new();
+        all_relays.extend(nostr_relays);
+        all_relays.extend(inbox_relays);
+        all_relays.extend(key_package_relays);
+
+        // Get current relay statuses from the Nostr client
+        let mut relay_statuses = Vec::new();
+        
+        for relay_url in all_relays {
+            // Try to get relay status from NostrManager
+            match self.nostr.get_relay_status(&relay_url).await {
+                Ok(status) => {
+                    relay_statuses.push((relay_url, status));
+                },
+                Err(_) => {
+                    // If we can't get the relay status, it's likely not connected
+                    relay_statuses.push((relay_url, RelayStatus::Disconnected));
+                }
+            }
+        }
+
+        Ok(relay_statuses)
+    }
 }
 
 #[cfg(test)]
