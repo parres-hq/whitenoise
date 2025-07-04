@@ -145,7 +145,7 @@ impl Whitenoise {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
         let account = self.fetch_account(pubkey).await?;
-        let keys = self.secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
+        let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
 
         let group_ids: Vec<String>;
         let mut group_relays = Vec::new();
@@ -219,7 +219,11 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn decline_welcome(&self, pubkey: &PublicKey, welcome_event_id: String) -> Result<()> {
+    pub async fn decline_welcome(
+        &self,
+        pubkey: &PublicKey,
+        welcome_event_id: String,
+    ) -> Result<()> {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
