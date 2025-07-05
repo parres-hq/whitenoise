@@ -755,4 +755,40 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_multiple_group_creations() {
+        let whitenoise = test_get_whitenoise().await;
+
+        let (creator_account, _creator_keys) = setup_login_account(&whitenoise).await;
+
+        // Setup member accounts
+        let member_accounts = setup_multiple_test_accounts(&whitenoise, &creator_account, 2).await;
+        let member_pubkeys: Vec<PublicKey> =
+            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+
+        // Setup admin accounts (creator + one member as admin)
+        let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
+
+        let group1 = whitenoise.create_group(&creator_account, member_pubkeys, admin_pubkeys, create_nostr_group_config_data()).await.unwrap();
+
+        let groups = whitenoise.fetch_groups(&creator_account, false).await.unwrap();
+        assert_eq!(group1, groups[0]);
+
+        
+        // Create another group
+        // Setup member accounts
+        let member_accounts = setup_multiple_test_accounts(&whitenoise, &creator_account, 2).await;
+        let member_pubkeys: Vec<PublicKey> =
+            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+
+        // Setup admin accounts (creator + one member as admin)
+        let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
+        let group2 = whitenoise.create_group(&creator_account, member_pubkeys, admin_pubkeys, create_nostr_group_config_data()).await.unwrap();
+        let groups = whitenoise.fetch_groups(&creator_account, false).await.unwrap();
+
+        assert_eq!(groups.len(), 2);
+        assert!(groups.contains(&group1));
+        assert!(groups.contains(&group2));
+    }
 }
