@@ -54,6 +54,7 @@ pub struct NostrManagerSettings {
 pub struct NostrManager {
     pub settings: Arc<Mutex<NostrManagerSettings>>,
     client: Client,
+    #[allow(dead_code)] // Allow dead code because this triggers a warning when linting on linux.
     db_path: PathBuf,
     session_salt: [u8; 16],
     // blossom: BlossomClient,
