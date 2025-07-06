@@ -8,7 +8,6 @@ use nostr_sdk::prelude::*;
 impl Whitenoise {
     /// Loads the Nostr metadata for a contact by their public key.
     ///
-    /// This method queries the Nostr network for user metadata associated with the provided public key.
     /// The metadata includes information such as display name, profile picture, and other user details
     /// that have been published to the Nostr network. If not found in the local database, it will
     /// fetch from relays.
@@ -26,10 +25,6 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError` if the metadata query fails.
     pub async fn fetch_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
-        if !self.logged_in(&pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
         // First try and fetch from local nostr database
         let mut metadata = self.nostr.query_user_metadata(pubkey).await?;
         if metadata.is_none() {
@@ -391,5 +386,211 @@ mod tests {
         assert!(json_str.contains("Test User"));
         assert!(json_str.contains("Bio with special chars"));
         assert!(json_str.contains("émojí 🚀"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_metadata_from_cache() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Login to the account
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create test metadata and store it in the nostr database
+        let test_metadata = Metadata {
+            name: Some("Test User".to_string()),
+            display_name: Some("Test Display Name".to_string()),
+            about: Some("Test bio".to_string()),
+            picture: Some("https://example.com/avatar.jpg".to_string()),
+            ..Default::default()
+        };
+
+        // First publish the metadata so it gets stored in the local database
+        whitenoise
+            .update_metadata(&test_metadata, &account.pubkey)
+            .await
+            .unwrap();
+
+        // Wait a bit for the metadata to be processed
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Now fetch the metadata - this should come from the cache
+        let result = whitenoise.fetch_metadata(account.pubkey).await;
+        assert!(result.is_ok(), "fetch_metadata should succeed");
+
+        let metadata = result.unwrap();
+        assert!(metadata.is_some(), "metadata should be found");
+
+        let retrieved_metadata = metadata.unwrap();
+        assert_eq!(retrieved_metadata.name, test_metadata.name);
+        assert_eq!(retrieved_metadata.display_name, test_metadata.display_name);
+        assert_eq!(retrieved_metadata.about, test_metadata.about);
+        assert_eq!(retrieved_metadata.picture, test_metadata.picture);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_metadata_from_relays() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Login to the account
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create a second account whose metadata we'll try to fetch
+        let (other_account, other_keys) = create_test_account();
+        whitenoise.save_account(&other_account).await.unwrap();
+        whitenoise
+            .secrets_store
+            .store_private_key(&other_keys)
+            .unwrap();
+
+        // Login to the other account temporarily to publish metadata
+        let other_log_account = whitenoise
+            .login(other_keys.secret_key().to_secret_hex())
+            .await;
+        assert!(other_log_account.is_ok());
+
+        // Initialize NostrMls for the other account
+        whitenoise
+            .initialize_nostr_mls_for_account(&other_account)
+            .await
+            .unwrap();
+
+        // Publish metadata for the other account
+        let other_metadata = Metadata {
+            name: Some("Other User".to_string()),
+            display_name: Some("Other Display Name".to_string()),
+            about: Some("Other bio".to_string()),
+            ..Default::default()
+        };
+
+        whitenoise
+            .update_metadata(&other_metadata, &other_account.pubkey)
+            .await
+            .unwrap();
+
+        // Wait for the metadata to be published
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // Switch back to the original account
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+
+        // Now try to fetch the other account's metadata
+        // This should attempt to fetch from relays since it's not in our local cache
+        let result = whitenoise.fetch_metadata(other_account.pubkey).await;
+        assert!(result.is_ok(), "fetch_metadata should succeed");
+
+        // Note: In a real test environment, this might return None if the relay fetch fails
+        // or if the local nostr database doesn't have the metadata yet
+        let metadata = result.unwrap();
+        if let Some(retrieved_metadata) = metadata {
+            assert_eq!(retrieved_metadata.name, other_metadata.name);
+            assert_eq!(retrieved_metadata.display_name, other_metadata.display_name);
+            assert_eq!(retrieved_metadata.about, other_metadata.about);
+        }
+        // We don't assert that metadata is Some() because relay fetching might not work
+        // in the test environment, but the method should still succeed
+    }
+
+    #[tokio::test]
+    async fn test_fetch_metadata_not_found() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Login to the account
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create a random public key that doesn't exist
+        let random_keys = Keys::generate();
+        let random_pubkey = random_keys.public_key();
+
+        // Try to fetch metadata for a non-existent user
+        let result = whitenoise.fetch_metadata(random_pubkey).await;
+        assert!(
+            result.is_ok(),
+            "fetch_metadata should succeed even when no metadata is found"
+        );
+
+        let metadata = result.unwrap();
+        assert!(
+            metadata.is_none(),
+            "metadata should be None for non-existent user"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_metadata_for_different_user() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create and save a test account
+        let (account, keys) = create_test_account();
+        whitenoise.save_account(&account).await.unwrap();
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        // Login to the account
+        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+        assert!(log_account.is_ok());
+        assert_eq!(log_account.unwrap(), account);
+
+        // Initialize NostrMls for the account
+        whitenoise
+            .initialize_nostr_mls_for_account(&account)
+            .await
+            .unwrap();
+
+        // Create a different user's keys
+        let other_keys = Keys::generate();
+        let other_pubkey = other_keys.public_key();
+
+        // Try to fetch metadata for the other user
+        let result = whitenoise.fetch_metadata(other_pubkey).await;
+        assert!(
+            result.is_ok(),
+            "fetch_metadata should succeed for different user"
+        );
+
+        let metadata = result.unwrap();
+        // The metadata should be None since the other user doesn't exist in our test setup
+        assert!(
+            metadata.is_none(),
+            "metadata should be None for user without metadata"
+        );
     }
 }
