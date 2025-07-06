@@ -463,10 +463,15 @@ mod tests {
         // Create a second account whose metadata we'll try to fetch
         let (other_account, other_keys) = create_test_account();
         whitenoise.save_account(&other_account).await.unwrap();
-        whitenoise.secrets_store.store_private_key(&other_keys).unwrap();
+        whitenoise
+            .secrets_store
+            .store_private_key(&other_keys)
+            .unwrap();
 
         // Login to the other account temporarily to publish metadata
-        let other_log_account = whitenoise.login(other_keys.secret_key().to_secret_hex()).await;
+        let other_log_account = whitenoise
+            .login(other_keys.secret_key().to_secret_hex())
+            .await;
         assert!(other_log_account.is_ok());
 
         // Initialize NostrMls for the other account
@@ -538,10 +543,16 @@ mod tests {
 
         // Try to fetch metadata for a non-existent user
         let result = whitenoise.fetch_metadata(random_pubkey).await;
-        assert!(result.is_ok(), "fetch_metadata should succeed even when no metadata is found");
+        assert!(
+            result.is_ok(),
+            "fetch_metadata should succeed even when no metadata is found"
+        );
 
         let metadata = result.unwrap();
-        assert!(metadata.is_none(), "metadata should be None for non-existent user");
+        assert!(
+            metadata.is_none(),
+            "metadata should be None for non-existent user"
+        );
     }
 
     #[tokio::test]
@@ -570,10 +581,16 @@ mod tests {
 
         // Try to fetch metadata for the other user
         let result = whitenoise.fetch_metadata(other_pubkey).await;
-        assert!(result.is_ok(), "fetch_metadata should succeed for different user");
+        assert!(
+            result.is_ok(),
+            "fetch_metadata should succeed for different user"
+        );
 
         let metadata = result.unwrap();
         // The metadata should be None since the other user doesn't exist in our test setup
-        assert!(metadata.is_none(), "metadata should be None for user without metadata");
+        assert!(
+            metadata.is_none(),
+            "metadata should be None for user without metadata"
+        );
     }
 }
