@@ -12,6 +12,11 @@ impl NostrManager {
         Ok(self.client.database().metadata(pubkey).await?)
     }
 
+    pub(crate) async fn fetch_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
+        let metadata = self.client.fetch_metadata(pubkey, Duration::from_secs(3)).await?;
+        Ok(metadata)
+    }
+
     pub(crate) async fn query_user_relays(
         &self,
         pubkey: PublicKey,

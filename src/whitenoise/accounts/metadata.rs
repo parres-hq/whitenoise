@@ -10,7 +10,8 @@ impl Whitenoise {
     ///
     /// This method queries the Nostr network for user metadata associated with the provided public key.
     /// The metadata includes information such as display name, profile picture, and other user details
-    /// that have been published to the Nostr network.
+    /// that have been published to the Nostr network. If not found in the local database, it will
+    /// fetch from relays.
     ///
     /// # Arguments
     ///
@@ -29,7 +30,12 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let metadata = self.nostr.query_user_metadata(pubkey).await?;
+        // First try and fetch from local nostr database
+        let mut metadata = self.nostr.query_user_metadata(pubkey).await?;
+        if metadata.is_none() {
+            // If we don't find it in the nostr database, try and fetch from relays
+            metadata = self.nostr.fetch_user_metadata(pubkey).await?;
+        }
         Ok(metadata)
     }
 
