@@ -28,9 +28,14 @@ impl NostrManager {
             .author(pubkey)
             .kind(relay_type.into())
             .limit(1);
-        let relay_events = self.client.fetch_events(filter.clone(), self.timeout().await?).await?;
+        let relay_events = self
+            .client
+            .fetch_events(filter.clone(), self.timeout().await?)
+            .await?;
         let database_events = self.client.database().query(filter).await?;
-        Ok(Self::relay_urls_from_events(relay_events.merge(database_events)))
+        Ok(Self::relay_urls_from_events(
+            relay_events.merge(database_events),
+        ))
     }
 
     pub(crate) async fn query_user_contact_list(
