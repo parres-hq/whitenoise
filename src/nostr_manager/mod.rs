@@ -128,9 +128,9 @@ impl NostrManager {
         for relay in &settings.relays {
             client.add_relay(relay).await?;
         }
-        // Add the purplepag.es relay as read only for fetching metadata
+        // Add the purplepag.es relay as discovery only
         client
-            .add_read_relay("wss://purplepag.es".to_string())
+            .add_discovery_relay("wss://purplepag.es".to_string())
             .await?;
 
         // Connect to relays if requested
