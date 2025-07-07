@@ -16,11 +16,10 @@ impl Whitenoise {
     ///
     /// # Returns
     /// * `Ok(Group)` - The newly created group
-    /// * `Err(String)` - Error message if group creation fails
+    /// * `Err(WhitenoiseError)` - Error message if group creation fails
     ///
     /// # Errors
     /// Returns error if:
-    /// - Active account is not the creator
     /// - Member/admin validation fails
     /// - Key package fetching fails
     /// - MLS group creation fails
@@ -137,6 +136,27 @@ impl Whitenoise {
             .map_err(WhitenoiseError::from)?;
 
         Ok(group)
+    }
+
+    /// Creates a new MLS direct message, which is a group with 2 members
+    ///
+    /// # Arguments
+    /// user1: `PublicKey` of the user who initiates the DM
+    /// user2: `PublicKey` of the initial recepient of the DM
+    /// config: `NostrConfigData`
+    ///
+    /// # Returns
+    /// * `Ok(Group)` - The newly created group whose type is a `GroupType::DirectMessage`
+    /// * `Err(WhitenoiseError)` - Error message if DM creation fails
+    pub async fn create_direct_message(
+        &self,
+        user1: PublicKey,
+        user2: PublicKey,
+        config: NostrGroupConfigData,
+    ) -> Result<group_types::Group> {
+        let account = self.read_account_by_pubkey(&user1).await?;
+        self.create_group(&account, vec![user2], vec![user1, user2], config)
+            .await
     }
 
     pub async fn fetch_groups(
@@ -442,6 +462,24 @@ mod tests {
         }
     }
 
+    async fn publish_key_package_for_test_account(whitenoise: &Whitenoise, account: &Account, keys: Keys) {
+        // publish keypackage to relays
+        let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
+        let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
+
+        // Get relays with fallback to defaults if user hasn't configured key package relays
+        let relays_to_use = whitenoise
+            .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
+            .await
+            .unwrap();
+
+        let _ = whitenoise
+            .nostr
+            .publish_event_builder_with_signer(key_package_event_builder, &relays_to_use, keys)
+            .await
+            .unwrap();
+    }
+
     async fn setup_multiple_test_accounts(
         whitenoise: &Whitenoise,
         creator_account: &Account,
@@ -450,30 +488,16 @@ mod tests {
         let mut accounts = Vec::new();
         for _ in 0..count {
             let (account, keys) = create_test_account();
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
             accounts.push((account.clone(), keys.clone()));
             whitenoise
                 .add_contact(creator_account, keys.public_key())
                 .await
                 .unwrap();
-
-            // publish keypackage to relays
-            let (ekp, tags) = whitenoise
-                .encoded_key_package(creator_account, &account.pubkey)
-                .await
-                .unwrap();
-            let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
-
-            // Get relays with fallback to defaults if user hasn't configured key package relays
-            let relays_to_use = whitenoise
-                .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
-                .await
-                .unwrap();
-
-            let _ = whitenoise
-                .nostr
-                .publish_event_builder_with_signer(key_package_event_builder, &relays_to_use, keys)
-                .await
-                .unwrap();
+            publish_key_package_for_test_account(whitenoise, &account, keys).await;
         }
         accounts
     }
@@ -754,5 +778,26 @@ mod tests {
                 println!("Group creation failed due to relay issues: {:?}", e);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_create_dm() {
+        let whitenoise = test_get_whitenoise().await;
+        let (_, user1) = setup_login_account(whitenoise).await;
+        let (acc2, user2) = create_test_account();
+        whitenoise.initialize_nostr_mls_for_account(&acc2).await.unwrap();
+
+        publish_key_package_for_test_account(whitenoise, &acc2, user2.clone()).await;
+
+        let dm = whitenoise
+            .create_direct_message(
+                user1.public_key,
+                user2.public_key,
+                create_nostr_group_config_data(),
+            )
+            .await
+            .unwrap();
+
+        matches!(dm.group_type, group_types::GroupType::DirectMessage);
     }
 }
