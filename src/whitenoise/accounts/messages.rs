@@ -246,7 +246,7 @@ impl Whitenoise {
         recepient_pubkey: &PublicKey,
         content: String,
         tags: Vec<Tag>,
-    ) -> Result<Vec<SerializableToken>> {
+    ) -> Result<()> {
         let sender_keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(sender_pubkey)?;
@@ -265,6 +265,6 @@ impl Whitenoise {
             .publish_event_builder_with_signer(dm_event_builder, &relays, sender_keys)
             .await?;
 
-        Ok(self.nostr.parse(&content))
+        Ok(())
     }
 }
