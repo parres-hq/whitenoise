@@ -406,12 +406,20 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         user_relays: Vec<RelayUrl>,
+        inbox_relays: Vec<RelayUrl>,
+        group_relays: Vec<RelayUrl>,
         nostr_group_ids: Vec<String>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         self.client.set_signer(signer).await;
         let result = self
-            .setup_account_subscriptions(pubkey, user_relays, nostr_group_ids)
+            .setup_account_subscriptions(
+                pubkey,
+                user_relays,
+                inbox_relays,
+                group_relays,
+                nostr_group_ids,
+            )
             .await;
         self.client.unset_signer().await;
         result

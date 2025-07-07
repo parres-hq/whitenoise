@@ -5,7 +5,6 @@ use crate::nostr_manager::{NostrManager, Result};
 use crate::whitenoise::accounts::relays::RelayType;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
-use std::time::Duration;
 
 impl NostrManager {
     pub(crate) async fn query_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
@@ -15,7 +14,7 @@ impl NostrManager {
     pub(crate) async fn fetch_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
         let metadata = self
             .client
-            .fetch_metadata(pubkey, Duration::from_secs(3))
+            .fetch_metadata(pubkey, self.timeout().await?)
             .await?;
         Ok(metadata)
     }
@@ -74,16 +73,10 @@ impl NostrManager {
             .limit(1);
         let events = self
             .client
-            .fetch_events_from(urls, filter.clone(), Duration::new(5, 0))
+            .fetch_events_from(urls, filter.clone(), self.timeout().await?)
             .await?;
 
-        #[cfg(test)]
-        {
-            let stored_events = self.client.database().query(filter).await?;
-            Ok(events.merge(stored_events).first_owned())
-        }
-
-        #[cfg(not(test))]
-        Ok(events.first_owned())
+        let stored_events = self.client.database().query(filter).await?;
+        Ok(events.merge(stored_events).first_owned())
     }
 }

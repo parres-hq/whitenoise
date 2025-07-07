@@ -1193,27 +1193,37 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let groups = {
+        let mut group_relays = Vec::new();
+        let groups: Vec<group_types::Group>;
+        {
             let nostr_mls_guard = account.nostr_mls.lock().await;
             if let Some(ref nostr_mls) = *nostr_mls_guard {
-                nostr_mls.get_groups()
+                groups = nostr_mls.get_groups()?;
+                // Collect all relays from all groups into a single vector
+                for group in &groups {
+                    let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                    group_relays.extend(relays);
+                }
+                // Remove duplicates by sorting and deduplicating
+                group_relays.sort();
+                group_relays.dedup();
             } else {
                 return Err(WhitenoiseError::NostrMlsNotInitialized);
             }
         };
 
         let nostr_group_ids = groups
-            .map(|groups| {
-                groups
-                    .iter()
-                    .map(|group| hex::encode(group.nostr_group_id))
-                    .collect::<Vec<String>>()
-            })
-            .unwrap_or_default();
+            .into_iter()
+            .map(|group| hex::encode(group.nostr_group_id))
+            .collect::<Vec<String>>();
 
         // Get relays with fallback to defaults if user hasn't configured any
-        let relays_to_use = self
+        let user_relays = self
             .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
+            .await?;
+
+        let inbox_relays = self
+            .fetch_relays_with_fallback(account.pubkey, RelayType::Inbox)
             .await?;
 
         // Use the signer-aware subscription setup method
@@ -1224,7 +1234,9 @@ impl Whitenoise {
         self.nostr
             .setup_account_subscriptions_with_signer(
                 account.pubkey,
-                relays_to_use,
+                user_relays,
+                inbox_relays,
+                group_relays,
                 nostr_group_ids,
                 keys,
             )
