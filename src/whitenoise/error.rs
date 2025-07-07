@@ -83,6 +83,9 @@ pub enum WhitenoiseError {
     #[error("Welcome not found")]
     WelcomeNotFound,
 
+    #[error("nip04 direcet message error")]
+    Nip04Error(#[from] nostr::nips::nip04::Error),
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }

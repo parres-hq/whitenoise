@@ -1,6 +1,7 @@
 use crate::types::MessageWithTokens;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
+use crate::{RelayType, SerializableToken};
 use nostr_mls::prelude::*;
 
 impl Whitenoise {
@@ -237,5 +238,121 @@ impl Whitenoise {
         let event_id = inner_event.id.unwrap(); // This is guaranteed to be Some by ensure_id
 
         Ok((inner_event, event_id))
+    }
+
+    /// Publish the message in encrypted form for the recepient to the relays as per nip04
+    pub async fn send_direct_message_nip04(
+        &self,
+        sender_pubkey: &PublicKey,
+        recepient_pubkey: &PublicKey,
+        content: String,
+        tags: Vec<Tag>,
+    ) -> Result<Vec<SerializableToken>> {
+        let sender_keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(sender_pubkey)?;
+
+        let encrypted_message =
+            nostr::nips::nip04::encrypt(sender_keys.secret_key(), recepient_pubkey, &content)?;
+        let dm_event_builder = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_message)
+            .tags(tags)
+            .tag(Tag::public_key(*recepient_pubkey));
+        let relays = self
+            .fetch_relays_with_fallback(*sender_pubkey, RelayType::Inbox)
+            .await?;
+
+        let _event_id = self
+            .nostr
+            .publish_event_builder_with_signer(dm_event_builder, &relays, sender_keys)
+            .await?;
+
+        Ok(self.nostr.parse(&content))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    use crate::whitenoise::test_utils::test_get_whitenoise;
+
+    use nostr::key::SecretKey;
+    use nostr::types::RelayUrl;
+    use nostr_sdk::nips::nip04;
+    use nostr_sdk::{Client, Keys};
+    use tokio;
+
+    #[tokio::test]
+    async fn test_send_and_fetch_direct_message_nip04() {
+        let sender_sk =
+            SecretKey::from_str("6b911fd37cdf5c81d4c0adb1ab7fa822ed253ab0ad9aa18d77257c88b29b718e")
+                .unwrap();
+        let sender_keys = Keys::new(sender_sk);
+
+        let receiver_sk =
+            SecretKey::from_str("7b911fd37cdf5c81d4c0adb1ab7fa822ed253ab0ad9aa18d77257c88b29b718e")
+                .unwrap();
+        let recepient_keys = Keys::new(receiver_sk);
+
+        let whitenoise = test_get_whitenoise().await;
+        let account = whitenoise
+            .login(sender_keys.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+        whitenoise
+            .update_relays(
+                &account,
+                crate::RelayType::Inbox,
+                vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
+            )
+            .await
+            .unwrap();
+
+        // Prepare message and tags
+        let content = String::from("Hello, this is a test DM!");
+
+        // Publish the encrypted DM
+        let result = whitenoise
+            .send_direct_message_nip04(
+                &sender_keys.public_key(),
+                &recepient_keys.public_key(),
+                content.clone(),
+                vec![],
+            )
+            .await;
+
+        assert!(result.is_ok(), "{:?}", result);
+
+        // Setup a client to fetch events from the relay
+        let client = Client::new(recepient_keys.clone());
+        client.add_relay("ws://localhost:8080").await.unwrap();
+        client.connect().await;
+
+        // Filter: fetch EncryptedDirectMessage events from sender to recipient
+        let filter = nostr_sdk::Filter::new()
+            .kind(nostr_sdk::Kind::EncryptedDirectMessage)
+            .pubkey(recepient_keys.public_key);
+
+        let events = client
+            .fetch_events(filter, Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        assert!(!events.is_empty(), "No direct messages found");
+
+        // Decrypt the first event
+        let event = events.first().unwrap();
+        let decrypted = nip04::decrypt(
+            recepient_keys.secret_key(),
+            &sender_keys.public_key(),
+            &event.content,
+        )
+        .unwrap();
+
+        assert_eq!(
+            decrypted, content,
+            "Decrypted content does not match original"
+        );
     }
 }
