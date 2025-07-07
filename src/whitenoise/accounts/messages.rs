@@ -1,7 +1,7 @@
 use crate::types::MessageWithTokens;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
-use crate::{RelayType, SerializableToken};
+use crate::RelayType;
 use nostr_mls::prelude::*;
 
 impl Whitenoise {
