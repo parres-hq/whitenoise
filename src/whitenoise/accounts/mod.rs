@@ -932,7 +932,10 @@ impl Whitenoise {
             .await?;
         account.onboarding.inbox_relays = !inbox_relays.is_empty();
         account.onboarding.key_package_relays = !key_package_relays.is_empty();
-        if !key_package_relays.is_empty() {
+        
+        // Only check relay state for key package publication if it's not already marked as published
+        // This prevents overwriting a recently published key package with false when relay propagation is slow
+        if !account.onboarding.key_package_published && !key_package_relays.is_empty() {
             let key_package_event = self
                 .fetch_key_package_event(account.pubkey, key_package_relays)
                 .await?;
