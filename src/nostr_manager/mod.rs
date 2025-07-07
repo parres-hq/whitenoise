@@ -413,7 +413,13 @@ impl NostrManager {
     ) -> Result<()> {
         self.client.set_signer(signer).await;
         let result = self
-            .setup_account_subscriptions(pubkey, user_relays, inbox_relays, group_relays, nostr_group_ids)
+            .setup_account_subscriptions(
+                pubkey,
+                user_relays,
+                inbox_relays,
+                group_relays,
+                nostr_group_ids,
+            )
             .await;
         self.client.unset_signer().await;
         result

@@ -1212,7 +1212,8 @@ impl Whitenoise {
             }
         };
 
-        let nostr_group_ids = groups.into_iter()
+        let nostr_group_ids = groups
+            .into_iter()
             .map(|group| hex::encode(group.nostr_group_id))
             .collect::<Vec<String>>();
 
