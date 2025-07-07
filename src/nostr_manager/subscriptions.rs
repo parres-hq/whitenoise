@@ -20,14 +20,16 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         user_relays: Vec<RelayUrl>,
+        inbox_relays: Vec<RelayUrl>,
+        group_relays: Vec<RelayUrl>,
         nostr_group_ids: Vec<String>,
     ) -> Result<()> {
         // Set up core subscriptions in parallel
         let (user_events_result, giftwrap_result, contacts_result, groups_result) = tokio::join!(
             self.setup_user_events_subscription(pubkey, user_relays.clone()),
-            self.setup_giftwrap_subscription(pubkey, user_relays.clone()),
+            self.setup_giftwrap_subscription(pubkey, inbox_relays.clone()),
             self.setup_contacts_metadata_subscription(pubkey, user_relays.clone()),
-            self.setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays.clone())
+            self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays.clone())
         );
 
         // Handle results
@@ -70,7 +72,7 @@ impl NostrManager {
     async fn setup_giftwrap_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<RelayUrl>,
+        inbox_relays: Vec<RelayUrl>,
     ) -> Result<()> {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
@@ -81,7 +83,7 @@ impl NostrManager {
             .since(Timestamp::now());
 
         self.client
-            .subscribe_with_id_to(user_relays, subscription_id, giftwrap_filter, None)
+            .subscribe_with_id_to(inbox_relays, subscription_id, giftwrap_filter, None)
             .await?;
 
         Ok(())
@@ -123,7 +125,7 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         nostr_group_ids: Vec<String>,
-        user_relays: Vec<RelayUrl>,
+        group_relays: Vec<RelayUrl>,
     ) -> Result<()> {
         if nostr_group_ids.is_empty() {
             // No groups yet, skip subscription
@@ -139,7 +141,7 @@ impl NostrManager {
             .since(Timestamp::now());
 
         self.client
-            .subscribe_with_id_to(user_relays, subscription_id, mls_message_filter, None)
+            .subscribe_with_id_to(group_relays, subscription_id, mls_message_filter, None)
             .await?;
 
         Ok(())
