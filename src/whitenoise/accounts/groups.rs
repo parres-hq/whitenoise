@@ -292,7 +292,7 @@ impl Whitenoise {
                 .map_err(WhitenoiseError::from)?;
             let result = self
                 .nostr
-                .publish_event_to(evolution_event, &group_relays)
+                .publish_event_to(evolution_event, group_relays)
                 .await;
 
             match result {
@@ -417,7 +417,7 @@ impl Whitenoise {
                 .map_err(WhitenoiseError::from)?;
 
             self.nostr
-                .publish_event_to(evolution_event, &group_relays)
+                .publish_event_to(evolution_event, group_relays)
                 .await?;
         } else {
             return Err(WhitenoiseError::NostrMlsNotInitialized);

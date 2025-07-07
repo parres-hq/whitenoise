@@ -1,6 +1,7 @@
 use crate::types::MessageWithTokens;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
+use crate::{RelayType, SerializableToken};
 use nostr_mls::prelude::*;
 
 impl Whitenoise {
@@ -85,7 +86,7 @@ impl Whitenoise {
             return Err(WhitenoiseError::NostrMlsNotInitialized);
         };
 
-        self.nostr.publish_event_to(message_event, &relays).await?;
+        self.nostr.publish_event_to(message_event, relays).await?;
 
         let tokens = self.nostr.parse(&message.content);
 
@@ -237,5 +238,26 @@ impl Whitenoise {
         let event_id = inner_event.id.unwrap(); // This is guaranteed to be Some by ensure_id
 
         Ok((inner_event, event_id))
+    }
+
+    /// Sends private message to the receiver in a gift wrap, sealed by the sender's keys
+    pub async fn send_direct_message(
+        &self,
+        sender_pubkey: &PublicKey,
+        recepient_pubkey: &PublicKey,
+        message: String,
+        tags: Vec<Tag>,
+    ) -> Result<Vec<SerializableToken>> {
+        let sender_keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(sender_pubkey)?;
+        let signed_rumour =
+            EventBuilder::private_msg(&sender_keys, *recepient_pubkey, &message, tags).await?;
+        let relays = self
+            .fetch_relays_with_fallback(*sender_pubkey, RelayType::Inbox)
+            .await?;
+
+        let _event_id = self.nostr.publish_event_to(signed_rumour, relays).await?;
+        Ok(self.nostr.parse(&message))
     }
 }
