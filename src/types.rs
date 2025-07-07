@@ -103,6 +103,23 @@ pub struct MessageWithTokens {
     pub tokens: Vec<SerializableToken>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DirectMessage {
+    pub content: String,
+    pub created_at: u64,
+    pub sender_pubkey: PublicKey, 
+    pub tokens: Vec<SerializableToken>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirectMessageData {
+    pub account_pubkey: PublicKey,
+    pub sender_pubkey: PublicKey,
+    pub content: String,
+    pub tags: Vec<Tag>,
+    pub created_at: u64,
+}
+
 impl MessageWithTokens {
     pub fn new(message: message_types::Message, tokens: Vec<SerializableToken>) -> Self {
         Self { message, tokens }

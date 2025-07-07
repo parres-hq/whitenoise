@@ -1,4 +1,4 @@
-use crate::types::MessageWithTokens;
+use crate::types::{DirectMessage, MessageWithTokens};
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
 use crate::{RelayType, SerializableToken};
@@ -259,5 +259,9 @@ impl Whitenoise {
 
         let _event_id = self.nostr.publish_event_to(signed_rumour, relays).await?;
         Ok(self.nostr.parse(&message))
+    }
+
+    pub async fn fetch_direct_messages(&self, pubkey: &PublicKey) -> Result<Vec<DirectMessage>> {
+        todo!()
     }
 }
