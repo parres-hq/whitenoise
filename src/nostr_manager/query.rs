@@ -118,9 +118,7 @@ mod contact_list_logic_tests {
     fn test_parse_contact_list_tags_single_contact() {
         // Test parsing contact list with one valid contact
         let test_pubkey = Keys::generate().public_key();
-        let tags = vec![
-            Tag::custom(TagKind::p(), [test_pubkey.to_hex()]),
-        ];
+        let tags = vec![Tag::custom(TagKind::p(), [test_pubkey.to_hex()])];
 
         let contacts_pubkeys: Vec<PublicKey> = tags
             .iter()
@@ -182,9 +180,7 @@ mod contact_list_logic_tests {
     #[should_panic]
     fn test_parse_contact_list_tags_invalid_hex() {
         // Test that invalid hex strings cause panic (expected behavior with unwrap())
-        let tags = vec![
-            Tag::custom(TagKind::p(), vec!["invalid_hex_string"]),
-        ];
+        let tags = vec![Tag::custom(TagKind::p(), vec!["invalid_hex_string"])];
 
         let _: Vec<PublicKey> = tags
             .iter()
@@ -202,9 +198,17 @@ mod contact_list_logic_tests {
         let contact2 = Keys::generate().public_key();
         let contact3 = Keys::generate().public_key();
 
-        let metadata1 = Some(create_test_metadata("alice", "Alice Smith", "Software developer"));
+        let metadata1 = Some(create_test_metadata(
+            "alice",
+            "Alice Smith",
+            "Software developer",
+        ));
         let metadata2 = None; // No metadata for contact2
-        let metadata3 = Some(create_test_metadata("carol", "Carol Brown", "Product manager"));
+        let metadata3 = Some(create_test_metadata(
+            "carol",
+            "Carol Brown",
+            "Product manager",
+        ));
 
         // Simulate the contacts and their corresponding metadata
         let contacts_and_metadata = vec![
@@ -256,7 +260,7 @@ mod contact_list_logic_tests {
         }
     }
 
-        #[test]
+    #[test]
     fn test_metadata_association_all_none() {
         // Test case where all contacts have no metadata
         let contact1 = Keys::generate().public_key();

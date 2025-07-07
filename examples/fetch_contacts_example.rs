@@ -50,7 +50,13 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     println!("✅ Successfully logged in!");
     println!("   📊 Account pubkey: {}", account.pubkey.to_hex());
-    println!("   📡 Account npub: {}", account.pubkey.to_bech32().unwrap_or_else(|_| "Invalid".to_string()));
+    println!(
+        "   📡 Account npub: {}",
+        account
+            .pubkey
+            .to_bech32()
+            .unwrap_or_else(|_| "Invalid".to_string())
+    );
 
     // Wait a moment for relay connections to stabilize
     println!("\n⏳ Waiting for relay connections to stabilize...");
@@ -67,7 +73,9 @@ async fn main() -> Result<(), WhitenoiseError> {
             if contacts.is_empty() {
                 println!("📝 No contacts found for this account.");
                 println!("   This could mean:");
-                println!("   • You haven't followed anyone yet (or haven't published a contact list)");
+                println!(
+                    "   • You haven't followed anyone yet (or haven't published a contact list)"
+                );
                 println!("   • Your contact list isn't available on the connected relays");
                 println!("   • This is a new account");
 
@@ -80,7 +88,12 @@ async fn main() -> Result<(), WhitenoiseError> {
 
                 for (i, (contact_pubkey, metadata)) in contacts.iter().enumerate() {
                     println!("\n👤 Contact #{}", i + 1);
-                    println!("   📡 npub: {}", contact_pubkey.to_bech32().unwrap_or_else(|_| "Invalid".to_string()));
+                    println!(
+                        "   📡 npub: {}",
+                        contact_pubkey
+                            .to_bech32()
+                            .unwrap_or_else(|_| "Invalid".to_string())
+                    );
                     println!("   🔑 hex:  {}", contact_pubkey.to_hex());
 
                     match metadata {
@@ -116,16 +129,20 @@ async fn main() -> Result<(), WhitenoiseError> {
                 }
 
                 // Summary statistics
-                let contacts_with_metadata = contacts.values().filter(|meta| meta.is_some()).count();
-                let contacts_with_names = contacts.values()
+                let contacts_with_metadata =
+                    contacts.values().filter(|meta| meta.is_some()).count();
+                let contacts_with_names = contacts
+                    .values()
                     .filter_map(|meta| meta.as_ref())
                     .filter(|meta| meta.name.is_some() || meta.display_name.is_some())
                     .count();
-                let contacts_with_pictures = contacts.values()
+                let contacts_with_pictures = contacts
+                    .values()
                     .filter_map(|meta| meta.as_ref())
                     .filter(|meta| meta.picture.is_some())
                     .count();
-                let contacts_with_nip05 = contacts.values()
+                let contacts_with_nip05 = contacts
+                    .values()
                     .filter_map(|meta| meta.as_ref())
                     .filter(|meta| meta.nip05.is_some())
                     .count();
@@ -135,8 +152,14 @@ async fn main() -> Result<(), WhitenoiseError> {
                 println!("   • Contacts with metadata: {}", contacts_with_metadata);
                 println!("   • Contacts with names: {}", contacts_with_names);
                 println!("   • Contacts with pictures: {}", contacts_with_pictures);
-                println!("   • Contacts with NIP-05 verification: {}", contacts_with_nip05);
-                println!("   • Contacts without metadata: {}", contacts.len() - contacts_with_metadata);
+                println!(
+                    "   • Contacts with NIP-05 verification: {}",
+                    contacts_with_nip05
+                );
+                println!(
+                    "   • Contacts without metadata: {}",
+                    contacts.len() - contacts_with_metadata
+                );
             }
         }
         Err(e) => {
@@ -157,7 +180,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         println!("   📝 This is normal for accounts that haven't configured custom relays");
         println!("   📝 Whitenoise is using default relays for queries");
     } else {
-        println!("   📡 Found {} relay(s) for this account:", relay_status.len());
+        println!(
+            "   📡 Found {} relay(s) for this account:",
+            relay_status.len()
+        );
         for (relay_url, status) in &relay_status {
             println!("      • {} - Status: {:?}", relay_url, status);
         }
