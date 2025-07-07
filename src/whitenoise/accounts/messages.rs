@@ -1,6 +1,7 @@
 use crate::types::MessageWithTokens;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
+use crate::RelayType;
 use nostr_mls::prelude::*;
 
 impl Whitenoise {
@@ -237,5 +238,33 @@ impl Whitenoise {
         let event_id = inner_event.id.unwrap(); // This is guaranteed to be Some by ensure_id
 
         Ok((inner_event, event_id))
+    }
+    /// Publish the message in encrypted form for the recepient to the relays as per nip04
+    pub async fn send_direct_message_nip04(
+        &self,
+        sender_pubkey: &PublicKey,
+        recepient_pubkey: &PublicKey,
+        content: String,
+        tags: Vec<Tag>,
+    ) -> Result<()> {
+        let sender_keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(sender_pubkey)?;
+
+        let encrypted_message =
+            nostr::nips::nip04::encrypt(sender_keys.secret_key(), recepient_pubkey, &content)?;
+        let dm_event_builder = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_message)
+            .tags(tags)
+            .tag(Tag::public_key(*recepient_pubkey));
+        let relays = self
+            .fetch_relays_with_fallback(*sender_pubkey, RelayType::Inbox)
+            .await?;
+
+        let _event_id = self
+            .nostr
+            .publish_event_builder_with_signer(dm_event_builder, &relays, sender_keys)
+            .await?;
+
+        Ok(())
     }
 }
