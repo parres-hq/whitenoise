@@ -3,7 +3,6 @@ use crate::types::{NostrEncryptionMethod, ProcessableEvent};
 
 use ::rand::RngCore;
 use nostr_sdk::prelude::*;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -308,11 +307,14 @@ impl NostrManager {
     /// # Returns
     ///
     /// * `Result<Output<EventId>>` - The published event ID if successful, or an error if publishing fails
-    pub(crate) async fn publish_event_to(
+    pub(crate) async fn publish_event_to<I>(
         &self,
         event: Event,
-        relays: &BTreeSet<RelayUrl>,
-    ) -> Result<Output<EventId>> {
+        relays: I,
+    ) -> Result<Output<EventId>>
+    where
+        I: IntoIterator<Item = RelayUrl>,
+    {
         Ok(self.client.send_event_to(relays, &event).await?)
     }
 

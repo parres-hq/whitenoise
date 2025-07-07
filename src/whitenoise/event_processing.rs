@@ -242,6 +242,7 @@ impl Whitenoise {
                     "Received private direct message: {:?}",
                     unwrapped.rumor
                 );
+                self.process_direct_message(&target_account, unwrapped).await?;
             }
             _ => {
                 tracing::debug!(
@@ -252,6 +253,20 @@ impl Whitenoise {
             }
         }
 
+        Ok(())
+    }
+
+    async fn process_direct_message(&self, account: &Account, message: UnwrappedGift) -> Result<()> {
+        let tags_json: String = serde_json::to_string(&message.rumor.tags)?;
+        let _result = sqlx::query("INSERT INTO direct_messages (account_pubkey, sender_pubkey, content, tags, created_at)
+        VALUES (?, ?, ?, ?, ?)")
+        .bind(account.pubkey.to_hex())
+        .bind(message.sender.to_hex())
+        .bind(message.rumor.content)
+        .bind(tags_json)
+        .bind(message.rumor.created_at.as_u64() as i64)
+        .execute(&self.database.pool)
+        .await?;
         Ok(())
     }
 

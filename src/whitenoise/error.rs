@@ -83,6 +83,9 @@ pub enum WhitenoiseError {
     #[error("Welcome not found")]
     WelcomeNotFound,
 
+    #[error("Nostr EventBuilder error")]
+    NostrEventBuilderError(#[from] nostr_sdk::event::builder::Error),
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }
