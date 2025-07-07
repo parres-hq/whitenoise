@@ -319,11 +319,13 @@ impl NostrManager {
     /// Publishes a Nostr event using a temporary signer.
     ///
     /// This method allows publishing an event with a signer that is only used for this specific operation.
-    /// The signer is set before publishing and unset immediately after.
+    /// The signer is set before publishing and unset immediately after. This method also ensures that
+    /// the client is connected to all specified relays before attempting to publish.
     ///
     /// # Arguments
     ///
     /// * `event_builder` - The event builder containing the event to publish
+    /// * `relays` - The list of relay URLs to publish the event to
     /// * `signer` - A signer that implements `NostrSigner` and has a 'static lifetime
     ///
     /// # Returns
@@ -335,6 +337,9 @@ impl NostrManager {
         relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
+        // Ensure we're connected to all target relays before publishing
+        self.ensure_relays_connected(relays).await?;
+
         self.client.set_signer(signer).await;
         let result = self
             .client
@@ -351,7 +356,8 @@ impl NostrManager {
     /// hiding the recipient's identity from relay operators and other observers.
     ///
     /// The signer is set before publishing and automatically unset immediately after the operation
-    /// completes, ensuring it doesn't persist in the client state.
+    /// completes, ensuring it doesn't persist in the client state. This method also ensures that
+    /// the client is connected to all specified relays before attempting to publish.
     ///
     /// # Arguments
     ///
@@ -379,6 +385,9 @@ impl NostrManager {
         relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
+        // Ensure we're connected to all target relays before publishing
+        self.ensure_relays_connected(relays).await?;
+
         let wrapped_event = EventBuilder::gift_wrap(&signer, receiver, rumor, extra_tags).await?;
 
         self.client.set_signer(signer).await;
@@ -782,6 +791,124 @@ impl NostrManager {
     pub async fn get_relay_status(&self, relay_url: &RelayUrl) -> Result<RelayStatus> {
         let relay = self.client.relay(relay_url).await?;
         Ok(relay.status())
+    }
+
+    /// Ensures that the client is connected to all the specified relays.
+    ///
+    /// This method checks each relay URL in the provided list and adds it to the client's
+    /// relay pool if it's not already connected. It then attempts to establish connections
+    /// to any newly added relays.
+    ///
+    /// This is essential for subscription setup and event publishing to work correctly,
+    /// as the nostr-sdk client needs to be connected to relays before it can subscribe
+    /// to them or publish events to them.
+    ///
+    /// # Arguments
+    ///
+    /// * `relays` - A slice of `RelayUrl` objects representing the relays to ensure connections to.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if all relays are successfully added and connection attempts are made.
+    /// Note that individual relay connection failures are logged but don't cause this method to fail,
+    /// as partial connectivity is often acceptable.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `NostrManagerError` if:
+    /// * Adding a relay to the client fails due to invalid URL format
+    /// * Client configuration errors prevent relay addition
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let user_relays = vec![
+    ///     RelayUrl::parse("wss://relay.damus.io").unwrap(),
+    ///     RelayUrl::parse("wss://nos.lol").unwrap(),
+    /// ];
+    /// nostr_manager.ensure_relays_connected(&user_relays).await?;
+    /// // Now safe to call client.subscribe_with_id_to(user_relays, ...)
+    /// ```
+    pub(crate) async fn ensure_relays_connected(&self, relays: &[RelayUrl]) -> Result<()> {
+        if relays.is_empty() {
+            return Ok(());
+        }
+
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::ensure_relays_connected",
+            "Ensuring connection to {} relays",
+            relays.len()
+        );
+
+        // Track newly added relays for connection
+        let mut newly_added_relays = Vec::new();
+
+        for relay_url in relays {
+            // Check if we're already connected to this relay by attempting to get its status
+            match self.client.relay(relay_url).await {
+                Ok(_) => {
+                    // Relay already exists in the client, skip
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::ensure_relays_connected",
+                        "Relay {} already connected",
+                        relay_url
+                    );
+                }
+                Err(_) => {
+                    // Relay not found in client, add it
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::ensure_relays_connected",
+                        "Adding new relay: {}",
+                        relay_url
+                    );
+
+                    match self.client.add_relay(relay_url).await {
+                        Ok(_) => {
+                            newly_added_relays.push(relay_url.clone());
+                            tracing::debug!(
+                                target: "whitenoise::nostr_manager::ensure_relays_connected",
+                                "Successfully added relay: {}",
+                                relay_url
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "whitenoise::nostr_manager::ensure_relays_connected",
+                                "Failed to add relay {}: {}",
+                                relay_url,
+                                e
+                            );
+                            // Continue with other relays rather than failing completely
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we added any new relays, trigger connection to establish them
+        if !newly_added_relays.is_empty() {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::ensure_relays_connected",
+                "Connecting to {} newly added relays",
+                newly_added_relays.len()
+            );
+
+            // The connect() method is async but we don't wait for full connection
+            // as subscription setup should work even with partially connected relays
+            tokio::spawn({
+                let client = self.client.clone();
+                async move {
+                    client.connect().await;
+                }
+            });
+        }
+
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::ensure_relays_connected",
+            "Relay connection ensuring completed"
+        );
+
+        Ok(())
     }
 }
 

@@ -50,6 +50,9 @@ impl NostrManager {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
 
+        // Ensure we're connected to all user relays before subscribing
+        self.ensure_relays_connected(&user_relays).await?;
+
         // Combine all user event types into a single subscription
         let user_events_filter = Filter::new()
             .kinds([
@@ -76,6 +79,9 @@ impl NostrManager {
     ) -> Result<()> {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
+
+        // Ensure we're connected to all inbox relays before subscribing
+        self.ensure_relays_connected(&inbox_relays).await?;
 
         let giftwrap_filter = Filter::new()
             .kind(Kind::GiftWrap)
@@ -105,6 +111,9 @@ impl NostrManager {
             return Ok(());
         }
 
+        // Ensure we're connected to all user relays before subscribing
+        self.ensure_relays_connected(&user_relays).await?;
+
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
 
@@ -131,6 +140,9 @@ impl NostrManager {
             // No groups yet, skip subscription
             return Ok(());
         }
+
+        // Ensure we're connected to all group relays before subscribing
+        self.ensure_relays_connected(&group_relays).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));
