@@ -462,7 +462,11 @@ mod tests {
         }
     }
 
-    async fn publish_key_package_for_test_account(whitenoise: &Whitenoise, account: &Account, keys: Keys) {
+    async fn publish_key_package_for_test_account(
+        whitenoise: &Whitenoise,
+        account: &Account,
+        keys: Keys,
+    ) {
         // publish keypackage to relays
         let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
         let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
@@ -785,7 +789,10 @@ mod tests {
         let whitenoise = test_get_whitenoise().await;
         let (_, user1) = setup_login_account(whitenoise).await;
         let (acc2, user2) = create_test_account();
-        whitenoise.initialize_nostr_mls_for_account(&acc2).await.unwrap();
+        whitenoise
+            .initialize_nostr_mls_for_account(&acc2)
+            .await
+            .unwrap();
 
         publish_key_package_for_test_account(whitenoise, &acc2, user2.clone()).await;
 
