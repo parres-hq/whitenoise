@@ -689,6 +689,53 @@ pub mod test_utils {
 
         (account, keys)
     }
+
+    pub(crate) fn create_nostr_group_config_data() -> NostrGroupConfigData {
+        NostrGroupConfigData {
+            name: "Test group".to_owned(),
+            description: "test description".to_owned(),
+            image_url: Some("http://test_blossom:53232/fake_img.png".to_owned()),
+            image_key: Some(b"fake key to encrypt image".to_vec()),
+            relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+        }
+    }
+
+    pub(crate) async fn setup_multiple_test_accounts(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        count: usize,
+    ) -> Vec<(Account, Keys)> {
+        let mut accounts = Vec::new();
+        for _ in 0..count {
+            let (account, keys) = create_test_account();
+            accounts.push((account.clone(), keys.clone()));
+            whitenoise
+                .add_contact(creator_account, keys.public_key())
+                .await
+                .unwrap();
+            whitenoise
+                .initialize_nostr_mls_for_account(&account)
+                .await
+                .unwrap();
+
+            // publish keypackage to relays
+            let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
+            let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
+
+            // Get relays with fallback to defaults if user hasn't configured key package relays
+            let relays_to_use = whitenoise
+                .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
+                .await
+                .unwrap();
+
+            let _ = whitenoise
+                .nostr
+                .publish_event_builder_with_signer(key_package_event_builder, &relays_to_use, keys)
+                .await
+                .unwrap();
+        }
+        accounts
+    }
 }
 
 #[cfg(test)]
