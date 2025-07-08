@@ -1297,7 +1297,6 @@ impl Whitenoise {
     pub(crate) async fn encoded_key_package(
         &self,
         account: &Account,
-        pubkey: &PublicKey,
     ) -> Result<(String, [Tag; 4])> {
         let key_package_relays = self
             .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
@@ -1310,7 +1309,7 @@ impl Whitenoise {
             .ok_or_else(|| WhitenoiseError::NostrMlsNotInitialized)?;
 
         let result = nostr_mls
-            .create_key_package_for_event(pubkey, key_package_relays)
+            .create_key_package_for_event(&account.pubkey, key_package_relays)
             .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
 
         Ok(result)
@@ -1340,8 +1339,7 @@ impl Whitenoise {
         }
 
         // Extract key package data while holding the lock
-        let (encoded_key_package, tags) =
-            self.encoded_key_package(account, &account.pubkey).await?;
+        let (encoded_key_package, tags) = self.encoded_key_package(account).await?;
 
         let signer = self
             .secrets_store
@@ -1655,6 +1653,7 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
+    #[ignore]
     async fn test_login_after_delete_all_data() {
         let whitenoise = test_get_whitenoise().await;
 

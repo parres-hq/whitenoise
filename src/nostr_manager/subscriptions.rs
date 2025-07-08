@@ -83,10 +83,7 @@ impl NostrManager {
         // Ensure we're connected to all inbox relays before subscribing
         self.ensure_relays_connected(&inbox_relays).await?;
 
-        let giftwrap_filter = Filter::new()
-            .kind(Kind::GiftWrap)
-            .pubkey(pubkey)
-            .since(Timestamp::now());
+        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
 
         self.client
             .subscribe_with_id_to(inbox_relays, subscription_id, giftwrap_filter, None)
@@ -149,8 +146,7 @@ impl NostrManager {
 
         let mls_message_filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
-            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids)
-            .since(Timestamp::now());
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids);
 
         self.client
             .subscribe_with_id_to(group_relays, subscription_id, mls_message_filter, None)
