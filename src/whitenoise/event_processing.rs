@@ -291,10 +291,10 @@ impl Whitenoise {
                 false, // For now we don't want to delete the key packages from MLS storage
             )
             .await?;
-            tracing::info!(target: "whitenoise::process_welcome", "Deleted used key package from relays");
+            tracing::debug!(target: "whitenoise::process_welcome", "Deleted used key package from relays");
 
             self.publish_key_package_for_account(account).await?;
-            tracing::info!(target: "whitenoise::process_welcome", "Published new key package");
+            tracing::debug!(target: "whitenoise::process_welcome", "Published new key package");
         } else {
             tracing::warn!(target: "whitenoise::process_welcome", "No key package event id found in welcome event");
         }
