@@ -235,7 +235,6 @@ impl Whitenoise {
             Kind::MlsWelcome => {
                 self.process_welcome(&target_account, event, unwrapped.rumor)
                     .await?;
-                tracing::info!("DELCIN processed welcome successfully");
             }
             Kind::PrivateDirectMessage => {
                 tracing::debug!(
@@ -292,10 +291,10 @@ impl Whitenoise {
                 false, // For now we don't want to delete the key packages from MLS storage
             )
             .await?;
-            tracing::debug!(target: "whitenoise::process_welcome", "Deleted used key package from relays");
+            tracing::info!(target: "whitenoise::process_welcome", "Deleted used key package from relays");
 
             self.publish_key_package_for_account(account).await?;
-            tracing::debug!(target: "whitenoise::process_welcome", "Published new key package");
+            tracing::info!(target: "whitenoise::process_welcome", "Published new key package");
         } else {
             tracing::warn!(target: "whitenoise::process_welcome", "No key package event id found in welcome event");
         }
