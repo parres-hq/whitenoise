@@ -246,10 +246,6 @@ impl Whitenoise {
 
 #[cfg(test)]
 mod tests {
-    // use std::{thread::sleep, time::Duration};
-
-    use std::{thread::sleep, time::Duration};
-
     use super::*;
     use crate::whitenoise::test_utils::*;
 
@@ -277,31 +273,33 @@ mod tests {
             )
             .await;
         assert!(group.is_ok());
-
         let result1 = whitenoise
             .fetch_welcomes(&creator_account.pubkey)
             .await
             .unwrap();
         assert!(result1.is_empty()); // creator should not receive welcome messages
+        whitenoise.logout(&creator_account.pubkey).await.unwrap();
 
         let admin_key = &member_accounts[0].1;
         let regular_key = &member_accounts[1].1;
 
+        tracing::info!("Logging into account {}", admin_key.public_key.to_hex());
         let account = whitenoise
             .login(admin_key.secret_key().to_secret_hex())
             .await
             .unwrap();
         // Give some time for the event processor to process welcome messages
-        sleep(Duration::from_secs(3));
+        // sleep(Duration::from_secs(3));
         let result = whitenoise.fetch_welcomes(&account.pubkey).await.unwrap();
-        assert!(!result.is_empty());
+        assert!(!result.is_empty(), "{:?}", result);
+        whitenoise.logout(&admin_key.public_key).await.unwrap();
 
+        tracing::info!("Logging into account {}", regular_key.public_key.to_hex());
         let account = whitenoise
             .login(regular_key.secret_key().to_secret_hex())
             .await
             .unwrap();
         // Give some time for the event processor to process welcome messages
-        // sleep(Duration::from_secs(10));
         let result = whitenoise.fetch_welcomes(&account.pubkey).await.unwrap();
         assert!(!result.is_empty());
     }

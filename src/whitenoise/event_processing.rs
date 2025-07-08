@@ -235,7 +235,6 @@ impl Whitenoise {
             Kind::MlsWelcome => {
                 self.process_welcome(&target_account, event, unwrapped.rumor)
                     .await?;
-                tracing::info!("DELCIN processed welcome successfully");
             }
             Kind::PrivateDirectMessage => {
                 tracing::debug!(
