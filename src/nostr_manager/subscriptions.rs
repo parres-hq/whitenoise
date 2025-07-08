@@ -113,9 +113,7 @@ impl NostrManager {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
 
-        let contacts_metadata_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(contacts_pubkeys);
+        let contacts_metadata_filter = Filter::new().kind(Kind::Metadata).authors(contacts_pubkeys);
 
         self.client
             .subscribe_with_id_to(user_relays, subscription_id, contacts_metadata_filter, None)
