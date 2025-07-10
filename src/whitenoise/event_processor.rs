@@ -65,7 +65,7 @@ impl Whitenoise {
         mut shutdown: Receiver<()>,
     ) {
         tracing::debug!(
-            target: "whitenoise::process_events",
+            target: "whitenoise::event_processor::process_events",
             "Starting event processing loop"
         );
 
@@ -75,7 +75,7 @@ impl Whitenoise {
             tokio::select! {
                 Some(event) = receiver.recv() => {
                     tracing::debug!(
-                        target: "whitenoise::process_events",
+                        target: "whitenoise::event_processor::process_events",
                         "Received event for processing"
                     );
 
@@ -93,7 +93,7 @@ impl Whitenoise {
                                 _ => {
                                     // TODO: Add more event types as needed
                                     tracing::debug!(
-                                        target: "whitenoise::process_events",
+                                        target: "whitenoise::event_processor::process_events",
                                         "Received unhandled event of kind: {:?} - add handler if needed",
                                         event.kind
                                     );
@@ -107,7 +107,7 @@ impl Whitenoise {
                                     if let Some(next_retry) = retry_info.next_attempt() {
                                         let delay_ms = next_retry.delay_ms();
                                         tracing::warn!(
-                                            target: "whitenoise::process_events",
+                                            target: "whitenoise::event_processor::process_events",
                                             "Event processing failed (attempt {}/{}), retrying in {}ms: {}",
                                             next_retry.attempt,
                                             next_retry.max_attempts,
@@ -126,7 +126,7 @@ impl Whitenoise {
                                             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                                             if let Err(send_err) = sender.send(retry_event).await {
                                                 tracing::error!(
-                                                    target: "whitenoise::process_events",
+                                                    target: "whitenoise::event_processor::process_events",
                                                     "Failed to requeue event for retry: {}",
                                                     send_err
                                                 );
@@ -135,7 +135,7 @@ impl Whitenoise {
                                     }
                                 } else {
                                     tracing::error!(
-                                        target: "whitenoise::process_events",
+                                        target: "whitenoise::event_processor::process_events",
                                         "Event processing failed after {} attempts, giving up: {}",
                                         retry_info.max_attempts,
                                         e
@@ -150,7 +150,7 @@ impl Whitenoise {
                 }
                 Some(_) = shutdown.recv(), if !shutting_down => {
                     tracing::info!(
-                        target: "whitenoise::process_events",
+                        target: "whitenoise::event_processor::process_events",
                         "Received shutdown signal, finishing current queue..."
                     );
                     shutting_down = true;
@@ -159,12 +159,12 @@ impl Whitenoise {
                 else => {
                     if shutting_down {
                         tracing::debug!(
-                            target: "whitenoise::process_events",
+                            target: "whitenoise::event_processor::process_events",
                             "Queue flushed, shutting down event processor"
                         );
                     } else {
                         tracing::debug!(
-                            target: "whitenoise::process_events",
+                            target: "whitenoise::event_processor::process_events",
                             "All channels closed, exiting event processing loop"
                         );
                     }
@@ -177,7 +177,7 @@ impl Whitenoise {
     /// Process giftwrap events with account awareness
     async fn process_giftwrap(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::process_giftwrap",
+            target: "whitenoise::event_processor::process_giftwrap",
             "Processing giftwrap: {:?}",
             event
         );
@@ -196,7 +196,7 @@ impl Whitenoise {
             })?;
 
         tracing::debug!(
-            target: "whitenoise::process_giftwrap",
+            target: "whitenoise::event_processor::process_giftwrap",
             "Processing giftwrap for target account: {} (author: {})",
             target_pubkey.to_hex(),
             event.pubkey.to_hex()
@@ -218,7 +218,7 @@ impl Whitenoise {
         let target_account = self.read_account_by_pubkey(&target_pubkey).await?;
 
         tracing::info!(
-            target: "whitenoise::process_giftwrap",
+            target: "whitenoise::event_processor::process_giftwrap",
             "Giftwrap received for account: {} - processing not yet implemented",
             target_pubkey.to_hex()
         );
@@ -238,14 +238,14 @@ impl Whitenoise {
             }
             Kind::PrivateDirectMessage => {
                 tracing::debug!(
-                    target: "whitenoise::process_giftwrap",
+                    target: "whitenoise::event_processor::process_giftwrap",
                     "Received private direct message: {:?}",
                     unwrapped.rumor
                 );
             }
             _ => {
                 tracing::debug!(
-                    target: "whitenoise::process_giftwrap",
+                    target: "whitenoise::event_processor::process_giftwrap",
                     "Received unhandled giftwrap of kind {:?}",
                     unwrapped.rumor.kind
                 );
@@ -268,9 +268,9 @@ impl Whitenoise {
                 nostr_mls
                     .process_welcome(&event.id, &rumor)
                     .map_err(WhitenoiseError::NostrMlsError)?;
-                tracing::debug!(target: "whitenoise::process_welcome", "Processed welcome event");
+                tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Processed welcome event");
             } else {
-                tracing::error!(target: "whitenoise::process_welcome", "Nostr MLS not initialized");
+                tracing::error!(target: "whitenoise::event_processor::process_welcome", "Nostr MLS not initialized");
                 return Err(WhitenoiseError::NostrMlsNotInitialized);
             }
         } // nostr_mls lock released here
@@ -291,12 +291,12 @@ impl Whitenoise {
                 false, // For now we don't want to delete the key packages from MLS storage
             )
             .await?;
-            tracing::debug!(target: "whitenoise::process_welcome", "Deleted used key package from relays");
+            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Deleted used key package from relays");
 
             self.publish_key_package_for_account(account).await?;
-            tracing::debug!(target: "whitenoise::process_welcome", "Published new key package");
+            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Published new key package");
         } else {
-            tracing::warn!(target: "whitenoise::process_welcome", "No key package event id found in welcome event");
+            tracing::warn!(target: "whitenoise::event_processor::process_welcome", "No key package event id found in welcome event");
         }
 
         Ok(())
@@ -309,7 +309,7 @@ impl Whitenoise {
         subscription_id: Option<String>,
     ) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::process_mls_message",
+            target: "whitenoise::event_processor::process_mls_message",
             "Processing MLS message: {:?}",
             event
         );
@@ -331,7 +331,7 @@ impl Whitenoise {
             })?;
 
         tracing::debug!(
-            target: "whitenoise::process_mls_message",
+            target: "whitenoise::event_processor::process_mls_message",
             "Processing MLS message for account: {}",
             target_pubkey.to_hex()
         );
@@ -342,16 +342,16 @@ impl Whitenoise {
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             match nostr_mls.process_message(&event) {
                 Ok(result) => {
-                    tracing::debug!(target: "whitenoise::process_mls_message", "Processed MLS message - Result: {:?}", result);
+                    tracing::debug!(target: "whitenoise::event_processor::process_mls_message", "Processed MLS message - Result: {:?}", result);
                     Ok(())
                 }
                 Err(e) => {
-                    tracing::error!(target: "whitenoise::process_mls_message", "MLS message processing failed for account {}: {}", target_pubkey.to_hex(), e);
+                    tracing::error!(target: "whitenoise::event_processor::process_mls_message", "MLS message processing failed for account {}: {}", target_pubkey.to_hex(), e);
                     Err(WhitenoiseError::NostrMlsError(e))
                 }
             }
         } else {
-            tracing::error!(target: "whitenoise::process_mls_message", "Nostr MLS not initialized");
+            tracing::error!(target: "whitenoise::event_processor::process_mls_message", "Nostr MLS not initialized");
             Err(WhitenoiseError::NostrMlsNotInitialized)
         }
     }
@@ -359,7 +359,7 @@ impl Whitenoise {
     /// Process relay messages for logging/monitoring
     async fn process_relay_message(&self, relay_url: RelayUrl, message_type: String) {
         tracing::debug!(
-            target: "whitenoise::process_relay_message",
+            target: "whitenoise::event_processor::process_relay_message",
             "Processing message from {}: {}",
             relay_url,
             message_type

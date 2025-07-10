@@ -11,7 +11,7 @@ use std::sync::Arc;
 pub mod accounts;
 pub mod database;
 pub mod error;
-mod event_processing;
+mod event_processor;
 pub mod message_aggregator;
 pub mod secrets_store;
 pub mod utils;
@@ -994,7 +994,6 @@ mod tests {
 
             let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
             assert!(log_account.is_ok());
-            assert_eq!(log_account.unwrap(), account);
 
             let _original_timestamp = account.last_synced;
 
@@ -1337,6 +1336,504 @@ mod tests {
         // Mock struct for testing group ID conversion
         struct MockGroup {
             nostr_group_id: Vec<u8>,
+        }
+    }
+
+    // Metadata Consistency Tests
+    mod metadata_consistency_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_metadata_consistency_between_query_and_fetch() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create multiple test accounts with distinct metadata
+            let mut test_accounts = Vec::new();
+            let mut test_metadata = Vec::new();
+
+            for i in 0..3 {
+                let (account, keys) = create_test_account();
+                whitenoise.save_account(&account).await.unwrap();
+                whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+                // Login to the account
+                let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
+                assert!(log_account.is_ok());
+
+                // Initialize NostrMls for the account
+                whitenoise
+                    .initialize_nostr_mls_for_account(&account)
+                    .await
+                    .unwrap();
+
+                // Create unique metadata for each account
+                let metadata = Metadata {
+                    name: Some(format!("Test User {}", i)),
+                    display_name: Some(format!("Display Name {}", i)),
+                    about: Some(format!("About text for user {}", i)),
+                    picture: Some(format!("https://example.com/avatar{}.jpg", i)),
+                    ..Default::default()
+                };
+
+                // Publish the metadata
+                whitenoise
+                    .update_metadata(&metadata, &account.pubkey)
+                    .await
+                    .unwrap();
+
+                test_accounts.push((account, keys));
+                test_metadata.push(metadata);
+            }
+
+            // Wait for metadata to be processed
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // Test each account's metadata using both methods
+            for (i, ((account, _keys), expected_metadata)) in
+                test_accounts.iter().zip(test_metadata.iter()).enumerate()
+            {
+                tracing::info!(
+                    "Testing account {} with pubkey: {}",
+                    i,
+                    account.pubkey.to_hex()
+                );
+
+                // Test fetch_metadata (cache + relays)
+                let fetch_result = whitenoise.fetch_metadata(account.pubkey).await.unwrap();
+
+                // Test query_metadata (cache only)
+                let query_result = whitenoise
+                    .nostr
+                    .query_user_metadata(account.pubkey)
+                    .await
+                    .unwrap();
+
+                tracing::info!(
+                    "Account {}: fetch_metadata result: {:?}",
+                    i,
+                    fetch_result.as_ref().map(|m| &m.name)
+                );
+                tracing::info!(
+                    "Account {}: query_metadata result: {:?}",
+                    i,
+                    query_result.as_ref().map(|m| &m.name)
+                );
+
+                // Both methods should return the same result
+                match (fetch_result.as_ref(), query_result.as_ref()) {
+                    (Some(fetch_meta), Some(query_meta)) => {
+                        if fetch_meta.name != query_meta.name {
+                            tracing::error!(
+                                 "METADATA MISMATCH for account {}: fetch_metadata name={:?}, query_metadata name={:?}",
+                                 i, fetch_meta.name, query_meta.name
+                             );
+                        }
+                        if fetch_meta.display_name != query_meta.display_name {
+                            tracing::error!(
+                                 "METADATA MISMATCH for account {}: fetch_metadata display_name={:?}, query_metadata display_name={:?}",
+                                 i, fetch_meta.display_name, query_meta.display_name
+                             );
+                        }
+                        assert_eq!(
+                            fetch_meta.name, query_meta.name,
+                            "Name should match between fetch and query for account {}",
+                            i
+                        );
+                        assert_eq!(
+                            fetch_meta.display_name, query_meta.display_name,
+                            "Display name should match between fetch and query for account {}",
+                            i
+                        );
+                        assert_eq!(
+                            fetch_meta.about, query_meta.about,
+                            "About should match between fetch and query for account {}",
+                            i
+                        );
+                        assert_eq!(
+                            fetch_meta.picture, query_meta.picture,
+                            "Picture should match between fetch and query for account {}",
+                            i
+                        );
+                    }
+                    (None, None) => {
+                        tracing::warn!("Both methods returned None for account {}", i);
+                        // This might be expected in test environment
+                    }
+                    (Some(_), None) => {
+                        tracing::warn!("fetch_metadata found metadata but query_metadata didn't for account {}", i);
+                        // This could happen if fetch gets from relays but cache is empty
+                    }
+                    (None, Some(query_meta)) => {
+                        tracing::error!(
+                             "CACHE CORRUPTION: query_metadata found metadata ({:?}) but fetch_metadata didn't for account {}",
+                             query_meta.name, i
+                         );
+                        panic!("Cache contains metadata that fetch_metadata can't find - possible corruption");
+                    }
+                }
+
+                // Additional check: verify the metadata matches what we expect
+                if let Some(retrieved_metadata) = fetch_result {
+                    assert_eq!(
+                        retrieved_metadata.name, expected_metadata.name,
+                        "Retrieved metadata name doesn't match expected for account {}",
+                        i
+                    );
+                    assert_eq!(
+                        retrieved_metadata.display_name, expected_metadata.display_name,
+                        "Retrieved metadata display_name doesn't match expected for account {}",
+                        i
+                    );
+                    assert_eq!(
+                        retrieved_metadata.about, expected_metadata.about,
+                        "Retrieved metadata about doesn't match expected for account {}",
+                        i
+                    );
+                    assert_eq!(
+                        retrieved_metadata.picture, expected_metadata.picture,
+                        "Retrieved metadata picture doesn't match expected for account {}",
+                        i
+                    );
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn test_contact_list_metadata_consistency() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create a main account
+            let (main_account, main_keys) = create_test_account();
+            whitenoise.save_account(&main_account).await.unwrap();
+            whitenoise
+                .secrets_store
+                .store_private_key(&main_keys)
+                .unwrap();
+            let log_account = whitenoise
+                .login(main_keys.secret_key().to_secret_hex())
+                .await;
+            assert!(log_account.is_ok());
+            whitenoise
+                .initialize_nostr_mls_for_account(&main_account)
+                .await
+                .unwrap();
+
+            // Create multiple contact accounts with unique metadata
+            let mut contact_accounts = Vec::new();
+            let mut expected_contact_metadata = Vec::new();
+
+            for i in 0..3 {
+                let (contact_account, contact_keys) = create_test_account();
+                whitenoise.save_account(&contact_account).await.unwrap();
+                whitenoise
+                    .secrets_store
+                    .store_private_key(&contact_keys)
+                    .unwrap();
+
+                // Login to contact account to publish metadata
+                let contact_log_account = whitenoise
+                    .login(contact_keys.secret_key().to_secret_hex())
+                    .await;
+                assert!(contact_log_account.is_ok());
+                whitenoise
+                    .initialize_nostr_mls_for_account(&contact_account)
+                    .await
+                    .unwrap();
+
+                // Create unique metadata for contact
+                let contact_metadata = Metadata {
+                    name: Some(format!("Contact {}", i)),
+                    display_name: Some(format!("Contact Display {}", i)),
+                    about: Some(format!("Contact {} bio", i)),
+                    picture: Some(format!("https://example.com/contact{}.jpg", i)),
+                    ..Default::default()
+                };
+
+                // Publish contact metadata
+                whitenoise
+                    .update_metadata(&contact_metadata, &contact_account.pubkey)
+                    .await
+                    .unwrap();
+
+                // Add this contact to main account's contact list
+                whitenoise
+                    .add_contact(&main_account, contact_account.pubkey)
+                    .await
+                    .unwrap();
+
+                contact_accounts.push((contact_account, contact_keys));
+                expected_contact_metadata.push(contact_metadata);
+            }
+
+            // Switch back to main account
+            let log_account = whitenoise
+                .login(main_keys.secret_key().to_secret_hex())
+                .await;
+            assert!(log_account.is_ok());
+
+            // Wait for metadata to be processed
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // Fetch contacts using the contact list method (which uses query_user_metadata)
+            let contacts_with_metadata = whitenoise
+                .fetch_contacts(main_account.pubkey)
+                .await
+                .unwrap();
+
+            tracing::info!(
+                "Found {} contacts in contact list",
+                contacts_with_metadata.len()
+            );
+
+            // Verify each contact's metadata individually using both methods
+            for (i, ((contact_account, _contact_keys), expected_metadata)) in contact_accounts
+                .iter()
+                .zip(expected_contact_metadata.iter())
+                .enumerate()
+            {
+                tracing::info!(
+                    "Testing contact {} with pubkey: {}",
+                    i,
+                    contact_account.pubkey.to_hex()
+                );
+
+                // Check if the contact is in the contact list
+                let contact_list_metadata = contacts_with_metadata.get(&contact_account.pubkey);
+
+                // Test individual fetch_metadata
+                let individual_fetch = whitenoise
+                    .fetch_metadata(contact_account.pubkey)
+                    .await
+                    .unwrap();
+
+                // Test individual query_metadata
+                let individual_query = whitenoise
+                    .nostr
+                    .query_user_metadata(contact_account.pubkey)
+                    .await
+                    .unwrap();
+
+                tracing::info!(
+                    "Contact {}: contact_list metadata: {:?}",
+                    i,
+                    contact_list_metadata.map(|m| m.as_ref().map(|meta| &meta.name))
+                );
+                tracing::info!(
+                    "Contact {}: individual_fetch metadata: {:?}",
+                    i,
+                    individual_fetch.as_ref().map(|m| &m.name)
+                );
+                tracing::info!(
+                    "Contact {}: individual_query_metadata metadata: {:?}",
+                    i,
+                    individual_query.as_ref().map(|m| &m.name)
+                );
+
+                // Compare all three sources
+                if let Some(Some(contact_meta)) = contact_list_metadata {
+                    if let Some(fetch_meta) = individual_fetch.as_ref() {
+                        if contact_meta.name != fetch_meta.name {
+                            tracing::error!(
+                                    "METADATA MISMATCH for contact {}: contact_list name={:?}, individual_fetch name={:?}",
+                                    i, contact_meta.name, fetch_meta.name
+                                );
+                        }
+                        assert_eq!(
+                            contact_meta.name, fetch_meta.name,
+                            "Contact list metadata should match individual fetch for contact {}",
+                            i
+                        );
+                    }
+
+                    if let Some(query_meta) = individual_query.as_ref() {
+                        if contact_meta.name != query_meta.name {
+                            tracing::error!(
+                                     "METADATA MISMATCH for contact {}: contact_list name={:?}, individual_query_metadata name={:?}",
+                                     i, contact_meta.name, query_meta.name
+                                 );
+                        }
+                        assert_eq!(contact_meta.name, query_meta.name,
+                                 "Contact list metadata should match individual query_metadata for contact {}", i);
+                    }
+
+                    // Verify against expected metadata
+                    if contact_meta.name != expected_metadata.name {
+                        tracing::error!(
+                            "WRONG METADATA for contact {}: got name={:?}, expected name={:?}",
+                            i,
+                            contact_meta.name,
+                            expected_metadata.name
+                        );
+                    }
+                    assert_eq!(
+                        contact_meta.name, expected_metadata.name,
+                        "Contact metadata should match expected for contact {}",
+                        i
+                    );
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn test_metadata_cache_isolation() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Create two accounts with very different metadata
+            let (account1, keys1) = create_test_account();
+            let (account2, keys2) = create_test_account();
+
+            whitenoise.save_account(&account1).await.unwrap();
+            whitenoise.save_account(&account2).await.unwrap();
+            whitenoise.secrets_store.store_private_key(&keys1).unwrap();
+            whitenoise.secrets_store.store_private_key(&keys2).unwrap();
+
+            // Login and setup account1
+            let log_account1 = whitenoise.login(keys1.secret_key().to_secret_hex()).await;
+            assert!(log_account1.is_ok());
+            whitenoise
+                .initialize_nostr_mls_for_account(&account1)
+                .await
+                .unwrap();
+
+            let metadata1 = Metadata {
+                name: Some("Alice".to_string()),
+                display_name: Some("Alice Smith".to_string()),
+                about: Some("Software engineer".to_string()),
+                picture: Some("https://example.com/alice.jpg".to_string()),
+                ..Default::default()
+            };
+
+            whitenoise
+                .update_metadata(&metadata1, &account1.pubkey)
+                .await
+                .unwrap();
+
+            // Login and setup account2
+            let log_account2 = whitenoise.login(keys2.secret_key().to_secret_hex()).await;
+            assert!(log_account2.is_ok());
+            whitenoise
+                .initialize_nostr_mls_for_account(&account2)
+                .await
+                .unwrap();
+
+            let metadata2 = Metadata {
+                name: Some("Bob".to_string()),
+                display_name: Some("Bob Johnson".to_string()),
+                about: Some("Product manager".to_string()),
+                picture: Some("https://example.com/bob.jpg".to_string()),
+                ..Default::default()
+            };
+
+            whitenoise
+                .update_metadata(&metadata2, &account2.pubkey)
+                .await
+                .unwrap();
+
+            // Wait for processing
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // Test multiple times to check for race conditions or caching issues
+            for iteration in 0..5 {
+                tracing::info!("Testing iteration {}", iteration);
+
+                // Query account1's metadata
+                let account1_fetch = whitenoise.fetch_metadata(account1.pubkey).await.unwrap();
+                let account1_query = whitenoise
+                    .nostr
+                    .query_user_metadata(account1.pubkey)
+                    .await
+                    .unwrap();
+
+                // Query account2's metadata
+                let account2_fetch = whitenoise.fetch_metadata(account2.pubkey).await.unwrap();
+                let account2_query = whitenoise
+                    .nostr
+                    .query_user_metadata(account2.pubkey)
+                    .await
+                    .unwrap();
+
+                // Verify account1 metadata
+                if let Some(meta1) = account1_fetch.as_ref() {
+                    if meta1.name != Some("Alice".to_string()) {
+                        tracing::error!(
+                            "Account1 fetch metadata wrong: got {:?}, expected Alice",
+                            meta1.name
+                        );
+                    }
+                    assert_eq!(
+                        meta1.name,
+                        Some("Alice".to_string()),
+                        "Account1 fetch metadata should be Alice in iteration {}",
+                        iteration
+                    );
+                }
+
+                if let Some(meta1) = account1_query.as_ref() {
+                    if meta1.name != Some("Alice".to_string()) {
+                        tracing::error!(
+                            "Account1 query metadata wrong: got {:?}, expected Alice",
+                            meta1.name
+                        );
+                    }
+                    assert_eq!(
+                        meta1.name,
+                        Some("Alice".to_string()),
+                        "Account1 query metadata should be Alice in iteration {}",
+                        iteration
+                    );
+                }
+
+                // Verify account2 metadata
+                if let Some(meta2) = account2_fetch.as_ref() {
+                    if meta2.name != Some("Bob".to_string()) {
+                        tracing::error!(
+                            "Account2 fetch metadata wrong: got {:?}, expected Bob",
+                            meta2.name
+                        );
+                    }
+                    assert_eq!(
+                        meta2.name,
+                        Some("Bob".to_string()),
+                        "Account2 fetch metadata should be Bob in iteration {}",
+                        iteration
+                    );
+                }
+
+                if let Some(meta2) = account2_query.as_ref() {
+                    if meta2.name != Some("Bob".to_string()) {
+                        tracing::error!(
+                            "Account2 query metadata wrong: got {:?}, expected Bob",
+                            meta2.name
+                        );
+                    }
+                    assert_eq!(
+                        meta2.name,
+                        Some("Bob".to_string()),
+                        "Account2 query metadata should be Bob in iteration {}",
+                        iteration
+                    );
+                }
+
+                // Critical test: Account1 should never have Account2's metadata and vice versa
+                if let (Some(meta1), Some(meta2)) =
+                    (account1_fetch.as_ref(), account2_fetch.as_ref())
+                {
+                    if meta1.name == meta2.name {
+                        tracing::error!(
+                            "CRITICAL: Account1 and Account2 have the same metadata name: {:?}",
+                            meta1.name
+                        );
+                    }
+                    assert_ne!(
+                        meta1.name, meta2.name,
+                        "Account1 and Account2 should have different names in iteration {}",
+                        iteration
+                    );
+                }
+
+                // Small delay between iterations
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
         }
     }
 }

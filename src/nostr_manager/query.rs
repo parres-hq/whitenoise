@@ -59,10 +59,73 @@ impl NostrManager {
             vec![]
         };
 
+        if contacts_pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         let mut contacts_metadata = HashMap::new();
+        let meta_filter = Filter::new()
+            .kind(Kind::Metadata)
+            .authors(contacts_pubkeys.clone());
+        let meta_events = self.client.database().query(meta_filter).await?;
         for contact in contacts_pubkeys {
-            let metadata = self.fetch_user_metadata(contact).await?;
-            contacts_metadata.insert(contact, metadata);
+            let metadata_event = meta_events.iter().find(|e| e.pubkey == contact);
+            if let Some(metadata_event) = metadata_event {
+                contacts_metadata
+                    .insert(contact, Some(Metadata::from_json(&metadata_event.content)?));
+            } else {
+                contacts_metadata.insert(contact, None);
+            }
+        }
+
+        Ok(contacts_metadata)
+    }
+
+    pub(crate) async fn fetch_user_contact_list(
+        &self,
+        pubkey: PublicKey,
+    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
+        let filter = Filter::new()
+            .kind(Kind::ContactList)
+            .author(pubkey)
+            .limit(1);
+
+        let events = self
+            .client
+            .fetch_events(filter, self.timeout().await?)
+            .await?;
+
+        let contacts_pubkeys = if let Some(event) = events.first() {
+            event
+                .tags
+                .iter()
+                .filter(|tag| tag.kind() == TagKind::p())
+                .filter_map(|tag| tag.content().map(|c| PublicKey::from_hex(c).unwrap()))
+                .collect()
+        } else {
+            vec![]
+        };
+
+        if contacts_pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut contacts_metadata = HashMap::new();
+        let meta_filter = Filter::new()
+            .kind(Kind::Metadata)
+            .authors(contacts_pubkeys.clone());
+        let meta_events = self
+            .client
+            .fetch_events(meta_filter, self.timeout().await?)
+            .await?;
+        for contact in contacts_pubkeys {
+            let metadata_event = meta_events.iter().find(|e| e.pubkey == contact);
+            if let Some(metadata_event) = metadata_event {
+                contacts_metadata
+                    .insert(contact, Some(Metadata::from_json(&metadata_event.content)?));
+            } else {
+                contacts_metadata.insert(contact, None);
+            }
         }
 
         Ok(contacts_metadata)
