@@ -915,8 +915,8 @@ impl NostrManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use std::collections::HashMap;
+    use std::time::Duration;
     use tempfile::tempdir;
     use tokio::sync::mpsc;
 
@@ -1154,9 +1154,21 @@ mod tests {
         let event = get_test_contact_list_event();
 
         // Count tags by type
-        let e_tags = event.tags.iter().filter(|tag| tag.kind() == TagKind::Custom("e".into())).count();
-        let p_tags = event.tags.iter().filter(|tag| tag.kind() == TagKind::p()).count();
-        let alt_tags = event.tags.iter().filter(|tag| tag.kind() == TagKind::Custom("alt".into())).count();
+        let e_tags = event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::Custom("e".into()))
+            .count();
+        let p_tags = event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::p())
+            .count();
+        let alt_tags = event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::Custom("alt".into()))
+            .count();
 
         // Verify tag counts
         assert_eq!(e_tags, 2);
@@ -1184,7 +1196,9 @@ mod tests {
         assert_eq!(contacts.len(), 8);
 
         // Check specific contacts
-        let expected_pubkey = PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad").unwrap();
+        let expected_pubkey =
+            PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad")
+                .unwrap();
         assert!(contacts.contains(&expected_pubkey));
     }
 
@@ -1224,7 +1238,9 @@ mod tests {
         assert_eq!(contacts_metadata.len(), 8);
 
         // Check specific contacts
-        let test_pubkey = PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad").unwrap();
+        let test_pubkey =
+            PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad")
+                .unwrap();
         assert!(contacts_metadata.contains_key(&test_pubkey));
         assert!(contacts_metadata.get(&test_pubkey).unwrap().is_none());
     }
@@ -1258,18 +1274,25 @@ mod tests {
         assert_eq!(contacts_metadata.len(), 8);
 
         // Check for specific contact
-        let test_pubkey = PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad").unwrap();
+        let test_pubkey =
+            PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad")
+                .unwrap();
         assert!(contacts_metadata.contains_key(&test_pubkey));
     }
 
     #[tokio::test]
     async fn test_handle_duplicate_contacts() {
         // Create a contact list with duplicate p tags
-        let contact1 = PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad").unwrap();
-        let contact2 = PublicKey::from_hex("c2827524936dedad5f623bcf8a04d201f3fd3ed7d4912a190dbeef685f45b2f7").unwrap();
+        let contact1 =
+            PublicKey::from_hex("e5e4557e6eb9c63bdf8ce7d2082ed543fa433c468d1d25374a97320be6d3b1ad")
+                .unwrap();
+        let contact2 =
+            PublicKey::from_hex("c2827524936dedad5f623bcf8a04d201f3fd3ed7d4912a190dbeef685f45b2f7")
+                .unwrap();
 
         // Create a mock event with duplicate contacts
-        let event_json = format!(r#"{{
+        let event_json = format!(
+            r#"{{
             "kind": 3,
             "id": "ebdd64bb88ad560aaf949f9c2fc7a5a7bba82100f5767dd4a6422a4cef646951",
             "pubkey": "991896cee597dd975c3b87266981387498bffa408fad05dc1ad578269805b702",
@@ -1283,7 +1306,11 @@ mod tests {
             ],
             "content": "{{}}",
             "sig": "8c174dbb1d88065c3d34a4f40d15eda1160a3f041f29e87f881afb44058d8e5405fe02db63655903925f439f64445409b2acad62e059ac9c152e7442972f6ede"
-        }}"#, contact1.to_hex(), contact2.to_hex(), contact1.to_hex());
+        }}"#,
+            contact1.to_hex(),
+            contact2.to_hex(),
+            contact1.to_hex()
+        );
 
         let event: Event = serde_json::from_str(&event_json).unwrap();
 
@@ -1341,7 +1368,8 @@ mod tests {
         assert_eq!(event.kind, Kind::ContactList);
         assert_eq!(
             event.pubkey,
-            PublicKey::from_hex("991896cee597dd975c3b87266981387498bffa408fad05dc1ad578269805b702").unwrap()
+            PublicKey::from_hex("991896cee597dd975c3b87266981387498bffa408fad05dc1ad578269805b702")
+                .unwrap()
         );
         assert_eq!(event.created_at.as_u64(), 1752141958);
 
