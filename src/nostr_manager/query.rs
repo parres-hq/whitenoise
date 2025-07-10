@@ -90,7 +90,7 @@ impl NostrManager {
             .author(pubkey)
             .limit(1);
 
-        let events = self.client.database().query(filter).await?; // Keep this as database query for now while we want to check metadata
+        let events = self.client.fetch_events(filter, self.timeout().await?).await?;
 
         let contacts_pubkeys = if let Some(event) = events.first() {
             event
