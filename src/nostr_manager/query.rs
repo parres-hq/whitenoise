@@ -90,7 +90,10 @@ impl NostrManager {
             .author(pubkey)
             .limit(1);
 
-        let events = self.client.fetch_events(filter, self.timeout().await?).await?;
+        let events = self
+            .client
+            .fetch_events(filter, self.timeout().await?)
+            .await?;
 
         let contacts_pubkeys = if let Some(event) = events.first() {
             event
