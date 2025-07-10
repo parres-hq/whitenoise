@@ -4717,6 +4717,7 @@ dependencies = [
  "chrono",
  "clap",
  "derivative",
+ "dotenvy",
  "futures",
  "hex",
  "image",

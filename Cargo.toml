@@ -65,6 +65,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.16.0", features = ["v4"] }
 base64ct = "=1.7.3"
 derivative = "2.2.0"
+dotenvy = "0.15"
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79", features = [
