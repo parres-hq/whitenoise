@@ -4,7 +4,7 @@
 use crate::nostr_manager::{NostrManager, Result};
 use crate::whitenoise::accounts::relays::RelayType;
 use nostr_sdk::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl NostrManager {
     pub(crate) async fn query_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
@@ -48,15 +48,16 @@ impl NostrManager {
             .limit(1);
         let events = self.client.database().query(filter).await?;
 
-        let contacts_pubkeys = if let Some(event) = events.first() {
+        let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
             event
                 .tags
                 .iter()
                 .filter(|tag| tag.kind() == TagKind::p())
-                .filter_map(|tag| tag.content().map(|c| PublicKey::from_hex(c).unwrap()))
+                .filter_map(|tag| tag.content())
+                .filter_map(|s| PublicKey::from_hex(s).ok())
                 .collect()
         } else {
-            vec![]
+            HashSet::new()
         };
 
         if contacts_pubkeys.is_empty() {
@@ -68,14 +69,15 @@ impl NostrManager {
             .kind(Kind::Metadata)
             .authors(contacts_pubkeys.clone());
         let meta_events = self.client.database().query(meta_filter).await?;
+
+        for event in meta_events {
+            contacts_metadata.insert(event.pubkey, Some(Metadata::from_json(&event.content)?));
+            contacts_pubkeys.remove(&event.pubkey);
+        }
+
+        // Adding contacts whose metadata is missing
         for contact in contacts_pubkeys {
-            let metadata_event = meta_events.iter().find(|e| e.pubkey == contact);
-            if let Some(metadata_event) = metadata_event {
-                contacts_metadata
-                    .insert(contact, Some(Metadata::from_json(&metadata_event.content)?));
-            } else {
-                contacts_metadata.insert(contact, None);
-            }
+            contacts_metadata.insert(contact, None);
         }
 
         Ok(contacts_metadata)
@@ -95,15 +97,16 @@ impl NostrManager {
             .fetch_events(filter, self.timeout().await?)
             .await?;
 
-        let contacts_pubkeys = if let Some(event) = events.first() {
+        let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
             event
                 .tags
                 .iter()
                 .filter(|tag| tag.kind() == TagKind::p())
-                .filter_map(|tag| tag.content().map(|c| PublicKey::from_hex(c).unwrap()))
+                .filter_map(|tag| tag.content())
+                .filter_map(|s| PublicKey::from_hex(s).ok())
                 .collect()
         } else {
-            vec![]
+            HashSet::new()
         };
 
         if contacts_pubkeys.is_empty() {
@@ -118,14 +121,15 @@ impl NostrManager {
             .client
             .fetch_events(meta_filter, self.timeout().await?)
             .await?;
+
+        for event in meta_events {
+            contacts_metadata.insert(event.pubkey, Some(Metadata::from_json(&event.content)?));
+            contacts_pubkeys.remove(&event.pubkey);
+        }
+
+        // Adding contacts whose metadata is missing
         for contact in contacts_pubkeys {
-            let metadata_event = meta_events.iter().find(|e| e.pubkey == contact);
-            if let Some(metadata_event) = metadata_event {
-                contacts_metadata
-                    .insert(contact, Some(Metadata::from_json(&metadata_event.content)?));
-            } else {
-                contacts_metadata.insert(contact, None);
-            }
+            contacts_metadata.insert(contact, None);
         }
 
         Ok(contacts_metadata)
