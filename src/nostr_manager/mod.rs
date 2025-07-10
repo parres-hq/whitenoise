@@ -16,6 +16,9 @@ pub mod query;
 pub mod subscriptions;
 // pub mod sync;
 
+#[cfg(test)]
+mod contact_list_tests;
+
 #[derive(Error, Debug)]
 pub enum NostrManagerError {
     #[error("Client Error: {0}")]
