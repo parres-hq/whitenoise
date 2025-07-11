@@ -28,12 +28,18 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-nostr = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79", features = [ "std" ] }
-nostr-mls = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79" }
-nostr-mls-sqlite-storage = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79" }
-
-nwc = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79" }
-nostr-blossom = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79" }
+nostr = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507", features = [ "std" ] }
+nostr-mls = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
+nostr-mls-sqlite-storage = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
+nwc = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
+nostr-blossom = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
+nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507", features = [
+    "lmdb",
+    "nip04",
+    "nip44",
+    "nip47",
+    "nip59",
+] }
 
 # LOCAL RUST_NOSTR FOR DEVELOPMENT
 # nostr = { version = "0.42", path="../rust-nostr/crates/nostr", features = [ "std" ] }
@@ -66,24 +72,6 @@ uuid = { version = "1.16.0", features = ["v4"] }
 base64ct = "=1.7.3"
 derivative = "2.2.0"
 dotenvy = "0.15"
-
-[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79", features = [
-    "ndb",  # Use NDB for macOS and iOS
-    "nip04",
-    "nip44",
-    "nip47",
-    "nip59",
-] }
-
-[target.'cfg(not(any(target_os = "ios", target_os = "macos")))'.dependencies]
-nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79", features = [
-    "lmdb",  # Use LMDB for all other platforms
-    "nip04",
-    "nip44",
-    "nip47",
-    "nip59",
-] }
 
 [dev-dependencies]
 mockito = "1.2"

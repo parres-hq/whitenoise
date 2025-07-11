@@ -31,7 +31,7 @@ cargo run --example fetch_contacts_example
 - Relay connection status
 - API usage instructions
 
-### `onboarding_workflow.rs`  
+### `onboarding_workflow.rs`
 
 Demonstrates the complete onboarding workflow for new accounts.
 
