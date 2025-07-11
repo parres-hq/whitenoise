@@ -294,29 +294,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
 
 [[package]]
-name = "bindgen"
-version = "0.69.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "271383c67ccabffb7381723dea0672a673f292304fcb45c01cc648c7a8d58088"
-dependencies = [
- "bitflags 2.9.0",
- "cexpr",
- "clang-sys",
- "itertools 0.12.1",
- "lazy_static",
- "lazycell",
- "log",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 1.1.0",
- "shlex",
- "syn 2.0.101",
- "which",
-]
-
-[[package]]
 name = "bip39"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -480,15 +457,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cexpr"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
-dependencies = [
- "nom",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -548,17 +516,6 @@ dependencies = [
  "crypto-common",
  "inout",
  "zeroize",
-]
-
-[[package]]
-name = "clang-sys"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
-dependencies = [
- "glob",
- "libc",
- "libloading",
 ]
 
 [[package]]
@@ -1055,11 +1012,11 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "flatbuffers"
-version = "23.5.26"
+version = "25.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dac53e22462d78c16d64a1cd22371b54cc3fe94aa15e7886a2fa6e5d1ab8640"
+checksum = "1045398c1bfd89168b5fd3f1fc11f6e70b34f6f66300c87d44d3de849463abf1"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.9.0",
  "rustc_version",
 ]
 
@@ -1268,12 +1225,6 @@ name = "gimli"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
-
-[[package]]
-name = "glob"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 
 [[package]]
 name = "gloo-timers"
@@ -1909,15 +1860,6 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -1974,12 +1916,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
-
-[[package]]
 name = "lebe"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1990,16 +1926,6 @@ name = "libc"
 version = "0.2.172"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
-
-[[package]]
-name = "libloading"
-version = "0.8.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
-dependencies = [
- "cfg-if",
- "windows-targets 0.48.5",
-]
 
 [[package]]
 name = "libm"
@@ -2047,12 +1973,6 @@ dependencies = [
  "bitflags 2.9.0",
  "libc",
 ]
-
-[[package]]
-name = "linux-raw-sys"
-version = "0.4.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "linux-raw-sys"
@@ -2147,12 +2067,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minimal-lexical"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2204,19 +2118,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
 
 [[package]]
-name = "nom"
-version = "7.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
-dependencies = [
- "memchr",
- "minimal-lexical",
-]
-
-[[package]]
 name = "nostr"
 version = "0.42.1"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2239,7 +2143,7 @@ dependencies = [
 [[package]]
 name = "nostr-blossom"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "base64 0.22.1",
  "nostr",
@@ -2250,7 +2154,7 @@ dependencies = [
 [[package]]
 name = "nostr-database"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "flatbuffers",
  "lru",
@@ -2261,7 +2165,7 @@ dependencies = [
 [[package]]
 name = "nostr-lmdb"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "async-utility",
  "heed",
@@ -2274,7 +2178,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "aes-gcm",
  "nostr",
@@ -2290,7 +2194,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls-sqlite-storage"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -2306,7 +2210,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls-storage"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "nostr",
  "openmls",
@@ -2316,19 +2220,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "nostr-ndb"
-version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
-dependencies = [
- "nostr",
- "nostr-database",
- "nostrdb",
-]
-
-[[package]]
 name = "nostr-relay-pool"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "async-utility",
  "async-wsocket",
@@ -2344,31 +2238,14 @@ dependencies = [
 [[package]]
 name = "nostr-sdk"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "async-utility",
  "nostr",
  "nostr-database",
  "nostr-lmdb",
- "nostr-ndb",
  "nostr-relay-pool",
  "tokio",
-]
-
-[[package]]
-name = "nostrdb"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df9b01d00781031ad2d6837a178e0e6ec343ff4ffc36a4510a583ed6cc67e159"
-dependencies = [
- "bindgen",
- "cc",
- "flatbuffers",
- "futures",
- "libc",
- "thiserror 2.0.12",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2437,7 +2314,7 @@ dependencies = [
 [[package]]
 name = "nwc"
 version = "0.42.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79#c4d16c691f5bc03448cf95bb8b2f59f7d5d0ca79"
+source = "git+https://github.com/rust-nostr/nostr?rev=8b6a68a92b9e56728d6135169feb1bbec678e507#8b6a68a92b9e56728d6135169feb1bbec678e507"
 dependencies = [
  "async-utility",
  "nostr",
@@ -2661,7 +2538,7 @@ checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
  "clap",
- "itertools 0.14.0",
+ "itertools",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -2800,16 +2677,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prettyplease"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6837b9e10d61f45f987d50808f83d1ee3d206c66acf650c3e4ae2e1f6ddedf55"
-dependencies = [
- "proc-macro2",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "primeorder"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2847,7 +2714,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "rustls 0.23.28",
  "socket2",
  "thiserror 2.0.12",
@@ -2867,7 +2734,7 @@ dependencies = [
  "lru-slab",
  "rand 0.9.1",
  "ring",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "rustls 0.23.28",
  "rustls-pki-types",
  "slab",
@@ -3233,12 +3100,6 @@ checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
 name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
-
-[[package]]
-name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
@@ -3254,19 +3115,6 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
-dependencies = [
- "bitflags 2.9.0",
- "errno",
- "libc",
- "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rustix"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d97817398dd4bb2e6da002002db259209759911da105da92bec29ccb12cf58bf"
@@ -3274,7 +3122,7 @@ dependencies = [
  "bitflags 2.9.0",
  "errno",
  "libc",
- "linux-raw-sys 0.9.4",
+ "linux-raw-sys",
  "windows-sys 0.59.0",
 ]
 
@@ -3971,7 +3819,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.3.2",
  "once_cell",
- "rustix 1.0.5",
+ "rustix",
  "windows-sys 0.59.0",
 ]
 
@@ -4691,18 +4539,6 @@ name = "weezl"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53a85b86a771b1c87058196170769dd264f66c0782acf1ae6cc51bfd64b39082"
-
-[[package]]
-name = "which"
-version = "4.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
-dependencies = [
- "either",
- "home",
- "once_cell",
- "rustix 0.38.44",
-]
 
 [[package]]
 name = "whitenoise"

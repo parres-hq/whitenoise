@@ -30,9 +30,6 @@ pub enum NostrManagerError {
     FailedToQueueEvent(String),
     #[error("Failed to shutdown event processor: {0}")]
     FailedToShutdownEventProcessor(String),
-    #[cfg(any(target_os = "ios", target_os = "macos"))]
-    #[error("I/O error: {0}")]
-    IoError(String),
     #[error("Account error: {0}")]
     AccountError(String),
     #[error("Failed to connect to any relays")]
@@ -102,20 +99,11 @@ impl NostrManager {
 
         // Initialize the client with the appropriate database based on platform
         let client = {
-            #[cfg(any(target_os = "ios", target_os = "macos"))]
-            {
-                let full_path = db_path.join("nostr_ndb");
-                let db = NdbDatabase::open(full_path.to_str().expect("Invalid path"))
-                    .expect("Failed to open Nostr database");
-                Client::builder().database(db).opts(opts).build()
-            }
-
-            #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-            {
-                let full_path = db_path.join("nostr_lmdb");
-                let db = NostrLMDB::open(full_path).expect("Failed to open Nostr database");
-                Client::builder().database(db).opts(opts).build()
-            }
+            let full_path = db_path.join("nostr_lmdb");
+            let db = NostrLMDB::builder(full_path)
+                .map_size(1024 * 1024 * 512)
+                .build()?;
+            Client::builder().database(db).opts(opts).build()
         };
 
         let settings = NostrManagerSettings::default();
@@ -677,49 +665,7 @@ impl NostrManager {
         );
         self.client.unset_signer().await;
         self.client.unsubscribe_all().await;
-
-        // Handle database wiping differently based on platform
-        #[cfg(any(target_os = "ios", target_os = "macos"))]
-        {
-            // On macOS/iOS, we need to delete the database files directly
-            // since NdbDatabase doesn't support the wipe method
-            let database_path = self.db_path.join("nostr_ndb");
-
-            // Remove the database directory
-            if database_path.exists() {
-                tracing::debug!(
-                    target: "whitenoise::nostr_manager::delete_all_data",
-                    "Removing NDB database directory: {:?}",
-                    database_path
-                );
-
-                // Use tokio's async filesystem operations
-                if let Err(e) = tokio::fs::remove_dir_all(&database_path).await {
-                    tracing::error!(
-                        target: "whitenoise::nostr_manager::delete_all_data",
-                        "Failed to remove NDB database directory: {:?}",
-                        e
-                    );
-                    return Err(NostrManagerError::IoError(e.to_string()));
-                }
-
-                // Recreate the empty directory
-                if let Err(e) = tokio::fs::create_dir_all(&database_path).await {
-                    tracing::error!(
-                        target: "whitenoise::nostr_manager::delete_all_data",
-                        "Failed to recreate NDB database directory: {:?}",
-                        e
-                    );
-                    return Err(NostrManagerError::IoError(e.to_string()));
-                }
-            }
-        }
-
-        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-        {
-            // On other platforms, use the wipe method
-            self.client.database().wipe().await?;
-        }
+        self.client.database().wipe().await?;
         Ok(())
     }
 
@@ -1066,12 +1012,6 @@ mod tests {
         assert!(shutdown_error
             .to_string()
             .contains("Failed to shutdown event processor"));
-
-        #[cfg(any(target_os = "ios", target_os = "macos"))]
-        {
-            let io_error = NostrManagerError::IoError("test error".to_string());
-            assert!(io_error.to_string().contains("I/O error"));
-        }
 
         let account_error = NostrManagerError::AccountError("test error".to_string());
         assert!(account_error.to_string().contains("Account error"));
