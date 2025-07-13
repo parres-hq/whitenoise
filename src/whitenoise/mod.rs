@@ -1,7 +1,6 @@
 use anyhow::Context;
 use nostr_mls::prelude::*;
 use tokio::sync::mpsc::{self, Sender};
-use tokio::sync::OnceCell;
 use tokio::sync::RwLock;
 
 use std::collections::HashMap;
@@ -81,13 +80,13 @@ pub struct Whitenoise {
     pub accounts: Arc<RwLock<HashMap<PublicKey, Account>>>,
     database: Arc<Database>,
     nostr: NostrManager,
-    secrets_store: SecretsStore,
-    message_aggregator: message_aggregator::MessageAggregator,
+    secrets_store: Arc<SecretsStore>,
+    message_aggregator: Arc<message_aggregator::MessageAggregator>,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
 }
 
-static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
+// REMOVED: static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
 
 impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -191,12 +190,10 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<()> {
+    pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<Self> {
         // Create event processing channels
         let (event_sender, event_receiver) = mpsc::channel(500);
         let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
-
-        let whitenoise_res: Result<&'static Whitenoise> = GLOBAL_WHITENOISE.get_or_try_init(|| async {
         let data_dir = &config.data_dir;
         let logs_dir = &config.logs_dir;
 
@@ -221,14 +218,16 @@ impl Whitenoise {
                 .await?;
 
         // Create SecretsStore
-        let secrets_store = SecretsStore::new(data_dir);
+        let secrets_store = Arc::new(SecretsStore::new(data_dir));
 
         // Create message aggregator - always initialize, use custom config if provided
-        let message_aggregator = if let Some(aggregator_config) = config.message_aggregator_config.clone() {
-            message_aggregator::MessageAggregator::with_config(aggregator_config)
-        } else {
-            message_aggregator::MessageAggregator::new()
-        };
+        let message_aggregator = Arc::new(
+            if let Some(aggregator_config) = config.message_aggregator_config.clone() {
+                message_aggregator::MessageAggregator::with_config(aggregator_config)
+            } else {
+                message_aggregator::MessageAggregator::new()
+            },
+        );
 
         let whitenoise = Self {
             config,
@@ -247,25 +246,26 @@ impl Whitenoise {
             let mut accounts = whitenoise.write_accounts().await;
             *accounts = loaded_accounts;
         }
-        Ok(whitenoise)
-        }).await;
+        // Create Arc for background tasks
+        let whitenoise_arc = Arc::new(whitenoise);
+        let whitenoise_arc_clone = whitenoise_arc.clone();
 
-        let whitenoise_ref = whitenoise_res?;
         tracing::debug!(
             target: "whitenoise::initialize_whitenoise",
             "Starting event processing loop for loaded accounts"
         );
 
-        Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
+        Self::start_event_processing_loop(&whitenoise_arc_clone, event_receiver, shutdown_receiver)
+            .await;
 
         // Fetch events and setup subscriptions for all accounts after event processing has started
         {
-            let accounts = whitenoise_ref.read_accounts().await;
+            let accounts = whitenoise_arc.read_accounts().await;
             let account_list: Vec<Account> = accounts.values().cloned().collect();
             drop(accounts); // Release the read lock early
             for account in account_list {
                 // Fetch account data
-                match whitenoise_ref.background_fetch_account_data(&account).await {
+                match whitenoise_arc.background_fetch_account_data(&account).await {
                     Ok(()) => {
                         tracing::debug!(
                             target: "whitenoise::initialize_whitenoise",
@@ -285,7 +285,7 @@ impl Whitenoise {
                 }
 
                 // Setup subscriptions for this account
-                match whitenoise_ref.setup_subscriptions(&account).await {
+                match whitenoise_arc.setup_subscriptions(&account).await {
                     Ok(()) => {
                         tracing::debug!(
                             target: "whitenoise::initialize_whitenoise",
@@ -311,73 +311,22 @@ impl Whitenoise {
             "Completed initialization for all loaded accounts"
         );
 
-        Ok(())
+        // Create a new Whitenoise instance that shares the same underlying data
+        // The background task keeps its own Arc reference
+        let shared_whitenoise = &*whitenoise_arc;
+        Ok(Whitenoise {
+            config: shared_whitenoise.config.clone(),
+            accounts: shared_whitenoise.accounts.clone(),
+            database: shared_whitenoise.database.clone(),
+            nostr: shared_whitenoise.nostr.clone(),
+            secrets_store: shared_whitenoise.secrets_store.clone(),
+            message_aggregator: shared_whitenoise.message_aggregator.clone(),
+            event_sender: shared_whitenoise.event_sender.clone(),
+            shutdown_sender: shared_whitenoise.shutdown_sender.clone(),
+        })
     }
 
-    /// Returns a reference to the global Whitenoise singleton instance.
-    ///
-    /// This method provides access to the globally initialized Whitenoise instance that was
-    /// created by [`initialize_whitenoise`]. The instance is stored as a static singleton
-    /// using [`tokio::sync::OnceCell`] to ensure async-safe thread-safe access and single initialization.
-    ///
-    /// This method is particularly useful for accessing the Whitenoise instance from different
-    /// parts of the application without passing references around, such as in event handlers,
-    /// background tasks, or API endpoints.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing:
-    /// - `Ok(&'static Whitenoise)` - A static reference to the initialized Whitenoise instance
-    /// - `Err(WhitenoiseError::Initialization)` - If [`initialize_whitenoise`] has not been called yet
-    ///
-    /// # Errors
-    ///
-    /// This function will return [`WhitenoiseError::Initialization`] if:
-    /// - [`initialize_whitenoise`] has not been successfully called prior to this method
-    /// - The global instance failed to initialize during the [`initialize_whitenoise`] call
-    ///
-    /// # Thread Safety
-    ///
-    /// This method is thread-safe and async-safe, and can be called concurrently from multiple
-    /// threads or async contexts. The underlying [`tokio::sync::OnceCell`] ensures that access
-    /// to the global instance is properly synchronized for async environments.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
-    /// # use std::path::Path;
-    /// # async fn example() -> Result<(), whitenoise::WhitenoiseError> {
-    /// // First, initialize Whitenoise
-    /// let config = WhitenoiseConfig::new(Path::new("./data"), Path::new("./logs"));
-    /// Whitenoise::initialize_whitenoise(config).await?;
-    ///
-    /// // Then access the instance from anywhere in your application
-    /// let whitenoise = Whitenoise::get_instance()?;
-    /// let account_count = whitenoise.get_accounts_count().await;
-    /// println!("Number of accounts: {}", account_count);
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Usage in Event Handlers
-    ///
-    /// ```rust
-    /// # use whitenoise::Whitenoise;
-    /// # async fn handle_some_event() -> Result<(), whitenoise::WhitenoiseError> {
-    /// // Access Whitenoise from an event handler without dependency injection
-    /// let whitenoise = Whitenoise::get_instance()?;
-    /// // ... use whitenoise methods
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// [`initialize_whitenoise`]: Self::initialize_whitenoise
-    pub fn get_instance() -> Result<&'static Self> {
-        GLOBAL_WHITENOISE
-            .get()
-            .ok_or(WhitenoiseError::Initialization)
-    }
+    // REMOVED: get_instance() method - no longer using singleton pattern
 
     /// Deletes all application data, including the database, MLS data, and log files.
     ///
@@ -484,7 +433,7 @@ impl Whitenoise {
     /// Get a reference to the message aggregator for advanced usage
     /// This allows consumers to access the message aggregator directly for custom processing
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
-        &self.message_aggregator
+        &*self.message_aggregator
     }
 }
 

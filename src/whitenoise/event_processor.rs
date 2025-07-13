@@ -16,12 +16,13 @@ impl Whitenoise {
 
     /// Start the event processing loop in a background task
     pub(crate) async fn start_event_processing_loop(
-        whitenoise: &'static Whitenoise,
+        whitenoise: &std::sync::Arc<Whitenoise>,
         receiver: Receiver<ProcessableEvent>,
         shutdown_receiver: Receiver<()>,
     ) {
+        let whitenoise_clone = whitenoise.clone();
         tokio::spawn(async move {
-            Self::process_events(whitenoise, receiver, shutdown_receiver).await;
+            Self::process_events(&whitenoise_clone, receiver, shutdown_receiver).await;
         });
     }
 
@@ -60,7 +61,7 @@ impl Whitenoise {
 
     /// Main event processing loop
     async fn process_events(
-        whitenoise: &'static Whitenoise,
+        whitenoise: &std::sync::Arc<Whitenoise>,
         mut receiver: Receiver<ProcessableEvent>,
         mut shutdown: Receiver<()>,
     ) {

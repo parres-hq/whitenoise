@@ -71,6 +71,15 @@ static TRACING_INIT: OnceLock<()> = OnceLock::new();
 
 fn init_tracing(logs_dir: &std::path::Path) {
     TRACING_INIT.get_or_init(|| {
+        // Check if a global default subscriber has already been set
+        // If so, skip initialization to avoid panic
+        if tracing::dispatcher::has_been_set() {
+            tracing::debug!(
+                "Tracing subscriber already initialized, skipping whitenoise tracing setup"
+            );
+            return;
+        }
+
         let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
             .rotation(tracing_appender::rolling::Rotation::DAILY)
             .filename_prefix("whitenoise")

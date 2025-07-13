@@ -1533,44 +1533,13 @@ impl Whitenoise {
                             account_pubkey.to_hex()
                         );
 
-                        // Complete any pending onboarding steps after successful data fetch
-                        if let Ok(whitenoise) = Whitenoise::get_instance() {
-                            tracing::debug!(
-                                target: "whitenoise::background_fetch_account_data",
-                                "Attempting to complete pending onboarding steps for account: {}",
-                                account_pubkey.to_hex()
-                            );
-
-                            match whitenoise
-                                .complete_pending_onboarding_steps(&account_pubkey)
-                                .await
-                            {
-                                Ok(final_state) => {
-                                    tracing::info!(
-                                        target: "whitenoise::background_fetch_account_data",
-                                        "Onboarding completion finished for {}: inbox_relays={}, key_package_relays={}, key_package_published={}",
-                                        account_pubkey.to_hex(),
-                                        final_state.inbox_relays,
-                                        final_state.key_package_relays,
-                                        final_state.key_package_published
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        target: "whitenoise::background_fetch_account_data",
-                                        "Failed to complete pending onboarding steps for account {}: {}",
-                                        account_pubkey.to_hex(),
-                                        e
-                                    );
-                                }
-                            }
-                        } else {
-                            tracing::warn!(
-                                target: "whitenoise::background_fetch_account_data",
-                                "Cannot access Whitenoise instance to complete onboarding for account: {}",
-                                account_pubkey.to_hex()
-                            );
-                        }
+                        // TODO: Complete any pending onboarding steps after successful data fetch
+                        // This needs to be refactored now that we removed the singleton pattern
+                        // The background task needs access to the whitenoise instance
+                        tracing::debug!(
+                            target: "whitenoise::background_fetch_account_data",
+                            "Skipping onboarding completion - singleton removed, needs refactoring"
+                        );
                     }
                 }
                 Err(e) => {
