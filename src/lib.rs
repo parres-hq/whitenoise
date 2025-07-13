@@ -1,8 +1,4 @@
-use std::sync::OnceLock;
-use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
-
-use std::sync::Mutex;
 
 // mod media;
 mod nostr_manager;
@@ -66,48 +62,48 @@ pub use nostr_mls::prelude::message_types::{Message, MessageState};
 /// Nostr MLS Welcome. Re-exported from [`nostr_mls::prelude::Welcome`](https://docs.rs/nostr-mls/latest/nostr_mls/prelude/struct.Welcome.html)
 pub use nostr_mls::prelude::welcome_types::{Welcome, WelcomeState};
 
-static TRACING_GUARDS: OnceLock<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceLock::new();
-static TRACING_INIT: OnceLock<()> = OnceLock::new();
-
 fn init_tracing(logs_dir: &std::path::Path) {
-    TRACING_INIT.get_or_init(|| {
-        // Check if a global default subscriber has already been set
-        // If so, skip initialization to avoid panic
-        if tracing::dispatcher::has_been_set() {
-            tracing::debug!(
-                "Tracing subscriber already initialized, skipping whitenoise tracing setup"
-            );
-            return;
-        }
+    // Check if tracing has already been initialized
+    if tracing::dispatcher::has_been_set() {
+        // For tests or when tracing is already set up, just log to console
+        tracing::debug!("Tracing already initialized, logging will use existing configuration");
+        return;
+    }
 
-        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
-            .rotation(tracing_appender::rolling::Rotation::DAILY)
-            .filename_prefix("whitenoise")
-            .filename_suffix("log")
-            .build(logs_dir)
-            .expect("Failed to create file appender");
+    // Create log file with a simple name
+    let log_file_path = logs_dir.join("nrc.log");
 
-        let (non_blocking_file, file_guard) = tracing_appender::non_blocking(file_appender);
-        let (non_blocking_stdout, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+    // Ensure the logs directory exists
+    std::fs::create_dir_all(logs_dir).ok();
 
-        TRACING_GUARDS
-            .set(Mutex::new(Some((file_guard, stdout_guard))))
-            .ok();
+    // Open or create the log file
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file_path)
+        .expect("Failed to open log file");
 
-        let stdout_layer = Layer::new()
-            .with_writer(non_blocking_stdout)
-            .with_ansi(true)
-            .with_target(true);
+    let (non_blocking_file, _file_guard) = tracing_appender::non_blocking(file);
+    let (non_blocking_stdout, _stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
 
-        let file_layer = Layer::new()
-            .with_writer(non_blocking_file)
-            .with_ansi(false)
-            .with_target(true);
+    // Keep guards alive for the lifetime of the program
+    // We leak them intentionally since logging should last the entire program
+    Box::leak(Box::new(_file_guard));
+    Box::leak(Box::new(_stdout_guard));
 
-        Registry::default()
-            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-            .with(stdout_layer)
-            .with(file_layer)
-            .init();
-    });
+    let stdout_layer = Layer::new()
+        .with_writer(non_blocking_stdout)
+        .with_ansi(true)
+        .with_target(true);
+
+    let file_layer = Layer::new()
+        .with_writer(non_blocking_file)
+        .with_ansi(false)
+        .with_target(true);
+
+    Registry::default()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
 }
