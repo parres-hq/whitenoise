@@ -11,4 +11,4 @@ jobs:
         uses: actions/add-to-project@v0.5.0
         with:
           project-url: https://github.com/users/parres-hq/projects/5
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.ISSUES_PAT }}
