@@ -116,9 +116,9 @@ impl NostrManager {
         for relay in &settings.relays {
             client.add_relay(relay).await?;
         }
-        // Add the purplepag.es relay as discovery only
+        // Add the purplepag.es relay to help with finding/publishing metadata
         client
-            .add_discovery_relay("wss://purplepag.es".to_string())
+            .add_relay("wss://purplepag.es".to_string())
             .await?;
 
         // Connect to relays if requested
