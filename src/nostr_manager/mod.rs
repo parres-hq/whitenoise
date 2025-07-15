@@ -117,9 +117,7 @@ impl NostrManager {
             client.add_relay(relay).await?;
         }
         // Add the purplepag.es relay to help with finding/publishing metadata
-        client
-            .add_relay("wss://purplepag.es".to_string())
-            .await?;
+        client.add_relay("wss://purplepag.es".to_string()).await?;
 
         // Connect to relays if requested
         if connect_to_relays {
