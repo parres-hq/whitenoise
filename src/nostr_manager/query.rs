@@ -71,7 +71,7 @@ impl NostrManager {
         let meta_events = self.client.database().query(meta_filter).await?;
 
         for event in meta_events {
-            contacts_metadata.insert(event.pubkey, Some(Metadata::from_json(&event.content)?));
+            contacts_metadata.insert(event.pubkey, Metadata::from_json(&event.content).ok());
             contacts_pubkeys.remove(&event.pubkey);
         }
 
@@ -123,7 +123,7 @@ impl NostrManager {
             .await?;
 
         for event in meta_events {
-            contacts_metadata.insert(event.pubkey, Some(Metadata::from_json(&event.content)?));
+            contacts_metadata.insert(event.pubkey, Metadata::from_json(&event.content).ok());
             contacts_pubkeys.remove(&event.pubkey);
         }
 
