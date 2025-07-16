@@ -95,6 +95,12 @@ jobs:
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
         run: RUST_LOG=error cargo test --all-features --doc
 
+      - name: Integration Test
+        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
+        run: |
+          rm -rf ./dev/data/integration_test/
+          RUST_LOG=warn,integration_test=info cargo run --bin integration_test -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+
       - name: Stop Docker Compose services
         if: always() && runner.os == 'Linux'
         run: docker-compose down -v
