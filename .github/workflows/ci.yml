@@ -38,17 +38,6 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
-      - name: Create dev directories
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p ./dev/data/nostr-rs-relay
-          mkdir -p ./dev/data/blossom-ts-server
-          mkdir -p ./dev/data/strfry-db
-          # Set permissions so containers can write to these directories
-          chmod 777 ./dev/data/nostr-rs-relay
-          chmod 777 ./dev/data/blossom-ts-server
-          chmod 777 ./dev/data/strfry-db
-
       - name: Start Docker Compose services
         if: runner.os == 'Linux'
         run: docker compose up -d
@@ -100,8 +89,9 @@ jobs:
       - name: Integration Test
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
         run: |
-          rm -rf ./dev/data/integration_test/
+          mkdir -p ./dev/data/integration_test/
           RUST_LOG=warn,integration_test=info cargo run --bin integration_test -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+          rm -rf ./dev/data/integration_test/
 
       - name: Stop Docker Compose services
         if: always() && runner.os == 'Linux'
