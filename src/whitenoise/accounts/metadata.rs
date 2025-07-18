@@ -189,12 +189,6 @@ mod tests {
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
 
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-
         // Create initial metadata so that upload_profile_picture can update it
         let initial_metadata = Metadata {
             name: Some("Test User".to_string()),
@@ -256,12 +250,6 @@ mod tests {
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
 
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-
         // Create test metadata
         let metadata = Metadata {
             name: Some("Updated Name".to_string()),
@@ -291,12 +279,6 @@ mod tests {
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
 
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-
         // Create minimal metadata (only name)
         let metadata = Metadata {
             name: Some("Simple Name".to_string()),
@@ -322,12 +304,6 @@ mod tests {
         let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
-
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
 
         // Create completely empty metadata
         let metadata = Metadata::default();
@@ -402,12 +378,6 @@ mod tests {
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
 
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-
         // Create test metadata and store it in the nostr database
         let test_metadata = Metadata {
             name: Some("Test User".to_string()),
@@ -454,12 +424,6 @@ mod tests {
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
 
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-
         // Create a second account whose metadata we'll try to fetch
         let (other_account, other_keys) = create_test_account();
         whitenoise.save_account(&other_account).await.unwrap();
@@ -473,12 +437,6 @@ mod tests {
             .login(other_keys.secret_key().to_secret_hex())
             .await;
         assert!(other_log_account.is_ok());
-
-        // Initialize NostrMls for the other account
-        whitenoise
-            .initialize_nostr_mls_for_account(&other_account)
-            .await
-            .unwrap();
 
         // Publish metadata for the other account
         let other_metadata = Metadata {
@@ -531,12 +489,6 @@ mod tests {
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
 
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-
         // Create a random public key that doesn't exist
         let random_keys = Keys::generate();
         let random_pubkey = random_keys.public_key();
@@ -568,12 +520,6 @@ mod tests {
         let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
         assert!(log_account.is_ok());
         assert_eq!(log_account.unwrap(), account);
-
-        // Initialize NostrMls for the account
-        whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
 
         // Create a different user's keys
         let other_keys = Keys::generate();

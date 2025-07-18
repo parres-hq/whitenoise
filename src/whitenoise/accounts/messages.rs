@@ -71,20 +71,15 @@ impl Whitenoise {
 
         let account = self.fetch_account(sender_pubkey).await?;
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().await;
 
-        let (message_event, message, relays) = if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            let msg_event = nostr_mls.create_message(group_id, inner_event)?;
-            let msg = nostr_mls
-                .get_message(&event_id)?
-                .ok_or(WhitenoiseError::InvalidEvent(
-                    "Message not found after creation".to_string(),
-                ))?;
-            let relays = nostr_mls.get_relays(group_id)?;
-            (msg_event, msg, relays)
-        } else {
-            return Err(WhitenoiseError::NostrMlsNotInitialized);
-        };
+        let message_event = nostr_mls.create_message(group_id, inner_event)?;
+        let message = nostr_mls
+            .get_message(&event_id)?
+            .ok_or(WhitenoiseError::InvalidEvent(
+                "Message not found after creation".to_string(),
+            ))?;
+        let relays = nostr_mls.get_relays(group_id)?;
 
         self.nostr.publish_event_to(message_event, &relays).await?;
 
@@ -144,20 +139,16 @@ impl Whitenoise {
         group_id: &GroupId,
     ) -> Result<Vec<MessageWithTokens>> {
         let account = self.fetch_account(pubkey).await?;
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            let messages = nostr_mls.get_messages(group_id)?;
-            let messages_with_tokens = messages
-                .iter()
-                .map(|message| MessageWithTokens {
-                    message: message.clone(),
-                    tokens: self.nostr.parse(&message.content),
-                })
-                .collect::<Vec<MessageWithTokens>>();
-            Ok(messages_with_tokens)
-        } else {
-            Err(WhitenoiseError::NostrMlsNotInitialized)
-        }
+        let nostr_mls = &*account.nostr_mls.lock().await;
+        let messages = nostr_mls.get_messages(group_id)?;
+        let messages_with_tokens = messages
+            .iter()
+            .map(|message| MessageWithTokens {
+                message: message.clone(),
+                tokens: self.nostr.parse(&message.content),
+            })
+            .collect::<Vec<MessageWithTokens>>();
+        Ok(messages_with_tokens)
     }
 
     /// Fetch and aggregate messages for a group - Main consumer API
@@ -192,32 +183,28 @@ impl Whitenoise {
     ) -> Result<Vec<crate::whitenoise::message_aggregator::ChatMessage>> {
         // Get account to access nostr_mls instance
         let account = self.read_account_by_pubkey(pubkey).await?;
-        let nostr_mls_guard = account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().await;
 
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            // Fetch raw messages from nostr_mls
-            let raw_messages = nostr_mls.get_messages(group_id).map_err(|e| {
-                WhitenoiseError::from(anyhow::anyhow!(
-                    "Failed to fetch messages from nostr_mls: {}",
-                    e
-                ))
-            })?;
+        // Fetch raw messages from nostr_mls
+        let raw_messages = nostr_mls.get_messages(group_id).map_err(|e| {
+            WhitenoiseError::from(anyhow::anyhow!(
+                "Failed to fetch messages from nostr_mls: {}",
+                e
+            ))
+        })?;
 
-            // Use the aggregator to process the messages
-            self.message_aggregator
-                .aggregate_messages_for_group(
-                    pubkey,
-                    group_id,
-                    raw_messages,
-                    &self.nostr, // For token parsing
-                )
-                .await
-                .map_err(|e| {
-                    WhitenoiseError::from(anyhow::anyhow!("Message aggregation failed: {}", e))
-                })
-        } else {
-            Err(WhitenoiseError::NostrMlsNotInitialized)
-        }
+        // Use the aggregator to process the messages
+        self.message_aggregator
+            .aggregate_messages_for_group(
+                pubkey,
+                group_id,
+                raw_messages,
+                &self.nostr, // For token parsing
+            )
+            .await
+            .map_err(|e| {
+                WhitenoiseError::from(anyhow::anyhow!("Message aggregation failed: {}", e))
+            })
     }
 
     /// Creates an unsigned nostr event with the given parameters

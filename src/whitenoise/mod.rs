@@ -493,9 +493,9 @@ pub mod test_utils {
     use crate::RelayType;
 
     use super::*;
+    use crate::whitenoise::accounts::test_utils::*;
     use accounts::AccountSettings;
     use tempfile::TempDir;
-    use tokio::sync::Mutex;
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
         let data_temp_dir = TempDir::new().expect("Failed to create temp data dir");
@@ -515,7 +515,7 @@ pub mod test_utils {
             settings: AccountSettings::default(),
             onboarding: accounts::OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: std::sync::Arc::new(Mutex::new(None)),
+            nostr_mls: create_nostr_mls(keys.public_key()),
         };
         (account, keys)
     }
@@ -675,10 +675,6 @@ pub mod test_utils {
             .await
             .unwrap();
         whitenoise
-            .initialize_nostr_mls_for_account(&account)
-            .await
-            .unwrap();
-        whitenoise
             .update_relays(
                 &account,
                 RelayType::Nostr,
@@ -713,11 +709,6 @@ pub mod test_utils {
                 .add_contact(creator_account, keys.public_key())
                 .await
                 .unwrap();
-            whitenoise
-                .initialize_nostr_mls_for_account(&account)
-                .await
-                .unwrap();
-
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
             let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
@@ -997,12 +988,6 @@ mod tests {
 
             let _original_timestamp = account.last_synced;
 
-            // Initialize NostrMls for the account
-            whitenoise
-                .initialize_nostr_mls_for_account(&account)
-                .await
-                .unwrap();
-
             // Trigger background fetch
             whitenoise
                 .background_fetch_account_data(&account)
@@ -1047,49 +1032,6 @@ mod tests {
     // Subscription Management Tests
     mod subscription_management_tests {
         use super::*;
-        use std::sync::Arc;
-        use tokio::sync::Mutex;
-
-        // Helper to create an account with mocked NostrMls
-        async fn create_account_with_mocked_nostr_mls(has_groups: bool) -> (Account, Keys) {
-            let (mut account, keys) = create_test_account();
-
-            // For testing, we'll mock the nostr_mls behavior by using None or Some
-            // In a real implementation, we'd need to mock the NostrMls struct
-            // For now, we'll test the error case and leave detailed group testing
-            // for when NostrMls has better testing support
-
-            if has_groups {
-                // Set up for having groups - this will be expanded when NostrMls is mockable
-                account.nostr_mls = Arc::new(Mutex::new(None)); // Still None for now
-            } else {
-                account.nostr_mls = Arc::new(Mutex::new(None));
-            }
-
-            (account, keys)
-        }
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_nostr_mls_not_initialized() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let (account, keys) = create_account_with_mocked_nostr_mls(false).await;
-
-            // Store keys so other operations can work
-            whitenoise.secrets_store.store_private_key(&keys).unwrap();
-            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
-            assert!(log_account.is_ok());
-
-            // Test that setup_subscriptions fails when NostrMls is not initialized
-            let result = whitenoise.setup_subscriptions(&account).await;
-
-            match result {
-                Err(WhitenoiseError::NostrMlsNotInitialized) => {
-                    // This is the expected behavior
-                }
-                Ok(_) => panic!("setup_subscriptions should fail when NostrMls is not initialized"),
-                Err(other) => panic!("Unexpected error: {:?}", other),
-            }
-        }
 
         #[tokio::test]
         async fn test_setup_subscriptions_relay_logic_with_empty_user_relays() {
@@ -1099,12 +1041,6 @@ mod tests {
             // Store keys and save account
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
             whitenoise.save_account(&account).await.unwrap();
-
-            // Initialize NostrMls for the account
-            whitenoise
-                .initialize_nostr_mls_for_account(&account)
-                .await
-                .unwrap();
 
             // Test the relay selection logic
             // fetch_relays should return empty in test environment
@@ -1246,12 +1182,6 @@ mod tests {
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
             whitenoise.save_account(&account).await.unwrap();
 
-            // Initialize NostrMls for the account
-            whitenoise
-                .initialize_nostr_mls_for_account(&account)
-                .await
-                .unwrap();
-
             // Test that fetch_relays doesn't fail in test environment
             // (It might return empty results, but shouldn't error)
             let user_relays_result = whitenoise
@@ -1271,12 +1201,6 @@ mod tests {
             // Store keys and save account
             whitenoise.secrets_store.store_private_key(&keys).unwrap();
             whitenoise.save_account(&account).await.unwrap();
-
-            // Initialize NostrMls for the account
-            whitenoise
-                .initialize_nostr_mls_for_account(&account)
-                .await
-                .unwrap();
 
             // Test that all individual components work
 
@@ -1302,35 +1226,6 @@ mod tests {
 
             // The logic should complete without errors
             assert!(!relays_to_use.is_empty() || relays_to_use.is_empty()); // Either case is valid
-        }
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_nostr_mls_lock_handling() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let (account, keys) = create_test_account();
-
-            // Store keys and save account
-            whitenoise.secrets_store.store_private_key(&keys).unwrap();
-            whitenoise.save_account(&account).await.unwrap();
-            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
-            assert!(log_account.is_ok());
-
-            // Test the lock acquisition logic
-            {
-                let nostr_mls_guard = account.nostr_mls.lock().await;
-
-                // In our test setup, nostr_mls should be None (not initialized)
-                assert!(nostr_mls_guard.is_none());
-
-                // The method should handle this case by returning NostrMlsNotInitialized error
-            }
-
-            // Test the actual error case by calling the method
-            let result = whitenoise.setup_subscriptions(&account).await;
-            assert!(matches!(
-                result,
-                Err(WhitenoiseError::NostrMlsNotInitialized)
-            ));
         }
 
         // Mock struct for testing group ID conversion
@@ -1359,12 +1254,6 @@ mod tests {
                 // Login to the account
                 let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
                 assert!(log_account.is_ok());
-
-                // Initialize NostrMls for the account
-                whitenoise
-                    .initialize_nostr_mls_for_account(&account)
-                    .await
-                    .unwrap();
 
                 // Create unique metadata for each account
                 let metadata = Metadata {
@@ -1513,10 +1402,6 @@ mod tests {
                 .login(main_keys.secret_key().to_secret_hex())
                 .await;
             assert!(log_account.is_ok());
-            whitenoise
-                .initialize_nostr_mls_for_account(&main_account)
-                .await
-                .unwrap();
 
             // Create multiple contact accounts with unique metadata
             let mut contact_accounts = Vec::new();
@@ -1535,11 +1420,6 @@ mod tests {
                     .login(contact_keys.secret_key().to_secret_hex())
                     .await;
                 assert!(contact_log_account.is_ok());
-                whitenoise
-                    .initialize_nostr_mls_for_account(&contact_account)
-                    .await
-                    .unwrap();
-
                 // Create unique metadata for contact
                 let contact_metadata = Metadata {
                     name: Some(format!("Contact {}", i)),
@@ -1690,10 +1570,6 @@ mod tests {
             // Login and setup account1
             let log_account1 = whitenoise.login(keys1.secret_key().to_secret_hex()).await;
             assert!(log_account1.is_ok());
-            whitenoise
-                .initialize_nostr_mls_for_account(&account1)
-                .await
-                .unwrap();
 
             let metadata1 = Metadata {
                 name: Some("Alice".to_string()),
@@ -1711,10 +1587,6 @@ mod tests {
             // Login and setup account2
             let log_account2 = whitenoise.login(keys2.secret_key().to_secret_hex()).await;
             assert!(log_account2.is_ok());
-            whitenoise
-                .initialize_nostr_mls_for_account(&account2)
-                .await
-                .unwrap();
 
             let metadata2 = Metadata {
                 name: Some("Bob".to_string()),

@@ -41,49 +41,42 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&creator_account.pubkey)?;
 
-        let group: group_types::Group;
-        let welcome_rumors: Vec<UnsignedEvent>;
-        let group_ids: Vec<String>;
         let mut key_package_events: Vec<Event> = Vec::new();
 
-        let nostr_mls_guard = creator_account.nostr_mls.lock().await;
+        let nostr_mls = &*creator_account.nostr_mls.lock().await;
         let group_relays = config.relays.clone();
 
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            // Fetch key packages for all members
-            for pk in member_pubkeys.iter() {
-                let user_key_package_relays = self
-                    .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
-                    .await?;
-                let some_event = self
-                    .fetch_key_package_event(*pk, user_key_package_relays.clone())
-                    .await?;
-                let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
-                    nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
-                ))?;
-                key_package_events.push(event);
-            }
-
-            let create_group_result = nostr_mls
-                .create_group(
-                    &creator_account.pubkey,
-                    key_package_events.clone(),
-                    admin_pubkeys,
-                    config,
-                )
-                .map_err(WhitenoiseError::from)?;
-
-            group = create_group_result.group;
-            welcome_rumors = create_group_result.welcome_rumors;
-            group_ids = nostr_mls
-                .get_groups()
-                .map_err(WhitenoiseError::from)?
-                .into_iter()
-                .map(|g| hex::encode(g.nostr_group_id))
-                .collect::<Vec<_>>();
-        } else {
-            return Err(WhitenoiseError::NostrMlsNotInitialized);
+        // Fetch key packages for all members
+        for pk in member_pubkeys.iter() {
+            let user_key_package_relays = self
+                .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
+                .await?;
+            let some_event = self
+                .fetch_key_package_event(*pk, user_key_package_relays.clone())
+                .await?;
+            let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
+                nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
+            ))?;
+            key_package_events.push(event);
         }
+
+        let create_group_result = nostr_mls
+            .create_group(
+                &creator_account.pubkey,
+                key_package_events.clone(),
+                admin_pubkeys,
+                config,
+            )
+            .map_err(WhitenoiseError::from)?;
+
+        let group = create_group_result.group;
+        let welcome_rumors = create_group_result.welcome_rumors;
+        let group_ids = nostr_mls
+            .get_groups()
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect::<Vec<_>>();
 
         tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
 
@@ -148,17 +141,13 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            Ok(nostr_mls
-                .get_groups()
-                .map_err(WhitenoiseError::from)?
-                .into_iter()
-                .filter(|group| !active_filter || group.state == group_types::GroupState::Active)
-                .collect())
-        } else {
-            Err(WhitenoiseError::NostrMlsNotInitialized)
-        }
+        let nostr_mls = &*account.nostr_mls.lock().await;
+        Ok(nostr_mls
+            .get_groups()
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .filter(|group| !active_filter || group.state == group_types::GroupState::Active)
+            .collect())
     }
 
     pub async fn fetch_group_members(
@@ -170,16 +159,12 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            Ok(nostr_mls
-                .get_members(group_id)
-                .map_err(WhitenoiseError::from)?
-                .into_iter()
-                .collect())
-        } else {
-            Err(WhitenoiseError::NostrMlsNotInitialized)
-        }
+        let nostr_mls = &*account.nostr_mls.lock().await;
+        Ok(nostr_mls
+            .get_members(group_id)
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .collect())
     }
 
     pub async fn fetch_group_admins(
@@ -191,18 +176,14 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            Ok(nostr_mls
-                .get_group(group_id)
-                .map_err(WhitenoiseError::from)?
-                .ok_or(WhitenoiseError::GroupNotFound)?
-                .admin_pubkeys
-                .into_iter()
-                .collect())
-        } else {
-            Err(WhitenoiseError::NostrMlsNotInitialized)
-        }
+        let nostr_mls = &*account.nostr_mls.lock().await;
+        Ok(nostr_mls
+            .get_group(group_id)
+            .map_err(WhitenoiseError::from)?
+            .ok_or(WhitenoiseError::GroupNotFound)?
+            .admin_pubkeys
+            .into_iter()
+            .collect())
     }
 
     /// Adds new members to an existing MLS group
@@ -252,97 +233,93 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            // Fetch key packages for all members
-            for pk in members.iter() {
-                let user_key_package_relays = self
-                    .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
-                    .await?;
-                let some_event = self
-                    .fetch_key_package_event(*pk, user_key_package_relays.clone())
-                    .await?;
-                let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
-                    nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
-                ))?;
-                key_package_events.push(event);
-            }
+        let nostr_mls = &*account.nostr_mls.lock().await;
+        // Fetch key packages for all members
+        for pk in members.iter() {
+            let user_key_package_relays = self
+                .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
+                .await?;
+            let some_event = self
+                .fetch_key_package_event(*pk, user_key_package_relays.clone())
+                .await?;
+            let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
+                nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
+            ))?;
+            key_package_events.push(event);
+        }
 
-            let update_result = nostr_mls
-                .add_members(group_id, &key_package_events)
-                .map_err(WhitenoiseError::from)?;
-            evolution_event = update_result.evolution_event;
-            welcome_rumors = update_result.welcome_rumors;
+        let update_result = nostr_mls
+            .add_members(group_id, &key_package_events)
+            .map_err(WhitenoiseError::from)?;
+        evolution_event = update_result.evolution_event;
+        welcome_rumors = update_result.welcome_rumors;
 
-            if welcome_rumors.is_none() {
-                return Err(WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(
-                    "Missing welcome message".to_owned(),
-                )));
-            }
+        if welcome_rumors.is_none() {
+            return Err(WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(
+                "Missing welcome message".to_owned(),
+            )));
+        }
 
-            // Merge the pending commit immediately after creating it
-            // This ensures our local state is correct before publishing
-            nostr_mls
-                .merge_pending_commit(group_id)
-                .map_err(WhitenoiseError::from)?;
+        // Merge the pending commit immediately after creating it
+        // This ensures our local state is correct before publishing
+        nostr_mls
+            .merge_pending_commit(group_id)
+            .map_err(WhitenoiseError::from)?;
 
-            // Publish the evolution event to the group
-            let group_relays = nostr_mls
-                .get_relays(group_id)
-                .map_err(WhitenoiseError::from)?;
-            let result = self
-                .nostr
-                .publish_event_to(evolution_event, &group_relays)
-                .await;
+        // Publish the evolution event to the group
+        let group_relays = nostr_mls
+            .get_relays(group_id)
+            .map_err(WhitenoiseError::from)?;
+        let result = self
+            .nostr
+            .publish_event_to(evolution_event, &group_relays)
+            .await;
 
-            match result {
-                Ok(_event_id) => {
-                    // Evolution event published successfully
-                    // Fan out the welcome message to all members
-                    for welcome_rumor in welcome_rumors.unwrap() {
-                        // Get the public key of the member from the key package event
-                        let key_package_event_id =
-                            welcome_rumor
-                                .tags
-                                .event_ids()
-                                .next()
-                                .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
-                                    "No event ID found in welcome rumor"
-                                )))?;
-
-                        let member_pubkey = key_package_events
-                            .iter()
-                            .find(|event| event.id == *key_package_event_id)
-                            .map(|event| event.pubkey)
+        match result {
+            Ok(_event_id) => {
+                // Evolution event published successfully
+                // Fan out the welcome message to all members
+                for welcome_rumor in welcome_rumors.unwrap() {
+                    // Get the public key of the member from the key package event
+                    let key_package_event_id =
+                        welcome_rumor
+                            .tags
+                            .event_ids()
+                            .next()
                             .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
-                                "No public key found in key package event"
+                                "No event ID found in welcome rumor"
                             )))?;
 
-                        let member_inbox_relays = self
-                            .fetch_relays_with_fallback(member_pubkey, RelayType::Inbox)
-                            .await?;
+                    let member_pubkey = key_package_events
+                        .iter()
+                        .find(|event| event.id == *key_package_event_id)
+                        .map(|event| event.pubkey)
+                        .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                            "No public key found in key package event"
+                        )))?;
 
-                        // Create a timestamp 1 month in the future
-                        use std::ops::Add;
-                        let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-                        self.nostr
-                            .publish_gift_wrap_with_signer(
-                                &member_pubkey,
-                                welcome_rumor.clone(),
-                                vec![Tag::expiration(one_month_future)],
-                                &member_inbox_relays,
-                                keys.clone(),
-                            )
-                            .await
-                            .map_err(WhitenoiseError::from)?;
-                    }
-                }
-                Err(e) => {
-                    return Err(WhitenoiseError::NostrManager(e));
+                    let member_inbox_relays = self
+                        .fetch_relays_with_fallback(member_pubkey, RelayType::Inbox)
+                        .await?;
+
+                    // Create a timestamp 1 month in the future
+                    use std::ops::Add;
+                    let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
+                    self.nostr
+                        .publish_gift_wrap_with_signer(
+                            &member_pubkey,
+                            welcome_rumor.clone(),
+                            vec![Tag::expiration(one_month_future)],
+                            &member_inbox_relays,
+                            keys.clone(),
+                        )
+                        .await
+                        .map_err(WhitenoiseError::from)?;
                 }
             }
-        } else {
-            return Err(WhitenoiseError::NostrMlsNotInitialized);
+            Err(e) => {
+                return Err(WhitenoiseError::NostrManager(e));
+            }
         }
 
         Ok(())
@@ -385,43 +362,39 @@ impl Whitenoise {
         members: Vec<PublicKey>,
     ) -> Result<()> {
         let evolution_event: Event;
-        let nostr_mls_guard = account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().await;
 
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            // First, validate that all members to be removed are actually in the group
-            let current_members = nostr_mls
-                .get_members(group_id)
-                .map_err(WhitenoiseError::from)?
-                .into_iter()
-                .collect::<std::collections::HashSet<PublicKey>>();
+        // First, validate that all members to be removed are actually in the group
+        let current_members = nostr_mls
+            .get_members(group_id)
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .collect::<std::collections::HashSet<PublicKey>>();
 
-            let mut members_not_in_group = Vec::new();
-            for member in &members {
-                if !current_members.contains(member) {
-                    members_not_in_group.push(*member);
-                }
+        let mut members_not_in_group = Vec::new();
+        for member in &members {
+            if !current_members.contains(member) {
+                members_not_in_group.push(*member);
             }
-
-            if !members_not_in_group.is_empty() {
-                return Err(WhitenoiseError::MembersNotInGroup);
-            }
-            let update_result = nostr_mls.remove_members(group_id, &members)?;
-            evolution_event = update_result.evolution_event;
-
-            nostr_mls
-                .merge_pending_commit(group_id)
-                .map_err(WhitenoiseError::from)?;
-
-            let group_relays = nostr_mls
-                .get_relays(group_id)
-                .map_err(WhitenoiseError::from)?;
-
-            self.nostr
-                .publish_event_to(evolution_event, &group_relays)
-                .await?;
-        } else {
-            return Err(WhitenoiseError::NostrMlsNotInitialized);
         }
+
+        if !members_not_in_group.is_empty() {
+            return Err(WhitenoiseError::MembersNotInGroup);
+        }
+        let update_result = nostr_mls.remove_members(group_id, &members)?;
+        evolution_event = update_result.evolution_event;
+
+        nostr_mls
+            .merge_pending_commit(group_id)
+            .map_err(WhitenoiseError::from)?;
+
+        let group_relays = nostr_mls
+            .get_relays(group_id)
+            .map_err(WhitenoiseError::from)?;
+
+        self.nostr
+            .publish_event_to(evolution_event, &group_relays)
+            .await?;
         Ok(())
     }
 }
@@ -461,25 +434,6 @@ mod tests {
         case_create_group_account_not_found(
             whitenoise,
             &unlogged_account,
-            member_pubkeys.clone(),
-            admin_pubkeys.clone(),
-        )
-        .await;
-
-        // Test case: NostrMLS not initialized
-        let keys = create_test_keys();
-        let uninitialized_account = whitenoise
-            .login(keys.secret_key().to_secret_hex())
-            .await
-            .unwrap();
-        // Clear the NostrMls instance manually to test the error case
-        {
-            let mut nostr_mls_guard = uninitialized_account.nostr_mls.lock().await;
-            *nostr_mls_guard = None;
-        }
-        case_create_group_nostr_mls_not_initialized(
-            whitenoise,
-            &uninitialized_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
         )
@@ -572,28 +526,6 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(WhitenoiseError::AccountNotFound)));
-    }
-
-    /// Test case: NostrMLS not initialized (part of MLS group creation fails)
-    async fn case_create_group_nostr_mls_not_initialized(
-        whitenoise: &Whitenoise,
-        creator_account: &Account,
-        member_pubkeys: Vec<PublicKey>,
-        admin_pubkeys: Vec<PublicKey>,
-    ) {
-        let result = whitenoise
-            .create_group(
-                creator_account,
-                member_pubkeys,
-                admin_pubkeys,
-                create_nostr_group_config_data(),
-            )
-            .await;
-
-        assert!(matches!(
-            result,
-            Err(WhitenoiseError::NostrMlsNotInitialized)
-        ));
     }
 
     /// Test case: Member/admin validation fails - empty admin list
