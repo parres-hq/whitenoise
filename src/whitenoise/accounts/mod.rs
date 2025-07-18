@@ -7,6 +7,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -66,7 +67,7 @@ pub struct OnboardingState {
 
 #[derive(Derivative)]
 #[derivative(PartialEq)]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct Account {
     pub pubkey: PublicKey,
     pub settings: AccountSettings,
@@ -75,10 +76,17 @@ pub struct Account {
     #[serde(skip)]
     #[doc(hidden)]
     #[derivative(PartialEq = "ignore")]
-    pub(crate) nostr_mls: Arc<Mutex<Option<NostrMls<NostrMlsSqliteStorage>>>>,
+    pub(crate) nostr_mls: Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>>,
 }
 
-impl<'r, R> sqlx::FromRow<'r, R> for Account
+struct AccountRow {
+    pubkey: PublicKey,
+    settings: AccountSettings,
+    onboarding: OnboardingState,
+    last_synced: Timestamp,
+}
+
+impl<'r, R> sqlx::FromRow<'r, R> for AccountRow
 where
     R: sqlx::Row,
     &'r str: sqlx::ColumnIndex<R>,
@@ -115,12 +123,11 @@ where
         // Convert last_synced from i64 to Timestamp
         let last_synced = Timestamp::from(last_synced_i64 as u64);
 
-        Ok(Account {
+        Ok(AccountRow {
             pubkey,
             settings,
             onboarding,
             last_synced,
-            nostr_mls: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -153,16 +160,18 @@ impl Account {
     ///
     /// This function does not currently return any errors, but it is fallible to allow for
     /// future error handling and to match the expected signature for account creation.
-    pub(crate) fn new() -> core::result::Result<(Account, Keys), AccountError> {
+    pub(crate) fn new(data_dir: &Path) -> core::result::Result<(Account, Keys), AccountError> {
         tracing::debug!(target: "whitenoise::accounts::new", "Generating new keypair");
         let keys = Keys::generate();
+
+        let nostr_mls = Self::create_nostr_mls(keys.public_key, data_dir)?;
 
         let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
             onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(Mutex::new(None)),
+            nostr_mls,
         };
 
         Ok((account, keys))
@@ -171,17 +180,24 @@ impl Account {
     pub(crate) async fn groups_nostr_group_ids(
         &self,
     ) -> core::result::Result<Vec<String>, AccountError> {
-        let nostr_mls_guard = self.nostr_mls.lock().await;
-
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            let groups = nostr_mls.get_groups()?;
-            Ok(groups
-                .iter()
-                .map(|g| hex::encode(g.nostr_group_id))
-                .collect())
-        } else {
-            Ok(Vec::new())
+        let groups;
+        {
+            let nostr_mls = &*self.nostr_mls.lock().await;
+            groups = nostr_mls.get_groups()?;
         }
+        Ok(groups
+            .iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect())
+    }
+
+    fn create_nostr_mls(
+        pubkey: PublicKey,
+        data_dir: &Path,
+    ) -> core::result::Result<Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>>, AccountError> {
+        let mls_storage_dir = data_dir.join("mls").join(pubkey.to_hex());
+        let storage = NostrMlsSqliteStorage::new(mls_storage_dir)?;
+        Ok(Arc::new(Mutex::new(NostrMls::new(storage))))
     }
 }
 
@@ -205,7 +221,7 @@ impl Whitenoise {
     /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
     pub async fn create_identity(&self) -> Result<Account> {
         // Create a new account with a generated keypair and a petname
-        let (mut account, keys) = Account::new()?;
+        let (mut account, keys) = Account::new(&self.config.data_dir)?;
 
         // Save the account to the database
         self.save_account(&account).await?;
@@ -218,8 +234,6 @@ impl Whitenoise {
             tracing::error!("Failed to login during create_identity: {}", e);
             return Err(e);
         }
-
-        self.initialize_nostr_mls_for_account(&account).await?;
 
         // Onboard the account
         self.onboard_new_account(&mut account).await?;
@@ -278,9 +292,6 @@ impl Whitenoise {
             let mut accounts = self.write_accounts().await;
             accounts.insert(account.pubkey, account.clone());
         }
-
-        // Initialize NostrMls for the account
-        self.initialize_nostr_mls_for_account(&account).await?;
 
         // Spawn a background task to fetch the account's data from relays (only if newly added)
         if added_from_keys {
@@ -440,7 +451,7 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::load_accounts", "Loading all accounts from database");
 
         let accounts =
-            sqlx::query_as::<_, Account>("SELECT * FROM accounts ORDER BY last_synced DESC")
+            sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts ORDER BY last_synced DESC")
                 .fetch_all(&self.database.pool)
                 .await?;
 
@@ -449,21 +460,20 @@ impl Whitenoise {
             return Ok(HashMap::new());
         }
 
+        let data_dir = &self.config.data_dir;
+
         let mut accounts_map = HashMap::new();
 
-        for account in accounts {
-            // Initialize NostrMls for each account
-            if let Err(e) = self.initialize_nostr_mls_for_account(&account).await {
-                tracing::warn!(
-                    target: "whitenoise::load_accounts",
-                    "Failed to initialize NostrMls for account {}: {}",
-                    account.pubkey.to_hex(),
-                    e
-                );
-                // Continue loading other accounts even if one fails
-                continue;
-            }
+        for account_row in accounts {
+            let nostr_mls = Account::create_nostr_mls(account_row.pubkey, data_dir)?;
 
+            let account = Account {
+                pubkey: account_row.pubkey,
+                settings: account_row.settings,
+                onboarding: account_row.onboarding,
+                last_synced: account_row.last_synced,
+                nostr_mls,
+            };
             // Add the account to the HashMap first, then trigger background fetch
             accounts_map.insert(account.pubkey, account.clone());
 
@@ -516,11 +526,20 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        sqlx::query_as::<_, Account>("SELECT * FROM accounts WHERE pubkey = ?")
-            .bind(pubkey.to_hex().as_str())
-            .fetch_one(&self.database.pool)
-            .await
-            .map_err(|_| WhitenoiseError::AccountNotFound)
+        let account_row =
+            sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
+                .bind(pubkey.to_hex().as_str())
+                .fetch_one(&self.database.pool)
+                .await
+                .map_err(|_| WhitenoiseError::AccountNotFound)?;
+
+        Ok(Account {
+            pubkey: account_row.pubkey,
+            settings: account_row.settings,
+            onboarding: account_row.onboarding,
+            last_synced: account_row.last_synced,
+            nostr_mls: Account::create_nostr_mls(account_row.pubkey, &self.config.data_dir)?,
+        })
     }
 
     /// Adds a new account to the database using the provided Nostr keys (atomic operation).
@@ -578,7 +597,7 @@ impl Whitenoise {
             settings: AccountSettings::default(),
             onboarding: onboarding_state,
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(Mutex::new(None)),
+            nostr_mls: Account::create_nostr_mls(keys.public_key(), &self.config.data_dir)?,
         };
 
         self.save_account(&account).await.map_err(|e| {
@@ -749,44 +768,6 @@ impl Whitenoise {
                 .await
                 .map_err(|_| WhitenoiseError::AccountNotFound)?;
         serde_json::from_value(settings_json).map_err(WhitenoiseError::from)
-    }
-
-    /// Initializes the Nostr MLS (Message Layer Security) instance for a given account.
-    ///
-    /// This method sets up the MLS storage and initializes a new NostrMls instance for secure messaging.
-    /// The MLS storage is created in a directory specific to the account's public key, ensuring
-    /// isolation between different accounts. The initialized NostrMls instance is stored in the
-    /// account's nostr_mls field for future use.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` for which to initialize the NostrMls instance.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if initialization is successful.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if:
-    /// * The MLS storage directory cannot be created
-    /// * The NostrMls instance cannot be initialized
-    /// * The mutex lock cannot be acquired
-    pub(crate) async fn initialize_nostr_mls_for_account(&self, account: &Account) -> Result<()> {
-        // Initialize NostrMls for the account
-        let mls_storage_dir = self
-            .config
-            .data_dir
-            .join("mls")
-            .join(account.pubkey.to_hex());
-
-        let nostr_mls = NostrMls::new(NostrMlsSqliteStorage::new(mls_storage_dir)?);
-        {
-            let mut nostr_mls_guard = account.nostr_mls.lock().await;
-            *nostr_mls_guard = Some(nostr_mls);
-        }
-        tracing::debug!(target: "whitenoise::initialize_nostr_mls_for_account", "NostrMls initialized for account: {}", account.pubkey.to_hex());
-        Ok(())
     }
 
     /// Performs onboarding steps for a new account, including relay setup and publishing metadata.
@@ -1302,12 +1283,7 @@ impl Whitenoise {
             .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
             .await?;
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-
-        let nostr_mls = nostr_mls_guard
-            .as_ref()
-            .ok_or_else(|| WhitenoiseError::NostrMlsNotInitialized)?;
-
+        let nostr_mls = &*account.nostr_mls.lock().await;
         let result = nostr_mls
             .create_key_package_for_event(&account.pubkey, key_package_relays)
             .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
@@ -1405,14 +1381,9 @@ impl Whitenoise {
 
         if let Some(event) = key_package_events.first() {
             if delete_mls_stored_keys {
-                let nostr_mls_guard = account.nostr_mls.lock().await;
-                if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-                    let key_package = nostr_mls.parse_key_package(event)?;
-
-                    nostr_mls.delete_key_package_from_storage(&key_package)?;
-                } else {
-                    return Err(WhitenoiseError::NostrMlsNotInitialized);
-                }
+                let nostr_mls = &*account.nostr_mls.lock().await;
+                let key_package = nostr_mls.parse_key_package(event)?;
+                nostr_mls.delete_key_package_from_storage(&key_package)?;
             }
 
             let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
@@ -1596,20 +1567,16 @@ impl Whitenoise {
         let mut group_relays = Vec::new();
         let groups: Vec<group_types::Group>;
         {
-            let nostr_mls_guard = account.nostr_mls.lock().await;
-            if let Some(ref nostr_mls) = *nostr_mls_guard {
-                groups = nostr_mls.get_groups()?;
-                // Collect all relays from all groups into a single vector
-                for group in &groups {
-                    let relays = nostr_mls.get_relays(&group.mls_group_id)?;
-                    group_relays.extend(relays);
-                }
-                // Remove duplicates by sorting and deduplicating
-                group_relays.sort();
-                group_relays.dedup();
-            } else {
-                return Err(WhitenoiseError::NostrMlsNotInitialized);
+            let nostr_mls = &*account.nostr_mls.lock().await;
+            groups = nostr_mls.get_groups()?;
+            // Collect all relays from all groups into a single vector
+            for group in &groups {
+                let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                group_relays.extend(relays);
             }
+            // Remove duplicates by sorting and deduplicating
+            group_relays.sort();
+            group_relays.dedup();
         };
 
         let nostr_group_ids = groups
@@ -1647,10 +1614,29 @@ impl Whitenoise {
 }
 
 #[cfg(test)]
+pub mod test_utils {
+    use std::{path::PathBuf, sync::Arc};
+
+    use nostr::key::PublicKey;
+    use nostr_mls::NostrMls;
+    use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+    use tempfile::TempDir;
+    use tokio::sync::Mutex;
+
+    pub fn data_dir() -> PathBuf {
+        TempDir::new().unwrap().path().to_path_buf()
+    }
+
+    pub fn create_nostr_mls(pubkey: PublicKey) -> Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>> {
+        super::Account::create_nostr_mls(pubkey, &data_dir()).unwrap()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::whitenoise::test_utils::*;
-    use std::sync::Arc;
+    use test_utils::*;
 
     #[tokio::test]
     #[ignore]
@@ -1667,7 +1653,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_account_new_creates_account_and_keys() {
-        let (account, keys) = Account::new().unwrap();
+        let (account, keys) = Account::new(&data_dir()).unwrap();
         assert_eq!(account.pubkey, keys.public_key());
         // Check defaults
         assert!(account.settings.dark_theme);
@@ -1702,7 +1688,7 @@ mod tests {
             settings: AccountSettings::default(),
             onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
+            nostr_mls: Account::create_nostr_mls(keys.public_key(), &data_dir()).unwrap(),
         };
 
         let debug_str = format!("{:?}", account);
@@ -1720,7 +1706,7 @@ mod tests {
             settings: AccountSettings::default(),
             onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
-            nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
+            nostr_mls: Account::create_nostr_mls(keys.public_key(), &data_dir()).unwrap(),
         };
 
         let group_ids = account.groups_nostr_group_ids().await.unwrap();
@@ -1749,8 +1735,8 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_account_creation() {
         // Test that Account::new() creates different accounts each time
-        let (account1, keys1) = Account::new().unwrap();
-        let (account2, keys2) = Account::new().unwrap();
+        let (account1, keys1) = Account::new(&data_dir()).unwrap();
+        let (account2, keys2) = Account::new(&data_dir()).unwrap();
 
         assert_ne!(account1.pubkey, account2.pubkey);
         assert_ne!(keys1.public_key(), keys2.public_key());
@@ -1795,7 +1781,7 @@ mod tests {
         .unwrap();
 
         // Test FromRow implementation by querying the account
-        let account: Account = sqlx::query_as("SELECT * FROM accounts WHERE pubkey = ?")
+        let account: AccountRow = sqlx::query_as("SELECT * FROM accounts WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .fetch_one(&pool)
             .await
@@ -1860,7 +1846,7 @@ mod tests {
                 },
                 onboarding: OnboardingState::default(),
                 last_synced: Timestamp::zero(),
-                nostr_mls: Arc::new(tokio::sync::Mutex::new(None)),
+                nostr_mls: Account::create_nostr_mls(keys.public_key(), &data_dir()).unwrap(),
             };
             (account, keys)
         }

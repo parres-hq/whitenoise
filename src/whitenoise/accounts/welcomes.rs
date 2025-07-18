@@ -48,10 +48,7 @@ impl Whitenoise {
         })?;
         let account = self.fetch_account(pubkey).await?;
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        let nostr_mls = nostr_mls_guard
-            .as_ref()
-            .ok_or_else(|| WhitenoiseError::NostrMlsNotInitialized)?;
+        let nostr_mls = &*account.nostr_mls.lock().await;
         let welcome = nostr_mls
             .get_welcome(&welcome_event_id)?
             .ok_or(WhitenoiseError::WelcomeNotFound)?;
@@ -95,10 +92,7 @@ impl Whitenoise {
     pub async fn fetch_welcomes(&self, pubkey: &PublicKey) -> Result<Vec<welcome_types::Welcome>> {
         let account = self.fetch_account(pubkey).await?;
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        let nostr_mls = nostr_mls_guard
-            .as_ref()
-            .ok_or_else(|| WhitenoiseError::NostrMlsNotInitialized)?;
+        let nostr_mls = account.nostr_mls.lock().await;
         let welcomes = nostr_mls.get_pending_welcomes()?;
         Ok(welcomes)
     }
@@ -149,11 +143,8 @@ impl Whitenoise {
 
         let group_ids: Vec<String>;
         let mut group_relays = Vec::new();
-        let nostr_mls_guard = account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().await;
 
-        let nostr_mls = nostr_mls_guard
-            .as_ref()
-            .ok_or_else(|| WhitenoiseError::NostrMlsNotInitialized)?;
         let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
         if let Some(welcome) = welcome {
             nostr_mls.accept_welcome(&welcome)?;
@@ -229,10 +220,7 @@ impl Whitenoise {
         })?;
         let account = self.fetch_account(pubkey).await?;
 
-        let nostr_mls_guard = account.nostr_mls.lock().await;
-        let nostr_mls = nostr_mls_guard
-            .as_ref()
-            .ok_or_else(|| WhitenoiseError::NostrMlsNotInitialized)?;
+        let nostr_mls = &*account.nostr_mls.lock().await;
         let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
         if let Some(welcome) = welcome {
             nostr_mls.decline_welcome(&welcome)?;

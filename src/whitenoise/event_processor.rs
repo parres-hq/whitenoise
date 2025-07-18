@@ -263,16 +263,11 @@ impl Whitenoise {
     ) -> Result<()> {
         // Process the welcome message - lock scope is minimal
         {
-            let nostr_mls_guard = account.nostr_mls.lock().await;
-            if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-                nostr_mls
-                    .process_welcome(&event.id, &rumor)
-                    .map_err(WhitenoiseError::NostrMlsError)?;
-                tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Processed welcome event");
-            } else {
-                tracing::error!(target: "whitenoise::event_processor::process_welcome", "Nostr MLS not initialized");
-                return Err(WhitenoiseError::NostrMlsNotInitialized);
-            }
+            let nostr_mls = &*account.nostr_mls.lock().await;
+            nostr_mls
+                .process_welcome(&event.id, &rumor)
+                .map_err(WhitenoiseError::NostrMlsError)?;
+            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Processed welcome event");
         } // nostr_mls lock released here
 
         let key_package_event_id: Option<EventId> = rumor
@@ -338,21 +333,16 @@ impl Whitenoise {
 
         let target_account = self.read_account_by_pubkey(&target_pubkey).await?;
 
-        let nostr_mls_guard = target_account.nostr_mls.lock().await;
-        if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-            match nostr_mls.process_message(&event) {
-                Ok(result) => {
-                    tracing::debug!(target: "whitenoise::event_processor::process_mls_message", "Processed MLS message - Result: {:?}", result);
-                    Ok(())
-                }
-                Err(e) => {
-                    tracing::error!(target: "whitenoise::event_processor::process_mls_message", "MLS message processing failed for account {}: {}", target_pubkey.to_hex(), e);
-                    Err(WhitenoiseError::NostrMlsError(e))
-                }
+        let nostr_mls = &*target_account.nostr_mls.lock().await;
+        match nostr_mls.process_message(&event) {
+            Ok(result) => {
+                tracing::debug!(target: "whitenoise::event_processor::process_mls_message", "Processed MLS message - Result: {:?}", result);
+                Ok(())
             }
-        } else {
-            tracing::error!(target: "whitenoise::event_processor::process_mls_message", "Nostr MLS not initialized");
-            Err(WhitenoiseError::NostrMlsNotInitialized)
+            Err(e) => {
+                tracing::error!(target: "whitenoise::event_processor::process_mls_message", "MLS message processing failed for account {}: {}", target_pubkey.to_hex(), e);
+                Err(WhitenoiseError::NostrMlsError(e))
+            }
         }
     }
 
