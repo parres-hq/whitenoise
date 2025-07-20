@@ -14,7 +14,7 @@ impl NostrManager {
     pub(crate) async fn fetch_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
         let metadata = self
             .client
-            .fetch_metadata(pubkey, self.timeout().await?)
+            .fetch_metadata(pubkey, self.timeout)
             .await?;
         Ok(metadata)
     }
@@ -30,7 +30,7 @@ impl NostrManager {
             .limit(1);
         let relay_events = self
             .client
-            .fetch_events(filter.clone(), self.timeout().await?)
+            .fetch_events(filter.clone(), self.timeout)
             .await?;
         let database_events = self.client.database().query(filter).await?;
         Ok(Self::relay_urls_from_events(
@@ -94,7 +94,7 @@ impl NostrManager {
 
         let events = self
             .client
-            .fetch_events(filter, self.timeout().await?)
+            .fetch_events(filter, self.timeout)
             .await?;
 
         let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
@@ -119,7 +119,7 @@ impl NostrManager {
             .authors(contacts_pubkeys.clone());
         let meta_events = self
             .client
-            .fetch_events(meta_filter, self.timeout().await?)
+            .fetch_events(meta_filter, self.timeout)
             .await?;
 
         for event in meta_events {
@@ -146,7 +146,7 @@ impl NostrManager {
             .limit(1);
         let events = self
             .client
-            .fetch_events_from(urls, filter.clone(), self.timeout().await?)
+            .fetch_events_from(urls, filter.clone(), self.timeout)
             .await?;
 
         let stored_events = self.client.database().query(filter).await?;

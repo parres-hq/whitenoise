@@ -217,7 +217,7 @@ impl Whitenoise {
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
-            NostrManager::new_with_connections(data_dir.join("nostr_lmdb"), event_sender.clone())
+            NostrManager::new(data_dir.join("nostr_lmdb"), event_sender.clone(), NostrManager::default_timeout())
                 .await?;
 
         // Create SecretsStore
@@ -558,9 +558,10 @@ pub mod test_utils {
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
-        let nostr = NostrManager::new_with_connections(
+        let nostr = NostrManager::new(
             config.data_dir.join("test_nostr"),
             event_sender.clone(),
+            NostrManager::default_timeout(),
         )
         .await
         .expect("Failed to create NostrManager");

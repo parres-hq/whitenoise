@@ -1560,7 +1560,6 @@ impl Whitenoise {
 
     pub(crate) async fn setup_subscriptions(&self, account: &Account) -> Result<()> {
         if !self.logged_in(&account.pubkey).await {
-            tracing::info!("SETUP");
             return Err(WhitenoiseError::AccountNotFound);
         }
 
