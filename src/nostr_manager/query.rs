@@ -1,8 +1,10 @@
 //! Query functions for NostrManager
 //! This handles fetching events from the database cache.
 
-use crate::nostr_manager::{NostrManager, Result};
-use crate::whitenoise::accounts::relays::RelayType;
+use crate::{
+    nostr_manager::{NostrManager, Result},
+    Account, RelayType,
+};
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -11,18 +13,27 @@ impl NostrManager {
         Ok(self.client.database().metadata(pubkey).await?)
     }
 
-    pub(crate) async fn fetch_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
-        let metadata = self
+    pub(crate) async fn fetch_metadata_from(
+        &self,
+        discovery_relays: Vec<RelayUrl>,
+        pubkey: PublicKey,
+    ) -> Result<Option<Metadata>> {
+        let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+        let events: Events = self
             .client
-            .fetch_metadata(pubkey, self.timeout)
+            .fetch_events_from(discovery_relays, filter, self.timeout)
             .await?;
-        Ok(metadata)
+        match events.first() {
+            Some(event) => Ok(Some(Metadata::try_from(event)?)),
+            None => Ok(None),
+        }
     }
 
-    pub(crate) async fn query_user_relays(
+    pub(crate) async fn fetch_user_relays(
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
+        discovery_relays: Vec<RelayUrl>,
     ) -> Result<Vec<RelayUrl>> {
         let filter = Filter::new()
             .author(pubkey)
@@ -30,12 +41,9 @@ impl NostrManager {
             .limit(1);
         let relay_events = self
             .client
-            .fetch_events(filter.clone(), self.timeout)
+            .fetch_events_from(discovery_relays, filter.clone(), self.timeout)
             .await?;
-        let database_events = self.client.database().query(filter).await?;
-        Ok(Self::relay_urls_from_events(
-            relay_events.merge(database_events),
-        ))
+        Ok(Self::relay_urls_from_events(relay_events))
     }
 
     pub(crate) async fn query_user_contact_list(
@@ -85,16 +93,16 @@ impl NostrManager {
 
     pub(crate) async fn fetch_user_contact_list(
         &self,
-        pubkey: PublicKey,
+        account: &Account,
     ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
         let filter = Filter::new()
             .kind(Kind::ContactList)
-            .author(pubkey)
+            .author(account.pubkey)
             .limit(1);
 
         let events = self
             .client
-            .fetch_events(filter, self.timeout)
+            .fetch_events_from(account.discovery_relays.clone(), filter, self.timeout)
             .await?;
 
         let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
@@ -117,10 +125,7 @@ impl NostrManager {
         let meta_filter = Filter::new()
             .kind(Kind::Metadata)
             .authors(contacts_pubkeys.clone());
-        let meta_events = self
-            .client
-            .fetch_events(meta_filter, self.timeout)
-            .await?;
+        let meta_events = self.client.fetch_events(meta_filter, self.timeout).await?;
 
         for event in meta_events {
             contacts_metadata.insert(event.pubkey, Metadata::from_json(&event.content).ok());

@@ -221,7 +221,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test Method 2: fetch_contacts (relays)
     println!("\n2️⃣  Fetching contacts from relays using fetch_contacts...");
     let start_time = std::time::Instant::now();
-    let fetch_contacts = whitenoise.fetch_contacts(account.pubkey).await?;
+    let fetch_contacts = whitenoise.fetch_contacts(&account).await?;
     let fetch_duration = start_time.elapsed();
 
     let fetch_with_metadata = fetch_contacts

@@ -1,7 +1,7 @@
 use crate::types::ImageType;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
-use crate::RelayType;
+use crate::Account;
 use nostr_blossom::prelude::*;
 use nostr_sdk::prelude::*;
 
@@ -24,12 +24,19 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the metadata query fails.
-    pub async fn fetch_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
+    pub async fn fetch_metadata_from(
+        &self,
+        discovery_relays: Vec<RelayUrl>,
+        pubkey: PublicKey,
+    ) -> Result<Option<Metadata>> {
         // First try and fetch from local nostr database
         let mut metadata = self.nostr.query_user_metadata(pubkey).await?;
         if metadata.is_none() {
             // If we don't find it in the nostr database, try and fetch from relays
-            metadata = self.nostr.fetch_user_metadata(pubkey).await?;
+            metadata = self
+                .nostr
+                .fetch_metadata_from(discovery_relays, pubkey)
+                .await?;
         }
         Ok(metadata)
     }
@@ -56,15 +63,11 @@ impl Whitenoise {
     /// * The account's private key cannot be retrieved from the secret store
     /// * The event publication fails
     /// * The database update fails
-    pub async fn update_metadata(&self, metadata: &Metadata, pubkey: &PublicKey) -> Result<()> {
-        if !self.logged_in(pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
+    pub async fn update_metadata(&self, metadata: &Metadata, account: &Account) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::update_metadata",
             "Updating metadata for account: {}",
-            pubkey.to_hex()
+            account.pubkey.to_hex()
         );
 
         // Serialize metadata to JSON
@@ -74,17 +77,14 @@ impl Whitenoise {
         let event = EventBuilder::new(Kind::Metadata, metadata_json);
 
         // Get signing keys for the account
-        let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
-
-        // Get relays with fallback to defaults if user hasn't configured any
-        let relays_to_use = self
-            .fetch_relays_with_fallback(*pubkey, RelayType::Nostr)
-            .await?;
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &relays_to_use, keys)
+            .publish_event_builder_with_signer(event, &account.discovery_relays, keys)
             .await?;
 
         tracing::debug!(
@@ -195,7 +195,7 @@ mod tests {
             ..Default::default()
         };
         whitenoise
-            .update_metadata(&initial_metadata, &account.pubkey)
+            .update_metadata(&initial_metadata, &account)
             .await
             .unwrap();
 
@@ -263,7 +263,7 @@ mod tests {
         };
 
         // Test updating metadata
-        let result = whitenoise.update_metadata(&metadata, &account.pubkey).await;
+        let result = whitenoise.update_metadata(&metadata, &account).await;
         assert!(result.is_ok(), "update_metadata should succeed");
     }
 
@@ -286,7 +286,7 @@ mod tests {
         };
 
         // Test updating metadata
-        let result = whitenoise.update_metadata(&metadata, &account.pubkey).await;
+        let result = whitenoise.update_metadata(&metadata, &account).await;
         assert!(
             result.is_ok(),
             "update_metadata should succeed with minimal metadata"
@@ -309,7 +309,7 @@ mod tests {
         let metadata = Metadata::default();
 
         // Test updating metadata
-        let result = whitenoise.update_metadata(&metadata, &account.pubkey).await;
+        let result = whitenoise.update_metadata(&metadata, &account).await;
         assert!(
             result.is_ok(),
             "update_metadata should succeed with empty metadata"
@@ -332,7 +332,7 @@ mod tests {
         };
 
         // Test updating metadata - this should fail because keys aren't stored
-        let result = whitenoise.update_metadata(&metadata, &account.pubkey).await;
+        let result = whitenoise.update_metadata(&metadata, &account).await;
         assert!(
             result.is_err(),
             "update_metadata should fail when keys aren't stored"
@@ -389,7 +389,7 @@ mod tests {
 
         // First publish the metadata so it gets stored in the local database
         whitenoise
-            .update_metadata(&test_metadata, &account.pubkey)
+            .update_metadata(&test_metadata, &account)
             .await
             .unwrap();
 
@@ -397,7 +397,9 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Now fetch the metadata - this should come from the cache
-        let result = whitenoise.fetch_metadata(account.pubkey).await;
+        let result = whitenoise
+            .fetch_metadata_from(account.discovery_relays.clone(), account.pubkey)
+            .await;
         assert!(result.is_ok(), "fetch_metadata should succeed");
 
         let metadata = result.unwrap();
@@ -447,7 +449,7 @@ mod tests {
         };
 
         whitenoise
-            .update_metadata(&other_metadata, &other_account.pubkey)
+            .update_metadata(&other_metadata, &other_account)
             .await
             .unwrap();
 
@@ -460,7 +462,9 @@ mod tests {
 
         // Now try to fetch the other account's metadata
         // This should attempt to fetch from relays since it's not in our local cache
-        let result = whitenoise.fetch_metadata(other_account.pubkey).await;
+        let result = whitenoise
+            .fetch_metadata_from(account.discovery_relays.clone(), other_account.pubkey)
+            .await;
         assert!(result.is_ok(), "fetch_metadata should succeed");
 
         // Note: In a real test environment, this might return None if the relay fetch fails
@@ -494,7 +498,9 @@ mod tests {
         let random_pubkey = random_keys.public_key();
 
         // Try to fetch metadata for a non-existent user
-        let result = whitenoise.fetch_metadata(random_pubkey).await;
+        let result = whitenoise
+            .fetch_metadata_from(account.discovery_relays.clone(), random_pubkey)
+            .await;
         assert!(
             result.is_ok(),
             "fetch_metadata should succeed even when no metadata is found"
@@ -526,7 +532,9 @@ mod tests {
         let other_pubkey = other_keys.public_key();
 
         // Try to fetch metadata for the other user
-        let result = whitenoise.fetch_metadata(other_pubkey).await;
+        let result = whitenoise
+            .fetch_metadata_from(account.discovery_relays.clone(), other_pubkey)
+            .await;
         assert!(
             result.is_ok(),
             "fetch_metadata should succeed for different user"

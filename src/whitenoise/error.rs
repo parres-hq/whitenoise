@@ -32,6 +32,9 @@ pub enum WhitenoiseError {
     #[error("Account not found")]
     AccountNotFound,
 
+    #[error("Contact not found")]
+    ContactNotFound,
+
     #[error("Account not authorized")]
     AccountNotAuthorized,
 

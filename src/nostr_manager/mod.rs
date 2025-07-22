@@ -41,7 +41,7 @@ pub enum NostrManagerError {
 
 #[derive(Debug, Clone)]
 pub struct NostrManager {
-    client: Client,
+    pub(crate) client: Client,
     #[allow(dead_code)] // Allow dead code because this triggers a warning when linting on linux.
     db_path: PathBuf,
     session_salt: [u8; 16],
@@ -52,6 +52,16 @@ pub struct NostrManager {
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
 
 impl NostrManager {
+    pub(crate) async fn add_relays<I>(&self, relays: I) -> Result<()>
+    where
+        I: IntoIterator<Item = RelayUrl>,
+    {
+        for relay in relays {
+            self.client.add_relay(relay).await?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn default_timeout() -> Duration {
         Duration::from_secs(5)
     }
@@ -182,26 +192,11 @@ impl NostrManager {
         })
     }
 
-    /// Get the relays for the Nostr manager
-    pub(crate) async fn relays(&self) -> Result<Vec<RelayUrl>> {
-        // let guard = self.settings.lock().await;
-        // Ok(guard
-        //     .relays
-        //     .clone()
-        //     .into_iter()
-        //     .map(|r| RelayUrl::parse(&r).unwrap())
-        //     .collect())
-        todo!()
-    }
-
     /// Fetch an event (first from database, then from relays) with a filter
     pub(crate) async fn fetch_events_with_filter(&self, filter: Filter) -> Result<Events> {
         let events = self.client.database().query(filter.clone()).await?;
         if events.is_empty() {
-            let events = self
-                .client
-                .fetch_events(filter, self.timeout)
-                .await?;
+            let events = self.client.fetch_events(filter, self.timeout).await?;
             Ok(events)
         } else {
             Ok(events)
@@ -591,65 +586,6 @@ impl NostrManager {
         self.client.unset_signer().await;
         self.client.unsubscribe_all().await;
         self.client.database().wipe().await?;
-        Ok(())
-    }
-
-    pub async fn fetch_all_user_data(
-        &self,
-        signer: impl NostrSigner + 'static,
-        last_synced: Timestamp,
-        group_ids: Vec<String>,
-    ) -> Result<()> {
-        let pubkey = signer.get_public_key().await?;
-        self.client.set_signer(signer).await;
-
-        // Create a filter for all metadata-related events (user metadata and contacts)
-        let contacts_pubkeys = self
-            .client
-            .get_contact_list_public_keys(self.timeout)
-            .await?;
-
-        let mut metadata_authors = contacts_pubkeys;
-        metadata_authors.push(pubkey);
-
-        let metadata_filter = Filter::new().kind(Kind::Metadata).authors(metadata_authors);
-
-        // Create a filter for all relay-related events
-        let relay_filter = Filter::new().author(pubkey).kinds(vec![
-            Kind::RelayList,
-            Kind::InboxRelays,
-            Kind::MlsKeyPackageRelays,
-        ]);
-
-        // Create a filter for all MLS-related events
-        let mls_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
-
-        // Create a filter for gift wrapped events
-        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
-
-        // Create a filter for group messages
-        let group_messages_filter = Filter::new()
-            .kind(Kind::MlsGroupMessage)
-            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
-            .since(last_synced)
-            .until(Timestamp::now());
-
-        // Fetch all events in parallel
-        // We don't need to handle the events, they'll be processed in the background by the event processor.
-        let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
-            self.client
-                .fetch_events(metadata_filter, self.timeout),
-            self.client
-                .fetch_events(relay_filter, self.timeout),
-            self.client.fetch_events(mls_filter, self.timeout),
-            self.client
-                .fetch_events(giftwrap_filter, self.timeout),
-            self.client
-                .fetch_events(group_messages_filter, self.timeout)
-        );
-
-        self.client.unset_signer().await;
-
         Ok(())
     }
 

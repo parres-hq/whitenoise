@@ -14,6 +14,10 @@ const MIGRATION_FILES: &[(&str, &[u8])] = &[
         "0002_add_media_files.sql",
         include_bytes!("../../db_migrations/0002_add_media_files.sql"),
     ),
+    (
+        "0003_contacts.sql",
+        include_bytes!("../../db_migrations/0003_contacts.sql"),
+    ),
     // Add new migrations here in order, for example:
     // ("000X_something.sql", include_bytes!("../db_migrations/000X_something.sql")),
     // ("000Y_another.sql", include_bytes!("../db_migrations/000Y_another.sql")),
@@ -268,7 +272,7 @@ mod tests {
         let (db, _temp_dir) = create_test_db().await;
 
         // Insert some test data
-        sqlx::query("INSERT INTO accounts (pubkey, settings, onboarding, last_synced) VALUES ('test-pubkey', '{}', '{}', 0)")
+        sqlx::query("INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
             .execute(&db.pool)
             .await
             .expect("Failed to insert test account");
@@ -343,7 +347,7 @@ mod tests {
             .expect("Failed to create database");
 
         // Insert some data
-        sqlx::query("INSERT INTO accounts (pubkey, settings, onboarding, last_synced) VALUES ('test-pubkey', '{}', '{}', 0)")
+        sqlx::query("INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
             .execute(&db1.pool)
             .await
             .expect("Failed to insert test data");
@@ -363,15 +367,17 @@ mod tests {
         assert_eq!(account_count.0, 1);
 
         // Verify the account data
-        let account: (String, String, String, i64) =
-            sqlx::query_as("SELECT pubkey, settings, onboarding, last_synced FROM accounts")
+        let account: (String, String, String, String, String, i64) =
+            sqlx::query_as("SELECT * FROM accounts")
                 .fetch_one(&db2.pool)
                 .await
                 .expect("Failed to fetch account");
         assert_eq!(account.0, "test-pubkey");
         assert_eq!(account.1, "{}");
-        assert_eq!(account.2, "{}");
-        assert_eq!(account.3, 0);
+        assert_eq!(account.2, "[1,2]");
+        assert_eq!(account.3, "[]");
+        assert_eq!(account.4, "[1]");
+        assert_eq!(account.5, 0);
     }
 
     #[tokio::test]

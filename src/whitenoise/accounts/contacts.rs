@@ -4,10 +4,91 @@ use nostr::key::PublicKey;
 
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::RelayType;
 use crate::whitenoise::Whitenoise;
+use crate::RelayType;
 
 use nostr_sdk::prelude::*;
+
+pub struct Contact {
+    pub pubkey: PublicKey,
+    pub metadata: Option<Metadata>,
+    pub discovery_relays: Vec<RelayUrl>,
+    pub inbox_relays: Vec<RelayUrl>,
+    pub key_package_relays: Vec<RelayUrl>,
+}
+
+impl<'r, R> sqlx::FromRow<'r, R> for Contact
+where
+    R: sqlx::Row,
+    &'r str: sqlx::ColumnIndex<R>,
+    String: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+{
+    fn from_row(row: &'r R) -> std::result::Result<Self, sqlx::Error> {
+        // Extract raw values from the database row
+        let pubkey_str: String = row.try_get("pubkey")?;
+        let metadata_string: Option<String> = row.try_get("metadata")?;
+        let discovery_relays: String = row.try_get("discovery_relays")?;
+        let inbox_relays: String = row.try_get("inbox_relays")?;
+        let key_package_relays: String = row.try_get("key_package_relays")?;
+
+        let metadata = match metadata_string {
+            Some(json) => {
+                Some(
+                    serde_json::from_str(&json).map_err(|e| sqlx::Error::ColumnDecode {
+                        index: "metadata".to_string(),
+                        source: Box::new(e),
+                    })?,
+                )
+            }
+            None => None,
+        };
+
+        // Parse pubkey from hex string
+        let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| sqlx::Error::ColumnDecode {
+            index: "pubkey".to_string(),
+            source: Box::new(e),
+        })?;
+
+        let discovery_relays: Vec<RelayUrl> = serde_json::from_str(&discovery_relays)
+            .map(|urls: Vec<String>| {
+                urls.iter()
+                    .filter_map(|url| RelayUrl::parse(url).ok())
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|e| sqlx::Error::ColumnDecode {
+                index: "discovery_relays".to_owned(),
+                source: Box::new(e),
+            })?;
+        let inbox_relays: Vec<RelayUrl> = serde_json::from_str(&inbox_relays)
+            .map(|urls: Vec<String>| {
+                urls.iter()
+                    .filter_map(|url| RelayUrl::parse(url).ok())
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|e| sqlx::Error::ColumnDecode {
+                index: "inbox_relays".to_owned(),
+                source: Box::new(e),
+            })?;
+        let key_package_relays: Vec<RelayUrl> = serde_json::from_str(&key_package_relays)
+            .map(|urls: Vec<String>| {
+                urls.iter()
+                    .filter_map(|url| RelayUrl::parse(url).ok())
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|e| sqlx::Error::ColumnDecode {
+                index: "key_package_relays".to_owned(),
+                source: Box::new(e),
+            })?;
+
+        Ok(Contact {
+            pubkey,
+            metadata,
+            discovery_relays,
+            inbox_relays,
+            key_package_relays,
+        })
+    }
+}
 
 impl Whitenoise {
     // ============================================================================
@@ -34,13 +115,13 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the contact list query fails.
     pub async fn fetch_contacts(
         &self,
-        pubkey: PublicKey,
+        account: &Account,
     ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        if !self.logged_in(&pubkey).await {
+        if !self.logged_in(&account.pubkey).await {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let contacts = self.nostr.fetch_user_contact_list(pubkey).await?;
+        let contacts = self.nostr.fetch_user_contact_list(account).await?;
         Ok(contacts)
     }
 
@@ -77,10 +158,10 @@ impl Whitenoise {
         Ok(contacts)
     }
 
-    pub async fn fetch_key_package_event(
+    pub async fn fetch_key_package_event_from(
         &self,
-        pubkey: PublicKey,
         urls: Vec<RelayUrl>,
+        pubkey: PublicKey,
     ) -> Result<Option<Event>> {
         let key_package = self.nostr.fetch_user_key_package(pubkey, urls).await?;
         Ok(key_package)
@@ -112,7 +193,7 @@ impl Whitenoise {
         }
 
         // Load current contact list
-        let current_contacts = self.fetch_contacts(account.pubkey).await?;
+        let current_contacts = self.fetch_contacts(account).await?;
 
         // Check if contact already exists
         if current_contacts.contains_key(&contact_pubkey) {
@@ -122,19 +203,46 @@ impl Whitenoise {
             )));
         }
 
+        let mut inbox_relays = self
+            .fetch_relays_from(
+                account.discovery_relays.clone(),
+                contact_pubkey,
+                RelayType::Inbox,
+            )
+            .await?;
+        if inbox_relays.is_empty() {
+            inbox_relays = account.inbox_relays.clone();
+        }
+        let mut key_package_relays = self
+            .fetch_relays_from(
+                account.discovery_relays.clone(),
+                contact_pubkey,
+                RelayType::KeyPackage,
+            )
+            .await?;
+        if key_package_relays.is_empty() {
+            key_package_relays = account.key_package_relays.clone();
+        }
+        let metadata = self
+            .fetch_metadata_from(account.discovery_relays.clone(), contact_pubkey)
+            .await?;
+
+        // save contact locally
+        let contact = Contact {
+            pubkey: contact_pubkey,
+            discovery_relays: account.discovery_relays.clone(), // The account discovered the contact through this relays
+            inbox_relays,
+            key_package_relays,
+            metadata,
+        };
+        self.save_contact_local(&contact).await?;
+
         // Create new contact list with the added contact
         let mut new_contacts: Vec<PublicKey> = current_contacts.keys().cloned().collect();
         new_contacts.push(contact_pubkey);
 
         // Publish the updated contact list
         self.publish_contact_list(account, new_contacts).await?;
-
-        tracing::info!(
-            target: "whitenoise::add_contact",
-            "Added contact {} to account {}",
-            contact_pubkey.to_hex(),
-            account.pubkey.to_hex()
-        );
 
         Ok(())
     }
@@ -165,7 +273,7 @@ impl Whitenoise {
         }
 
         // Load current contact list
-        let current_contacts = self.fetch_contacts(account.pubkey).await?;
+        let current_contacts = self.fetch_contacts(account).await?;
 
         // Check if contact exists
         if !current_contacts.contains_key(&contact_pubkey) {
@@ -184,6 +292,8 @@ impl Whitenoise {
 
         // Publish the updated contact list
         self.publish_contact_list(account, new_contacts).await?;
+
+        self.remove_contact_local(&contact_pubkey).await?;
 
         tracing::info!(
             target: "whitenoise::remove_contact",
@@ -235,6 +345,92 @@ impl Whitenoise {
         Ok(())
     }
 
+    pub(crate) async fn save_contact_local(&self, contact: &Contact) -> Result<()> {
+        let discovery_urls: Vec<_> = contact
+            .discovery_relays
+            .iter()
+            .map(|relay_url| relay_url.as_str())
+            .collect();
+
+        let inbox_urls: Vec<_> = contact
+            .inbox_relays
+            .iter()
+            .map(|relay_url| relay_url.as_str())
+            .collect();
+
+        let key_package_urls: Vec<_> = contact
+            .key_package_relays
+            .iter()
+            .map(|relay_url| relay_url.as_str())
+            .collect();
+
+        let result = sqlx::query(
+            "INSERT INTO contacts (pubkey, metadata, discovery_relays, inbox_relays, key_package_relays)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(pubkey) DO UPDATE SET
+                metadata = excluded.metadata,
+                discovery_relays = excluded.discovery_relays,
+                inbox_relays = excluded.inbox_relays,
+                key_package_relays = excluded.key_package_relays",
+        )
+        .bind(contact.pubkey.to_hex())
+        .bind(contact.metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()? // Convert Option<Result> to Result<Option>
+        )
+        .bind(serde_json::to_string(&discovery_urls)?)
+        .bind(serde_json::to_string(&inbox_urls)?)
+        .bind(serde_json::to_string(&key_package_urls)?)
+        .execute(&self.database.pool)
+        .await?;
+
+        tracing::debug!(
+            target: "whitenoise::save_contact",
+            "Contact query executed. Rows affected: {}",
+            result.rows_affected()
+        );
+
+        Ok(())
+    }
+
+    pub(crate) async fn remove_contact_local(&self, pubkey: &PublicKey) -> Result<()> {
+        let result = sqlx::query("DELETE FROM contacts WHERE pubkey = ?")
+            .bind(pubkey.to_hex())
+            .execute(&self.database.pool)
+            .await?;
+
+        tracing::debug!(
+            target: "whitenoise::remove_contact_local",
+            "Delete executed. Rows affected: {}",
+            result.rows_affected()
+        );
+
+        tracing::debug!(
+            target: "whitenoise::remove_contact_local",
+            "Contact deleted successfully for pubkey: {}",
+            pubkey.to_hex()
+        );
+
+        Ok(())
+    }
+
+    pub(crate) async fn load_contact(&self, pubkey: &PublicKey) -> Result<Contact> {
+        let contact = sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE pubkey = ?")
+            .bind(pubkey.to_hex().as_str())
+            .fetch_one(&self.database.pool)
+            .await
+            .map_err(|_| WhitenoiseError::ContactNotFound)?;
+
+        tracing::debug!(
+            target: "whitenoise::load_contact",
+            "Contact loaded successfully for pubkey: {}",
+            pubkey.to_hex()
+        );
+
+        Ok(contact)
+    }
+
     // Private Helper Methods =====================================================
 
     /// Publishes a contact list event (Kind 3) to the Nostr network.
@@ -277,20 +473,19 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
-        // Get relays with fallback to defaults if user hasn't configured any
-        let relays_to_use = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
-            .await?;
-
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &relays_to_use, keys.clone())
+            .publish_event_builder_with_signer(event, &account.discovery_relays, keys.clone())
             .await?;
 
         // Update subscription for contact list metadata - use same relay logic
         self.nostr
-            .update_contacts_metadata_subscription_with_signer(account.pubkey, relays_to_use, keys)
+            .update_contacts_metadata_subscription_with_signer(
+                account.pubkey,
+                account.discovery_relays.clone(),
+                keys,
+            )
             .await?;
 
         tracing::debug!(
@@ -363,7 +558,7 @@ mod tests {
 
         // Test the logic of adding a contact (without actual network calls)
         // Load current contact list (will be empty in test environment)
-        let current_contacts = whitenoise.fetch_contacts(account.pubkey).await.unwrap();
+        let current_contacts = whitenoise.fetch_contacts(&account).await.unwrap();
 
         // Verify contact doesn't already exist
         assert!(!current_contacts.contains_key(&contact_pubkey));
@@ -476,7 +671,7 @@ mod tests {
         let contact_pubkey = create_test_keys().public_key();
 
         // Test add contact validation (contact doesn't exist)
-        let current_contacts = whitenoise.fetch_contacts(account.pubkey).await.unwrap();
+        let current_contacts = whitenoise.fetch_contacts(&account).await.unwrap();
 
         // Should be able to add new contact (empty list)
         let can_add = !current_contacts.contains_key(&contact_pubkey);
