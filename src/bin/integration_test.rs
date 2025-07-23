@@ -252,6 +252,8 @@ async fn main() -> Result<(), WhitenoiseError> {
     let member_pubkeys = vec![account2.pubkey]; // account2 as member (has published key package)
     let admin_pubkeys = vec![account1.pubkey]; // account1 as admin/creator
 
+    whitenoise.add_contact(&account1, account2.pubkey).await.unwrap();
+
     let test_group = whitenoise
         .create_group(
             &account1,
@@ -386,6 +388,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Add account4 as a new member to the test group (account1 is admin)
     let new_members = vec![account4.pubkey];
+    whitenoise.add_contact(&account1, account4.pubkey).await.unwrap();
     whitenoise
         .add_members_to_group(&account1, &test_group.mls_group_id, new_members)
         .await?;
@@ -418,6 +421,8 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Add both accounts as members
     let bulk_new_members = vec![account5.pubkey, account6.pubkey];
+    whitenoise.add_contact(&account1, account5.pubkey).await.unwrap();
+    whitenoise.add_contact(&account1, account6.pubkey).await.unwrap();
     whitenoise
         .add_members_to_group(&account1, &test_group.mls_group_id, bulk_new_members)
         .await?;
@@ -438,6 +443,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - non-admin trying to add members
     tracing::info!("Testing error handling - non-admin adding members...");
     let account7 = whitenoise.create_identity().await?;
+    whitenoise.add_contact(&account4, account7.pubkey).await.unwrap();
     let non_admin_result = whitenoise
         .add_members_to_group(&account4, &test_group.mls_group_id, vec![account7.pubkey])
         .await;
@@ -452,6 +458,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // Test error handling - adding to non-existent group
+    whitenoise.add_contact(&account1, account7.pubkey).await.unwrap();
     tracing::info!("Testing error handling - adding to non-existent group...");
     let fake_group_id = GroupId::from_slice(&[1u8; 32]);
     let fake_group_result = whitenoise
@@ -472,6 +479,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - adding non-existent user (no key package)
     tracing::info!("Testing error handling - adding user without key package...");
     let no_keypackage_user = Keys::generate().public_key();
+    whitenoise.add_contact(&account1, no_keypackage_user).await.unwrap();
     let no_keypackage_result = whitenoise
         .add_members_to_group(
             &account1,
