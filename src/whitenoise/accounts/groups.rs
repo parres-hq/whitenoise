@@ -70,13 +70,6 @@ impl Whitenoise {
 
         let group = create_group_result.group;
         let welcome_rumors = create_group_result.welcome_rumors;
-        let group_ids = nostr_mls
-            .get_groups()
-            .map_err(WhitenoiseError::from)?
-            .into_iter()
-            .map(|g| hex::encode(g.nostr_group_id))
-            .collect::<Vec<_>>();
-
         if welcome_rumors.len() != contacts.len() {
             return Err(WhitenoiseError::Other(anyhow::Error::msg(
                 "Welcome rumours are missing for some of the members",
@@ -119,6 +112,13 @@ impl Whitenoise {
                 .await
                 .map_err(WhitenoiseError::from)?;
         }
+
+        let group_ids = nostr_mls
+            .get_groups()
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect::<Vec<_>>();
 
         self.nostr
             .setup_group_messages_subscriptions_with_signer(

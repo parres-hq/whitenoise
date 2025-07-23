@@ -71,7 +71,7 @@ impl NostrManager {
     ///
     /// * `db_path` - The path to the nostr cache database
     /// * `event_sender` - Channel sender for forwarding events to Whitenoise for processing
-    /// * `connect_to_relays` - Whether to attempt connecting to relays (false for testing)
+    /// * `timeout` - Timeout for client requests
     pub async fn new(
         db_path: PathBuf,
         event_sender: Sender<crate::types::ProcessableEvent>,

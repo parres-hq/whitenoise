@@ -111,36 +111,9 @@ where
                 source: Box::new(e),
             })?;
 
-        let discovery_relays: Vec<RelayUrl> = serde_json::from_str(&discovery_relays)
-            .map(|urls: Vec<String>| {
-                urls.iter()
-                    .filter_map(|url| RelayUrl::parse(url).ok())
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "discovery_relays".to_owned(),
-                source: Box::new(e),
-            })?;
-        let inbox_relays: Vec<RelayUrl> = serde_json::from_str(&inbox_relays)
-            .map(|urls: Vec<String>| {
-                urls.iter()
-                    .filter_map(|url| RelayUrl::parse(url).ok())
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "inbox_relays".to_owned(),
-                source: Box::new(e),
-            })?;
-        let key_package_relays: Vec<RelayUrl> = serde_json::from_str(&key_package_relays)
-            .map(|urls: Vec<String>| {
-                urls.iter()
-                    .filter_map(|url| RelayUrl::parse(url).ok())
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "key_package_relays".to_owned(),
-                source: Box::new(e),
-            })?;
+        let discovery_relays = Whitenoise::parse_relays_from_sql(discovery_relays)?;
+        let inbox_relays = Whitenoise::parse_relays_from_sql(inbox_relays)?;
+        let key_package_relays = Whitenoise::parse_relays_from_sql(key_package_relays)?;
 
         // Convert last_synced from i64 to Timestamp
         let last_synced = Timestamp::from(last_synced_i64 as u64);
