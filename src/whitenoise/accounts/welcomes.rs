@@ -46,7 +46,7 @@ impl Whitenoise {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.fetch_account(pubkey).await?;
+        let account = self.get_account(pubkey).await?;
 
         let nostr_mls = &*account.nostr_mls.lock().await;
         let welcome = nostr_mls
@@ -90,7 +90,7 @@ impl Whitenoise {
     /// # }
     /// ```
     pub async fn fetch_welcomes(&self, pubkey: &PublicKey) -> Result<Vec<welcome_types::Welcome>> {
-        let account = self.fetch_account(pubkey).await?;
+        let account = self.get_account(pubkey).await?;
 
         let nostr_mls = account.nostr_mls.lock().await;
         let welcomes = nostr_mls.get_pending_welcomes()?;
@@ -138,7 +138,7 @@ impl Whitenoise {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.fetch_account(pubkey).await?;
+        let account = self.get_account(pubkey).await?;
         let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
 
         let group_ids: Vec<String>;
@@ -218,7 +218,7 @@ impl Whitenoise {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.fetch_account(pubkey).await?;
+        let account = self.get_account(pubkey).await?;
 
         let nostr_mls = &*account.nostr_mls.lock().await;
         let welcome = nostr_mls.get_welcome(&welcome_event_id)?;

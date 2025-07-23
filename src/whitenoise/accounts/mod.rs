@@ -3,7 +3,6 @@ use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -13,8 +12,8 @@ use tokio::sync::Mutex;
 
 use crate::nostr_manager::NostrManagerError;
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::RelayType;
 use crate::whitenoise::Whitenoise;
+use crate::RelayType;
 
 pub mod contacts;
 pub mod groups;
@@ -58,20 +57,15 @@ impl Default for AccountSettings {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
-pub struct OnboardingState {
-    pub inbox_relays: bool,
-    pub key_package_relays: bool,
-    pub key_package_published: bool,
-}
-
 #[derive(Derivative)]
 #[derivative(PartialEq)]
 #[derive(Serialize, Clone)]
 pub struct Account {
     pub pubkey: PublicKey,
     pub settings: AccountSettings,
-    pub onboarding: OnboardingState,
+    pub discovery_relays: Vec<RelayUrl>,
+    pub inbox_relays: Vec<RelayUrl>,
+    pub key_package_relays: Vec<RelayUrl>,
     pub last_synced: Timestamp,
     #[serde(skip)]
     #[doc(hidden)]
@@ -82,8 +76,10 @@ pub struct Account {
 struct AccountRow {
     pubkey: PublicKey,
     settings: AccountSettings,
-    onboarding: OnboardingState,
     last_synced: Timestamp,
+    discovery_relays: Vec<RelayUrl>,
+    inbox_relays: Vec<RelayUrl>,
+    key_package_relays: Vec<RelayUrl>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for AccountRow
@@ -97,8 +93,10 @@ where
         // Extract raw values from the database row
         let pubkey_str: String = row.try_get("pubkey")?;
         let settings_json: String = row.try_get("settings")?;
-        let onboarding_json: String = row.try_get("onboarding")?;
         let last_synced_i64: i64 = row.try_get("last_synced")?;
+        let discovery_relays: String = row.try_get("discovery_relays")?;
+        let inbox_relays: String = row.try_get("inbox_relays")?;
+        let key_package_relays: String = row.try_get("key_package_relays")?;
 
         // Parse pubkey from hex string
         let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| sqlx::Error::ColumnDecode {
@@ -113,12 +111,9 @@ where
                 source: Box::new(e),
             })?;
 
-        // Parse onboarding from JSON
-        let onboarding: OnboardingState =
-            serde_json::from_str(&onboarding_json).map_err(|e| sqlx::Error::ColumnDecode {
-                index: "onboarding".to_string(),
-                source: Box::new(e),
-            })?;
+        let discovery_relays = Whitenoise::parse_relays_from_sql(discovery_relays)?;
+        let inbox_relays = Whitenoise::parse_relays_from_sql(inbox_relays)?;
+        let key_package_relays = Whitenoise::parse_relays_from_sql(key_package_relays)?;
 
         // Convert last_synced from i64 to Timestamp
         let last_synced = Timestamp::from(last_synced_i64 as u64);
@@ -126,8 +121,10 @@ where
         Ok(AccountRow {
             pubkey,
             settings,
-            onboarding,
             last_synced,
+            discovery_relays,
+            inbox_relays,
+            key_package_relays,
         })
     }
 }
@@ -137,8 +134,11 @@ impl std::fmt::Debug for Account {
         f.debug_struct("Account")
             .field("pubkey", &self.pubkey)
             .field("settings", &self.settings)
-            .field("onboarding", &self.onboarding)
             .field("last_synced", &self.last_synced)
+            .field("discovery_relays", &self.discovery_relays)
+            .field("inbox_relays", &self.inbox_relays)
+            .field("key_package_relays", &self.key_package_relays)
+            .field("inbox_relays", &self.inbox_relays)
             .field("nostr_mls", &"<REDACTED>")
             .finish()
     }
@@ -169,26 +169,30 @@ impl Account {
         let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
-            onboarding: OnboardingState::default(),
             last_synced: Timestamp::zero(),
+            discovery_relays: Self::default_relays(),
+            inbox_relays: Self::default_relays(),
+            key_package_relays: Self::default_relays(),
             nostr_mls,
         };
 
         Ok((account, keys))
     }
 
-    pub(crate) async fn groups_nostr_group_ids(
-        &self,
-    ) -> core::result::Result<Vec<String>, AccountError> {
-        let groups;
-        {
-            let nostr_mls = &*self.nostr_mls.lock().await;
-            groups = nostr_mls.get_groups()?;
+    pub fn default_relays() -> Vec<RelayUrl> {
+        let mut relays = Vec::new();
+        if cfg!(debug_assertions) {
+            relays.push("ws://localhost:8080");
+            relays.push("ws://localhost:7777");
+        } else {
+            relays.push("wss://relay.damus.io");
+            relays.push("wss://relay.primal.net");
+            relays.push("wss://nos.lol");
         }
-        Ok(groups
+        relays
             .iter()
-            .map(|g| hex::encode(g.nostr_group_id))
-            .collect())
+            .map(|url| RelayUrl::parse(url).unwrap())
+            .collect()
     }
 
     fn create_nostr_mls(
@@ -221,7 +225,7 @@ impl Whitenoise {
     /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
     pub async fn create_identity(&self) -> Result<Account> {
         // Create a new account with a generated keypair and a petname
-        let (mut account, keys) = Account::new(&self.config.data_dir)?;
+        let (account, keys) = Account::new(&self.config.data_dir)?;
 
         // Save the account to the database
         self.save_account(&account).await?;
@@ -233,18 +237,6 @@ impl Whitenoise {
         if let Err(e) = log_account {
             tracing::error!("Failed to login during create_identity: {}", e);
             return Err(e);
-        }
-
-        // Onboard the account
-        self.onboard_new_account(&mut account).await?;
-
-        // Initialize subscriptions on nostr manager
-        self.setup_subscriptions(&account).await?;
-
-        // Add the account to the in-memory accounts list
-        {
-            let mut accounts = self.write_accounts().await;
-            accounts.insert(account.pubkey, account.clone());
         }
 
         Ok(account)
@@ -274,15 +266,15 @@ impl Whitenoise {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
 
-        let (account, added_from_keys) = match self.find_account_by_pubkey(&pubkey).await {
+        let account = match self.load_account(&pubkey).await {
             Ok(account) => {
                 tracing::debug!(target: "whitenoise::login", "Account found");
-                (account, false)
+                account
             }
             Err(WhitenoiseError::AccountNotFound) => {
                 tracing::debug!(target: "whitenoise::login", "Account not found, adding from keys");
                 let account = self.add_account_from_keys(&keys).await?;
-                (account, true)
+                account
             }
             Err(e) => return Err(e),
         };
@@ -293,13 +285,11 @@ impl Whitenoise {
             accounts.insert(account.pubkey, account.clone());
         }
 
-        // Spawn a background task to fetch the account's data from relays (only if newly added)
-        if added_from_keys {
-            self.background_fetch_account_data(&account).await?;
-        }
+        self.publish_account_relay_info(&account).await?;
 
-        // Initialize subscriptions on nostr manager
         self.setup_subscriptions(&account).await?;
+
+        self.publish_key_package_for_account(&account).await?;
 
         Ok(account)
     }
@@ -419,7 +409,7 @@ impl Whitenoise {
     ///
     /// Consider using methods that return proper error states (like `AccountNotFound`)
     /// if you need to distinguish between existing and non-existing accounts.
-    pub async fn fetch_account(&self, pubkey: &PublicKey) -> Result<Account> {
+    pub async fn get_account(&self, pubkey: &PublicKey) -> Result<Account> {
         self.read_accounts()
             .await
             .get(pubkey)
@@ -470,29 +460,34 @@ impl Whitenoise {
             let account = Account {
                 pubkey: account_row.pubkey,
                 settings: account_row.settings,
-                onboarding: account_row.onboarding,
                 last_synced: account_row.last_synced,
+                discovery_relays: account_row.discovery_relays,
+                inbox_relays: account_row.inbox_relays,
+                key_package_relays: account_row.key_package_relays,
                 nostr_mls,
             };
             // Add the account to the HashMap first, then trigger background fetch
             accounts_map.insert(account.pubkey, account.clone());
 
-            // Trigger background data fetch for each account (non-critical)
-            if let Err(e) = self.background_fetch_account_data(&account).await {
-                tracing::warn!(
-                    target: "whitenoise::load_accounts",
-                    "Failed to trigger background fetch for account {}: {}",
-                    account.pubkey.to_hex(),
-                    e
-                );
-                // Continue - background fetch failure should not prevent account loading
-            }
+            // Add account relays to the client
+            self.nostr
+                .add_relays(
+                    account
+                        .discovery_relays
+                        .clone()
+                        .into_iter()
+                        .chain(account.inbox_relays.clone())
+                        .chain(account.key_package_relays.clone()),
+                )
+                .await?;
 
-            tracing::debug!(
-                target: "whitenoise::load_accounts",
-                "Loaded and initialized account: {}",
-                account.pubkey.to_hex()
-            );
+            // Add group relays to the client
+            let nostr_mls = &*account.nostr_mls.lock().await;
+            let groups = nostr_mls.get_groups()?;
+            for group in groups {
+                let group_relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                self.nostr.add_relays(group_relays).await?;
+            }
         }
 
         tracing::info!(
@@ -521,11 +516,7 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError::AccountNotFound` if the account is not found in the database,
     /// or another `WhitenoiseError` if the database query fails.
-    pub(crate) async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
-        if !self.logged_in(pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
+    pub(crate) async fn load_account(&self, pubkey: &PublicKey) -> Result<Account> {
         let account_row =
             sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
                 .bind(pubkey.to_hex().as_str())
@@ -536,8 +527,10 @@ impl Whitenoise {
         Ok(Account {
             pubkey: account_row.pubkey,
             settings: account_row.settings,
-            onboarding: account_row.onboarding,
             last_synced: account_row.last_synced,
+            discovery_relays: account_row.discovery_relays,
+            inbox_relays: account_row.inbox_relays,
+            key_package_relays: account_row.key_package_relays,
             nostr_mls: Account::create_nostr_mls(account_row.pubkey, &self.config.data_dir)?,
         })
     }
@@ -581,22 +574,14 @@ impl Whitenoise {
         })?;
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Keys stored in secret store");
 
-        // Step 2: Load onboarding state (read-only operation)
-        let onboarding_state = self.fetch_onboarding_state(keys.public_key()).await.map_err(|e| {
-            tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to load onboarding state: {}", e);
-            // Try to clean up stored private key
-            if let Err(cleanup_err) = self.secrets_store.remove_private_key_for_pubkey(&keys.public_key()) {
-                tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to cleanup private key after onboarding state failure: {}", cleanup_err);
-            }
-            e
-        })?;
-
         // Step 3: Create account struct and save to database
         let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
-            onboarding: onboarding_state,
             last_synced: Timestamp::zero(),
+            discovery_relays: Account::default_relays(),
+            inbox_relays: Account::default_relays(),
+            key_package_relays: Account::default_relays(),
             nostr_mls: Account::create_nostr_mls(keys.public_key(), &self.config.data_dir)?,
         };
 
@@ -639,17 +624,37 @@ impl Whitenoise {
 
         let mut txn = self.database.pool.begin().await?;
 
+        let discovery_urls: Vec<_> = account
+            .discovery_relays
+            .iter()
+            .map(|relay_url| relay_url.as_str())
+            .collect();
+        let inbox_urls: Vec<_> = account
+            .inbox_relays
+            .iter()
+            .map(|relay_url| relay_url.as_str())
+            .collect();
+        let key_package_urls: Vec<_> = account
+            .key_package_relays
+            .iter()
+            .map(|relay_url| relay_url.as_str())
+            .collect();
+
         let result = sqlx::query(
-            "INSERT INTO accounts (pubkey, settings, onboarding, last_synced)
-             VALUES (?, ?, ?, ?)
+            "INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced)
+             VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
                 settings = excluded.settings,
-                onboarding = excluded.onboarding,
+                discovery_relays = excluded.discovery_relays,
+                inbox_relays = excluded.inbox_relays,
+                key_package_relays = excluded.key_package_relays,
                 last_synced = excluded.last_synced",
         )
         .bind(account.pubkey.to_hex())
         .bind(&serde_json::to_string(&account.settings)?)
-        .bind(&serde_json::to_string(&account.onboarding)?)
+        .bind(&serde_json::to_string(&discovery_urls)?)
+        .bind(&serde_json::to_string(&inbox_urls)?)
+        .bind(&serde_json::to_string(&key_package_urls)?)
         .bind(account.last_synced.to_string())
         .execute(&mut *txn)
         .await?;
@@ -702,6 +707,20 @@ impl Whitenoise {
         }
     }
 
+    pub async fn load_account_settings(&self, pubkey: &PublicKey) -> Result<AccountSettings> {
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        let settings_json: Value =
+            sqlx::query_scalar("SELECT settings FROM accounts WHERE pubkey = ?")
+                .bind(pubkey.to_hex())
+                .fetch_one(&self.database.pool)
+                .await
+                .map_err(|_| WhitenoiseError::AccountNotFound)?;
+        serde_json::from_value(settings_json).map_err(WhitenoiseError::from)
+    }
+
     /// Saves the provided `AccountSettings` to the database.
     ///
     /// This method updates the settings field of the account record in the database, serializing
@@ -745,547 +764,13 @@ impl Whitenoise {
         }
     }
 
-    /// Fetches the `AccountSettings` from the database
-    ///
-    /// # Arguments
-    /// * pubkey
-    ///
-    /// # Returns
-    /// Returns `AccountSettings` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if account does not exist or database operation fails or if serialization fails
-    pub async fn fetch_account_settings(&self, pubkey: &PublicKey) -> Result<AccountSettings> {
-        if !self.logged_in(pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        let settings_json: Value =
-            sqlx::query_scalar("SELECT settings FROM accounts WHERE pubkey = ?")
-                .bind(pubkey.to_hex())
-                .fetch_one(&self.database.pool)
-                .await
-                .map_err(|_| WhitenoiseError::AccountNotFound)?;
-        serde_json::from_value(settings_json).map_err(WhitenoiseError::from)
-    }
-
-    /// Performs onboarding steps for a new account, including relay setup and publishing metadata.
-    ///
-    /// This method sets onboarding flags, assigns default relays, publishes the account's metadata
-    /// and relay lists to Nostr, and attempts to publish the key package. It updates the onboarding
-    /// status based on the success of these operations.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A mutable reference to the `Account` being onboarded.
-    ///
-    /// # Returns
-    ///
-    /// Returns the onboarded `Account` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if any database or Nostr operation fails.
-    async fn onboard_new_account(&self, account: &mut Account) -> Result<Account> {
-        tracing::debug!(target: "whitenoise::onboard_new_account", "Starting onboarding process");
-
-        // Set onboarding flags
-        account.onboarding.inbox_relays = false;
-        account.onboarding.key_package_relays = false;
-
-        let default_relays = self.nostr.relays().await?;
-
-        // Generate a petname for the account (two words, separated by a space)
-        let petname_raw = petname::petname(2, " ").unwrap_or_else(|| "Anonymous User".to_string());
-
-        // Capitalize each word in the petname
-        let petname = petname_raw
-            .split_whitespace()
-            .map(|word| {
-                let mut chars = word.chars();
-                match chars.next() {
-                    None => String::new(),
-                    Some(first_char) => {
-                        let first_upper = first_char.to_uppercase().collect::<String>();
-                        first_upper + chars.as_str()
-                    }
-                }
-            })
-            .collect::<Vec<String>>()
-            .join(" ");
-
-        let metadata = Metadata {
-            name: Some(petname.clone()),
-            display_name: Some(petname),
-            ..Default::default()
-        };
-
-        self.update_metadata(&metadata, &account.pubkey).await?;
-
-        // Also publish relay lists to Nostr
-        self.publish_relay_list_for_account(account, default_relays.clone(), RelayType::Nostr)
-            .await?;
-        self.publish_relay_list_for_account(account, default_relays.clone(), RelayType::Inbox)
-            .await?;
-        self.publish_relay_list_for_account(account, default_relays, RelayType::KeyPackage)
-            .await?;
-
-        // Publish key package to key package relays
-        match self.publish_key_package_for_account(account).await {
-            Ok(_) => {
-                account.onboarding.key_package_published = true;
-                self.save_account(account).await?;
-                tracing::debug!(target: "whitenoise::onboard_new_account", "Published key package to relays");
-            }
-            Err(e) => {
-                account.onboarding.key_package_published = false;
-                self.save_account(account).await?;
-                tracing::warn!(target: "whitenoise::onboard_new_account", "Failed to publish key package: {}", e);
-            }
-        }
-
-        tracing::debug!(target: "whitenoise::onboard_new_account", "Onboarding complete for new account: {:?}", account);
-        Ok(account.clone())
-    }
-
-    /// Refreshes and updates the onboarding state for an existing account.
-    ///
-    /// This method re-evaluates the current onboarding status of an account by checking:
-    /// - Whether inbox relays are configured and available
-    /// - Whether key package relays are configured and available
-    /// - Whether a key package has been successfully published to the key package relays
-    ///
-    /// The method performs the following operations:
-    /// 1. Fetches the current inbox relays for the account
-    /// 2. Fetches the current key package relays for the account
-    /// 3. Updates the `inbox_relays` onboarding flag based on whether inbox relays exist
-    /// 4. Updates the `key_package_relays` onboarding flag based on whether key package relays exist
-    /// 5. If key package relays are available, checks for an existing key package event and updates the `key_package_published` flag
-    /// 6. Updates the account's `last_synced` timestamp to the current time
-    /// 7. Persists the updated account state to the database
-    ///
-    /// This method is typically called:
-    /// - After initial account setup to verify onboarding completion
-    /// - Periodically to refresh the onboarding state based on current relay configuration
-    /// - When the user manually triggers a sync operation
-    /// - After relay configuration changes to update the onboarding status
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A mutable reference to the `Account` whose onboarding state should be refreshed.
-    ///   The account's onboarding fields and last_synced timestamp will be updated based on the current state.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the onboarding state was successfully refreshed and the account was saved to the database.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if:
-    /// * The account is not found or not logged in
-    /// * Failed to fetch inbox relays from the database or Nostr network
-    /// * Failed to fetch key package relays from the database or Nostr network
-    /// * Failed to query for existing key package events from the relays
-    /// * Failed to save the updated account state to the database
-    /// * Network connectivity issues when querying relays
-    /// * Database transaction failures during account save
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let mut account = whitenoise.fetch_account(&pubkey).await?;
-    ///
-    /// // Refresh the onboarding state to get current status
-    /// whitenoise.refresh_account_onboarding_state(&mut account).await?;
-    ///
-    /// // Check the updated onboarding state
-    /// if account.onboarding.key_package_published {
-    ///     println!("Account is fully onboarded");
-    /// } else {
-    ///     println!("Account setup is incomplete");
-    /// }
-    /// ```
-    pub async fn refresh_account_onboarding_state(&self, account: &mut Account) -> Result<()> {
-        let inbox_relays = self.fetch_relays(account.pubkey, RelayType::Inbox).await?;
-        let key_package_relays = self
-            .fetch_relays(account.pubkey, RelayType::KeyPackage)
-            .await?;
-        account.onboarding.inbox_relays = !inbox_relays.is_empty();
-        account.onboarding.key_package_relays = !key_package_relays.is_empty();
-
-        // Only check relay state for key package publication if it's not already marked as published
-        // This prevents overwriting a recently published key package with false when relay propagation is slow
-        if !account.onboarding.key_package_published && !key_package_relays.is_empty() {
-            let key_package_event = self
-                .fetch_key_package_event(account.pubkey, key_package_relays)
-                .await?;
-            if key_package_event.is_some() {
-                account.onboarding.key_package_published = true;
-            }
-        }
-        account.last_synced = Timestamp::now();
-        self.save_account(account).await?;
-        Ok(())
-    }
-
-    /// Completes any pending onboarding steps for an account after background data fetching.
-    ///
-    /// This method is designed to be called after `background_fetch_account_data()` completes
-    /// successfully to ensure that the account's onboarding process is fully completed. It:
-    ///
-    /// 1. **Refreshes the onboarding state** - Checks current relay configuration and key package status
-    /// 2. **Publishes missing relay lists** - Creates and publishes inbox and key package relay lists if missing
-    /// 3. **Publishes key package** - Creates and publishes a new key package if one doesn't exist
-    /// 4. **Updates the account** - Saves the final onboarding state to the database
-    /// 5. **Updates in-memory cache** - Ensures the cached account reflects the latest onboarding state
-    ///
-    /// The method implements partial completion recovery - if some steps succeed but others fail,
-    /// it will update the onboarding state to reflect what was actually completed, allowing
-    /// future calls to only attempt the remaining incomplete steps.
-    ///
-    /// # Arguments
-    ///
-    /// * `account_pubkey` - The `PublicKey` of the account to complete onboarding for.
-    ///   The account must be currently logged in and available in the in-memory cache.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(OnboardingState)` containing the final onboarding state after completion attempts.
-    /// Even if some steps fail, the method returns the current state showing which steps succeeded.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if:
-    /// * The account is not found or not logged in
-    /// * Critical failures occur during state refresh or account saving
-    /// * NostrMls is not properly initialized for key package operations
-    ///
-    /// Note: Individual step failures (e.g., network errors during publishing) are logged as warnings
-    /// but do not cause the method to fail. The returned `OnboardingState` shows actual completion status.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // After successful background fetch, complete any missing onboarding steps
-    /// let final_state = whitenoise.complete_pending_onboarding_steps(&pubkey).await?;
-    ///
-    /// if final_state.key_package_published {
-    ///     println!("Account is fully onboarded and ready to use");
-    /// } else {
-    ///     println!("Some onboarding steps are still incomplete");
-    /// }
-    /// ```
-    ///
-    /// # Usage in Background Tasks
-    ///
-    /// This method is particularly useful when called from within the completion handler
-    /// of `background_fetch_account_data()`:
-    ///
-    /// ```rust,ignore
-    /// // In background task completion
-    /// tokio::spawn(async move {
-    ///     match nostr.fetch_all_user_data(signer, last_synced, group_ids).await {
-    ///         Ok(_) => {
-    ///             // Update sync timestamp
-    ///             update_last_synced(&database, &account_pubkey).await;
-    ///
-    ///             // Complete any pending onboarding steps
-    ///             if let Err(e) = whitenoise.complete_pending_onboarding_steps(&account_pubkey).await {
-    ///                 tracing::warn!("Failed to complete onboarding for {}: {}", account_pubkey.to_hex(), e);
-    ///             }
-    ///         }
-    ///         Err(e) => { /* handle fetch error */ }
-    ///     }
-    /// });
-    /// ```
-    pub async fn complete_pending_onboarding_steps(
-        &self,
-        account_pubkey: &PublicKey,
-    ) -> Result<OnboardingState> {
-        tracing::debug!(
-            target: "whitenoise::complete_pending_onboarding_steps",
-            "Starting onboarding completion for account: {}",
-            account_pubkey.to_hex()
-        );
-
-        // Step 1: Get the current account from memory and refresh its onboarding state
-        let mut account = self.fetch_account(account_pubkey).await?;
-        self.refresh_account_onboarding_state(&mut account).await?;
-
-        let initial_state = account.onboarding.clone();
-        tracing::debug!(
-            target: "whitenoise::complete_pending_onboarding_steps",
-            "Initial onboarding state for {}: inbox_relays={}, key_package_relays={}, key_package_published={}",
-            account_pubkey.to_hex(),
-            initial_state.inbox_relays,
-            initial_state.key_package_relays,
-            initial_state.key_package_published
-        );
-
-        // Step 2: Complete missing inbox relay list if needed
-        if !account.onboarding.inbox_relays {
-            tracing::debug!(
-                target: "whitenoise::complete_pending_onboarding_steps",
-                "Publishing inbox relay list for account: {}",
-                account_pubkey.to_hex()
-            );
-
-            match self.ensure_inbox_relay_list_published(&account).await {
-                Ok(_) => {
-                    account.onboarding.inbox_relays = true;
-                    tracing::debug!(
-                        target: "whitenoise::complete_pending_onboarding_steps",
-                        "Successfully published inbox relay list for account: {}",
-                        account_pubkey.to_hex()
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target: "whitenoise::complete_pending_onboarding_steps",
-                        "Failed to publish inbox relay list for account {}: {}",
-                        account_pubkey.to_hex(),
-                        e
-                    );
-                    // Continue with other steps even if this one fails
-                }
-            }
-        }
-
-        // Step 3: Complete missing key package relay list if needed
-        if !account.onboarding.key_package_relays {
-            tracing::debug!(
-                target: "whitenoise::complete_pending_onboarding_steps",
-                "Publishing key package relay list for account: {}",
-                account_pubkey.to_hex()
-            );
-
-            match self.ensure_key_package_relay_list_published(&account).await {
-                Ok(_) => {
-                    account.onboarding.key_package_relays = true;
-                    tracing::debug!(
-                        target: "whitenoise::complete_pending_onboarding_steps",
-                        "Successfully published key package relay list for account: {}",
-                        account_pubkey.to_hex()
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target: "whitenoise::complete_pending_onboarding_steps",
-                        "Failed to publish key package relay list for account {}: {}",
-                        account_pubkey.to_hex(),
-                        e
-                    );
-                    // Continue with other steps even if this one fails
-                }
-            }
-        }
-
-        // Step 4: Complete missing key package publication if needed and relays are available
-        if !account.onboarding.key_package_published && account.onboarding.key_package_relays {
-            tracing::debug!(
-                target: "whitenoise::complete_pending_onboarding_steps",
-                "Publishing key package for account: {}",
-                account_pubkey.to_hex()
-            );
-
-            match self.publish_key_package_for_account(&account).await {
-                Ok(_) => {
-                    account.onboarding.key_package_published = true;
-                    tracing::debug!(
-                        target: "whitenoise::complete_pending_onboarding_steps",
-                        "Successfully published key package for account: {}",
-                        account_pubkey.to_hex()
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target: "whitenoise::complete_pending_onboarding_steps",
-                        "Failed to publish key package for account {}: {}",
-                        account_pubkey.to_hex(),
-                        e
-                    );
-                    // key_package_published remains false
-                }
-            }
-        } else if !account.onboarding.key_package_published {
-            tracing::debug!(
-                target: "whitenoise::complete_pending_onboarding_steps",
-                "Skipping key package publication for account {} - key package relays not available",
-                account_pubkey.to_hex()
-            );
-        }
-
-        // Step 5: Update the account's last_synced timestamp and save the final state
-        account.last_synced = Timestamp::now();
-        self.save_account(&account).await?;
-
-        // Step 6: Update the in-memory cache with the updated account
-        {
-            let mut accounts = self.write_accounts().await;
-            accounts.insert(*account_pubkey, account.clone());
-        }
-
-        let final_state = account.onboarding.clone();
-        tracing::info!(
-            target: "whitenoise::complete_pending_onboarding_steps",
-            "Onboarding completion finished for {}: inbox_relays={}, key_package_relays={}, key_package_published={}",
-            account_pubkey.to_hex(),
-            final_state.inbox_relays,
-            final_state.key_package_relays,
-            final_state.key_package_published
-        );
-
-        Ok(final_state)
-    }
-
-    /// Ensures that an inbox relay list is published for the account.
-    ///
-    /// This helper method checks if the account has inbox relays configured, and if so,
-    /// publishes an inbox relay list event to Nostr. If no inbox relays are configured,
-    /// it falls back to using the default Nostr relays.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` for which to ensure the inbox relay list.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the inbox relay list was successfully published.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if the relay list cannot be published.
-    async fn ensure_inbox_relay_list_published(&self, account: &Account) -> Result<()> {
-        let inbox_relays = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::Inbox)
-            .await?;
-
-        if !inbox_relays.is_empty() {
-            self.publish_relay_list_for_account(account, inbox_relays, RelayType::Inbox)
-                .await?;
-        } else {
-            tracing::warn!(
-                target: "whitenoise::ensure_inbox_relay_list_published",
-                "No inbox relays available for account {}, cannot publish inbox relay list",
-                account.pubkey.to_hex()
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Ensures that a key package relay list is published for the account.
-    ///
-    /// This helper method checks if the account has key package relays configured, and if so,
-    /// publishes a key package relay list event to Nostr. If no key package relays are configured,
-    /// it falls back to using the default Nostr relays.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` for which to ensure the key package relay list.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the key package relay list was successfully published.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if the relay list cannot be published.
-    async fn ensure_key_package_relay_list_published(&self, account: &Account) -> Result<()> {
-        let key_package_relays = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
-            .await?;
-
-        if !key_package_relays.is_empty() {
-            self.publish_relay_list_for_account(account, key_package_relays, RelayType::KeyPackage)
-                .await?;
-        } else {
-            tracing::warn!(
-                target: "whitenoise::ensure_key_package_relay_list_published",
-                "No key package relays available for account {}, cannot publish key package relay list",
-                account.pubkey.to_hex()
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Publishes a relay list event of the specified type for the given account to Nostr.
-    ///
-    /// This helper method constructs and sends a relay list event (Nostr, Inbox, or KeyPackage)
-    /// using the provided relays. If the relays vector is empty, the method returns early.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` whose relay list will be published.
-    /// * `relays` - A vector of `RelayUrl` specifying the relays to include in the event.
-    /// * `relay_type` - The type of relay list to publish (Nostr, Inbox, or KeyPackage).
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if event creation or publishing fails.
-    pub(crate) async fn publish_relay_list_for_account(
-        &self,
-        account: &Account,
-        relays: Vec<RelayUrl>,
-        relay_type: RelayType,
-    ) -> Result<()> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        if relays.is_empty() {
-            return Ok(());
-        }
-
-        // Create a minimal relay list event
-        let tags: Vec<Tag> = relays
-            .into_iter()
-            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
-            .collect();
-
-        // Determine the kind of relay list event to publish
-        let relay_event_kind = match relay_type {
-            RelayType::Nostr => Kind::RelayList,
-            RelayType::Inbox => Kind::InboxRelays,
-            RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
-        };
-
-        let event = EventBuilder::new(relay_event_kind, "").tags(tags);
-        let keys = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
-
-        // Get relays with fallback to defaults if user hasn't configured any
-        let relays_to_use = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
-            .await?;
-
-        let result = self
-            .nostr
-            .publish_event_builder_with_signer(event.clone(), &relays_to_use, keys)
-            .await?;
-        tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
-
-        Ok(())
-    }
-
     pub(crate) async fn encoded_key_package(
         &self,
         account: &Account,
     ) -> Result<(String, [Tag; 4])> {
-        let key_package_relays = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
-            .await?;
-
         let nostr_mls = &*account.nostr_mls.lock().await;
         let result = nostr_mls
-            .create_key_package_for_event(&account.pubkey, key_package_relays)
+            .create_key_package_for_event(&account.pubkey, account.key_package_relays.clone())
             .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
 
         Ok(result)
@@ -1323,14 +808,13 @@ impl Whitenoise {
         let key_package_event_builder =
             EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package).tags(tags);
 
-        // Get relays with fallback to defaults if user hasn't configured key package relays
-        let relays_to_use = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
-            .await?;
-
         let result = self
             .nostr
-            .publish_event_builder_with_signer(key_package_event_builder, &relays_to_use, signer)
+            .publish_event_builder_with_signer(
+                key_package_event_builder,
+                &account.key_package_relays,
+                signer,
+            )
             .await?;
 
         tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
@@ -1362,10 +846,6 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let key_package_relays = self
-            .fetch_relays(account.pubkey, RelayType::KeyPackage)
-            .await?;
-
         let key_package_filter = Filter::new()
             .id(*event_id)
             .kind(Kind::MlsKeyPackage)
@@ -1388,18 +868,9 @@ impl Whitenoise {
 
             let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
 
-            // Only try to delete if we have key package relays configured
-            if !key_package_relays.is_empty() {
-                self.nostr
-                    .publish_event_builder_with_signer(builder, &key_package_relays, signer)
-                    .await?;
-            } else {
-                tracing::warn!(
-                    target: "whitenoise::delete_key_package_from_relays_for_account",
-                    "No key package relays configured for account {}, cannot delete key package",
-                    account.pubkey.to_hex()
-                );
-            }
+            self.nostr
+                .publish_event_builder_with_signer(builder, &account.key_package_relays, signer)
+                .await?;
         } else {
             tracing::warn!(target: "whitenoise::delete_key_package_from_relays_for_account", "Key package event not found for account: {}", account.pubkey.to_hex());
             return Ok(());
@@ -1408,162 +879,7 @@ impl Whitenoise {
         Ok(())
     }
 
-    /// Initiates a background fetch of all Nostr data associated with the given account.
-    ///
-    /// This method spawns an asynchronous background task to fetch the account's complete
-    /// Nostr data, including events, messages, and group-related information. The fetch
-    /// operation runs independently without blocking the caller, making it ideal for
-    /// triggering data synchronization after account creation or login.
-    ///
-    /// The background task will fetch:
-    /// - User metadata and profile information
-    /// - Contact lists and relay configurations
-    /// - Messages and events since the last sync timestamp
-    /// - Group-specific data for all groups the account belongs to
-    ///
-    /// When the fetch completes successfully:
-    /// 1. The account's `last_synced` timestamp is updated in the database
-    /// 2. Any pending onboarding steps are completed automatically
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` for which to fetch Nostr data.
-    ///   The account's public key, last sync timestamp, and group memberships
-    ///   are used to determine what data to fetch.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` immediately after spawning the background task. The actual
-    /// data fetching occurs asynchronously and any errors are logged rather than
-    /// propagated to the caller.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if:
-    /// * Failed to extract group IDs from the account's NostrMls instance
-    /// * The account's NostrMls instance is not properly initialized
-    ///
-    /// Note that errors occurring within the spawned background task (such as network
-    /// failures or parsing errors) are logged but do not cause this method to fail.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // Trigger background data fetch after account login
-    /// whitenoise.background_fetch_account_data(&account).await?;
-    /// // Method returns immediately, data fetch continues in background
-    /// // Onboarding completion happens automatically after successful fetch
-    /// ```
-    pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        let group_ids = account.groups_nostr_group_ids().await?;
-        let nostr = self.nostr.clone();
-        let database = self.database.clone();
-        let signer = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let last_synced = account.last_synced;
-        let account_pubkey = account.pubkey;
-
-        tokio::spawn(async move {
-            tracing::debug!(
-                target: "whitenoise::background_fetch_account_data",
-                "Starting background fetch for account: {} (since: {})",
-                account_pubkey.to_hex(),
-                last_synced
-            );
-
-            match nostr
-                .fetch_all_user_data(signer, last_synced, group_ids)
-                .await
-            {
-                Ok(_) => {
-                    // Update the last_synced timestamp in the database
-                    let current_time = Timestamp::now();
-
-                    if let Err(e) =
-                        sqlx::query("UPDATE accounts SET last_synced = ? WHERE pubkey = ?")
-                            .bind(current_time.to_string())
-                            .bind(account_pubkey.to_hex())
-                            .execute(&database.pool)
-                            .await
-                    {
-                        tracing::error!(
-                            target: "whitenoise::background_fetch_account_data",
-                            "Failed to update last_synced timestamp for account {}: {}",
-                            account_pubkey.to_hex(),
-                            e
-                        );
-                    } else {
-                        tracing::info!(
-                            target: "whitenoise::background_fetch_account_data",
-                            "Successfully fetched data and updated last_synced for account: {}",
-                            account_pubkey.to_hex()
-                        );
-
-                        // Complete any pending onboarding steps after successful data fetch
-                        if let Ok(whitenoise) = Whitenoise::get_instance() {
-                            tracing::debug!(
-                                target: "whitenoise::background_fetch_account_data",
-                                "Attempting to complete pending onboarding steps for account: {}",
-                                account_pubkey.to_hex()
-                            );
-
-                            match whitenoise
-                                .complete_pending_onboarding_steps(&account_pubkey)
-                                .await
-                            {
-                                Ok(final_state) => {
-                                    tracing::info!(
-                                        target: "whitenoise::background_fetch_account_data",
-                                        "Onboarding completion finished for {}: inbox_relays={}, key_package_relays={}, key_package_published={}",
-                                        account_pubkey.to_hex(),
-                                        final_state.inbox_relays,
-                                        final_state.key_package_relays,
-                                        final_state.key_package_published
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        target: "whitenoise::background_fetch_account_data",
-                                        "Failed to complete pending onboarding steps for account {}: {}",
-                                        account_pubkey.to_hex(),
-                                        e
-                                    );
-                                }
-                            }
-                        } else {
-                            tracing::warn!(
-                                target: "whitenoise::background_fetch_account_data",
-                                "Cannot access Whitenoise instance to complete onboarding for account: {}",
-                                account_pubkey.to_hex()
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(
-                        target: "whitenoise::background_fetch_account_data",
-                        "Failed to fetch user data for account {}: {}",
-                        account_pubkey.to_hex(),
-                        e
-                    );
-                }
-            }
-        });
-
-        Ok(())
-    }
-
     pub(crate) async fn setup_subscriptions(&self, account: &Account) -> Result<()> {
-        if !self.logged_in(&account.pubkey).await {
-            tracing::info!("SETUP");
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
         let mut group_relays = Vec::new();
         let groups: Vec<group_types::Group>;
         {
@@ -1584,15 +900,6 @@ impl Whitenoise {
             .map(|group| hex::encode(group.nostr_group_id))
             .collect::<Vec<String>>();
 
-        // Get relays with fallback to defaults if user hasn't configured any
-        let user_relays = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::Nostr)
-            .await?;
-
-        let inbox_relays = self
-            .fetch_relays_with_fallback(account.pubkey, RelayType::Inbox)
-            .await?;
-
         // Use the signer-aware subscription setup method
         let keys = self
             .secrets_store
@@ -1601,14 +908,53 @@ impl Whitenoise {
         self.nostr
             .setup_account_subscriptions_with_signer(
                 account.pubkey,
-                user_relays,
-                inbox_relays,
+                account.discovery_relays.clone(),
+                account.inbox_relays.clone(),
                 group_relays,
                 nostr_group_ids,
                 keys,
             )
             .await?;
 
+        Ok(())
+    }
+
+    pub(crate) async fn publish_account_relay_info(&self, account: &Account) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        // Create a minimal relay list event
+        let inbox_tags: Vec<Tag> = account
+            .inbox_relays
+            .iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+
+        let key_package_tags: Vec<Tag> = account
+            .key_package_relays
+            .iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+
+        let inbox_event = EventBuilder::new(RelayType::Inbox.into(), "").tags(inbox_tags);
+        let key_package_event =
+            EventBuilder::new(RelayType::KeyPackage.into(), "").tags(key_package_tags);
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        let inbox_result = self
+            .nostr
+            .publish_event_builder_with_signer(inbox_event, &account.discovery_relays, keys.clone())
+            .await?;
+        tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", inbox_result);
+
+        let key_package_result = self
+            .nostr
+            .publish_event_builder_with_signer(key_package_event, &account.discovery_relays, keys)
+            .await?;
+        tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", key_package_result);
         Ok(())
     }
 }
@@ -1636,7 +982,6 @@ pub mod test_utils {
 mod tests {
     use super::*;
     use crate::whitenoise::test_utils::*;
-    use test_utils::*;
 
     #[tokio::test]
     #[ignore]
@@ -1652,98 +997,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_account_new_creates_account_and_keys() {
-        let (account, keys) = Account::new(&data_dir()).unwrap();
-        assert_eq!(account.pubkey, keys.public_key());
-        // Check defaults
-        assert!(account.settings.dark_theme);
-        assert!(!account.settings.dev_mode);
-        assert!(!account.settings.lockdown_mode);
-        assert!(!account.onboarding.inbox_relays);
-        assert!(!account.onboarding.key_package_relays);
-        assert!(!account.onboarding.key_package_published);
-    }
-
-    #[test]
-    fn test_account_settings_default() {
-        let settings = AccountSettings::default();
-        assert!(settings.dark_theme);
-        assert!(!settings.dev_mode);
-        assert!(!settings.lockdown_mode);
-    }
-
-    #[test]
-    fn test_onboarding_state_default() {
-        let onboarding = OnboardingState::default();
-        assert!(!onboarding.inbox_relays);
-        assert!(!onboarding.key_package_relays);
-        assert!(!onboarding.key_package_published);
-    }
-
-    #[test]
-    fn test_account_debug_formatting() {
-        let keys = Keys::generate();
-        let account = Account {
-            pubkey: keys.public_key(),
-            settings: AccountSettings::default(),
-            onboarding: OnboardingState::default(),
-            last_synced: Timestamp::zero(),
-            nostr_mls: Account::create_nostr_mls(keys.public_key(), &data_dir()).unwrap(),
-        };
-
-        let debug_str = format!("{:?}", account);
-        assert!(debug_str.contains("Account"));
-        assert!(debug_str.contains(&keys.public_key().to_hex()));
-        assert!(debug_str.contains("<REDACTED>"));
-        assert!(!debug_str.contains("NostrMls"));
-    }
-
-    #[tokio::test]
-    async fn test_groups_nostr_group_ids_when_nostr_mls_none() {
-        let keys = Keys::generate();
-        let account = Account {
-            pubkey: keys.public_key(),
-            settings: AccountSettings::default(),
-            onboarding: OnboardingState::default(),
-            last_synced: Timestamp::zero(),
-            nostr_mls: Account::create_nostr_mls(keys.public_key(), &data_dir()).unwrap(),
-        };
-
-        let group_ids = account.groups_nostr_group_ids().await.unwrap();
-        assert!(group_ids.is_empty());
-    }
-
-    #[test]
-    fn test_account_error_display() {
-        let key_error = AccountError::PublicKeyError(nostr_sdk::key::Error::InvalidSecretKey);
-        assert!(key_error.to_string().contains("Failed to parse public key"));
-
-        let nostr_mls_not_init = AccountError::NostrMlsNotInitialized;
-        assert_eq!(nostr_mls_not_init.to_string(), "Nostr MLS not initialized");
-    }
-
-    #[test]
-    fn test_account_error_from_conversions() {
-        let key_error = nostr_sdk::key::Error::InvalidSecretKey;
-        let account_error: AccountError = key_error.into();
-        match account_error {
-            AccountError::PublicKeyError(_) => {} // Expected
-            _ => panic!("Expected PublicKeyError variant"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_multiple_account_creation() {
-        // Test that Account::new() creates different accounts each time
-        let (account1, keys1) = Account::new(&data_dir()).unwrap();
-        let (account2, keys2) = Account::new(&data_dir()).unwrap();
-
-        assert_ne!(account1.pubkey, account2.pubkey);
-        assert_ne!(keys1.public_key(), keys2.public_key());
-        assert_ne!(keys1.secret_key(), keys2.secret_key());
-    }
-
-    #[tokio::test]
     async fn test_from_row_implementation() {
         use sqlx::SqlitePool;
 
@@ -1754,10 +1007,12 @@ mod tests {
         sqlx::query(
             "CREATE TABLE accounts (
                 pubkey TEXT PRIMARY KEY,
-                settings TEXT NOT NULL,
-                onboarding TEXT NOT NULL,
+                settings JSONB NOT NULL,
+                discovery_relays TEXT NOT NULL,
+                inbox_relays TEXT NOT NULL,
+                key_package_relays TEXT NOT NULL,
                 last_synced INTEGER NOT NULL
-            )",
+            );",
         )
         .execute(&pool)
         .await
@@ -1766,15 +1021,19 @@ mod tests {
         // Insert a test account
         let test_pubkey = Keys::generate().public_key();
         let test_settings = serde_json::to_string(&AccountSettings::default()).unwrap();
-        let test_onboarding = serde_json::to_string(&OnboardingState::default()).unwrap();
+        let test_relay_urls = Account::default_relays();
+        let test_relay_str: Vec<_> = test_relay_urls.iter().map(|url| url.as_str()).collect();
+        let relays_str = serde_json::to_string(&test_relay_str).unwrap();
         let test_timestamp = 1234567890u64;
 
         sqlx::query(
-            "INSERT INTO accounts (pubkey, settings, onboarding, last_synced) VALUES (?, ?, ?, ?)",
+            "INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(&test_settings)
-        .bind(&test_onboarding)
+        .bind(&relays_str)
+        .bind(&relays_str)
+        .bind(&relays_str)
         .bind(test_timestamp as i64)
         .execute(&pool)
         .await
@@ -1790,87 +1049,10 @@ mod tests {
         // Verify the account was correctly parsed
         assert_eq!(account.pubkey, test_pubkey);
         assert_eq!(account.settings, AccountSettings::default());
-        assert_eq!(account.onboarding, OnboardingState::default());
         assert_eq!(account.last_synced.as_u64(), test_timestamp);
-    }
-
-    #[test]
-    fn test_account_settings_modifications() {
-        let mut settings = AccountSettings::default();
-        assert!(settings.dark_theme);
-        assert!(!settings.dev_mode);
-        assert!(!settings.lockdown_mode);
-
-        settings.dark_theme = false;
-        settings.dev_mode = true;
-        settings.lockdown_mode = true;
-
-        assert!(!settings.dark_theme);
-        assert!(settings.dev_mode);
-        assert!(settings.lockdown_mode);
-    }
-
-    #[test]
-    fn test_onboarding_state_modifications() {
-        let mut onboarding = OnboardingState::default();
-        assert!(!onboarding.inbox_relays);
-        assert!(!onboarding.key_package_relays);
-        assert!(!onboarding.key_package_published);
-
-        onboarding.inbox_relays = true;
-        onboarding.key_package_relays = true;
-        onboarding.key_package_published = true;
-
-        assert!(onboarding.inbox_relays);
-        assert!(onboarding.key_package_relays);
-        assert!(onboarding.key_package_published);
-    }
-
-    // Integration test helpers for future database testing
-    mod integration_test_helpers {
-        use super::*;
-
-        #[allow(dead_code)]
-        pub fn create_test_account_with_settings(
-            dark_theme: bool,
-            dev_mode: bool,
-            lockdown_mode: bool,
-        ) -> (Account, Keys) {
-            let keys = Keys::generate();
-            let account = Account {
-                pubkey: keys.public_key(),
-                settings: AccountSettings {
-                    dark_theme,
-                    dev_mode,
-                    lockdown_mode,
-                },
-                onboarding: OnboardingState::default(),
-                last_synced: Timestamp::zero(),
-                nostr_mls: Account::create_nostr_mls(keys.public_key(), &data_dir()).unwrap(),
-            };
-            (account, keys)
-        }
-    }
-
-    #[tokio::test]
-    async fn test_multiple_pubkeys() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let keys = [create_test_keys(), create_test_keys(), create_test_keys()];
-
-        for key in keys {
-            let pubkey = key.public_key();
-            let account = whitenoise.login(key.secret_key().to_secret_hex()).await;
-            assert!(account.is_ok());
-
-            // Test that all methods work with different pubkeys
-            assert!(whitenoise.fetch_metadata(pubkey).await.is_ok());
-            assert!(whitenoise
-                .fetch_relays(pubkey, RelayType::Inbox)
-                .await
-                .is_ok());
-            assert!(whitenoise.fetch_contacts(pubkey).await.is_ok());
-            assert!(whitenoise.fetch_onboarding_state(pubkey).await.is_ok());
-        }
+        assert_eq!(account.discovery_relays, test_relay_urls);
+        assert_eq!(account.inbox_relays, test_relay_urls);
+        assert_eq!(account.key_package_relays, test_relay_urls);
     }
 
     #[tokio::test]
@@ -1906,186 +1088,5 @@ mod tests {
             loaded_account1.settings.dark_theme,
             account1.settings.dark_theme
         );
-    }
-
-    #[tokio::test]
-    async fn test_load_accounts_ordering_by_last_synced() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Create test accounts with different last_synced times
-        let (mut account1, keys1) = create_test_account();
-        let (mut account2, keys2) = create_test_account();
-        let (mut account3, keys3) = create_test_account();
-
-        // Set different last_synced timestamps
-        account1.last_synced = Timestamp::from(100); // oldest
-        account2.last_synced = Timestamp::from(300); // newest
-        account3.last_synced = Timestamp::from(200); // middle
-
-        // Save accounts to database
-        whitenoise.save_account(&account1).await.unwrap();
-        whitenoise.save_account(&account2).await.unwrap();
-        whitenoise.save_account(&account3).await.unwrap();
-
-        // Store keys in secrets store
-        whitenoise.secrets_store.store_private_key(&keys1).unwrap();
-        whitenoise.secrets_store.store_private_key(&keys2).unwrap();
-        whitenoise.secrets_store.store_private_key(&keys3).unwrap();
-
-        // Load accounts from database
-        let loaded_accounts = whitenoise.load_accounts().await.unwrap();
-        assert_eq!(loaded_accounts.len(), 3);
-
-        // Verify the most recent account would be first in HashMap iteration
-        // (Note: HashMap iteration order is not guaranteed, but our SQL query orders by last_synced DESC)
-        // We'll test the active account selection in a separate test
-    }
-
-    #[tokio::test]
-    async fn test_complete_pending_onboarding_steps() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Create and save a test account with incomplete onboarding
-        let (mut test_account, test_keys) = create_test_account();
-        test_account.onboarding = OnboardingState {
-            inbox_relays: false,
-            key_package_relays: false,
-            key_package_published: false,
-        };
-
-        // Store keys and save account
-        whitenoise
-            .secrets_store
-            .store_private_key(&test_keys)
-            .unwrap();
-        whitenoise.save_account(&test_account).await.unwrap();
-
-        // Log in the account to ensure it's in memory
-        let _logged_account = whitenoise
-            .login(test_keys.secret_key().to_secret_hex())
-            .await
-            .unwrap();
-
-        // Test the complete_pending_onboarding_steps method
-        let result = whitenoise
-            .complete_pending_onboarding_steps(&test_account.pubkey)
-            .await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_complete_pending_onboarding_steps_account_not_found() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Test with a non-existent account
-        let fake_keys = create_test_keys();
-        let result = whitenoise
-            .complete_pending_onboarding_steps(&fake_keys.public_key())
-            .await;
-
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            WhitenoiseError::AccountNotFound
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_refresh_account_onboarding_state() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Create and save a test account
-        let (mut test_account, test_keys) = create_test_account();
-
-        // Store keys and save account
-        whitenoise
-            .secrets_store
-            .store_private_key(&test_keys)
-            .unwrap();
-        whitenoise.save_account(&test_account).await.unwrap();
-
-        // Log in the account to ensure it's in memory
-        let _logged_account = whitenoise
-            .login(test_keys.secret_key().to_secret_hex())
-            .await
-            .unwrap();
-
-        // Test refresh_account_onboarding_state
-        let result = whitenoise
-            .refresh_account_onboarding_state(&mut test_account)
-            .await;
-        assert!(result.is_ok());
-
-        // Verify that last_synced was updated
-        assert!(test_account.last_synced > Timestamp::zero());
-    }
-
-    #[tokio::test]
-    async fn test_ensure_relay_list_helper_methods() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Create and save a test account
-        let (test_account, test_keys) = create_test_account();
-
-        // Store keys and save account
-        whitenoise
-            .secrets_store
-            .store_private_key(&test_keys)
-            .unwrap();
-        whitenoise.save_account(&test_account).await.unwrap();
-
-        // Log in the account to ensure it's in memory and initialize nostr_mls
-        let _logged_account = whitenoise
-            .login(test_keys.secret_key().to_secret_hex())
-            .await
-            .unwrap();
-
-        // Test inbox relay list helper
-        let inbox_result = whitenoise
-            .ensure_inbox_relay_list_published(&test_account)
-            .await;
-        assert!(inbox_result.is_ok());
-
-        // Test key package relay list helper
-        let key_package_result = whitenoise
-            .ensure_key_package_relay_list_published(&test_account)
-            .await;
-        assert!(key_package_result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_onboarding_completion_partial_success() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Create and save a test account with some onboarding steps completed
-        let (mut test_account, test_keys) = create_test_account();
-        test_account.onboarding = OnboardingState {
-            inbox_relays: true, // This step is already complete
-            key_package_relays: false,
-            key_package_published: false,
-        };
-
-        // Store keys and save account
-        whitenoise
-            .secrets_store
-            .store_private_key(&test_keys)
-            .unwrap();
-        whitenoise.save_account(&test_account).await.unwrap();
-
-        // Log in the account
-        let _logged_account = whitenoise
-            .login(test_keys.secret_key().to_secret_hex())
-            .await
-            .unwrap();
-
-        // Test that the method handles partial completion correctly
-        let result = whitenoise
-            .complete_pending_onboarding_steps(&test_account.pubkey)
-            .await;
-        assert!(result.is_ok());
-
-        let final_state = result.unwrap();
-        // The already completed step should remain true
-        assert!(final_state.inbox_relays);
     }
 }

@@ -124,19 +124,15 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Test metadata fetching
     tracing::info!("Testing metadata fetching...");
-    let loaded_metadata = whitenoise.fetch_metadata(account3.pubkey).await?;
+    let loaded_metadata = whitenoise
+        .fetch_metadata_from(account3.discovery_relays.clone(), account3.pubkey)
+        .await?;
     if let Some(metadata) = loaded_metadata {
         assert_eq!(metadata.name, Some("Known User".to_string()));
         tracing::info!("✓ Metadata fetched correctly");
     } else {
         tracing::warn!("Metadata not found - may be expected in test environment");
     }
-
-    // Test onboarding state
-    tracing::info!("Testing onboarding state...");
-    let onboarding_state = whitenoise.fetch_onboarding_state(account3.pubkey).await?;
-    tracing::info!("Onboarding state: {:?}", onboarding_state);
-    tracing::info!("✓ Onboarding state fetched");
 
     // Test metadata update
     tracing::info!("Testing metadata update...");
@@ -153,7 +149,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     };
 
     whitenoise
-        .update_metadata(&updated_metadata, &account3.pubkey)
+        .update_metadata(&updated_metadata, &account3)
         .await?;
     tracing::info!("✓ Metadata updated successfully");
 
@@ -163,7 +159,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("=== Testing Account Settings ===");
 
     // Test fetching default settings
-    let settings = whitenoise.fetch_account_settings(&account1.pubkey).await?;
+    let settings = whitenoise.load_account_settings(&account1.pubkey).await?;
     assert_eq!(settings, AccountSettings::default());
     tracing::info!("✓ Default settings fetched correctly");
 
@@ -179,13 +175,13 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("✓ Settings updated successfully");
 
     // Verify settings were updated
-    let updated_settings = whitenoise.fetch_account_settings(&account1.pubkey).await?;
+    let updated_settings = whitenoise.load_account_settings(&account1.pubkey).await?;
     assert_eq!(updated_settings, new_settings);
     tracing::info!("✓ Settings verified after update");
 
     // Test error case - non-existent account
     let fake_pubkey = Keys::generate().public_key();
-    let result = whitenoise.fetch_account_settings(&fake_pubkey).await;
+    let result = whitenoise.load_account_settings(&fake_pubkey).await;
     assert!(matches!(result, Err(WhitenoiseError::AccountNotFound)));
     tracing::info!("✓ Correctly handled non-existent account error");
 
@@ -200,7 +196,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let test_contact3 = Keys::generate().public_key();
 
     // Test initial empty contact list
-    let initial_contacts = whitenoise.fetch_contacts(account1.pubkey).await?;
+    let initial_contacts = whitenoise.fetch_contacts(&account1).await?;
     assert_eq!(initial_contacts.len(), 0);
     tracing::info!("✓ Initial contact list is empty");
 
@@ -256,6 +252,11 @@ async fn main() -> Result<(), WhitenoiseError> {
     let member_pubkeys = vec![account2.pubkey]; // account2 as member (has published key package)
     let admin_pubkeys = vec![account1.pubkey]; // account1 as admin/creator
 
+    whitenoise
+        .add_contact(&account1, account2.pubkey)
+        .await
+        .unwrap();
+
     let test_group = whitenoise
         .create_group(
             &account1,
@@ -288,7 +289,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let test_message = "Hello from integration test!".to_string();
     let message_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey,
+            &account1,
             &test_group.mls_group_id,
             test_message.clone(),
             9, // Kind 9 for MLS group chat messages
@@ -309,7 +310,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let tagged_message_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey,
+            &account1,
             &test_group.mls_group_id,
             tagged_message.clone(),
             9, // Kind 9 for MLS group chat messages
@@ -325,7 +326,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let reaction_message = "👍".to_string();
     let reaction_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey,
+            &account1,
             &test_group.mls_group_id,
             reaction_message.clone(),
             7, // Kind 7 for reaction (this one stays as 7)
@@ -342,7 +343,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let fake_group_id = GroupId::from_slice(&[0u8; 32]);
     let error_result = whitenoise
         .send_message_to_group(
-            &account1.pubkey,
+            &account1,
             &fake_group_id,
             "This should fail".to_string(),
             1,
@@ -391,6 +392,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Add account4 as a new member to the test group (account1 is admin)
     let new_members = vec![account4.pubkey];
     whitenoise
+        .add_contact(&account1, account4.pubkey)
+        .await
+        .unwrap();
+    whitenoise
         .add_members_to_group(&account1, &test_group.mls_group_id, new_members)
         .await?;
     tracing::info!("✓ Successfully added new member to group");
@@ -423,6 +428,14 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Add both accounts as members
     let bulk_new_members = vec![account5.pubkey, account6.pubkey];
     whitenoise
+        .add_contact(&account1, account5.pubkey)
+        .await
+        .unwrap();
+    whitenoise
+        .add_contact(&account1, account6.pubkey)
+        .await
+        .unwrap();
+    whitenoise
         .add_members_to_group(&account1, &test_group.mls_group_id, bulk_new_members)
         .await?;
     tracing::info!("✓ Successfully added multiple members to group");
@@ -442,6 +455,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - non-admin trying to add members
     tracing::info!("Testing error handling - non-admin adding members...");
     let account7 = whitenoise.create_identity().await?;
+    whitenoise
+        .add_contact(&account4, account7.pubkey)
+        .await
+        .unwrap();
     let non_admin_result = whitenoise
         .add_members_to_group(&account4, &test_group.mls_group_id, vec![account7.pubkey])
         .await;
@@ -456,6 +473,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // Test error handling - adding to non-existent group
+    whitenoise
+        .add_contact(&account1, account7.pubkey)
+        .await
+        .unwrap();
     tracing::info!("Testing error handling - adding to non-existent group...");
     let fake_group_id = GroupId::from_slice(&[1u8; 32]);
     let fake_group_result = whitenoise
@@ -476,6 +497,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - adding non-existent user (no key package)
     tracing::info!("Testing error handling - adding user without key package...");
     let no_keypackage_user = Keys::generate().public_key();
+    whitenoise
+        .add_contact(&account1, no_keypackage_user)
+        .await
+        .unwrap();
     let no_keypackage_result = whitenoise
         .add_members_to_group(
             &account1,
@@ -500,7 +525,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let post_addition_message = "Welcome to the new members!".to_string();
     let post_addition_message_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey,
+            &account1,
             &test_group.mls_group_id,
             post_addition_message.clone(),
             9, // Kind 9 for MLS group chat messages
@@ -540,7 +565,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let targeted_reaction_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey, // Use account1 (group creator) to ensure group access
+            &account1, // Use account1 (group creator) to ensure group access
             &test_group.mls_group_id,
             reaction_content.clone(),
             7, // Kind 7 for reaction
@@ -564,7 +589,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Account5 was recently added and may not be fully synchronized yet
     let reply_message_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey, // Use account1 (group creator) to ensure reliable group access
+            &account1, // Use account1 (group creator) to ensure reliable group access
             &test_group.mls_group_id,
             reply_content.clone(),
             9, // Kind 9 for chat message reply
@@ -583,7 +608,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let second_reaction_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey, // Use account1 again for consistent group access
+            &account1, // Use account1 again for consistent group access
             &test_group.mls_group_id,
             second_reaction_content.clone(),
             7, // Kind 7 for reaction
@@ -602,7 +627,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let to_be_deleted_message = "This message will be deleted soon!".to_string();
     let to_be_deleted_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey,
+            &account1,
             &test_group.mls_group_id,
             to_be_deleted_message.clone(),
             9, // Kind 9 for chat message
@@ -623,7 +648,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let _delete_message_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey, // Same user deletes their own message
+            &account1, // Same user deletes their own message
             &test_group.mls_group_id,
             "".to_string(), // Empty content for deletion event
             5,              // Kind 5 for deletion
@@ -638,7 +663,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let final_message = "This is the final test message after all interactions!".to_string();
     let final_message_with_tokens = whitenoise
         .send_message_to_group(
-            &account1.pubkey, // Use account1 (group creator) to avoid MLS sync timing issues with account7
+            &account1, // Use account1 (group creator) to avoid MLS sync timing issues with account7
             &test_group.mls_group_id,
             final_message.clone(),
             9, // Kind 9 for chat message
@@ -673,7 +698,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // First test the old method to see if messages are being stored at all
     tracing::info!("Testing fetch_messages_for_group (old method) for debugging...");
     let old_messages = whitenoise
-        .fetch_messages_for_group(&account1.pubkey, &test_group.mls_group_id)
+        .fetch_messages_for_group(&account1, &test_group.mls_group_id)
         .await?;
     tracing::info!("Old method fetched {} messages", old_messages.len());
 

@@ -106,6 +106,8 @@ impl Parser for MockParser {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use tempfile::TempDir;
     use tokio::sync::mpsc;
@@ -114,7 +116,7 @@ mod tests {
         let (event_sender, _event_receiver) = mpsc::channel(500);
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let db_path = temp_dir.path().join("test.db");
-        NostrManager::new(db_path, event_sender, false)
+        NostrManager::new(db_path, event_sender, Duration::from_secs(3))
             .await
             .unwrap()
     }

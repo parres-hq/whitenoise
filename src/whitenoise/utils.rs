@@ -1,5 +1,5 @@
 use crate::whitenoise::error::WhitenoiseError;
-use nostr::{PublicKey, ToBech32};
+use nostr::{types::RelayUrl, PublicKey, ToBech32};
 
 use super::Whitenoise;
 
@@ -93,5 +93,20 @@ impl Whitenoise {
     pub fn hex_pubkey_from_npub(npub: &str) -> Result<String, WhitenoiseError> {
         let public_key = PublicKey::parse(npub).map_err(|_| WhitenoiseError::InvalidPublicKey)?;
         Ok(public_key.to_hex())
+    }
+
+    pub fn parse_relays_from_sql(
+        relays: String,
+    ) -> core::result::Result<Vec<RelayUrl>, sqlx::Error> {
+        serde_json::from_str(&relays)
+            .map(|urls: Vec<String>| {
+                urls.iter()
+                    .filter_map(|url| RelayUrl::parse(url).ok())
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|e| sqlx::Error::ColumnDecode {
+                index: "discovery_relays".to_owned(),
+                source: Box::new(e),
+            })
     }
 }

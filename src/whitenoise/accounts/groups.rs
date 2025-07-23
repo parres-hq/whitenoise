@@ -1,6 +1,5 @@
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::RelayType;
 use crate::whitenoise::Whitenoise;
 use nostr_mls::prelude::*;
 
@@ -42,22 +41,22 @@ impl Whitenoise {
             .get_nostr_keys_for_pubkey(&creator_account.pubkey)?;
 
         let mut key_package_events: Vec<Event> = Vec::new();
+        let mut contacts = Vec::new();
 
         let nostr_mls = &*creator_account.nostr_mls.lock().await;
         let group_relays = config.relays.clone();
 
         // Fetch key packages for all members
         for pk in member_pubkeys.iter() {
-            let user_key_package_relays = self
-                .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
-                .await?;
+            let contact = self.load_contact(pk).await?;
             let some_event = self
-                .fetch_key_package_event(*pk, user_key_package_relays.clone())
+                .fetch_key_package_event_from(contact.key_package_relays.clone(), *pk)
                 .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
             key_package_events.push(event);
+            contacts.push(contact);
         }
 
         let create_group_result = nostr_mls
@@ -71,17 +70,16 @@ impl Whitenoise {
 
         let group = create_group_result.group;
         let welcome_rumors = create_group_result.welcome_rumors;
-        let group_ids = nostr_mls
-            .get_groups()
-            .map_err(WhitenoiseError::from)?
-            .into_iter()
-            .map(|g| hex::encode(g.nostr_group_id))
-            .collect::<Vec<_>>();
+        if welcome_rumors.len() != contacts.len() {
+            return Err(WhitenoiseError::Other(anyhow::Error::msg(
+                "Welcome rumours are missing for some of the members",
+            )));
+        }
 
         tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
 
         // Fan out the welcome message to all members
-        for welcome_rumor in welcome_rumors {
+        for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts.iter()) {
             // Get the public key of the member from the key package event
             let key_package_event_id =
                 welcome_rumor
@@ -100,10 +98,6 @@ impl Whitenoise {
                     "No public key found in key package event"
                 )))?;
 
-            let member_inbox_relays = self
-                .fetch_relays_with_fallback(member_pubkey, RelayType::Inbox)
-                .await?;
-
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
@@ -112,12 +106,19 @@ impl Whitenoise {
                     &member_pubkey,
                     welcome_rumor.clone(),
                     vec![Tag::expiration(one_month_future)],
-                    &member_inbox_relays,
+                    &contact.inbox_relays,
                     keys.clone(),
                 )
                 .await
                 .map_err(WhitenoiseError::from)?;
         }
+
+        let group_ids = nostr_mls
+            .get_groups()
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect::<Vec<_>>();
 
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
@@ -226,37 +227,43 @@ impl Whitenoise {
         group_id: &GroupId,
         members: Vec<PublicKey>,
     ) -> Result<()> {
-        let evolution_event: Event;
-        let welcome_rumors: Option<Vec<UnsignedEvent>>;
         let mut key_package_events: Vec<Event> = Vec::new();
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let mut contacts = Vec::new();
 
         let nostr_mls = &*account.nostr_mls.lock().await;
         // Fetch key packages for all members
         for pk in members.iter() {
-            let user_key_package_relays = self
-                .fetch_relays_with_fallback(*pk, RelayType::KeyPackage)
-                .await?;
+            let contact = self.load_contact(pk).await?;
             let some_event = self
-                .fetch_key_package_event(*pk, user_key_package_relays.clone())
+                .fetch_key_package_event_from(contact.key_package_relays.clone(), *pk)
                 .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
             key_package_events.push(event);
+            contacts.push(contact);
         }
 
         let update_result = nostr_mls
             .add_members(group_id, &key_package_events)
             .map_err(WhitenoiseError::from)?;
-        evolution_event = update_result.evolution_event;
-        welcome_rumors = update_result.welcome_rumors;
+        let evolution_event = update_result.evolution_event;
 
-        if welcome_rumors.is_none() {
-            return Err(WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(
-                "Missing welcome message".to_owned(),
+        let welcome_rumors = match update_result.welcome_rumors {
+            None => {
+                return Err(WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(
+                    "Missing welcome message".to_owned(),
+                )))
+            }
+            Some(wr) => wr,
+        };
+
+        if welcome_rumors.len() != contacts.len() {
+            return Err(WhitenoiseError::Other(anyhow::Error::msg(
+                "Welcome rumours are missing for some of the members",
             )));
         }
 
@@ -279,7 +286,7 @@ impl Whitenoise {
             Ok(_event_id) => {
                 // Evolution event published successfully
                 // Fan out the welcome message to all members
-                for welcome_rumor in welcome_rumors.unwrap() {
+                for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts) {
                     // Get the public key of the member from the key package event
                     let key_package_event_id =
                         welcome_rumor
@@ -298,10 +305,6 @@ impl Whitenoise {
                             "No public key found in key package event"
                         )))?;
 
-                    let member_inbox_relays = self
-                        .fetch_relays_with_fallback(member_pubkey, RelayType::Inbox)
-                        .await?;
-
                     // Create a timestamp 1 month in the future
                     use std::ops::Add;
                     let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
@@ -310,7 +313,7 @@ impl Whitenoise {
                             &member_pubkey,
                             welcome_rumor.clone(),
                             vec![Tag::expiration(one_month_future)],
-                            &member_inbox_relays,
+                            &contact.inbox_relays,
                             keys.clone(),
                         )
                         .await
@@ -429,16 +432,6 @@ mod tests {
         )
         .await;
 
-        // Test case: Account not found (not logged in)
-        let (unlogged_account, _unused_keys) = create_test_account();
-        case_create_group_account_not_found(
-            whitenoise,
-            &unlogged_account,
-            member_pubkeys.clone(),
-            admin_pubkeys.clone(),
-        )
-        .await;
-
         // // Test case: Key package fetch fails (invalid member)
         // let invalid_member_pubkey = create_test_keys().public_key();
         // case_create_group_key_package_fetch_fails(
@@ -467,20 +460,6 @@ mod tests {
             vec![creator_account.pubkey, non_member_pubkey],
         )
         .await;
-
-        // Test case: Welcome message fails (no relays)
-        let (no_relay_creator, _keys) = setup_login_account(whitenoise).await;
-        whitenoise
-            .update_relays(&no_relay_creator, RelayType::Nostr, vec![])
-            .await
-            .unwrap();
-        case_create_group_welcome_message_fails(
-            whitenoise,
-            &no_relay_creator,
-            member_pubkeys.clone(),
-            vec![no_relay_creator.pubkey],
-        )
-        .await;
     }
 
     async fn case_create_group_success(
@@ -507,25 +486,6 @@ mod tests {
         assert_eq!(group.description, config.description);
         assert!(group.admin_pubkeys.contains(&creator_account.pubkey));
         assert!(group.admin_pubkeys.contains(&member_pubkeys[0]));
-    }
-
-    /// Test case: Active account is not the creator
-    async fn case_create_group_account_not_found(
-        whitenoise: &Whitenoise,
-        creator_account: &Account,
-        member_pubkeys: Vec<PublicKey>,
-        admin_pubkeys: Vec<PublicKey>,
-    ) {
-        let result = whitenoise
-            .create_group(
-                creator_account,
-                member_pubkeys,
-                admin_pubkeys,
-                create_nostr_group_config_data(),
-            )
-            .await;
-
-        assert!(matches!(result, Err(WhitenoiseError::AccountNotFound)));
     }
 
     /// Test case: Member/admin validation fails - empty admin list
@@ -604,35 +564,6 @@ mod tests {
                 // Expected if MLS validates admin membership
             }
             Err(other) => panic!("Unexpected error: {:?}", other),
-        }
-    }
-
-    /// Test case: Welcome message sending fails - no relays configured
-    async fn case_create_group_welcome_message_fails(
-        whitenoise: &Whitenoise,
-        creator_account: &Account,
-        member_pubkeys: Vec<PublicKey>,
-        admin_pubkeys: Vec<PublicKey>,
-    ) {
-        let result = whitenoise
-            .create_group(
-                creator_account,
-                member_pubkeys,
-                admin_pubkeys,
-                create_nostr_group_config_data(),
-            )
-            .await;
-
-        // May fail when trying to send welcome messages with no relays
-        match result {
-            Ok(_) => {
-                // Might succeed if fallback relays are used
-                println!("Group created despite no relays (fallback used)");
-            }
-            Err(e) => {
-                // Expected if no relays available for welcome messages
-                println!("Group creation failed due to relay issues: {:?}", e);
-            }
         }
     }
 }

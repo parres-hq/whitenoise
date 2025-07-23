@@ -217,7 +217,7 @@ impl Whitenoise {
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
-            NostrManager::new_with_connections(data_dir.join("nostr_lmdb"), event_sender.clone())
+            NostrManager::new(data_dir.join("nostr_lmdb"), event_sender.clone(), NostrManager::default_timeout())
                 .await?;
 
         // Create SecretsStore
@@ -247,6 +247,14 @@ impl Whitenoise {
             let mut accounts = whitenoise.write_accounts().await;
             *accounts = loaded_accounts;
         }
+
+        // No need to wait for all the relays to be up
+        tokio::spawn({
+            let client = whitenoise.nostr.client.clone();
+            async move {
+                client.connect().await;
+            }
+        });
         Ok(whitenoise)
         }).await;
 
@@ -264,26 +272,6 @@ impl Whitenoise {
             let account_list: Vec<Account> = accounts.values().cloned().collect();
             drop(accounts); // Release the read lock early
             for account in account_list {
-                // Fetch account data
-                match whitenoise_ref.background_fetch_account_data(&account).await {
-                    Ok(()) => {
-                        tracing::debug!(
-                            target: "whitenoise::initialize_whitenoise",
-                            "Successfully fetched account data for account: {}",
-                            account.pubkey.to_hex()
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            target: "whitenoise::initialize_whitenoise",
-                            "Failed to fetch account data for account {}: {}",
-                            account.pubkey.to_hex(),
-                            e
-                        );
-                        // Continue with other accounts instead of failing completely
-                    }
-                }
-
                 // Setup subscriptions for this account
                 match whitenoise_ref.setup_subscriptions(&account).await {
                     Ok(()) => {
@@ -490,11 +478,8 @@ impl Whitenoise {
 
 #[cfg(test)]
 pub mod test_utils {
-    use crate::RelayType;
-
     use super::*;
     use crate::whitenoise::accounts::test_utils::*;
-    use accounts::AccountSettings;
     use tempfile::TempDir;
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
@@ -509,15 +494,7 @@ pub mod test_utils {
     }
 
     pub(crate) fn create_test_account() -> (Account, Keys) {
-        let keys = Keys::generate();
-        let account = Account {
-            pubkey: keys.public_key(),
-            settings: AccountSettings::default(),
-            onboarding: accounts::OnboardingState::default(),
-            last_synced: Timestamp::zero(),
-            nostr_mls: create_nostr_mls(keys.public_key()),
-        };
-        (account, keys)
+        Account::new(&data_dir()).unwrap()
     }
 
     /// Creates a mock Whitenoise instance for testing.
@@ -558,12 +535,23 @@ pub mod test_utils {
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
-        let nostr = NostrManager::new_with_connections(
+        let nostr = NostrManager::new(
             config.data_dir.join("test_nostr"),
             event_sender.clone(),
+            NostrManager::default_timeout(),
         )
         .await
         .expect("Failed to create NostrManager");
+
+        // connect to default relays
+        nostr.add_relays(Account::default_relays()).await.unwrap();
+        tokio::spawn({
+            let client = nostr.client.clone();
+            async move {
+                client.connect().await;
+            }
+        });
+        nostr.client.connect().await;
 
         // Create message aggregator for testing
         let message_aggregator = message_aggregator::MessageAggregator::new();
@@ -674,15 +662,6 @@ pub mod test_utils {
             .login(keys.secret_key().to_secret_hex())
             .await
             .unwrap();
-        whitenoise
-            .update_relays(
-                &account,
-                RelayType::Nostr,
-                vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
-            )
-            .await
-            .unwrap();
-
         (account, keys)
     }
 
@@ -709,19 +688,18 @@ pub mod test_utils {
                 .add_contact(creator_account, keys.public_key())
                 .await
                 .unwrap();
+            whitenoise.load_contact(&keys.public_key).await.unwrap();
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
             let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
 
-            // Get relays with fallback to defaults if user hasn't configured key package relays
-            let relays_to_use = whitenoise
-                .fetch_relays_with_fallback(account.pubkey, RelayType::KeyPackage)
-                .await
-                .unwrap();
-
             let _ = whitenoise
                 .nostr
-                .publish_event_builder_with_signer(key_package_event_builder, &relays_to_use, keys)
+                .publish_event_builder_with_signer(
+                    key_package_event_builder,
+                    &account.discovery_relays,
+                    keys,
+                )
                 .await
                 .unwrap();
         }
@@ -733,8 +711,6 @@ pub mod test_utils {
 mod tests {
     use super::test_utils::*;
     use super::*;
-    use relays::*;
-    use std::time::Duration;
 
     // Configuration Tests
     mod config_tests {
@@ -896,18 +872,16 @@ mod tests {
                 .await;
             assert!(account.is_ok());
 
+            let account = account.unwrap();
+
+            let relays = account.discovery_relays.clone();
+
             // Test all load methods return expected types (though they may be empty in test env)
-            let metadata = whitenoise.fetch_metadata(pubkey).await;
+            let metadata = whitenoise.fetch_metadata_from(relays, pubkey).await;
             assert!(metadata.is_ok());
 
-            let relays = whitenoise.fetch_relays(pubkey, RelayType::Inbox).await;
-            assert!(relays.is_ok());
-
-            let contacts = whitenoise.fetch_contacts(pubkey).await;
+            let contacts = whitenoise.fetch_contacts(&account).await;
             assert!(contacts.is_ok());
-
-            let onboarding = whitenoise.fetch_onboarding_state(pubkey).await;
-            assert!(onboarding.is_ok());
         }
 
         #[tokio::test]
@@ -948,764 +922,6 @@ mod tests {
             // Should return an error (group not found or similar), but not NostrMlsNotInitialized
             assert!(result.is_err());
             // The specific error will be about the group not being found since we're using a fake group ID
-        }
-
-        #[tokio::test]
-        async fn test_concurrent_api_calls() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let test_keys = create_test_keys();
-            let pubkey = test_keys.public_key();
-            let account = whitenoise
-                .login(test_keys.secret_key().to_secret_hex())
-                .await;
-            assert!(account.is_ok());
-
-            // Test concurrent API calls
-            let results = tokio::join!(
-                whitenoise.fetch_metadata(pubkey),
-                whitenoise.fetch_relays(pubkey, RelayType::Inbox),
-                whitenoise.fetch_contacts(pubkey),
-                whitenoise.fetch_onboarding_state(pubkey)
-            );
-
-            assert!(results.0.is_ok());
-            assert!(results.1.is_ok());
-            assert!(results.2.is_ok());
-            assert!(results.3.is_ok());
-        }
-
-        #[tokio::test]
-        async fn test_background_fetch_updates_last_synced() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-            // Create and save a test account
-            let (account, keys) = create_test_account();
-            whitenoise.save_account(&account).await.unwrap();
-            whitenoise.secrets_store.store_private_key(&keys).unwrap();
-
-            let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
-            assert!(log_account.is_ok());
-
-            let _original_timestamp = account.last_synced;
-
-            // Trigger background fetch
-            whitenoise
-                .background_fetch_account_data(&account)
-                .await
-                .unwrap();
-
-            // Give the background task a moment to complete
-            tokio::time::sleep(Duration::from_millis(100)).await;
-
-            // Check that the account still exists in database
-            // (The background task updates the timestamp, but we can't easily test the
-            // actual timestamp update in a unit test without mocking the NostrManager)
-            let loaded_account = whitenoise
-                .find_account_by_pubkey(&account.pubkey)
-                .await
-                .unwrap();
-            assert_eq!(loaded_account.pubkey, account.pubkey);
-        }
-    }
-
-    // Helper Tests
-    mod helper_tests {
-        use super::*;
-
-        #[test]
-        fn test_onboarding_state_default() {
-            let onboarding_state = OnboardingState::default();
-            assert!(!onboarding_state.inbox_relays);
-            assert!(!onboarding_state.key_package_relays);
-            assert!(!onboarding_state.key_package_published);
-        }
-
-        #[test]
-        fn test_relay_type_enum_coverage() {
-            // Ensure we can create all relay types
-            let _nostr = RelayType::Nostr;
-            let _inbox = RelayType::Inbox;
-            let _key_package = RelayType::KeyPackage;
-        }
-    }
-
-    // Subscription Management Tests
-    mod subscription_management_tests {
-        use super::*;
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_relay_logic_with_empty_user_relays() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let (account, keys) = create_test_account();
-
-            // Store keys and save account
-            whitenoise.secrets_store.store_private_key(&keys).unwrap();
-            whitenoise.save_account(&account).await.unwrap();
-
-            // Test the relay selection logic
-            // fetch_relays should return empty in test environment
-            let user_relays = whitenoise
-                .fetch_relays(account.pubkey, RelayType::Nostr)
-                .await
-                .unwrap();
-            assert!(
-                user_relays.is_empty(),
-                "User relays should be empty in test environment"
-            );
-
-            // When user_relays is empty, should use default client relays
-            let default_relays = whitenoise.nostr.relays().await.unwrap();
-
-            let relays_to_use = if user_relays.is_empty() {
-                default_relays.clone()
-            } else {
-                user_relays
-            };
-
-            // In test environment, default relays might also be empty, but the logic should work
-            assert_eq!(relays_to_use, default_relays);
-        }
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_relay_selection_logic() {
-            // Test the relay selection logic independently
-            let empty_user_relays: Vec<RelayUrl> = vec![];
-            let default_relays = vec![
-                RelayUrl::parse("wss://relay.damus.io").unwrap(),
-                RelayUrl::parse("wss://nos.lol").unwrap(),
-            ];
-
-            // Test: when user_relays is empty, should use default_relays
-            let relays_to_use = if empty_user_relays.is_empty() {
-                default_relays.clone()
-            } else {
-                empty_user_relays
-            };
-            assert_eq!(relays_to_use, default_relays);
-
-            // Test: when user_relays is not empty, should use user_relays
-            let user_relays = vec![
-                RelayUrl::parse("wss://user.relay.com").unwrap(),
-                RelayUrl::parse("wss://custom.relay.net").unwrap(),
-            ];
-
-            let relays_to_use = if user_relays.is_empty() {
-                default_relays.clone()
-            } else {
-                user_relays.clone()
-            };
-            assert_eq!(relays_to_use, user_relays);
-        }
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_group_ids_conversion_logic() {
-            // Test the group ID conversion logic independently
-            // This simulates what happens in the method when converting groups to nostr_group_ids
-
-            // Test with None groups (empty result)
-            let groups: Option<Vec<MockGroup>> = None;
-            let nostr_group_ids = groups
-                .map(|groups| {
-                    groups
-                        .iter()
-                        .map(|group| hex::encode(&group.nostr_group_id))
-                        .collect::<Vec<String>>()
-                })
-                .unwrap_or_default();
-            assert!(nostr_group_ids.is_empty());
-
-            // Test with empty groups
-            let empty_groups: Option<Vec<MockGroup>> = Some(vec![]);
-            let nostr_group_ids = empty_groups
-                .map(|groups| {
-                    groups
-                        .iter()
-                        .map(|group| hex::encode(&group.nostr_group_id))
-                        .collect::<Vec<String>>()
-                })
-                .unwrap_or_default();
-            assert!(nostr_group_ids.is_empty());
-
-            // Test with actual groups
-            let mock_groups = vec![
-                MockGroup {
-                    nostr_group_id: vec![1, 2, 3, 4],
-                },
-                MockGroup {
-                    nostr_group_id: vec![5, 6, 7, 8],
-                },
-                MockGroup {
-                    nostr_group_id: vec![9, 10, 11, 12],
-                },
-            ];
-            let groups_with_data: Option<Vec<MockGroup>> = Some(mock_groups);
-            let nostr_group_ids = groups_with_data
-                .map(|groups| {
-                    groups
-                        .iter()
-                        .map(|group| hex::encode(&group.nostr_group_id))
-                        .collect::<Vec<String>>()
-                })
-                .unwrap_or_default();
-
-            assert_eq!(nostr_group_ids.len(), 3);
-            assert_eq!(nostr_group_ids[0], "01020304");
-            assert_eq!(nostr_group_ids[1], "05060708");
-            assert_eq!(nostr_group_ids[2], "090a0b0c");
-        }
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_hex_encoding() {
-            // Test hex encoding edge cases for group IDs
-
-            let test_cases = vec![
-                (vec![], ""),
-                (vec![0], "00"),
-                (vec![255], "ff"),
-                (vec![0, 255], "00ff"),
-                (vec![16, 32, 48, 64], "10203040"),
-                (vec![170, 187, 204, 221], "aabbccdd"),
-            ];
-
-            for (input, expected) in test_cases {
-                let encoded = hex::encode(&input);
-                assert_eq!(encoded, expected, "Failed for input: {:?}", input);
-            }
-        }
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_error_handling_fetch_relays() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let (account, keys) = create_test_account();
-
-            // Store keys and save account
-            whitenoise.secrets_store.store_private_key(&keys).unwrap();
-            whitenoise.save_account(&account).await.unwrap();
-
-            // Test that fetch_relays doesn't fail in test environment
-            // (It might return empty results, but shouldn't error)
-            let user_relays_result = whitenoise
-                .fetch_relays(account.pubkey, RelayType::Nostr)
-                .await;
-            assert!(
-                user_relays_result.is_ok(),
-                "fetch_relays should not fail in test environment"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_setup_subscriptions_components_integration() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let (account, keys) = create_test_account();
-
-            // Store keys and save account
-            whitenoise.secrets_store.store_private_key(&keys).unwrap();
-            whitenoise.save_account(&account).await.unwrap();
-
-            // Test that all individual components work
-
-            // 1. Test that we can fetch user relays
-            let user_relays = whitenoise
-                .fetch_relays(account.pubkey, RelayType::Nostr)
-                .await;
-            assert!(user_relays.is_ok());
-
-            // 2. Test that we can get default relays
-            let default_relays = whitenoise.nostr.relays().await;
-            assert!(default_relays.is_ok());
-
-            // 3. Test relay selection logic
-            let user_relays = user_relays.unwrap();
-            let default_relays = default_relays.unwrap();
-
-            let relays_to_use = if user_relays.is_empty() {
-                default_relays
-            } else {
-                user_relays
-            };
-
-            // The logic should complete without errors
-            assert!(!relays_to_use.is_empty() || relays_to_use.is_empty()); // Either case is valid
-        }
-
-        // Mock struct for testing group ID conversion
-        struct MockGroup {
-            nostr_group_id: Vec<u8>,
-        }
-    }
-
-    // Metadata Consistency Tests
-    mod metadata_consistency_tests {
-        use super::*;
-
-        #[tokio::test]
-        async fn test_metadata_consistency_between_query_and_fetch() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-            // Create multiple test accounts with distinct metadata
-            let mut test_accounts = Vec::new();
-            let mut test_metadata = Vec::new();
-
-            for i in 0..3 {
-                let (account, keys) = create_test_account();
-                whitenoise.save_account(&account).await.unwrap();
-                whitenoise.secrets_store.store_private_key(&keys).unwrap();
-
-                // Login to the account
-                let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
-                assert!(log_account.is_ok());
-
-                // Create unique metadata for each account
-                let metadata = Metadata {
-                    name: Some(format!("Test User {}", i)),
-                    display_name: Some(format!("Display Name {}", i)),
-                    about: Some(format!("About text for user {}", i)),
-                    picture: Some(format!("https://example.com/avatar{}.jpg", i)),
-                    ..Default::default()
-                };
-
-                // Publish the metadata
-                whitenoise
-                    .update_metadata(&metadata, &account.pubkey)
-                    .await
-                    .unwrap();
-
-                test_accounts.push((account, keys));
-                test_metadata.push(metadata);
-            }
-
-            // Wait for metadata to be processed
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            // Test each account's metadata using both methods
-            for (i, ((account, _keys), expected_metadata)) in
-                test_accounts.iter().zip(test_metadata.iter()).enumerate()
-            {
-                tracing::info!(
-                    "Testing account {} with pubkey: {}",
-                    i,
-                    account.pubkey.to_hex()
-                );
-
-                // Test fetch_metadata (cache + relays)
-                let fetch_result = whitenoise.fetch_metadata(account.pubkey).await.unwrap();
-
-                // Test query_metadata (cache only)
-                let query_result = whitenoise
-                    .nostr
-                    .query_user_metadata(account.pubkey)
-                    .await
-                    .unwrap();
-
-                tracing::info!(
-                    "Account {}: fetch_metadata result: {:?}",
-                    i,
-                    fetch_result.as_ref().map(|m| &m.name)
-                );
-                tracing::info!(
-                    "Account {}: query_metadata result: {:?}",
-                    i,
-                    query_result.as_ref().map(|m| &m.name)
-                );
-
-                // Both methods should return the same result
-                match (fetch_result.as_ref(), query_result.as_ref()) {
-                    (Some(fetch_meta), Some(query_meta)) => {
-                        if fetch_meta.name != query_meta.name {
-                            tracing::error!(
-                                 "METADATA MISMATCH for account {}: fetch_metadata name={:?}, query_metadata name={:?}",
-                                 i, fetch_meta.name, query_meta.name
-                             );
-                        }
-                        if fetch_meta.display_name != query_meta.display_name {
-                            tracing::error!(
-                                 "METADATA MISMATCH for account {}: fetch_metadata display_name={:?}, query_metadata display_name={:?}",
-                                 i, fetch_meta.display_name, query_meta.display_name
-                             );
-                        }
-                        assert_eq!(
-                            fetch_meta.name, query_meta.name,
-                            "Name should match between fetch and query for account {}",
-                            i
-                        );
-                        assert_eq!(
-                            fetch_meta.display_name, query_meta.display_name,
-                            "Display name should match between fetch and query for account {}",
-                            i
-                        );
-                        assert_eq!(
-                            fetch_meta.about, query_meta.about,
-                            "About should match between fetch and query for account {}",
-                            i
-                        );
-                        assert_eq!(
-                            fetch_meta.picture, query_meta.picture,
-                            "Picture should match between fetch and query for account {}",
-                            i
-                        );
-                    }
-                    (None, None) => {
-                        tracing::warn!("Both methods returned None for account {}", i);
-                        // This might be expected in test environment
-                    }
-                    (Some(_), None) => {
-                        tracing::warn!("fetch_metadata found metadata but query_metadata didn't for account {}", i);
-                        // This could happen if fetch gets from relays but cache is empty
-                    }
-                    (None, Some(query_meta)) => {
-                        tracing::error!(
-                             "CACHE CORRUPTION: query_metadata found metadata ({:?}) but fetch_metadata didn't for account {}",
-                             query_meta.name, i
-                         );
-                        panic!("Cache contains metadata that fetch_metadata can't find - possible corruption");
-                    }
-                }
-
-                // Additional check: verify the metadata matches what we expect
-                if let Some(retrieved_metadata) = fetch_result {
-                    assert_eq!(
-                        retrieved_metadata.name, expected_metadata.name,
-                        "Retrieved metadata name doesn't match expected for account {}",
-                        i
-                    );
-                    assert_eq!(
-                        retrieved_metadata.display_name, expected_metadata.display_name,
-                        "Retrieved metadata display_name doesn't match expected for account {}",
-                        i
-                    );
-                    assert_eq!(
-                        retrieved_metadata.about, expected_metadata.about,
-                        "Retrieved metadata about doesn't match expected for account {}",
-                        i
-                    );
-                    assert_eq!(
-                        retrieved_metadata.picture, expected_metadata.picture,
-                        "Retrieved metadata picture doesn't match expected for account {}",
-                        i
-                    );
-                }
-            }
-        }
-
-        #[tokio::test]
-        async fn test_contact_list_metadata_consistency() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-            // Create a main account
-            let (main_account, main_keys) = create_test_account();
-            whitenoise.save_account(&main_account).await.unwrap();
-            whitenoise
-                .secrets_store
-                .store_private_key(&main_keys)
-                .unwrap();
-            let log_account = whitenoise
-                .login(main_keys.secret_key().to_secret_hex())
-                .await;
-            assert!(log_account.is_ok());
-
-            // Create multiple contact accounts with unique metadata
-            let mut contact_accounts = Vec::new();
-            let mut expected_contact_metadata = Vec::new();
-
-            for i in 0..3 {
-                let (contact_account, contact_keys) = create_test_account();
-                whitenoise.save_account(&contact_account).await.unwrap();
-                whitenoise
-                    .secrets_store
-                    .store_private_key(&contact_keys)
-                    .unwrap();
-
-                // Login to contact account to publish metadata
-                let contact_log_account = whitenoise
-                    .login(contact_keys.secret_key().to_secret_hex())
-                    .await;
-                assert!(contact_log_account.is_ok());
-                // Create unique metadata for contact
-                let contact_metadata = Metadata {
-                    name: Some(format!("Contact {}", i)),
-                    display_name: Some(format!("Contact Display {}", i)),
-                    about: Some(format!("Contact {} bio", i)),
-                    picture: Some(format!("https://example.com/contact{}.jpg", i)),
-                    ..Default::default()
-                };
-
-                // Publish contact metadata
-                whitenoise
-                    .update_metadata(&contact_metadata, &contact_account.pubkey)
-                    .await
-                    .unwrap();
-
-                // Add this contact to main account's contact list
-                whitenoise
-                    .add_contact(&main_account, contact_account.pubkey)
-                    .await
-                    .unwrap();
-
-                contact_accounts.push((contact_account, contact_keys));
-                expected_contact_metadata.push(contact_metadata);
-            }
-
-            // Switch back to main account
-            let log_account = whitenoise
-                .login(main_keys.secret_key().to_secret_hex())
-                .await;
-            assert!(log_account.is_ok());
-
-            // Wait for metadata to be processed
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            // Fetch contacts using the contact list method (which uses query_user_metadata)
-            let contacts_with_metadata = whitenoise
-                .fetch_contacts(main_account.pubkey)
-                .await
-                .unwrap();
-
-            tracing::info!(
-                "Found {} contacts in contact list",
-                contacts_with_metadata.len()
-            );
-
-            // Verify each contact's metadata individually using both methods
-            for (i, ((contact_account, _contact_keys), expected_metadata)) in contact_accounts
-                .iter()
-                .zip(expected_contact_metadata.iter())
-                .enumerate()
-            {
-                tracing::info!(
-                    "Testing contact {} with pubkey: {}",
-                    i,
-                    contact_account.pubkey.to_hex()
-                );
-
-                // Check if the contact is in the contact list
-                let contact_list_metadata = contacts_with_metadata.get(&contact_account.pubkey);
-
-                // Test individual fetch_metadata
-                let individual_fetch = whitenoise
-                    .fetch_metadata(contact_account.pubkey)
-                    .await
-                    .unwrap();
-
-                // Test individual query_metadata
-                let individual_query = whitenoise
-                    .nostr
-                    .query_user_metadata(contact_account.pubkey)
-                    .await
-                    .unwrap();
-
-                tracing::info!(
-                    "Contact {}: contact_list metadata: {:?}",
-                    i,
-                    contact_list_metadata.map(|m| m.as_ref().map(|meta| &meta.name))
-                );
-                tracing::info!(
-                    "Contact {}: individual_fetch metadata: {:?}",
-                    i,
-                    individual_fetch.as_ref().map(|m| &m.name)
-                );
-                tracing::info!(
-                    "Contact {}: individual_query_metadata metadata: {:?}",
-                    i,
-                    individual_query.as_ref().map(|m| &m.name)
-                );
-
-                // Compare all three sources
-                if let Some(Some(contact_meta)) = contact_list_metadata {
-                    if let Some(fetch_meta) = individual_fetch.as_ref() {
-                        if contact_meta.name != fetch_meta.name {
-                            tracing::error!(
-                                    "METADATA MISMATCH for contact {}: contact_list name={:?}, individual_fetch name={:?}",
-                                    i, contact_meta.name, fetch_meta.name
-                                );
-                        }
-                        assert_eq!(
-                            contact_meta.name, fetch_meta.name,
-                            "Contact list metadata should match individual fetch for contact {}",
-                            i
-                        );
-                    }
-
-                    if let Some(query_meta) = individual_query.as_ref() {
-                        if contact_meta.name != query_meta.name {
-                            tracing::error!(
-                                     "METADATA MISMATCH for contact {}: contact_list name={:?}, individual_query_metadata name={:?}",
-                                     i, contact_meta.name, query_meta.name
-                                 );
-                        }
-                        assert_eq!(contact_meta.name, query_meta.name,
-                                 "Contact list metadata should match individual query_metadata for contact {}", i);
-                    }
-
-                    // Verify against expected metadata
-                    if contact_meta.name != expected_metadata.name {
-                        tracing::error!(
-                            "WRONG METADATA for contact {}: got name={:?}, expected name={:?}",
-                            i,
-                            contact_meta.name,
-                            expected_metadata.name
-                        );
-                    }
-                    assert_eq!(
-                        contact_meta.name, expected_metadata.name,
-                        "Contact metadata should match expected for contact {}",
-                        i
-                    );
-                }
-            }
-        }
-
-        #[tokio::test]
-        async fn test_metadata_cache_isolation() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-            // Create two accounts with very different metadata
-            let (account1, keys1) = create_test_account();
-            let (account2, keys2) = create_test_account();
-
-            whitenoise.save_account(&account1).await.unwrap();
-            whitenoise.save_account(&account2).await.unwrap();
-            whitenoise.secrets_store.store_private_key(&keys1).unwrap();
-            whitenoise.secrets_store.store_private_key(&keys2).unwrap();
-
-            // Login and setup account1
-            let log_account1 = whitenoise.login(keys1.secret_key().to_secret_hex()).await;
-            assert!(log_account1.is_ok());
-
-            let metadata1 = Metadata {
-                name: Some("Alice".to_string()),
-                display_name: Some("Alice Smith".to_string()),
-                about: Some("Software engineer".to_string()),
-                picture: Some("https://example.com/alice.jpg".to_string()),
-                ..Default::default()
-            };
-
-            whitenoise
-                .update_metadata(&metadata1, &account1.pubkey)
-                .await
-                .unwrap();
-
-            // Login and setup account2
-            let log_account2 = whitenoise.login(keys2.secret_key().to_secret_hex()).await;
-            assert!(log_account2.is_ok());
-
-            let metadata2 = Metadata {
-                name: Some("Bob".to_string()),
-                display_name: Some("Bob Johnson".to_string()),
-                about: Some("Product manager".to_string()),
-                picture: Some("https://example.com/bob.jpg".to_string()),
-                ..Default::default()
-            };
-
-            whitenoise
-                .update_metadata(&metadata2, &account2.pubkey)
-                .await
-                .unwrap();
-
-            // Wait for processing
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            // Test multiple times to check for race conditions or caching issues
-            for iteration in 0..5 {
-                tracing::info!("Testing iteration {}", iteration);
-
-                // Query account1's metadata
-                let account1_fetch = whitenoise.fetch_metadata(account1.pubkey).await.unwrap();
-                let account1_query = whitenoise
-                    .nostr
-                    .query_user_metadata(account1.pubkey)
-                    .await
-                    .unwrap();
-
-                // Query account2's metadata
-                let account2_fetch = whitenoise.fetch_metadata(account2.pubkey).await.unwrap();
-                let account2_query = whitenoise
-                    .nostr
-                    .query_user_metadata(account2.pubkey)
-                    .await
-                    .unwrap();
-
-                // Verify account1 metadata
-                if let Some(meta1) = account1_fetch.as_ref() {
-                    if meta1.name != Some("Alice".to_string()) {
-                        tracing::error!(
-                            "Account1 fetch metadata wrong: got {:?}, expected Alice",
-                            meta1.name
-                        );
-                    }
-                    assert_eq!(
-                        meta1.name,
-                        Some("Alice".to_string()),
-                        "Account1 fetch metadata should be Alice in iteration {}",
-                        iteration
-                    );
-                }
-
-                if let Some(meta1) = account1_query.as_ref() {
-                    if meta1.name != Some("Alice".to_string()) {
-                        tracing::error!(
-                            "Account1 query metadata wrong: got {:?}, expected Alice",
-                            meta1.name
-                        );
-                    }
-                    assert_eq!(
-                        meta1.name,
-                        Some("Alice".to_string()),
-                        "Account1 query metadata should be Alice in iteration {}",
-                        iteration
-                    );
-                }
-
-                // Verify account2 metadata
-                if let Some(meta2) = account2_fetch.as_ref() {
-                    if meta2.name != Some("Bob".to_string()) {
-                        tracing::error!(
-                            "Account2 fetch metadata wrong: got {:?}, expected Bob",
-                            meta2.name
-                        );
-                    }
-                    assert_eq!(
-                        meta2.name,
-                        Some("Bob".to_string()),
-                        "Account2 fetch metadata should be Bob in iteration {}",
-                        iteration
-                    );
-                }
-
-                if let Some(meta2) = account2_query.as_ref() {
-                    if meta2.name != Some("Bob".to_string()) {
-                        tracing::error!(
-                            "Account2 query metadata wrong: got {:?}, expected Bob",
-                            meta2.name
-                        );
-                    }
-                    assert_eq!(
-                        meta2.name,
-                        Some("Bob".to_string()),
-                        "Account2 query metadata should be Bob in iteration {}",
-                        iteration
-                    );
-                }
-
-                // Critical test: Account1 should never have Account2's metadata and vice versa
-                if let (Some(meta1), Some(meta2)) =
-                    (account1_fetch.as_ref(), account2_fetch.as_ref())
-                {
-                    if meta1.name == meta2.name {
-                        tracing::error!(
-                            "CRITICAL: Account1 and Account2 have the same metadata name: {:?}",
-                            meta1.name
-                        );
-                    }
-                    assert_ne!(
-                        meta1.name, meta2.name,
-                        "Account1 and Account2 should have different names in iteration {}",
-                        iteration
-                    );
-                }
-
-                // Small delay between iterations
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
         }
     }
 }

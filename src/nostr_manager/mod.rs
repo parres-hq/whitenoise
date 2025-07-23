@@ -5,10 +5,9 @@ use ::rand::RngCore;
 use nostr_sdk::prelude::*;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::{mpsc::Sender, Mutex};
+use tokio::sync::mpsc::Sender;
 
 pub mod parser;
 pub mod query;
@@ -41,59 +40,42 @@ pub enum NostrManagerError {
 }
 
 #[derive(Debug, Clone)]
-pub struct NostrManagerSettings {
-    pub timeout: Duration,
-    pub relays: Vec<String>,
-    // pub blossom_server: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct NostrManager {
-    pub settings: Arc<Mutex<NostrManagerSettings>>,
-    client: Client,
+    pub(crate) client: Client,
     #[allow(dead_code)] // Allow dead code because this triggers a warning when linting on linux.
     db_path: PathBuf,
     session_salt: [u8; 16],
+    timeout: Duration,
     // blossom: BlossomClient,
 }
 
-impl Default for NostrManagerSettings {
-    fn default() -> Self {
-        let mut relays = vec![];
-        if cfg!(debug_assertions) {
-            relays.push("ws://localhost:8080".to_string());
-            relays.push("ws://localhost:7777".to_string());
-        } else {
-            relays.push("wss://relay.damus.io".to_string());
-            relays.push("wss://relay.primal.net".to_string());
-            relays.push("wss://nos.lol".to_string());
-        }
-
-        Self {
-            timeout: Duration::from_secs(3),
-            relays,
-            // blossom_server: if cfg!(debug_assertions) {
-            //     "http://localhost:3000".to_string()
-            // } else {
-            //     "https://blossom.primal.net".to_string()
-            // },
-        }
-    }
-}
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
 
 impl NostrManager {
+    pub(crate) async fn add_relays<I>(&self, relays: I) -> Result<()>
+    where
+        I: IntoIterator<Item = RelayUrl>,
+    {
+        for relay in relays {
+            self.client.add_relay(relay).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn default_timeout() -> Duration {
+        Duration::from_secs(5)
+    }
     /// Create a new Nostr manager
     ///
     /// # Arguments
     ///
     /// * `db_path` - The path to the nostr cache database
     /// * `event_sender` - Channel sender for forwarding events to Whitenoise for processing
-    /// * `connect_to_relays` - Whether to attempt connecting to relays (false for testing)
-    async fn new(
+    /// * `timeout` - Timeout for client requests
+    pub async fn new(
         db_path: PathBuf,
         event_sender: Sender<crate::types::ProcessableEvent>,
-        connect_to_relays: bool,
+        timeout: Duration,
     ) -> Result<Self> {
         let opts = ClientOptions::default();
 
@@ -106,32 +88,9 @@ impl NostrManager {
             Client::builder().database(db).opts(opts).build()
         };
 
-        let settings = NostrManagerSettings::default();
-
         // Generate a random session salt
         let mut session_salt = [0u8; 16];
         ::rand::rng().fill_bytes(&mut session_salt);
-
-        // Add the default relays
-        for relay in &settings.relays {
-            client.add_relay(relay).await?;
-        }
-        // Add the purplepag.es relay to help with finding/publishing metadata
-        client.add_relay("wss://purplepag.es".to_string()).await?;
-
-        // Connect to relays if requested
-        if connect_to_relays {
-            tracing::debug!(
-                target: "whitenoise::nostr_manager::new",
-                "Connecting to relays..."
-            );
-            client.connect().await;
-        } else {
-            tracing::debug!(
-                target: "whitenoise::nostr_manager::new",
-                "Created NostrManager without connecting to relays (connect_to_relays=false)"
-            );
-        }
 
         // Set up notification handler with error handling
         tracing::debug!(
@@ -227,54 +186,17 @@ impl NostrManager {
 
         Ok(Self {
             client,
-            settings: Arc::new(Mutex::new(settings)),
             db_path,
             session_salt,
+            timeout,
         })
-    }
-
-    /// Create a new Nostr manager with relay connections (for production use)
-    pub async fn new_with_connections(
-        db_path: PathBuf,
-        event_sender: Sender<crate::types::ProcessableEvent>,
-    ) -> Result<Self> {
-        Self::new(db_path, event_sender, true).await
-    }
-
-    /// Create a new Nostr manager without attempting to connect to relays (for testing)
-    #[cfg(test)]
-    pub async fn new_without_connection(
-        db_path: PathBuf,
-        event_sender: Sender<crate::types::ProcessableEvent>,
-    ) -> Result<Self> {
-        Self::new(db_path, event_sender, false).await
-    }
-
-    /// Get the timeout for the Nostr manager
-    pub(crate) async fn timeout(&self) -> Result<Duration> {
-        let guard = self.settings.lock().await;
-        Ok(guard.timeout)
-    }
-
-    /// Get the relays for the Nostr manager
-    pub(crate) async fn relays(&self) -> Result<Vec<RelayUrl>> {
-        let guard = self.settings.lock().await;
-        Ok(guard
-            .relays
-            .clone()
-            .into_iter()
-            .map(|r| RelayUrl::parse(&r).unwrap())
-            .collect())
     }
 
     /// Fetch an event (first from database, then from relays) with a filter
     pub(crate) async fn fetch_events_with_filter(&self, filter: Filter) -> Result<Events> {
         let events = self.client.database().query(filter.clone()).await?;
         if events.is_empty() {
-            let events = self
-                .client
-                .fetch_events(filter, self.timeout().await.unwrap())
-                .await?;
+            let events = self.client.fetch_events(filter, self.timeout).await?;
             Ok(events)
         } else {
             Ok(events)
@@ -667,65 +589,6 @@ impl NostrManager {
         Ok(())
     }
 
-    pub async fn fetch_all_user_data(
-        &self,
-        signer: impl NostrSigner + 'static,
-        last_synced: Timestamp,
-        group_ids: Vec<String>,
-    ) -> Result<()> {
-        let pubkey = signer.get_public_key().await?;
-        self.client.set_signer(signer).await;
-
-        // Create a filter for all metadata-related events (user metadata and contacts)
-        let contacts_pubkeys = self
-            .client
-            .get_contact_list_public_keys(self.timeout().await?)
-            .await?;
-
-        let mut metadata_authors = contacts_pubkeys;
-        metadata_authors.push(pubkey);
-
-        let metadata_filter = Filter::new().kind(Kind::Metadata).authors(metadata_authors);
-
-        // Create a filter for all relay-related events
-        let relay_filter = Filter::new().author(pubkey).kinds(vec![
-            Kind::RelayList,
-            Kind::InboxRelays,
-            Kind::MlsKeyPackageRelays,
-        ]);
-
-        // Create a filter for all MLS-related events
-        let mls_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
-
-        // Create a filter for gift wrapped events
-        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
-
-        // Create a filter for group messages
-        let group_messages_filter = Filter::new()
-            .kind(Kind::MlsGroupMessage)
-            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
-            .since(last_synced)
-            .until(Timestamp::now());
-
-        // Fetch all events in parallel
-        // We don't need to handle the events, they'll be processed in the background by the event processor.
-        let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
-            self.client
-                .fetch_events(metadata_filter, self.timeout().await?),
-            self.client
-                .fetch_events(relay_filter, self.timeout().await?),
-            self.client.fetch_events(mls_filter, self.timeout().await?),
-            self.client
-                .fetch_events(giftwrap_filter, self.timeout().await?),
-            self.client
-                .fetch_events(group_messages_filter, self.timeout().await?)
-        );
-
-        self.client.unset_signer().await;
-
-        Ok(())
-    }
-
     /// Expose session_salt for use in subscriptions
     pub fn session_salt(&self) -> &[u8; 16] {
         &self.session_salt
@@ -860,195 +723,6 @@ impl NostrManager {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use std::time::Duration;
-    use tempfile::tempdir;
-    use tokio::sync::mpsc;
-
-    #[test]
-    fn test_nostr_manager_settings_default() {
-        let settings = NostrManagerSettings::default();
-
-        // Test timeout
-        assert_eq!(settings.timeout, Duration::from_secs(3));
-
-        // Test that relays are configured
-        assert!(!settings.relays.is_empty());
-
-        // Test that debug and release builds have different relay configurations
-        if cfg!(debug_assertions) {
-            assert!(settings.relays.contains(&"ws://localhost:8080".to_string()));
-            assert!(settings.relays.contains(&"ws://localhost:7777".to_string()));
-        } else {
-            assert!(settings
-                .relays
-                .contains(&"wss://relay.damus.io".to_string()));
-            assert!(settings.relays.contains(&"wss://purplepag.es".to_string()));
-            assert!(settings
-                .relays
-                .contains(&"wss://relay.primal.net".to_string()));
-            assert!(settings.relays.contains(&"wss://nos.lol".to_string()));
-        }
-    }
-
-    #[test]
-    fn test_nostr_manager_settings_clone_and_debug() {
-        let settings = NostrManagerSettings::default();
-        let cloned_settings = settings.clone();
-
-        assert_eq!(settings.timeout, cloned_settings.timeout);
-        assert_eq!(settings.relays, cloned_settings.relays);
-
-        // Test Debug implementation
-        let debug_str = format!("{:?}", settings);
-        assert!(debug_str.contains("NostrManagerSettings"));
-        assert!(debug_str.contains("timeout"));
-        assert!(debug_str.contains("relays"));
-    }
-
-    #[tokio::test]
-    async fn test_nostr_manager_new() {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().to_path_buf();
-        let (tx, _rx) = mpsc::channel(10);
-
-        let result = NostrManager::new_without_connection(db_path, tx).await;
-        assert!(result.is_ok());
-
-        let manager = result.unwrap();
-
-        // Test that settings are properly initialized
-        let settings = manager.settings.lock().await;
-        assert_eq!(settings.timeout, Duration::from_secs(3));
-        assert!(!settings.relays.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_nostr_manager_timeout() {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().to_path_buf();
-        let (tx, _rx) = mpsc::channel(10);
-
-        let manager = NostrManager::new_without_connection(db_path, tx)
-            .await
-            .unwrap();
-        let timeout = manager.timeout().await.unwrap();
-
-        assert_eq!(timeout, Duration::from_secs(3));
-    }
-
-    #[tokio::test]
-    async fn test_nostr_manager_relays() {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().to_path_buf();
-        let (tx, _rx) = mpsc::channel(10);
-
-        let manager = NostrManager::new_without_connection(db_path, tx)
-            .await
-            .unwrap();
-        let relays = manager.relays().await.unwrap();
-
-        assert!(!relays.is_empty());
-
-        // Verify that all returned relays are valid RelayUrl objects
-        for relay in relays {
-            assert!(
-                relay.to_string().starts_with("ws://") || relay.to_string().starts_with("wss://")
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_nostr_manager_clone_and_debug() {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().to_path_buf();
-        let (tx, _rx) = mpsc::channel(10);
-
-        let manager = NostrManager::new_without_connection(db_path, tx)
-            .await
-            .unwrap();
-        let cloned_manager = manager.clone();
-
-        // Test that cloned manager has the same settings
-        let original_timeout = manager.timeout().await.unwrap();
-        let cloned_timeout = cloned_manager.timeout().await.unwrap();
-        assert_eq!(original_timeout, cloned_timeout);
-
-        // Test Debug implementation
-        let debug_str = format!("{:?}", manager);
-        assert!(debug_str.contains("NostrManager"));
-        assert!(debug_str.contains("settings"));
-        assert!(debug_str.contains("client"));
-    }
-
-    #[tokio::test]
-    async fn test_delete_all_data() {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().to_path_buf();
-        let (tx, _rx) = mpsc::channel(10);
-
-        let manager = NostrManager::new_without_connection(db_path, tx)
-            .await
-            .unwrap();
-
-        // Test that delete_all_data succeeds
-        let result = manager.delete_all_data().await;
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_nostr_manager_error_display() {
-        let secrets_error = NostrManagerError::SecretsStoreError("test error".to_string());
-        assert!(secrets_error
-            .to_string()
-            .contains("Error with secrets store"));
-
-        let queue_error = NostrManagerError::FailedToQueueEvent("test error".to_string());
-        assert!(queue_error.to_string().contains("Failed to queue event"));
-
-        let shutdown_error =
-            NostrManagerError::FailedToShutdownEventProcessor("test error".to_string());
-        assert!(shutdown_error
-            .to_string()
-            .contains("Failed to shutdown event processor"));
-
-        let account_error = NostrManagerError::AccountError("test error".to_string());
-        assert!(account_error.to_string().contains("Account error"));
-    }
-
-    #[test]
-    fn test_nostr_manager_error_debug() {
-        let error = NostrManagerError::SecretsStoreError("test error".to_string());
-        let debug_str = format!("{:?}", error);
-        assert!(debug_str.contains("SecretsStoreError"));
-        assert!(debug_str.contains("test error"));
-    }
-
-    #[tokio::test]
-    async fn test_extract_invite_events_empty() {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().to_path_buf();
-        let (tx, _rx) = mpsc::channel(10);
-
-        let manager = NostrManager::new_without_connection(db_path, tx)
-            .await
-            .unwrap();
-
-        // Test with empty vector
-        let result = manager.extract_invite_events(vec![]).await;
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_result_type_alias() {
-        // Test that our Result type alias works correctly
-        let ok_result: Result<String> = Ok("test".to_string());
-        assert!(ok_result.is_ok());
-        assert_eq!("test", "test");
-
-        let err_result: Result<String> =
-            Err(NostrManagerError::SecretsStoreError("test".to_string()));
-        assert!(err_result.is_err());
-    }
 
     // Test data for problematic contact list
     fn get_test_contact_list_event() -> Event {

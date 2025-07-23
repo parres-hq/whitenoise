@@ -1,7 +1,7 @@
 use crate::types::MessageWithTokens;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
-use crate::RelayType;
+use crate::Account;
 use nostr_mls::prelude::*;
 
 impl Whitenoise {
@@ -42,15 +42,15 @@ impl Whitenoise {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use whitenoise::Whitenoise;
+    /// # use whitenoise::{Account, Whitenoise};
     /// # use nostr_mls::prelude::*;
-    /// # async fn example(whitenoise: &Whitenoise, sender_pubkey: PublicKey, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, account: &Account, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
     /// let message_content = "Hello, group!".to_string();
     /// let kind = 1; // Text note
     /// let tags = Some(vec![Tag::hashtag("example")]);
     ///
     /// let message_with_tokens = whitenoise
-    ///     .send_message_to_group(&sender_pubkey, &group_id, message_content, kind, tags)
+    ///     .send_message_to_group(&account, &group_id, message_content, kind, tags)
     ///     .await?;
     ///
     /// println!("Sent message: {}", message_with_tokens.message.content);
@@ -60,16 +60,14 @@ impl Whitenoise {
     /// ```
     pub async fn send_message_to_group(
         &self,
-        sender_pubkey: &PublicKey,
+        account: &Account,
         group_id: &GroupId,
         message: String,
         kind: u16,
         tags: Option<Vec<Tag>>,
     ) -> Result<MessageWithTokens> {
         let (inner_event, event_id) =
-            self.create_unsigned_nostr_event(sender_pubkey, &message, kind, tags)?;
-
-        let account = self.fetch_account(sender_pubkey).await?;
+            self.create_unsigned_nostr_event(&account.pubkey, &message, kind, tags)?;
 
         let nostr_mls = &*account.nostr_mls.lock().await;
 
@@ -119,11 +117,11 @@ impl Whitenoise {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use whitenoise::Whitenoise;
+    /// # use whitenoise::{Account, Whitenoise};
     /// # use nostr_mls::prelude::*;
-    /// # async fn example(whitenoise: &Whitenoise, user_pubkey: PublicKey, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, account: &Account, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
     /// let messages = whitenoise
-    ///     .fetch_messages_for_group(&user_pubkey, &group_id)
+    ///     .fetch_messages_for_group(&account, &group_id)
     ///     .await?;
     ///
     /// for message_with_tokens in messages {
@@ -135,10 +133,9 @@ impl Whitenoise {
     /// ```
     pub async fn fetch_messages_for_group(
         &self,
-        pubkey: &PublicKey,
+        account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<MessageWithTokens>> {
-        let account = self.fetch_account(pubkey).await?;
         let nostr_mls = &*account.nostr_mls.lock().await;
         let messages = nostr_mls.get_messages(group_id)?;
         let messages_with_tokens = messages
@@ -229,27 +226,26 @@ impl Whitenoise {
     /// Publish the message in encrypted form for the recepient to the relays as per nip04
     pub async fn send_direct_message_nip04(
         &self,
-        sender_pubkey: &PublicKey,
+        account: &Account,
         recepient_pubkey: &PublicKey,
         content: String,
         tags: Vec<Tag>,
     ) -> Result<()> {
         let sender_keys = self
             .secrets_store
-            .get_nostr_keys_for_pubkey(sender_pubkey)?;
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        let contact = self.load_contact(recepient_pubkey).await?;
 
         let encrypted_message =
             nostr::nips::nip04::encrypt(sender_keys.secret_key(), recepient_pubkey, &content)?;
         let dm_event_builder = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_message)
             .tags(tags)
             .tag(Tag::public_key(*recepient_pubkey));
-        let relays = self
-            .fetch_relays_with_fallback(*sender_pubkey, RelayType::Inbox)
-            .await?;
 
         let _event_id = self
             .nostr
-            .publish_event_builder_with_signer(dm_event_builder, &relays, sender_keys)
+            .publish_event_builder_with_signer(dm_event_builder, &contact.inbox_relays, sender_keys)
             .await?;
 
         Ok(())

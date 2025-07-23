@@ -99,7 +99,7 @@ impl NostrManager {
     ) -> Result<()> {
         let contacts_pubkeys = self
             .client
-            .get_contact_list_public_keys(self.timeout().await?)
+            .get_contact_list_public_keys(self.timeout)
             .await?;
 
         if contacts_pubkeys.is_empty() {
