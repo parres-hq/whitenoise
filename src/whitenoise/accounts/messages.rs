@@ -42,15 +42,15 @@ impl Whitenoise {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use whitenoise::Whitenoise;
+    /// # use whitenoise::{Account, Whitenoise};
     /// # use nostr_mls::prelude::*;
-    /// # async fn example(whitenoise: &Whitenoise, sender_pubkey: PublicKey, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, account: &Account, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
     /// let message_content = "Hello, group!".to_string();
     /// let kind = 1; // Text note
     /// let tags = Some(vec![Tag::hashtag("example")]);
     ///
     /// let message_with_tokens = whitenoise
-    ///     .send_message_to_group(&sender_pubkey, &group_id, message_content, kind, tags)
+    ///     .send_message_to_group(&account, &group_id, message_content, kind, tags)
     ///     .await?;
     ///
     /// println!("Sent message: {}", message_with_tokens.message.content);
@@ -117,11 +117,11 @@ impl Whitenoise {
     /// # Example
     ///
     /// ```rust,no_run
-    /// # use whitenoise::Whitenoise;
+    /// # use whitenoise::{Account, Whitenoise};
     /// # use nostr_mls::prelude::*;
-    /// # async fn example(whitenoise: &Whitenoise, user_pubkey: PublicKey, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example(whitenoise: &Whitenoise, account: &Account, group_id: GroupId) -> Result<(), Box<dyn std::error::Error>> {
     /// let messages = whitenoise
-    ///     .fetch_messages_for_group(&user_pubkey, &group_id)
+    ///     .fetch_messages_for_group(&account, &group_id)
     ///     .await?;
     ///
     /// for message_with_tokens in messages {
