@@ -13,6 +13,7 @@ pub mod whitenoise;
 pub use crate::nostr_manager::parser::SerializableToken;
 pub use crate::types::ImageType;
 pub use crate::types::MessageWithTokens;
+pub use crate::whitenoise::accounts::contacts::Contact;
 pub use crate::whitenoise::accounts::relays::RelayType;
 pub use crate::whitenoise::accounts::{Account, AccountSettings};
 pub use crate::whitenoise::error::WhitenoiseError;
@@ -21,7 +22,6 @@ pub use crate::whitenoise::message_aggregator::{
 };
 pub use nostr_mls::groups::NostrGroupConfigData;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
-pub use crate::whitenoise::accounts::contacts::Contact;
 
 // Re-export nostr types with documentation
 //
