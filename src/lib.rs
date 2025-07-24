@@ -21,6 +21,7 @@ pub use crate::whitenoise::message_aggregator::{
 };
 pub use nostr_mls::groups::NostrGroupConfigData;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
+pub use crate::whitenoise::accounts::contacts::Contact;
 
 // Re-export nostr types with documentation
 //
