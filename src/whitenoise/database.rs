@@ -18,6 +18,10 @@ const MIGRATION_FILES: &[(&str, &[u8])] = &[
         "0003_contacts.sql",
         include_bytes!("../../db_migrations/0003_contacts.sql"),
     ),
+    (
+        "0001_accounts_relays.sql",
+        include_bytes!("../../db_migrations/0004_accounts_relays.sql"),
+    ),
     // Add new migrations here in order, for example:
     // ("000X_something.sql", include_bytes!("../db_migrations/000X_something.sql")),
     // ("000Y_another.sql", include_bytes!("../db_migrations/000Y_another.sql")),
