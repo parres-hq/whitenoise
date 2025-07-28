@@ -574,12 +574,19 @@ impl Whitenoise {
         })?;
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Keys stored in secret store");
 
+        let mut nip65_relays = self
+            .fetch_relays_from(Account::default_relays(), keys.public_key, RelayType::Nostr)
+            .await?;
+        if nip65_relays.is_empty() {
+            nip65_relays = Account::default_relays();
+        }
+
         // Step 3: Create account struct and save to database
         let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
             last_synced: Timestamp::zero(),
-            nip65_relays: Account::default_relays(),
+            nip65_relays,
             inbox_relays: Account::default_relays(),
             key_package_relays: Account::default_relays(),
             nostr_mls: Account::create_nostr_mls(keys.public_key(), &self.config.data_dir)?,
