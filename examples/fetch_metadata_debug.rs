@@ -271,12 +271,12 @@ async fn main() -> Result<(), WhitenoiseError> {
         println!("   📍 PubKey 2: {}", pubkey2.to_hex());
     }
 
-    let discovery_relays = Account::default_relays();
+    let nip65_relays = Account::default_relays();
 
     println!("\n1️⃣  Fetching metadata for first npub...");
     let start_time = std::time::Instant::now();
     let metadata1 = whitenoise
-        .fetch_metadata_from(discovery_relays.clone(), pubkey1)
+        .fetch_metadata_from(nip65_relays.clone(), pubkey1)
         .await?;
     let duration1 = start_time.elapsed();
     println!("   ✅ Fetched in {:?}", duration1);
@@ -284,7 +284,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     println!("\n2️⃣  Fetching metadata for second npub...");
     let start_time = std::time::Instant::now();
     let metadata2 = whitenoise
-        .fetch_metadata_from(discovery_relays.clone(), pubkey2)
+        .fetch_metadata_from(nip65_relays.clone(), pubkey2)
         .await?;
     let duration2 = start_time.elapsed();
     println!("   ✅ Fetched in {:?}", duration2);
@@ -325,10 +325,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     println!("Re-fetching both metadata to check for caching issues...");
 
     let metadata1_second = whitenoise
-        .fetch_metadata_from(discovery_relays.clone(), pubkey1)
+        .fetch_metadata_from(nip65_relays.clone(), pubkey1)
         .await?;
     let metadata2_second = whitenoise
-        .fetch_metadata_from(discovery_relays.clone(), pubkey2)
+        .fetch_metadata_from(nip65_relays.clone(), pubkey2)
         .await?;
 
     // Check if results are consistent between fetches

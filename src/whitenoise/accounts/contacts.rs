@@ -12,7 +12,7 @@ use nostr_sdk::prelude::*;
 pub struct Contact {
     pub pubkey: PublicKey,
     pub metadata: Option<Metadata>,
-    pub discovery_relays: Vec<RelayUrl>,
+    pub nip65_relays: Vec<RelayUrl>,
     pub inbox_relays: Vec<RelayUrl>,
     pub key_package_relays: Vec<RelayUrl>,
 }
@@ -27,7 +27,7 @@ where
         // Extract raw values from the database row
         let pubkey_str: String = row.try_get("pubkey")?;
         let metadata_string: Option<String> = row.try_get("metadata")?;
-        let discovery_relays: String = row.try_get("discovery_relays")?;
+        let nip65_relays: String = row.try_get("nip65_relays")?;
         let inbox_relays: String = row.try_get("inbox_relays")?;
         let key_package_relays: String = row.try_get("key_package_relays")?;
 
@@ -49,14 +49,14 @@ where
             source: Box::new(e),
         })?;
 
-        let discovery_relays = Whitenoise::parse_relays_from_sql(discovery_relays)?;
+        let nip65_relays = Whitenoise::parse_relays_from_sql(nip65_relays)?;
         let inbox_relays = Whitenoise::parse_relays_from_sql(inbox_relays)?;
         let key_package_relays = Whitenoise::parse_relays_from_sql(key_package_relays)?;
 
         Ok(Contact {
             pubkey,
             metadata,
-            discovery_relays,
+            nip65_relays,
             inbox_relays,
             key_package_relays,
         })
@@ -179,7 +179,7 @@ impl Whitenoise {
 
         let mut inbox_relays = self
             .fetch_relays_from(
-                account.discovery_relays.clone(),
+                account.nip65_relays.clone(),
                 contact_pubkey,
                 RelayType::Inbox,
             )
@@ -189,7 +189,7 @@ impl Whitenoise {
         }
         let mut key_package_relays = self
             .fetch_relays_from(
-                account.discovery_relays.clone(),
+                account.nip65_relays.clone(),
                 contact_pubkey,
                 RelayType::KeyPackage,
             )
@@ -198,13 +198,13 @@ impl Whitenoise {
             key_package_relays = account.key_package_relays.clone();
         }
         let metadata = self
-            .fetch_metadata_from(account.discovery_relays.clone(), contact_pubkey)
+            .fetch_metadata_from(account.nip65_relays.clone(), contact_pubkey)
             .await?;
 
         // save contact locally
         let contact = Contact {
             pubkey: contact_pubkey,
-            discovery_relays: account.discovery_relays.clone(), // The account discovered the contact through this relays
+            nip65_relays: account.nip65_relays.clone(), // The account discovered the contact through this relays
             inbox_relays,
             key_package_relays,
             metadata,
@@ -321,7 +321,7 @@ impl Whitenoise {
 
     pub(crate) async fn save_contact_local(&self, contact: &Contact) -> Result<()> {
         let discovery_urls: Vec<_> = contact
-            .discovery_relays
+            .nip65_relays
             .iter()
             .map(|relay_url| relay_url.as_str())
             .collect();
@@ -339,11 +339,11 @@ impl Whitenoise {
             .collect();
 
         let result = sqlx::query(
-            "INSERT INTO contacts (pubkey, metadata, discovery_relays, inbox_relays, key_package_relays)
+            "INSERT INTO contacts (pubkey, metadata, nip65_relays, inbox_relays, key_package_relays)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(pubkey) DO UPDATE SET
                 metadata = excluded.metadata,
-                discovery_relays = excluded.discovery_relays,
+                nip65_relays = excluded.nip65_relays,
                 inbox_relays = excluded.inbox_relays,
                 key_package_relays = excluded.key_package_relays",
         )
@@ -450,14 +450,14 @@ impl Whitenoise {
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &account.discovery_relays, keys.clone())
+            .publish_event_builder_with_signer(event, &account.nip65_relays, keys.clone())
             .await?;
 
         // Update subscription for contact list metadata - use same relay logic
         self.nostr
             .update_contacts_metadata_subscription_with_signer(
                 account.pubkey,
-                account.discovery_relays.clone(),
+                account.nip65_relays.clone(),
                 keys,
             )
             .await?;

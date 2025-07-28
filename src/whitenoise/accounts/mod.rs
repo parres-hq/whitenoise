@@ -63,7 +63,7 @@ impl Default for AccountSettings {
 pub struct Account {
     pub pubkey: PublicKey,
     pub settings: AccountSettings,
-    pub discovery_relays: Vec<RelayUrl>,
+    pub nip65_relays: Vec<RelayUrl>,
     pub inbox_relays: Vec<RelayUrl>,
     pub key_package_relays: Vec<RelayUrl>,
     pub last_synced: Timestamp,
@@ -77,7 +77,7 @@ struct AccountRow {
     pubkey: PublicKey,
     settings: AccountSettings,
     last_synced: Timestamp,
-    discovery_relays: Vec<RelayUrl>,
+    nip65_relays: Vec<RelayUrl>,
     inbox_relays: Vec<RelayUrl>,
     key_package_relays: Vec<RelayUrl>,
 }
@@ -94,7 +94,7 @@ where
         let pubkey_str: String = row.try_get("pubkey")?;
         let settings_json: String = row.try_get("settings")?;
         let last_synced_i64: i64 = row.try_get("last_synced")?;
-        let discovery_relays: String = row.try_get("discovery_relays")?;
+        let nip65_relays: String = row.try_get("nip65_relays")?;
         let inbox_relays: String = row.try_get("inbox_relays")?;
         let key_package_relays: String = row.try_get("key_package_relays")?;
 
@@ -111,7 +111,7 @@ where
                 source: Box::new(e),
             })?;
 
-        let discovery_relays = Whitenoise::parse_relays_from_sql(discovery_relays)?;
+        let nip65_relays = Whitenoise::parse_relays_from_sql(nip65_relays)?;
         let inbox_relays = Whitenoise::parse_relays_from_sql(inbox_relays)?;
         let key_package_relays = Whitenoise::parse_relays_from_sql(key_package_relays)?;
 
@@ -122,7 +122,7 @@ where
             pubkey,
             settings,
             last_synced,
-            discovery_relays,
+            nip65_relays,
             inbox_relays,
             key_package_relays,
         })
@@ -135,7 +135,7 @@ impl std::fmt::Debug for Account {
             .field("pubkey", &self.pubkey)
             .field("settings", &self.settings)
             .field("last_synced", &self.last_synced)
-            .field("discovery_relays", &self.discovery_relays)
+            .field("nip65_relays", &self.nip65_relays)
             .field("inbox_relays", &self.inbox_relays)
             .field("key_package_relays", &self.key_package_relays)
             .field("inbox_relays", &self.inbox_relays)
@@ -170,7 +170,7 @@ impl Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
             last_synced: Timestamp::zero(),
-            discovery_relays: Self::default_relays(),
+            nip65_relays: Self::default_relays(),
             inbox_relays: Self::default_relays(),
             key_package_relays: Self::default_relays(),
             nostr_mls,
@@ -461,7 +461,7 @@ impl Whitenoise {
                 pubkey: account_row.pubkey,
                 settings: account_row.settings,
                 last_synced: account_row.last_synced,
-                discovery_relays: account_row.discovery_relays,
+                nip65_relays: account_row.nip65_relays,
                 inbox_relays: account_row.inbox_relays,
                 key_package_relays: account_row.key_package_relays,
                 nostr_mls,
@@ -473,7 +473,7 @@ impl Whitenoise {
             self.nostr
                 .add_relays(
                     account
-                        .discovery_relays
+                        .nip65_relays
                         .clone()
                         .into_iter()
                         .chain(account.inbox_relays.clone())
@@ -528,7 +528,7 @@ impl Whitenoise {
             pubkey: account_row.pubkey,
             settings: account_row.settings,
             last_synced: account_row.last_synced,
-            discovery_relays: account_row.discovery_relays,
+            nip65_relays: account_row.nip65_relays,
             inbox_relays: account_row.inbox_relays,
             key_package_relays: account_row.key_package_relays,
             nostr_mls: Account::create_nostr_mls(account_row.pubkey, &self.config.data_dir)?,
@@ -579,7 +579,7 @@ impl Whitenoise {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
             last_synced: Timestamp::zero(),
-            discovery_relays: Account::default_relays(),
+            nip65_relays: Account::default_relays(),
             inbox_relays: Account::default_relays(),
             key_package_relays: Account::default_relays(),
             nostr_mls: Account::create_nostr_mls(keys.public_key(), &self.config.data_dir)?,
@@ -625,7 +625,7 @@ impl Whitenoise {
         let mut txn = self.database.pool.begin().await?;
 
         let discovery_urls: Vec<_> = account
-            .discovery_relays
+            .nip65_relays
             .iter()
             .map(|relay_url| relay_url.as_str())
             .collect();
@@ -641,11 +641,11 @@ impl Whitenoise {
             .collect();
 
         let result = sqlx::query(
-            "INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced)
+            "INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
                 settings = excluded.settings,
-                discovery_relays = excluded.discovery_relays,
+                nip65_relays = excluded.nip65_relays,
                 inbox_relays = excluded.inbox_relays,
                 key_package_relays = excluded.key_package_relays,
                 last_synced = excluded.last_synced",
@@ -908,7 +908,7 @@ impl Whitenoise {
         self.nostr
             .setup_account_subscriptions_with_signer(
                 account.pubkey,
-                account.discovery_relays.clone(),
+                account.nip65_relays.clone(),
                 account.inbox_relays.clone(),
                 group_relays,
                 nostr_group_ids,
@@ -946,13 +946,13 @@ impl Whitenoise {
 
         let inbox_result = self
             .nostr
-            .publish_event_builder_with_signer(inbox_event, &account.discovery_relays, keys.clone())
+            .publish_event_builder_with_signer(inbox_event, &account.nip65_relays, keys.clone())
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", inbox_result);
 
         let key_package_result = self
             .nostr
-            .publish_event_builder_with_signer(key_package_event, &account.discovery_relays, keys)
+            .publish_event_builder_with_signer(key_package_event, &account.nip65_relays, keys)
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", key_package_result);
         Ok(())
@@ -1008,7 +1008,7 @@ mod tests {
             "CREATE TABLE accounts (
                 pubkey TEXT PRIMARY KEY,
                 settings JSONB NOT NULL,
-                discovery_relays TEXT NOT NULL,
+                nip65_relays TEXT NOT NULL,
                 inbox_relays TEXT NOT NULL,
                 key_package_relays TEXT NOT NULL,
                 last_synced INTEGER NOT NULL
@@ -1027,7 +1027,7 @@ mod tests {
         let test_timestamp = 1234567890u64;
 
         sqlx::query(
-            "INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(&test_settings)
@@ -1050,7 +1050,7 @@ mod tests {
         assert_eq!(account.pubkey, test_pubkey);
         assert_eq!(account.settings, AccountSettings::default());
         assert_eq!(account.last_synced.as_u64(), test_timestamp);
-        assert_eq!(account.discovery_relays, test_relay_urls);
+        assert_eq!(account.nip65_relays, test_relay_urls);
         assert_eq!(account.inbox_relays, test_relay_urls);
         assert_eq!(account.key_package_relays, test_relay_urls);
     }

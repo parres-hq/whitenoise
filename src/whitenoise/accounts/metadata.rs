@@ -26,17 +26,14 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the metadata query fails.
     pub async fn fetch_metadata_from(
         &self,
-        discovery_relays: Vec<RelayUrl>,
+        nip65_relays: Vec<RelayUrl>,
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         // First try and fetch from local nostr database
         let mut metadata = self.nostr.query_user_metadata(pubkey).await?;
         if metadata.is_none() {
             // If we don't find it in the nostr database, try and fetch from relays
-            metadata = self
-                .nostr
-                .fetch_metadata_from(discovery_relays, pubkey)
-                .await?;
+            metadata = self.nostr.fetch_metadata_from(nip65_relays, pubkey).await?;
         }
         Ok(metadata)
     }
@@ -84,7 +81,7 @@ impl Whitenoise {
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &account.discovery_relays, keys)
+            .publish_event_builder_with_signer(event, &account.nip65_relays, keys)
             .await?;
 
         tracing::debug!(
@@ -398,7 +395,7 @@ mod tests {
 
         // Now fetch the metadata - this should come from the cache
         let result = whitenoise
-            .fetch_metadata_from(account.discovery_relays.clone(), account.pubkey)
+            .fetch_metadata_from(account.nip65_relays.clone(), account.pubkey)
             .await;
         assert!(result.is_ok(), "fetch_metadata should succeed");
 
@@ -463,7 +460,7 @@ mod tests {
         // Now try to fetch the other account's metadata
         // This should attempt to fetch from relays since it's not in our local cache
         let result = whitenoise
-            .fetch_metadata_from(account.discovery_relays.clone(), other_account.pubkey)
+            .fetch_metadata_from(account.nip65_relays.clone(), other_account.pubkey)
             .await;
         assert!(result.is_ok(), "fetch_metadata should succeed");
 
@@ -499,7 +496,7 @@ mod tests {
 
         // Try to fetch metadata for a non-existent user
         let result = whitenoise
-            .fetch_metadata_from(account.discovery_relays.clone(), random_pubkey)
+            .fetch_metadata_from(account.nip65_relays.clone(), random_pubkey)
             .await;
         assert!(
             result.is_ok(),
@@ -533,7 +530,7 @@ mod tests {
 
         // Try to fetch metadata for the other user
         let result = whitenoise
-            .fetch_metadata_from(account.discovery_relays.clone(), other_pubkey)
+            .fetch_metadata_from(account.nip65_relays.clone(), other_pubkey)
             .await;
         assert!(
             result.is_ok(),

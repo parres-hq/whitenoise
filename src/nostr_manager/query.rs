@@ -15,13 +15,13 @@ impl NostrManager {
 
     pub(crate) async fn fetch_metadata_from(
         &self,
-        discovery_relays: Vec<RelayUrl>,
+        nip65_relays: Vec<RelayUrl>,
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
         let events: Events = self
             .client
-            .fetch_events_from(discovery_relays, filter, self.timeout)
+            .fetch_events_from(nip65_relays, filter, self.timeout)
             .await?;
         match events.first() {
             Some(event) => Ok(Some(Metadata::try_from(event)?)),
@@ -33,7 +33,7 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        discovery_relays: Vec<RelayUrl>,
+        nip65_relays: Vec<RelayUrl>,
     ) -> Result<Vec<RelayUrl>> {
         let filter = Filter::new()
             .author(pubkey)
@@ -41,7 +41,7 @@ impl NostrManager {
             .limit(1);
         let relay_events = self
             .client
-            .fetch_events_from(discovery_relays, filter.clone(), self.timeout)
+            .fetch_events_from(nip65_relays, filter.clone(), self.timeout)
             .await?;
         Ok(Self::relay_urls_from_events(relay_events))
     }
@@ -102,7 +102,7 @@ impl NostrManager {
 
         let events = self
             .client
-            .fetch_events_from(account.discovery_relays.clone(), filter, self.timeout)
+            .fetch_events_from(account.nip65_relays.clone(), filter, self.timeout)
             .await?;
 
         let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {

@@ -125,7 +125,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test metadata fetching
     tracing::info!("Testing metadata fetching...");
     let loaded_metadata = whitenoise
-        .fetch_metadata_from(account3.discovery_relays.clone(), account3.pubkey)
+        .fetch_metadata_from(account3.nip65_relays.clone(), account3.pubkey)
         .await?;
     if let Some(metadata) = loaded_metadata {
         assert_eq!(metadata.name, Some("Known User".to_string()));
