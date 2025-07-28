@@ -88,13 +88,14 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the contact list query fails.
     pub async fn fetch_contacts(
         &self,
-        account: &Account,
+        pubkey: &PublicKey,
     ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        if !self.logged_in(&account.pubkey).await {
+        if !self.logged_in(pubkey).await {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let contacts = self.nostr.fetch_user_contact_list(account).await?;
+        let account = self.get_account(pubkey).await?;
+        let contacts = self.nostr.fetch_user_contact_list(&account).await?;
         Ok(contacts)
     }
 
@@ -166,7 +167,7 @@ impl Whitenoise {
         }
 
         // Load current contact list
-        let current_contacts = self.fetch_contacts(account).await?;
+        let current_contacts = self.fetch_contacts(&account.pubkey).await?;
 
         // Check if contact already exists
         if current_contacts.contains_key(&contact_pubkey) {
@@ -246,7 +247,7 @@ impl Whitenoise {
         }
 
         // Load current contact list
-        let current_contacts = self.fetch_contacts(account).await?;
+        let current_contacts = self.fetch_contacts(&account.pubkey).await?;
 
         // Check if contact exists
         if !current_contacts.contains_key(&contact_pubkey) {
@@ -531,7 +532,7 @@ mod tests {
 
         // Test the logic of adding a contact (without actual network calls)
         // Load current contact list (will be empty in test environment)
-        let current_contacts = whitenoise.fetch_contacts(&account).await.unwrap();
+        let current_contacts = whitenoise.fetch_contacts(&account.pubkey).await.unwrap();
 
         // Verify contact doesn't already exist
         assert!(!current_contacts.contains_key(&contact_pubkey));
@@ -644,7 +645,7 @@ mod tests {
         let contact_pubkey = create_test_keys().public_key();
 
         // Test add contact validation (contact doesn't exist)
-        let current_contacts = whitenoise.fetch_contacts(&account).await.unwrap();
+        let current_contacts = whitenoise.fetch_contacts(&account.pubkey).await.unwrap();
 
         // Should be able to add new contact (empty list)
         let can_add = !current_contacts.contains_key(&contact_pubkey);

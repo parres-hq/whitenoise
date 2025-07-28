@@ -196,7 +196,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let test_contact3 = Keys::generate().public_key();
 
     // Test initial empty contact list
-    let initial_contacts = whitenoise.fetch_contacts(&account1).await?;
+    let initial_contacts = whitenoise.fetch_contacts(&account1.pubkey).await?;
     assert_eq!(initial_contacts.len(), 0);
     tracing::info!("✓ Initial contact list is empty");
 

@@ -880,7 +880,7 @@ mod tests {
             let metadata = whitenoise.fetch_metadata_from(relays, pubkey).await;
             assert!(metadata.is_ok());
 
-            let contacts = whitenoise.fetch_contacts(&account).await;
+            let contacts = whitenoise.fetch_contacts(&account.pubkey).await;
             assert!(contacts.is_ok());
         }
 
