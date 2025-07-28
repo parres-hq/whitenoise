@@ -200,11 +200,21 @@ impl Whitenoise {
         let metadata = self
             .fetch_metadata_from(account.nip65_relays.clone(), contact_pubkey)
             .await?;
+        let mut nip65_relays = self
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                contact_pubkey,
+                RelayType::Nostr,
+            )
+            .await?;
+        if nip65_relays.is_empty() {
+            nip65_relays = account.nip65_relays.clone();
+        }
 
         // save contact locally
         let contact = Contact {
             pubkey: contact_pubkey,
-            nip65_relays: account.nip65_relays.clone(), // The account discovered the contact through this relays
+            nip65_relays,
             inbox_relays,
             key_package_relays,
             metadata,
