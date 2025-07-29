@@ -279,6 +279,8 @@ impl Whitenoise {
             Err(e) => return Err(e),
         };
 
+        self.connect_account_relays(&account).await?;
+
         // Add the account to the in-memory accounts list
         {
             let mut accounts = self.write_accounts().await;

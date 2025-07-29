@@ -248,6 +248,13 @@ impl Whitenoise {
             *accounts = loaded_accounts;
         }
 
+        if whitenoise.nostr.client.relays().await.is_empty() {
+            // First time starting the app
+            for relay in Account::default_relays() {
+                whitenoise.nostr.client.add_relay(relay).await?;
+            }
+        }
+
         // No need to wait for all the relays to be up
         tokio::spawn({
             let client = whitenoise.nostr.client.clone();

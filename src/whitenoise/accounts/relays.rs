@@ -132,4 +132,25 @@ impl Whitenoise {
 
         Ok(relay_statuses)
     }
+
+    pub(crate) async fn connect_account_relays(&self, account: &Account) -> Result<()> {
+        for relay in account
+            .nip65_relays
+            .iter()
+            .chain(account.inbox_relays.iter())
+            .chain(account.key_package_relays.iter())
+        {
+            self.nostr.client.add_relay(relay).await?;
+        }
+
+        tracing::debug!("Connecting to the account relays added");
+        tokio::spawn({
+            let client = self.nostr.client.clone();
+            async move {
+                client.connect().await;
+            }
+        });
+
+        Ok(())
+    }
 }
