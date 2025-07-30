@@ -90,10 +90,6 @@ impl Whitenoise {
         &self,
         pubkey: &PublicKey,
     ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        if !self.logged_in(pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
         let account = self.get_account(pubkey).await?;
         let contacts = self.nostr.fetch_user_contact_list(&account).await?;
         Ok(contacts)
@@ -177,40 +173,33 @@ impl Whitenoise {
             )));
         }
 
-        let mut inbox_relays = self
-            .fetch_relays_from(
-                account.nip65_relays.clone(),
-                contact_pubkey,
-                RelayType::Inbox,
-            )
-            .await?;
-        if inbox_relays.is_empty() {
-            inbox_relays = account.inbox_relays.clone();
-        }
-        let mut key_package_relays = self
-            .fetch_relays_from(
-                account.nip65_relays.clone(),
-                contact_pubkey,
-                RelayType::KeyPackage,
-            )
-            .await?;
-        if key_package_relays.is_empty() {
-            key_package_relays = account.key_package_relays.clone();
-        }
-        let metadata = self
-            .fetch_metadata_from(account.nip65_relays.clone(), contact_pubkey)
-            .await?;
-        let mut nip65_relays = self
+        let nip65_relays = self
             .fetch_relays_from(
                 account.nip65_relays.clone(),
                 contact_pubkey,
                 RelayType::Nostr,
             )
             .await?;
-        if nip65_relays.is_empty() {
-            nip65_relays = account.nip65_relays.clone();
-        }
 
+        let inbox_relays = self
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                contact_pubkey,
+                RelayType::Inbox,
+            )
+            .await?;
+
+        let key_package_relays = self
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                contact_pubkey,
+                RelayType::KeyPackage,
+            )
+            .await?;
+
+        let metadata = self
+            .fetch_metadata_from(account.nip65_relays.clone(), contact_pubkey)
+            .await?;
         // save contact locally
         let contact = Contact {
             pubkey: contact_pubkey,
@@ -330,7 +319,7 @@ impl Whitenoise {
     }
 
     pub(crate) async fn save_contact_local(&self, contact: &Contact) -> Result<()> {
-        let discovery_urls: Vec<_> = contact
+        let nip65_urls: Vec<_> = contact
             .nip65_relays
             .iter()
             .map(|relay_url| relay_url.as_str())
@@ -363,7 +352,7 @@ impl Whitenoise {
             .map(serde_json::to_string)
             .transpose()? // Convert Option<Result> to Result<Option>
         )
-        .bind(serde_json::to_string(&discovery_urls)?)
+        .bind(serde_json::to_string(&nip65_urls)?)
         .bind(serde_json::to_string(&inbox_urls)?)
         .bind(serde_json::to_string(&key_package_urls)?)
         .execute(&self.database.pool)

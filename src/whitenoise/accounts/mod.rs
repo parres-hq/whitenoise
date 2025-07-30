@@ -638,7 +638,7 @@ impl Whitenoise {
 
         let mut txn = self.database.pool.begin().await?;
 
-        let discovery_urls: Vec<_> = account
+        let nip65_urls: Vec<_> = account
             .nip65_relays
             .iter()
             .map(|relay_url| relay_url.as_str())
@@ -666,7 +666,7 @@ impl Whitenoise {
         )
         .bind(account.pubkey.to_hex())
         .bind(&serde_json::to_string(&account.settings)?)
-        .bind(&serde_json::to_string(&discovery_urls)?)
+        .bind(&serde_json::to_string(&nip65_urls)?)
         .bind(&serde_json::to_string(&inbox_urls)?)
         .bind(&serde_json::to_string(&key_package_urls)?)
         .bind(account.last_synced.to_string())

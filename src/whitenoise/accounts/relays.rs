@@ -138,7 +138,6 @@ impl Whitenoise {
             .nip65_relays
             .iter()
             .chain(account.inbox_relays.iter())
-            .chain(account.key_package_relays.iter())
         {
             self.nostr.client.add_relay(relay).await?;
         }

@@ -45,8 +45,13 @@ impl Whitenoise {
 
         for pk in member_pubkeys.iter() {
             let contact = self.load_contact(pk).await?;
+            let relays_to_use = if contact.key_package_relays.is_empty() {
+                Account::default_relays()
+            } else {
+                contact.key_package_relays.clone()
+            };
             let some_event = self
-                .fetch_key_package_event_from(contact.key_package_relays.clone(), *pk)
+                .fetch_key_package_event_from(relays_to_use, *pk)
                 .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
@@ -54,6 +59,8 @@ impl Whitenoise {
             key_package_events.push(event);
             contacts.push(contact);
         }
+
+        tracing::debug!("Succefully fetched the key packages of members");
 
         let group_relays = config.relays.clone();
 
@@ -113,12 +120,18 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
+            let relays_to_use = if contact.inbox_relays.is_empty() {
+                Account::default_relays()
+            } else {
+                contact.inbox_relays.clone()
+            };
+
             self.nostr
                 .publish_gift_wrap_with_signer(
                     &member_pubkey,
                     welcome_rumor.clone(),
                     vec![Tag::expiration(one_month_future)],
-                    &contact.inbox_relays,
+                    &relays_to_use,
                     keys.clone(),
                 )
                 .await
