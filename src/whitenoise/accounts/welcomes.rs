@@ -48,7 +48,7 @@ impl Whitenoise {
         })?;
         let account = self.get_account(pubkey).await?;
 
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         let welcome = nostr_mls
             .get_welcome(&welcome_event_id)?
             .ok_or(WhitenoiseError::WelcomeNotFound)?;
@@ -92,7 +92,7 @@ impl Whitenoise {
     pub async fn fetch_welcomes(&self, pubkey: &PublicKey) -> Result<Vec<welcome_types::Welcome>> {
         let account = self.get_account(pubkey).await?;
 
-        let nostr_mls = account.nostr_mls.lock().await;
+        let nostr_mls = account.nostr_mls.lock().unwrap();
         let welcomes = nostr_mls.get_pending_welcomes()?;
         Ok(welcomes)
     }
@@ -141,32 +141,37 @@ impl Whitenoise {
         let account = self.get_account(pubkey).await?;
         let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
 
-        let group_ids: Vec<String>;
-        let mut group_relays = Vec::new();
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let result = tokio::task::spawn_blocking(move || {
+            let nostr_mls = account.nostr_mls.lock().unwrap();
 
-        let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
-        if let Some(welcome) = welcome {
-            nostr_mls.accept_welcome(&welcome)?;
+            let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
+            if let Some(welcome) = welcome {
+                nostr_mls.accept_welcome(&welcome)?;
 
-            let groups = nostr_mls.get_groups()?;
-            group_ids = groups
-                .iter()
-                .map(|g| hex::encode(g.nostr_group_id))
-                .collect::<Vec<_>>();
+                let groups = nostr_mls.get_groups()?;
+                let mut group_relays = Vec::new();
+                let group_ids = groups
+                    .iter()
+                    .map(|g| hex::encode(g.nostr_group_id))
+                    .collect::<Vec<_>>();
 
-            // Collect all relays from all groups into a single vector
-            for group in &groups {
-                let relays = nostr_mls.get_relays(&group.mls_group_id)?;
-                group_relays.extend(relays);
+                // Collect all relays from all groups into a single vector
+                for group in &groups {
+                    let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                    group_relays.extend(relays);
+                }
+
+                // Remove duplicates by sorting and deduplicating
+                group_relays.sort();
+                group_relays.dedup();
+                Ok((group_ids, group_relays))
+            } else {
+                Err(WhitenoiseError::WelcomeNotFound)
             }
+        })
+        .await?;
 
-            // Remove duplicates by sorting and deduplicating
-            group_relays.sort();
-            group_relays.dedup();
-        } else {
-            return Err(WhitenoiseError::WelcomeNotFound);
-        }
+        let (group_ids, group_relays) = result?;
 
         self.nostr
             .setup_group_messages_subscriptions_with_signer(*pubkey, group_relays, group_ids, keys)
@@ -220,7 +225,7 @@ impl Whitenoise {
         })?;
         let account = self.get_account(pubkey).await?;
 
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
         if let Some(welcome) = welcome {
             nostr_mls.decline_welcome(&welcome)?;

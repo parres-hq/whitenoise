@@ -263,7 +263,7 @@ impl Whitenoise {
     ) -> Result<()> {
         // Process the welcome message - lock scope is minimal
         {
-            let nostr_mls = &*account.nostr_mls.lock().await;
+            let nostr_mls = &*account.nostr_mls.lock().unwrap();
             nostr_mls
                 .process_welcome(&event.id, &rumor)
                 .map_err(WhitenoiseError::NostrMlsError)?;
@@ -333,7 +333,7 @@ impl Whitenoise {
 
         let target_account = self.read_account_by_pubkey(&target_pubkey).await?;
 
-        let nostr_mls = &*target_account.nostr_mls.lock().await;
+        let nostr_mls = &*target_account.nostr_mls.lock().unwrap();
         match nostr_mls.process_message(&event) {
             Ok(result) => {
                 tracing::debug!(target: "whitenoise::event_processor::process_mls_message", "Processed MLS message - Result: {:?}", result);

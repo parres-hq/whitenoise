@@ -497,7 +497,7 @@ impl Whitenoise {
     ) -> Result<Vec<ChatMessage>> {
         // Get account to access nostr_mls instance
         let account = self.fetch_account(pubkey).await?;
-        let nostr_mls_guard = account.nostr_mls.lock().await;
+        let nostr_mls_guard = account.nostr_mls.lock().unwrap();
         
         if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
             // Use the aggregator to handle the complete pipeline

@@ -8,7 +8,7 @@ use thiserror::Error;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::nostr_manager::NostrManagerError;
 use crate::whitenoise::error::{Result, WhitenoiseError};
@@ -472,22 +472,27 @@ impl Whitenoise {
             accounts_map.insert(account.pubkey, account.clone());
 
             // Add account relays to the client
-            self.nostr
-                .add_relays(
-                    account
-                        .nip65_relays
-                        .clone()
-                        .into_iter()
-                        .chain(account.inbox_relays.clone())
-                        .chain(account.key_package_relays.clone()),
-                )
-                .await?;
+            let groups_and_relays = tokio::task::spawn_blocking({
+                // clone whatever you need into the closure…
+                let account = account.clone();
+                move || -> core::result::Result<_, nostr_mls::error::Error> {
+                    // this runs on a dedicated “blocking” thread,
+                    // so we can call blocking_lock() on the tokio::Mutex
+                    let nostr_mls = account.nostr_mls.lock().unwrap();
 
-            // Add group relays to the client
-            let nostr_mls = &*account.nostr_mls.lock().await;
-            let groups = nostr_mls.get_groups()?;
-            for group in groups {
-                let group_relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                    let mut all_relays = Vec::new();
+                    let groups = nostr_mls.get_groups()?;
+                    for group in groups {
+                        let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                        all_relays.push(relays);
+                    }
+                    Ok(all_relays)
+                }
+            })
+            .await
+            .map_err(WhitenoiseError::from)??;
+
+            for group_relays in groups_and_relays {
                 self.nostr.add_relays(group_relays).await?;
             }
         }
@@ -777,7 +782,7 @@ impl Whitenoise {
         &self,
         account: &Account,
     ) -> Result<(String, [Tag; 4])> {
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         let result = nostr_mls
             .create_key_package_for_event(&account.pubkey, account.key_package_relays.clone())
             .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
@@ -870,7 +875,7 @@ impl Whitenoise {
 
         if let Some(event) = key_package_events.first() {
             if delete_mls_stored_keys {
-                let nostr_mls = &*account.nostr_mls.lock().await;
+                let nostr_mls = &*account.nostr_mls.lock().unwrap();
                 let key_package = nostr_mls.parse_key_package(event)?;
                 nostr_mls.delete_key_package_from_storage(&key_package)?;
             }
@@ -892,7 +897,7 @@ impl Whitenoise {
         let mut group_relays = Vec::new();
         let groups: Vec<group_types::Group>;
         {
-            let nostr_mls = &*account.nostr_mls.lock().await;
+            let nostr_mls = &*account.nostr_mls.lock().unwrap();
             groups = nostr_mls.get_groups()?;
             // Collect all relays from all groups into a single vector
             for group in &groups {
@@ -975,8 +980,8 @@ pub mod test_utils {
     use nostr::key::PublicKey;
     use nostr_mls::NostrMls;
     use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+    use std::sync::Mutex;
     use tempfile::TempDir;
-    use tokio::sync::Mutex;
 
     pub fn data_dir() -> PathBuf {
         TempDir::new().unwrap().path().to_path_buf()

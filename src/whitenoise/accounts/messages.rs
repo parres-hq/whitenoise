@@ -69,15 +69,22 @@ impl Whitenoise {
         let (inner_event, event_id) =
             self.create_unsigned_nostr_event(&account.pubkey, &message, kind, tags)?;
 
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let (message_event, relays, message) = tokio::task::spawn_blocking({
+            let account = account.clone();
+            let group_id = group_id.clone();
+            move || -> core::result::Result<_, nostr_mls::error::Error> {
+                let nostr_mls = account.nostr_mls.lock().unwrap();
 
-        let message_event = nostr_mls.create_message(group_id, inner_event)?;
-        let message = nostr_mls
-            .get_message(&event_id)?
-            .ok_or(WhitenoiseError::InvalidEvent(
-                "Message not found after creation".to_string(),
-            ))?;
-        let relays = nostr_mls.get_relays(group_id)?;
+                let message_event = nostr_mls.create_message(&group_id, inner_event)?;
+                let message = nostr_mls
+                    .get_message(&event_id)?
+                    .ok_or(nostr_mls::error::Error::MessageNotFound)?;
+                let relays = nostr_mls.get_relays(&group_id)?;
+
+                Ok((message_event, relays, message))
+            }
+        })
+        .await??;
 
         self.nostr.publish_event_to(message_event, &relays).await?;
 
@@ -136,7 +143,7 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<MessageWithTokens>> {
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         let messages = nostr_mls.get_messages(group_id)?;
         let messages_with_tokens = messages
             .iter()
@@ -180,16 +187,17 @@ impl Whitenoise {
     ) -> Result<Vec<crate::whitenoise::message_aggregator::ChatMessage>> {
         // Get account to access nostr_mls instance
         let account = self.read_account_by_pubkey(pubkey).await?;
-        let nostr_mls = &*account.nostr_mls.lock().await;
 
-        // Fetch raw messages from nostr_mls
-        let raw_messages = nostr_mls.get_messages(group_id).map_err(|e| {
-            WhitenoiseError::from(anyhow::anyhow!(
-                "Failed to fetch messages from nostr_mls: {}",
-                e
-            ))
-        })?;
+        let raw_messages = tokio::task::spawn_blocking({
+            let group_id = group_id.clone();
+            move || -> core::result::Result<_, nostr_mls::error::Error> {
+                let nostr_mls = account.nostr_mls.lock().unwrap();
 
+                // Fetch raw messages from nostr_mls
+                nostr_mls.get_messages(&group_id)
+            }
+        })
+        .await??;
         // Use the aggregator to process the messages
         self.message_aggregator
             .aggregate_messages_for_group(

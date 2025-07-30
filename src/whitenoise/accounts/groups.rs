@@ -43,10 +43,6 @@ impl Whitenoise {
         let mut key_package_events: Vec<Event> = Vec::new();
         let mut contacts = Vec::new();
 
-        let nostr_mls = &*creator_account.nostr_mls.lock().await;
-        let group_relays = config.relays.clone();
-
-        // Fetch key packages for all members
         for pk in member_pubkeys.iter() {
             let contact = self.load_contact(pk).await?;
             let some_event = self
@@ -59,14 +55,32 @@ impl Whitenoise {
             contacts.push(contact);
         }
 
-        let create_group_result = nostr_mls
-            .create_group(
-                &creator_account.pubkey,
-                key_package_events.clone(),
-                admin_pubkeys,
-                config,
-            )
-            .map_err(WhitenoiseError::from)?;
+        let group_relays = config.relays.clone();
+
+        let (create_group_result, group_ids) = tokio::task::spawn_blocking({
+            let creator_account = creator_account.clone();
+            let key_package_events = key_package_events.clone();
+            move || -> core::result::Result<_, nostr_mls::error::Error> {
+                let nostr_mls = creator_account.nostr_mls.lock().unwrap();
+                // Fetch key packages for all members
+                let create_group_result = nostr_mls.create_group(
+                    &creator_account.pubkey,
+                    key_package_events,
+                    admin_pubkeys,
+                    config,
+                )?;
+
+                let group_ids = nostr_mls
+                    .get_groups()?
+                    .into_iter()
+                    .map(|g| hex::encode(g.nostr_group_id))
+                    .collect::<Vec<_>>();
+
+                Ok((create_group_result, group_ids))
+            }
+        })
+        .await
+        .map_err(WhitenoiseError::from)??;
 
         let group = create_group_result.group;
         let welcome_rumors = create_group_result.welcome_rumors;
@@ -75,8 +89,6 @@ impl Whitenoise {
                 "Welcome rumours are missing for some of the members",
             )));
         }
-
-        tracing::debug!(target: "whitenoise::commands::groups::create_group", "nostr_mls lock released");
 
         // Fan out the welcome message to all members
         for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts.iter()) {
@@ -113,13 +125,6 @@ impl Whitenoise {
                 .map_err(WhitenoiseError::from)?;
         }
 
-        let group_ids = nostr_mls
-            .get_groups()
-            .map_err(WhitenoiseError::from)?
-            .into_iter()
-            .map(|g| hex::encode(g.nostr_group_id))
-            .collect::<Vec<_>>();
-
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 creator_account.pubkey,
@@ -142,7 +147,7 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         Ok(nostr_mls
             .get_groups()
             .map_err(WhitenoiseError::from)?
@@ -160,7 +165,7 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         Ok(nostr_mls
             .get_members(group_id)
             .map_err(WhitenoiseError::from)?
@@ -177,7 +182,7 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         Ok(nostr_mls
             .get_group(group_id)
             .map_err(WhitenoiseError::from)?
@@ -233,7 +238,6 @@ impl Whitenoise {
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
         let mut contacts = Vec::new();
 
-        let nostr_mls = &*account.nostr_mls.lock().await;
         // Fetch key packages for all members
         for pk in members.iter() {
             let contact = self.load_contact(pk).await?;
@@ -247,9 +251,25 @@ impl Whitenoise {
             contacts.push(contact);
         }
 
-        let update_result = nostr_mls
-            .add_members(group_id, &key_package_events)
-            .map_err(WhitenoiseError::from)?;
+        let (update_result, group_relays) = tokio::task::spawn_blocking({
+            let key_package_events = key_package_events.clone();
+            let account = account.clone();
+            let group_id = group_id.clone();
+            move || -> core::result::Result<_, nostr_mls::error::Error> {
+                let nostr_mls = account.nostr_mls.lock().unwrap();
+                let update_result = nostr_mls.add_members(&group_id, &key_package_events)?;
+                // Merge the pending commit immediately after creating it
+                // This ensures our local state is correct before publishing
+                nostr_mls.merge_pending_commit(&group_id)?;
+
+                // Publish the evolution event to the group
+                let group_relays = nostr_mls.get_relays(&group_id)?;
+
+                Ok((update_result, group_relays))
+            }
+        })
+        .await??;
+
         let evolution_event = update_result.evolution_event;
 
         let welcome_rumors = match update_result.welcome_rumors {
@@ -267,16 +287,6 @@ impl Whitenoise {
             )));
         }
 
-        // Merge the pending commit immediately after creating it
-        // This ensures our local state is correct before publishing
-        nostr_mls
-            .merge_pending_commit(group_id)
-            .map_err(WhitenoiseError::from)?;
-
-        // Publish the evolution event to the group
-        let group_relays = nostr_mls
-            .get_relays(group_id)
-            .map_err(WhitenoiseError::from)?;
         let result = self
             .nostr
             .publish_event_to(evolution_event, &group_relays)
@@ -364,37 +374,24 @@ impl Whitenoise {
         group_id: &GroupId,
         members: Vec<PublicKey>,
     ) -> Result<()> {
-        let evolution_event: Event;
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let (update_result, group_relays) = tokio::task::spawn_blocking({
+            let account = account.clone();
+            let group_id = group_id.clone();
+            move || -> core::result::Result<_, nostr_mls::error::Error> {
+                let nostr_mls = account.nostr_mls.lock().unwrap();
 
-        // First, validate that all members to be removed are actually in the group
-        let current_members = nostr_mls
-            .get_members(group_id)
-            .map_err(WhitenoiseError::from)?
-            .into_iter()
-            .collect::<std::collections::HashSet<PublicKey>>();
+                let update_result = nostr_mls.remove_members(&group_id, &members)?;
 
-        let mut members_not_in_group = Vec::new();
-        for member in &members {
-            if !current_members.contains(member) {
-                members_not_in_group.push(*member);
+                nostr_mls.merge_pending_commit(&group_id)?;
+
+                let group_relays = nostr_mls.get_relays(&group_id)?;
+
+                Ok((update_result, group_relays))
             }
-        }
+        })
+        .await??;
 
-        if !members_not_in_group.is_empty() {
-            return Err(WhitenoiseError::MembersNotInGroup);
-        }
-        let update_result = nostr_mls.remove_members(group_id, &members)?;
-        evolution_event = update_result.evolution_event;
-
-        nostr_mls
-            .merge_pending_commit(group_id)
-            .map_err(WhitenoiseError::from)?;
-
-        let group_relays = nostr_mls
-            .get_relays(group_id)
-            .map_err(WhitenoiseError::from)?;
-
+        let evolution_event = update_result.evolution_event;
         self.nostr
             .publish_event_to(evolution_event, &group_relays)
             .await?;
