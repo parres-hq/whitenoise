@@ -8,7 +8,7 @@ use thiserror::Error;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::nostr_manager::NostrManagerError;
 use crate::whitenoise::error::{Result, WhitenoiseError};
@@ -63,7 +63,7 @@ impl Default for AccountSettings {
 pub struct Account {
     pub pubkey: PublicKey,
     pub settings: AccountSettings,
-    pub discovery_relays: Vec<RelayUrl>,
+    pub nip65_relays: Vec<RelayUrl>,
     pub inbox_relays: Vec<RelayUrl>,
     pub key_package_relays: Vec<RelayUrl>,
     pub last_synced: Timestamp,
@@ -77,7 +77,7 @@ struct AccountRow {
     pubkey: PublicKey,
     settings: AccountSettings,
     last_synced: Timestamp,
-    discovery_relays: Vec<RelayUrl>,
+    nip65_relays: Vec<RelayUrl>,
     inbox_relays: Vec<RelayUrl>,
     key_package_relays: Vec<RelayUrl>,
 }
@@ -94,7 +94,7 @@ where
         let pubkey_str: String = row.try_get("pubkey")?;
         let settings_json: String = row.try_get("settings")?;
         let last_synced_i64: i64 = row.try_get("last_synced")?;
-        let discovery_relays: String = row.try_get("discovery_relays")?;
+        let nip65_relays: String = row.try_get("nip65_relays")?;
         let inbox_relays: String = row.try_get("inbox_relays")?;
         let key_package_relays: String = row.try_get("key_package_relays")?;
 
@@ -111,7 +111,7 @@ where
                 source: Box::new(e),
             })?;
 
-        let discovery_relays = Whitenoise::parse_relays_from_sql(discovery_relays)?;
+        let nip65_relays = Whitenoise::parse_relays_from_sql(nip65_relays)?;
         let inbox_relays = Whitenoise::parse_relays_from_sql(inbox_relays)?;
         let key_package_relays = Whitenoise::parse_relays_from_sql(key_package_relays)?;
 
@@ -122,7 +122,7 @@ where
             pubkey,
             settings,
             last_synced,
-            discovery_relays,
+            nip65_relays,
             inbox_relays,
             key_package_relays,
         })
@@ -135,7 +135,7 @@ impl std::fmt::Debug for Account {
             .field("pubkey", &self.pubkey)
             .field("settings", &self.settings)
             .field("last_synced", &self.last_synced)
-            .field("discovery_relays", &self.discovery_relays)
+            .field("nip65_relays", &self.nip65_relays)
             .field("inbox_relays", &self.inbox_relays)
             .field("key_package_relays", &self.key_package_relays)
             .field("inbox_relays", &self.inbox_relays)
@@ -170,7 +170,7 @@ impl Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
             last_synced: Timestamp::zero(),
-            discovery_relays: Self::default_relays(),
+            nip65_relays: Self::default_relays(),
             inbox_relays: Self::default_relays(),
             key_package_relays: Self::default_relays(),
             nostr_mls,
@@ -278,6 +278,8 @@ impl Whitenoise {
             }
             Err(e) => return Err(e),
         };
+
+        self.connect_account_relays(&account).await?;
 
         // Add the account to the in-memory accounts list
         {
@@ -461,7 +463,7 @@ impl Whitenoise {
                 pubkey: account_row.pubkey,
                 settings: account_row.settings,
                 last_synced: account_row.last_synced,
-                discovery_relays: account_row.discovery_relays,
+                nip65_relays: account_row.nip65_relays,
                 inbox_relays: account_row.inbox_relays,
                 key_package_relays: account_row.key_package_relays,
                 nostr_mls,
@@ -470,22 +472,27 @@ impl Whitenoise {
             accounts_map.insert(account.pubkey, account.clone());
 
             // Add account relays to the client
-            self.nostr
-                .add_relays(
-                    account
-                        .discovery_relays
-                        .clone()
-                        .into_iter()
-                        .chain(account.inbox_relays.clone())
-                        .chain(account.key_package_relays.clone()),
-                )
-                .await?;
+            let groups_and_relays = tokio::task::spawn_blocking({
+                // clone whatever you need into the closure…
+                let account = account.clone();
+                move || -> core::result::Result<_, nostr_mls::error::Error> {
+                    // this runs on a dedicated “blocking” thread,
+                    // so we can call blocking_lock() on the tokio::Mutex
+                    let nostr_mls = account.nostr_mls.lock().unwrap();
 
-            // Add group relays to the client
-            let nostr_mls = &*account.nostr_mls.lock().await;
-            let groups = nostr_mls.get_groups()?;
-            for group in groups {
-                let group_relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                    let mut all_relays = Vec::new();
+                    let groups = nostr_mls.get_groups()?;
+                    for group in groups {
+                        let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                        all_relays.push(relays);
+                    }
+                    Ok(all_relays)
+                }
+            })
+            .await
+            .map_err(WhitenoiseError::from)??;
+
+            for group_relays in groups_and_relays {
                 self.nostr.add_relays(group_relays).await?;
             }
         }
@@ -528,7 +535,7 @@ impl Whitenoise {
             pubkey: account_row.pubkey,
             settings: account_row.settings,
             last_synced: account_row.last_synced,
-            discovery_relays: account_row.discovery_relays,
+            nip65_relays: account_row.nip65_relays,
             inbox_relays: account_row.inbox_relays,
             key_package_relays: account_row.key_package_relays,
             nostr_mls: Account::create_nostr_mls(account_row.pubkey, &self.config.data_dir)?,
@@ -574,12 +581,19 @@ impl Whitenoise {
         })?;
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Keys stored in secret store");
 
+        let mut nip65_relays = self
+            .fetch_relays_from(Account::default_relays(), keys.public_key, RelayType::Nostr)
+            .await?;
+        if nip65_relays.is_empty() {
+            nip65_relays = Account::default_relays();
+        }
+
         // Step 3: Create account struct and save to database
         let account = Account {
             pubkey: keys.public_key(),
             settings: AccountSettings::default(),
             last_synced: Timestamp::zero(),
-            discovery_relays: Account::default_relays(),
+            nip65_relays,
             inbox_relays: Account::default_relays(),
             key_package_relays: Account::default_relays(),
             nostr_mls: Account::create_nostr_mls(keys.public_key(), &self.config.data_dir)?,
@@ -624,8 +638,8 @@ impl Whitenoise {
 
         let mut txn = self.database.pool.begin().await?;
 
-        let discovery_urls: Vec<_> = account
-            .discovery_relays
+        let nip65_urls: Vec<_> = account
+            .nip65_relays
             .iter()
             .map(|relay_url| relay_url.as_str())
             .collect();
@@ -641,18 +655,18 @@ impl Whitenoise {
             .collect();
 
         let result = sqlx::query(
-            "INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced)
+            "INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
                 settings = excluded.settings,
-                discovery_relays = excluded.discovery_relays,
+                nip65_relays = excluded.nip65_relays,
                 inbox_relays = excluded.inbox_relays,
                 key_package_relays = excluded.key_package_relays,
                 last_synced = excluded.last_synced",
         )
         .bind(account.pubkey.to_hex())
         .bind(&serde_json::to_string(&account.settings)?)
-        .bind(&serde_json::to_string(&discovery_urls)?)
+        .bind(&serde_json::to_string(&nip65_urls)?)
         .bind(&serde_json::to_string(&inbox_urls)?)
         .bind(&serde_json::to_string(&key_package_urls)?)
         .bind(account.last_synced.to_string())
@@ -768,7 +782,7 @@ impl Whitenoise {
         &self,
         account: &Account,
     ) -> Result<(String, [Tag; 4])> {
-        let nostr_mls = &*account.nostr_mls.lock().await;
+        let nostr_mls = &*account.nostr_mls.lock().unwrap();
         let result = nostr_mls
             .create_key_package_for_event(&account.pubkey, account.key_package_relays.clone())
             .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
@@ -861,7 +875,7 @@ impl Whitenoise {
 
         if let Some(event) = key_package_events.first() {
             if delete_mls_stored_keys {
-                let nostr_mls = &*account.nostr_mls.lock().await;
+                let nostr_mls = &*account.nostr_mls.lock().unwrap();
                 let key_package = nostr_mls.parse_key_package(event)?;
                 nostr_mls.delete_key_package_from_storage(&key_package)?;
             }
@@ -883,7 +897,7 @@ impl Whitenoise {
         let mut group_relays = Vec::new();
         let groups: Vec<group_types::Group>;
         {
-            let nostr_mls = &*account.nostr_mls.lock().await;
+            let nostr_mls = &*account.nostr_mls.lock().unwrap();
             groups = nostr_mls.get_groups()?;
             // Collect all relays from all groups into a single vector
             for group in &groups {
@@ -908,7 +922,7 @@ impl Whitenoise {
         self.nostr
             .setup_account_subscriptions_with_signer(
                 account.pubkey,
-                account.discovery_relays.clone(),
+                account.nip65_relays.clone(),
                 account.inbox_relays.clone(),
                 group_relays,
                 nostr_group_ids,
@@ -946,13 +960,13 @@ impl Whitenoise {
 
         let inbox_result = self
             .nostr
-            .publish_event_builder_with_signer(inbox_event, &account.discovery_relays, keys.clone())
+            .publish_event_builder_with_signer(inbox_event, &account.nip65_relays, keys.clone())
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", inbox_result);
 
         let key_package_result = self
             .nostr
-            .publish_event_builder_with_signer(key_package_event, &account.discovery_relays, keys)
+            .publish_event_builder_with_signer(key_package_event, &account.nip65_relays, keys)
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", key_package_result);
         Ok(())
@@ -966,8 +980,8 @@ pub mod test_utils {
     use nostr::key::PublicKey;
     use nostr_mls::NostrMls;
     use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+    use std::sync::Mutex;
     use tempfile::TempDir;
-    use tokio::sync::Mutex;
 
     pub fn data_dir() -> PathBuf {
         TempDir::new().unwrap().path().to_path_buf()
@@ -1008,7 +1022,7 @@ mod tests {
             "CREATE TABLE accounts (
                 pubkey TEXT PRIMARY KEY,
                 settings JSONB NOT NULL,
-                discovery_relays TEXT NOT NULL,
+                nip65_relays TEXT NOT NULL,
                 inbox_relays TEXT NOT NULL,
                 key_package_relays TEXT NOT NULL,
                 last_synced INTEGER NOT NULL
@@ -1027,7 +1041,7 @@ mod tests {
         let test_timestamp = 1234567890u64;
 
         sqlx::query(
-            "INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(&test_settings)
@@ -1050,7 +1064,7 @@ mod tests {
         assert_eq!(account.pubkey, test_pubkey);
         assert_eq!(account.settings, AccountSettings::default());
         assert_eq!(account.last_synced.as_u64(), test_timestamp);
-        assert_eq!(account.discovery_relays, test_relay_urls);
+        assert_eq!(account.nip65_relays, test_relay_urls);
         assert_eq!(account.inbox_relays, test_relay_urls);
         assert_eq!(account.key_package_relays, test_relay_urls);
     }

@@ -86,6 +86,9 @@ pub enum WhitenoiseError {
     #[error("nip04 direcet message error")]
     Nip04Error(#[from] nostr::nips::nip04::Error),
 
+    #[error("join error due to spawn blocking")]
+    JoinError(#[from] tokio::task::JoinError),
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }

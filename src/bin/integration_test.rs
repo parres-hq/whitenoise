@@ -125,7 +125,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test metadata fetching
     tracing::info!("Testing metadata fetching...");
     let loaded_metadata = whitenoise
-        .fetch_metadata_from(account3.discovery_relays.clone(), account3.pubkey)
+        .fetch_metadata_from(account3.nip65_relays.clone(), account3.pubkey)
         .await?;
     if let Some(metadata) = loaded_metadata {
         assert_eq!(metadata.name, Some("Known User".to_string()));
@@ -196,7 +196,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let test_contact3 = Keys::generate().public_key();
 
     // Test initial empty contact list
-    let initial_contacts = whitenoise.fetch_contacts(&account1).await?;
+    let initial_contacts = whitenoise.fetch_contacts(&account1.pubkey).await?;
     assert_eq!(initial_contacts.len(), 0);
     tracing::info!("✓ Initial contact list is empty");
 

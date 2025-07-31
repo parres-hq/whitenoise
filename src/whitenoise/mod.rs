@@ -248,6 +248,13 @@ impl Whitenoise {
             *accounts = loaded_accounts;
         }
 
+        if whitenoise.nostr.client.relays().await.is_empty() {
+            // First time starting the app
+            for relay in Account::default_relays() {
+                whitenoise.nostr.client.add_relay(relay).await?;
+            }
+        }
+
         // No need to wait for all the relays to be up
         tokio::spawn({
             let client = whitenoise.nostr.client.clone();
@@ -697,7 +704,7 @@ pub mod test_utils {
                 .nostr
                 .publish_event_builder_with_signer(
                     key_package_event_builder,
-                    &account.discovery_relays,
+                    &account.nip65_relays,
                     keys,
                 )
                 .await
@@ -874,13 +881,13 @@ mod tests {
 
             let account = account.unwrap();
 
-            let relays = account.discovery_relays.clone();
+            let relays = account.nip65_relays.clone();
 
             // Test all load methods return expected types (though they may be empty in test env)
             let metadata = whitenoise.fetch_metadata_from(relays, pubkey).await;
             assert!(metadata.is_ok());
 
-            let contacts = whitenoise.fetch_contacts(&account).await;
+            let contacts = whitenoise.fetch_contacts(&account.pubkey).await;
             assert!(contacts.is_ok());
         }
 

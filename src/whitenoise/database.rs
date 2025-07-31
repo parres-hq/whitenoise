@@ -18,6 +18,10 @@ const MIGRATION_FILES: &[(&str, &[u8])] = &[
         "0003_contacts.sql",
         include_bytes!("../../db_migrations/0003_contacts.sql"),
     ),
+    (
+        "0004_accounts_relays.sql",
+        include_bytes!("../../db_migrations/0004_accounts_relays.sql"),
+    ),
     // Add new migrations here in order, for example:
     // ("000X_something.sql", include_bytes!("../db_migrations/000X_something.sql")),
     // ("000Y_another.sql", include_bytes!("../db_migrations/000Y_another.sql")),
@@ -272,7 +276,7 @@ mod tests {
         let (db, _temp_dir) = create_test_db().await;
 
         // Insert some test data
-        sqlx::query("INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
+        sqlx::query("INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
             .execute(&db.pool)
             .await
             .expect("Failed to insert test account");
@@ -347,7 +351,7 @@ mod tests {
             .expect("Failed to create database");
 
         // Insert some data
-        sqlx::query("INSERT INTO accounts (pubkey, settings, discovery_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
+        sqlx::query("INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
             .execute(&db1.pool)
             .await
             .expect("Failed to insert test data");

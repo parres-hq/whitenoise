@@ -63,13 +63,13 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the relay query fails.
     pub async fn fetch_relays_from(
         &self,
-        discovery_relays: Vec<RelayUrl>,
+        nip65_relays: Vec<RelayUrl>,
         pubkey: PublicKey,
         relay_type: RelayType,
     ) -> Result<Vec<RelayUrl>> {
         let relays = self
             .nostr
-            .fetch_user_relays(pubkey, relay_type, discovery_relays)
+            .fetch_user_relays(pubkey, relay_type, nip65_relays)
             .await?;
         Ok(relays)
     }
@@ -110,7 +110,7 @@ impl Whitenoise {
         // Get all relay URLs for this user across all types
         // Combine all relay URLs into one list, removing duplicates
         let mut all_relays = Vec::new();
-        all_relays.extend(account.discovery_relays.clone());
+        all_relays.extend(account.nip65_relays.clone());
         all_relays.extend(account.inbox_relays.clone());
         all_relays.extend(account.key_package_relays.clone());
 
@@ -131,5 +131,25 @@ impl Whitenoise {
         }
 
         Ok(relay_statuses)
+    }
+
+    pub(crate) async fn connect_account_relays(&self, account: &Account) -> Result<()> {
+        for relay in account
+            .nip65_relays
+            .iter()
+            .chain(account.inbox_relays.iter())
+        {
+            self.nostr.client.add_relay(relay).await?;
+        }
+
+        tracing::debug!("Connecting to the account relays added");
+        tokio::spawn({
+            let client = self.nostr.client.clone();
+            async move {
+                client.connect().await;
+            }
+        });
+
+        Ok(())
     }
 }

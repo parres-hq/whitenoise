@@ -105,7 +105,7 @@ impl Whitenoise {
                     .collect::<Vec<_>>()
             })
             .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "discovery_relays".to_owned(),
+                index: "nip65_relays".to_owned(),
                 source: Box::new(e),
             })
     }
