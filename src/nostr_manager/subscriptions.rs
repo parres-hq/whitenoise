@@ -2,6 +2,7 @@
 //! This mostly handles subscribing and processing events as they come in while the user is active.
 
 use crate::nostr_manager::{NostrManager, Result};
+use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
 
@@ -19,9 +20,9 @@ impl NostrManager {
     pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<RelayUrl>,
-        inbox_relays: Vec<RelayUrl>,
-        group_relays: Vec<RelayUrl>,
+        user_relays: DashSet<RelayUrl>,
+        inbox_relays: DashSet<RelayUrl>,
+        group_relays: DashSet<RelayUrl>,
         nostr_group_ids: Vec<String>,
     ) -> Result<()> {
         // Set up core subscriptions in parallel
@@ -45,13 +46,13 @@ impl NostrManager {
     async fn setup_user_events_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<RelayUrl>,
+        user_relays: DashSet<RelayUrl>,
     ) -> Result<()> {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
 
         // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(&user_relays).await?;
+        self.ensure_relays_connected(user_relays.clone()).await?;
 
         // Combine all user event types into a single subscription
         let user_events_filter = Filter::new()
@@ -74,13 +75,13 @@ impl NostrManager {
     async fn setup_giftwrap_subscription(
         &self,
         pubkey: PublicKey,
-        inbox_relays: Vec<RelayUrl>,
+        inbox_relays: DashSet<RelayUrl>,
     ) -> Result<()> {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
 
         // Ensure we're connected to all inbox relays before subscribing
-        self.ensure_relays_connected(&inbox_relays).await?;
+        self.ensure_relays_connected(inbox_relays.clone()).await?;
 
         let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
 
@@ -95,7 +96,7 @@ impl NostrManager {
     pub(crate) async fn setup_contacts_metadata_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<RelayUrl>,
+        user_relays: DashSet<RelayUrl>,
     ) -> Result<()> {
         let contacts_pubkeys = self
             .client
@@ -108,7 +109,7 @@ impl NostrManager {
         }
 
         // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(&user_relays).await?;
+        self.ensure_relays_connected(user_relays.clone()).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
@@ -127,7 +128,7 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         nostr_group_ids: Vec<String>,
-        group_relays: Vec<RelayUrl>,
+        group_relays: DashSet<RelayUrl>,
     ) -> Result<()> {
         if nostr_group_ids.is_empty() {
             // No groups yet, skip subscription
@@ -135,7 +136,7 @@ impl NostrManager {
         }
 
         // Ensure we're connected to all group relays before subscribing
-        self.ensure_relays_connected(&group_relays).await?;
+        self.ensure_relays_connected(group_relays.clone()).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));

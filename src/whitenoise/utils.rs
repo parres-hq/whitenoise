@@ -1,4 +1,5 @@
 use crate::whitenoise::error::WhitenoiseError;
+use dashmap::DashSet;
 use nostr::{types::RelayUrl, PublicKey, ToBech32};
 
 use super::Whitenoise;
@@ -108,5 +109,18 @@ impl Whitenoise {
                 index: "nip65_relays".to_owned(),
                 source: Box::new(e),
             })
+    }
+
+    pub(crate) fn relayurl_dashset_eq(left: DashSet<RelayUrl>, right: DashSet<RelayUrl>) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+
+        for l in left {
+            if !right.contains(&l) {
+                return false;
+            }
+        }
+        true
     }
 }

@@ -253,7 +253,11 @@ impl Whitenoise {
 
         let _event_id = self
             .nostr
-            .publish_event_builder_with_signer(dm_event_builder, &contact.inbox_relays, sender_keys)
+            .publish_event_builder_with_signer(
+                dm_event_builder,
+                contact.inbox_relays.clone(),
+                sender_keys,
+            )
             .await?;
 
         Ok(())

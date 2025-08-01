@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use dashmap::DashSet;
 use nostr::key::PublicKey;
 
 use crate::whitenoise::accounts::Account;
@@ -12,9 +13,9 @@ use nostr_sdk::prelude::*;
 pub struct Contact {
     pub pubkey: PublicKey,
     pub metadata: Option<Metadata>,
-    pub nip65_relays: Vec<RelayUrl>,
-    pub inbox_relays: Vec<RelayUrl>,
-    pub key_package_relays: Vec<RelayUrl>,
+    pub nip65_relays: DashSet<RelayUrl>,
+    pub inbox_relays: DashSet<RelayUrl>,
+    pub key_package_relays: DashSet<RelayUrl>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for Contact
@@ -49,9 +50,15 @@ where
             source: Box::new(e),
         })?;
 
-        let nip65_relays = Whitenoise::parse_relays_from_sql(nip65_relays)?;
-        let inbox_relays = Whitenoise::parse_relays_from_sql(inbox_relays)?;
-        let key_package_relays = Whitenoise::parse_relays_from_sql(key_package_relays)?;
+        let nip65_relays = Whitenoise::parse_relays_from_sql(nip65_relays)?
+            .into_iter()
+            .collect();
+        let inbox_relays = Whitenoise::parse_relays_from_sql(inbox_relays)?
+            .into_iter()
+            .collect();
+        let key_package_relays = Whitenoise::parse_relays_from_sql(key_package_relays)?
+            .into_iter()
+            .collect();
 
         Ok(Contact {
             pubkey,
@@ -130,7 +137,7 @@ impl Whitenoise {
 
     pub async fn fetch_key_package_event_from(
         &self,
-        urls: Vec<RelayUrl>,
+        urls: DashSet<RelayUrl>,
         pubkey: PublicKey,
     ) -> Result<Option<Event>> {
         let key_package = self.nostr.fetch_user_key_package(pubkey, urls).await?;
@@ -322,19 +329,19 @@ impl Whitenoise {
         let nip65_urls: Vec<_> = contact
             .nip65_relays
             .iter()
-            .map(|relay_url| relay_url.as_str())
+            .map(|relay_url| relay_url.to_string())
             .collect();
 
         let inbox_urls: Vec<_> = contact
             .inbox_relays
             .iter()
-            .map(|relay_url| relay_url.as_str())
+            .map(|relay_url| relay_url.to_string())
             .collect();
 
         let key_package_urls: Vec<_> = contact
             .key_package_relays
             .iter()
-            .map(|relay_url| relay_url.as_str())
+            .map(|relay_url| relay_url.to_string())
             .collect();
 
         let result = sqlx::query(
@@ -449,7 +456,7 @@ impl Whitenoise {
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &account.nip65_relays, keys.clone())
+            .publish_event_builder_with_signer(event, account.nip65_relays.clone(), keys.clone())
             .await?;
 
         // Update subscription for contact list metadata - use same relay logic

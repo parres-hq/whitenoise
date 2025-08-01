@@ -172,7 +172,7 @@ pub async fn fetch_key_package_for_pubkey(pubkey: String) -> Result<Option<(Even
 pub async fn publish_key_package() -> Result<()> {
     let active_account = Account::get_active().await?;
 
-    let key_package_relays: Vec<RelayUrl> = active_account
+    let key_package_relays: DashSet<RelayUrl> = active_account
         .relays(RelayType::KeyPackage)
         .await?
         .into_iter()
