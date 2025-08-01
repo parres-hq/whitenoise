@@ -704,7 +704,7 @@ pub mod test_utils {
                 .nostr
                 .publish_event_builder_with_signer(
                     key_package_event_builder,
-                    &account.nip65_relays,
+                    account.nip65_relays.clone(),
                     keys,
                 )
                 .await

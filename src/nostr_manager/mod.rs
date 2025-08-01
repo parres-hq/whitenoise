@@ -2,6 +2,7 @@
 use crate::types::{NostrEncryptionMethod, ProcessableEvent};
 
 use ::rand::RngCore;
+use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -242,11 +243,11 @@ impl NostrManager {
     pub(crate) async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
-        relays: &[RelayUrl],
+        relays: DashSet<RelayUrl>,
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays).await?;
+        self.ensure_relays_connected(relays.clone()).await?;
 
         self.client.set_signer(signer).await;
         let result = self
@@ -290,11 +291,11 @@ impl NostrManager {
         receiver: &PublicKey,
         rumor: UnsignedEvent,
         extra_tags: Vec<Tag>,
-        relays: &[RelayUrl],
+        relays: DashSet<RelayUrl>,
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays).await?;
+        self.ensure_relays_connected(relays.clone()).await?;
 
         let wrapped_event = EventBuilder::gift_wrap(&signer, receiver, rumor, extra_tags).await?;
 
@@ -322,9 +323,9 @@ impl NostrManager {
     pub(crate) async fn setup_account_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<RelayUrl>,
-        inbox_relays: Vec<RelayUrl>,
-        group_relays: Vec<RelayUrl>,
+        user_relays: DashSet<RelayUrl>,
+        inbox_relays: DashSet<RelayUrl>,
+        group_relays: DashSet<RelayUrl>,
         nostr_group_ids: Vec<String>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
@@ -345,7 +346,7 @@ impl NostrManager {
     pub(crate) async fn setup_group_messages_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<RelayUrl>,
+        user_relays: DashSet<RelayUrl>,
         nostr_group_ids: Vec<String>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
@@ -389,7 +390,7 @@ impl NostrManager {
     pub(crate) async fn update_contacts_metadata_subscription_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<RelayUrl>,
+        user_relays: DashSet<RelayUrl>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         self.client.set_signer(signer).await;
@@ -501,7 +502,7 @@ impl NostrManager {
     ///
     /// # Returns
     ///
-    /// Returns a `Vec<RelayUrl>` containing all valid relay URLs found in the events.
+    /// Returns a `DashSet<RelayUrl>` containing all valid relay URLs found in the events.
     /// Invalid or malformed relay URLs are silently skipped.
     ///
     /// # Example
@@ -520,7 +521,7 @@ impl NostrManager {
     ///   - Contain invalid relay URL formats
     /// * The order of relay URLs in the returned vector is not guaranteed to match
     ///   the order they appeared in the events
-    fn relay_urls_from_events(events: Events) -> Vec<RelayUrl> {
+    fn relay_urls_from_events(events: Events) -> DashSet<RelayUrl> {
         events
             .into_iter()
             .flat_map(|e| e.tags)
@@ -636,7 +637,7 @@ impl NostrManager {
     /// nostr_manager.ensure_relays_connected(&user_relays).await?;
     /// // Now safe to call client.subscribe_with_id_to(user_relays, ...)
     /// ```
-    pub(crate) async fn ensure_relays_connected(&self, relays: &[RelayUrl]) -> Result<()> {
+    pub(crate) async fn ensure_relays_connected(&self, relays: DashSet<RelayUrl>) -> Result<()> {
         if relays.is_empty() {
             return Ok(());
         }
@@ -652,7 +653,7 @@ impl NostrManager {
 
         for relay_url in relays {
             // Check if we're already connected to this relay by attempting to get its status
-            match self.client.relay(relay_url).await {
+            match self.client.relay(relay_url.clone()).await {
                 Ok(_) => {
                     // Relay already exists in the client, skip
                     tracing::debug!(
@@ -669,7 +670,7 @@ impl NostrManager {
                         relay_url
                     );
 
-                    match self.client.add_relay(relay_url).await {
+                    match self.client.add_relay(relay_url.clone()).await {
                         Ok(_) => {
                             newly_added_relays.push(relay_url.clone());
                             tracing::debug!(

@@ -1,4 +1,4 @@
-use derivative::Derivative;
+use dashmap::DashSet;
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use nostr_sdk::prelude::*;
@@ -57,21 +57,40 @@ impl Default for AccountSettings {
     }
 }
 
-#[derive(Derivative)]
-#[derivative(PartialEq)]
-#[derive(Serialize, Clone)]
+#[derive(Clone)]
 pub struct Account {
     pub pubkey: PublicKey,
     pub settings: AccountSettings,
-    pub nip65_relays: Vec<RelayUrl>,
-    pub inbox_relays: Vec<RelayUrl>,
-    pub key_package_relays: Vec<RelayUrl>,
+    pub nip65_relays: DashSet<RelayUrl>,
+    pub inbox_relays: DashSet<RelayUrl>,
+    pub key_package_relays: DashSet<RelayUrl>,
     pub last_synced: Timestamp,
-    #[serde(skip)]
     #[doc(hidden)]
-    #[derivative(PartialEq = "ignore")]
     pub(crate) nostr_mls: Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>>,
 }
+
+impl PartialEq for Account {
+    fn eq(&self, other: &Self) -> bool {
+        self.pubkey == other.pubkey
+            && self.settings == other.settings
+            && self.last_synced == other.last_synced
+            && Whitenoise::relayurl_dashset_eq(
+                self.nip65_relays.clone(),
+                other.nip65_relays.clone(),
+            )
+            && Whitenoise::relayurl_dashset_eq(
+                self.inbox_relays.clone(),
+                other.inbox_relays.clone(),
+            )
+            && Whitenoise::relayurl_dashset_eq(
+                self.key_package_relays.clone(),
+                other.key_package_relays.clone(),
+            )
+        // -- note: `nostr_mls` is deliberately omitted
+    }
+}
+
+impl Eq for Account {}
 
 struct AccountRow {
     pubkey: PublicKey,
@@ -179,7 +198,7 @@ impl Account {
         Ok((account, keys))
     }
 
-    pub fn default_relays() -> Vec<RelayUrl> {
+    pub fn default_relays() -> DashSet<RelayUrl> {
         let mut relays = Vec::new();
         if cfg!(debug_assertions) {
             relays.push("ws://localhost:8080");
@@ -463,9 +482,9 @@ impl Whitenoise {
                 pubkey: account_row.pubkey,
                 settings: account_row.settings,
                 last_synced: account_row.last_synced,
-                nip65_relays: account_row.nip65_relays,
-                inbox_relays: account_row.inbox_relays,
-                key_package_relays: account_row.key_package_relays,
+                nip65_relays: account_row.nip65_relays.into_iter().collect(),
+                inbox_relays: account_row.inbox_relays.into_iter().collect(),
+                key_package_relays: account_row.key_package_relays.into_iter().collect(),
                 nostr_mls,
             };
             // Add the account to the HashMap first, then trigger background fetch
@@ -535,9 +554,9 @@ impl Whitenoise {
             pubkey: account_row.pubkey,
             settings: account_row.settings,
             last_synced: account_row.last_synced,
-            nip65_relays: account_row.nip65_relays,
-            inbox_relays: account_row.inbox_relays,
-            key_package_relays: account_row.key_package_relays,
+            nip65_relays: account_row.nip65_relays.into_iter().collect(),
+            inbox_relays: account_row.inbox_relays.into_iter().collect(),
+            key_package_relays: account_row.key_package_relays.into_iter().collect(),
             nostr_mls: Account::create_nostr_mls(account_row.pubkey, &self.config.data_dir)?,
         })
     }
@@ -641,17 +660,17 @@ impl Whitenoise {
         let nip65_urls: Vec<_> = account
             .nip65_relays
             .iter()
-            .map(|relay_url| relay_url.as_str())
+            .map(|relay_url| relay_url.to_string())
             .collect();
         let inbox_urls: Vec<_> = account
             .inbox_relays
             .iter()
-            .map(|relay_url| relay_url.as_str())
+            .map(|relay_url| relay_url.to_string())
             .collect();
         let key_package_urls: Vec<_> = account
             .key_package_relays
             .iter()
-            .map(|relay_url| relay_url.as_str())
+            .map(|relay_url| relay_url.to_string())
             .collect();
 
         let result = sqlx::query(
@@ -826,7 +845,7 @@ impl Whitenoise {
             .nostr
             .publish_event_builder_with_signer(
                 key_package_event_builder,
-                &account.key_package_relays,
+                account.key_package_relays.clone(),
                 signer,
             )
             .await?;
@@ -883,7 +902,11 @@ impl Whitenoise {
             let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
 
             self.nostr
-                .publish_event_builder_with_signer(builder, &account.key_package_relays, signer)
+                .publish_event_builder_with_signer(
+                    builder,
+                    account.key_package_relays.clone(),
+                    signer,
+                )
                 .await?;
         } else {
             tracing::warn!(target: "whitenoise::delete_key_package_from_relays_for_account", "Key package event not found for account: {}", account.pubkey.to_hex());
@@ -924,7 +947,7 @@ impl Whitenoise {
                 account.pubkey,
                 account.nip65_relays.clone(),
                 account.inbox_relays.clone(),
-                group_relays,
+                group_relays.into_iter().collect(),
                 nostr_group_ids,
                 keys,
             )
@@ -960,13 +983,21 @@ impl Whitenoise {
 
         let inbox_result = self
             .nostr
-            .publish_event_builder_with_signer(inbox_event, &account.nip65_relays, keys.clone())
+            .publish_event_builder_with_signer(
+                inbox_event,
+                account.nip65_relays.clone(),
+                keys.clone(),
+            )
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", inbox_result);
 
         let key_package_result = self
             .nostr
-            .publish_event_builder_with_signer(key_package_event, &account.nip65_relays, keys)
+            .publish_event_builder_with_signer(
+                key_package_event,
+                account.nip65_relays.clone(),
+                keys,
+            )
             .await?;
         tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", key_package_result);
         Ok(())
@@ -1035,8 +1066,8 @@ mod tests {
         // Insert a test account
         let test_pubkey = Keys::generate().public_key();
         let test_settings = serde_json::to_string(&AccountSettings::default()).unwrap();
-        let test_relay_urls = Account::default_relays();
-        let test_relay_str: Vec<_> = test_relay_urls.iter().map(|url| url.as_str()).collect();
+        let test_relay_urls: Vec<RelayUrl> = Account::default_relays().into_iter().collect();
+        let test_relay_str: Vec<_> = test_relay_urls.iter().map(|url| url.to_string()).collect();
         let relays_str = serde_json::to_string(&test_relay_str).unwrap();
         let test_timestamp = 1234567890u64;
 

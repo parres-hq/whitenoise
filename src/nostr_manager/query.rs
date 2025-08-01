@@ -5,6 +5,7 @@ use crate::{
     nostr_manager::{NostrManager, Result},
     Account, RelayType,
 };
+use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -15,7 +16,7 @@ impl NostrManager {
 
     pub(crate) async fn fetch_metadata_from(
         &self,
-        nip65_relays: Vec<RelayUrl>,
+        nip65_relays: DashSet<RelayUrl>,
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
@@ -33,8 +34,8 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        nip65_relays: Vec<RelayUrl>,
-    ) -> Result<Vec<RelayUrl>> {
+        nip65_relays: DashSet<RelayUrl>,
+    ) -> Result<DashSet<RelayUrl>> {
         let filter = Filter::new()
             .author(pubkey)
             .kind(relay_type.into())
@@ -143,7 +144,7 @@ impl NostrManager {
     pub(crate) async fn fetch_user_key_package(
         &self,
         pubkey: PublicKey,
-        urls: Vec<RelayUrl>,
+        urls: DashSet<RelayUrl>,
     ) -> Result<Option<Event>> {
         let filter = Filter::new()
             .kind(Kind::MlsKeyPackage)

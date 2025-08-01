@@ -1,6 +1,7 @@
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::Whitenoise;
+use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -56,17 +57,17 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Vec<RelayUrl>)` containing the list of relay URLs, or an error if the query fails.
+    /// Returns `Ok(DashSet<RelayUrl>)` containing the list of relay URLs, or an error if the query fails.
     ///
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the relay query fails.
     pub async fn fetch_relays_from(
         &self,
-        nip65_relays: Vec<RelayUrl>,
+        nip65_relays: DashSet<RelayUrl>,
         pubkey: PublicKey,
         relay_type: RelayType,
-    ) -> Result<Vec<RelayUrl>> {
+    ) -> Result<DashSet<RelayUrl>> {
         let relays = self
             .nostr
             .fetch_user_relays(pubkey, relay_type, nip65_relays)
@@ -139,7 +140,7 @@ impl Whitenoise {
             .iter()
             .chain(account.inbox_relays.iter())
         {
-            self.nostr.client.add_relay(relay).await?;
+            self.nostr.client.add_relay(relay.clone()).await?;
         }
 
         tracing::debug!("Connecting to the account relays added");
