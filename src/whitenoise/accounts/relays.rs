@@ -158,13 +158,25 @@ impl Whitenoise {
     /// Update the relay list in the database
     pub async fn add_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
         self.nostr.connect_to_relay(relay.clone()).await?;
-        account.nip65_relays.insert(relay);
+        account.nip65_relays.insert(relay.clone());
+        
+        // It is possible that the user have a relay list published in this added relay
+        // To avoid over-writing it, we check if that event is published
+        let list = DashSet::new();
+        list.insert(relay);
+        let existing_relay_list = self.fetch_relays_from(list, account.pubkey, RelayType::Nostr).await?;
+        for relay in existing_relay_list {
+            account.nip65_relays.insert(relay);
+        }
+
         self.update_account_relays_db(
             &account.pubkey,
             account.nip65_relays.clone().into_iter().collect(),
             RelayType::Nostr,
         )
-        .await
+        .await?;
+        
+        self.publish_relay_list_for_account(account, RelayType::Nostr).await
     }
 
     /// Add relay to the inbox relays list and establishes the connection
@@ -204,7 +216,8 @@ impl Whitenoise {
             account.nip65_relays.clone().into_iter().collect(),
             RelayType::Nostr,
         )
-        .await
+        .await?;
+        self.publish_relay_list_for_account(account, RelayType::Nostr).await
     }
 
     pub async fn remove_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
@@ -251,15 +264,13 @@ impl Whitenoise {
         relay_type: RelayType,
     ) -> Result<()> {
         // Determine the kind of relay list event to publish
-        let (relay_event_kind, relays_to_use) = match relay_type {
-            RelayType::Nostr => (Kind::RelayList, account.nip65_relays.clone()),
-            RelayType::Inbox => (Kind::InboxRelays, account.inbox_relays.clone()),
-            RelayType::KeyPackage => (
-                Kind::MlsKeyPackageRelays,
-                account.key_package_relays.clone(),
-            ),
+        let relay_event_kind = match relay_type {
+            RelayType::Nostr => Kind::RelayList,
+            RelayType::Inbox => Kind::InboxRelays,
+            RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
         };
 
+        let relays_to_use = account.nip65_relays.clone();
         // Create a minimal relay list event
         let tags: Vec<Tag> = relays_to_use
             .clone()
