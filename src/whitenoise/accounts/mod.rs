@@ -797,43 +797,6 @@ impl Whitenoise {
         }
     }
 
-    pub(crate) async fn update_account_relays_db(
-        &self,
-        pubkey: &PublicKey,
-        relays: Vec<RelayUrl>,
-        relay_type: RelayType,
-    ) -> Result<()> {
-        // 1. Ensure the account exists
-        if !self.logged_in(pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        // 2. Serialize the Vec<RelayUrl> into a JSON string
-        let relays_json = serde_json::to_string(&relays)?;
-
-        // 3. Pick the right column name
-        let column = match relay_type {
-            RelayType::Nostr => "nip65_relays",
-            RelayType::Inbox => "inbox_relays",
-            RelayType::KeyPackage => "key_package_relays",
-        };
-
-        // 4. Build & execute the UPDATE
-        let sql = format!("UPDATE accounts SET {} = ? WHERE pubkey = ?", column);
-        let result = sqlx::query(&sql)
-            .bind(relays_json)
-            .bind(pubkey.to_hex())
-            .execute(&self.database.pool)
-            .await?;
-
-        // 5. Make sure something was updated
-        if result.rows_affected() < 1 {
-            Err(WhitenoiseError::AccountNotFound)
-        } else {
-            Ok(())
-        }
-    }
-
     pub(crate) async fn encoded_key_package(
         &self,
         account: &Account,

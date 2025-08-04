@@ -503,48 +503,10 @@ impl NostrManager {
         }
     }
 
-    /// Extracts and parses relay URLs from a collection of Nostr events.
-    ///
-    /// This helper method processes a collection of Nostr events and extracts all valid
-    /// relay URLs from their tags. It filters for tags of kind `Relay` and attempts to
-    /// parse each tag's content as a valid relay URL.
-    ///
-    /// The method performs the following operations:
-    /// 1. Iterates through all events in the collection
-    /// 2. Extracts all tags from each event
-    /// 3. Filters for tags with kind `TagKind::Relay`
-    /// 4. Attempts to parse each tag's content as a `RelayUrl`
-    /// 5. Collects all successfully parsed relay URLs into a vector
-    ///
-    /// # Arguments
-    ///
-    /// * `events` - A collection of `Event` structs containing relay information in their tags
-    ///
-    /// # Returns
-    ///
-    /// Returns a `DashSet<RelayUrl>` containing all valid relay URLs found in the events.
-    /// Invalid or malformed relay URLs are silently skipped.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let events = fetch_relay_list_events().await?;
-    /// let relay_urls = relay_urls_from_events(events);
-    /// // relay_urls now contains all valid relay URLs from the events
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// * This method silently skips any tags that:
-    ///   - Are not of kind `Relay`
-    ///   - Have no content
-    ///   - Contain invalid relay URL formats
-    /// * The order of relay URLs in the returned vector is not guaranteed to match
-    ///   the order they appeared in the events
-    fn relay_urls_from_events(events: Events) -> DashSet<RelayUrl> {
-        events
+    fn relay_urls_from_event(event: Event) -> DashSet<RelayUrl> {
+        event
+            .tags
             .into_iter()
-            .flat_map(|e| e.tags)
             .filter(|tag| tag.kind() == TagKind::Relay)
             .filter_map(|tag| {
                 tag.content()
