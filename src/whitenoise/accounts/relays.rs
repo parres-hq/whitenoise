@@ -411,13 +411,13 @@ mod tests {
     use nostr::types::RelayUrl;
     use tokio::time::sleep;
 
-    use crate::whitenoise::test_utils::test_get_whitenoise;
+    use crate::whitenoise::test_utils::create_mock_whitenoise;
     use crate::{RelayType, Whitenoise};
 
     #[tokio::test]
     async fn test_add_remove_relay() {
         let l7777 = RelayUrl::parse("ws://localhost:7777").unwrap();
-        let whitenoise = test_get_whitenoise().await;
+        let (whitenoise, _, _) = create_mock_whitenoise().await;
         let account = whitenoise.create_identity().await.unwrap();
 
         tracing::info!("NOTE: Identitiy created");
@@ -449,7 +449,7 @@ mod tests {
             .unwrap();
         assert!(
             Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.nip65_relays.clone()),
-            "{relay_list:?}"
+            "RELAY ======= {relay_list:?}"
         );
 
         tracing::info!("Checking add nip65 relay");
