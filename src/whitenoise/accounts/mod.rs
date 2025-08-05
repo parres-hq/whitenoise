@@ -252,13 +252,7 @@ impl Whitenoise {
         // Add the keys to the secret store
         self.secrets_store.store_private_key(&keys)?;
 
-        let log_account = self.login(keys.secret_key().to_secret_hex()).await;
-        if let Err(e) = log_account {
-            tracing::error!("Failed to login during create_identity: {}", e);
-            return Err(e);
-        }
-
-        Ok(account)
+        self.login(keys.secret_key().to_secret_hex()).await
     }
 
     /// Logs in an existing user using a private key (nsec or hex format).

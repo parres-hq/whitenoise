@@ -159,12 +159,14 @@ impl Whitenoise {
     pub async fn add_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
         self.nostr.connect_to_relay(relay.clone()).await?;
         account.nip65_relays.insert(relay.clone());
-        
+
         // It is possible that the user have a relay list published in this added relay
         // To avoid over-writing it, we check if that event is published
         let list = DashSet::new();
         list.insert(relay);
-        let existing_relay_list = self.fetch_relays_from(list, account.pubkey, RelayType::Nostr).await?;
+        let existing_relay_list = self
+            .fetch_relays_from(list, account.pubkey, RelayType::Nostr)
+            .await?;
         for relay in existing_relay_list {
             account.nip65_relays.insert(relay);
         }
@@ -175,8 +177,9 @@ impl Whitenoise {
             RelayType::Nostr,
         )
         .await?;
-        
-        self.publish_relay_list_for_account(account, RelayType::Nostr).await
+
+        self.publish_relay_list_for_account(account, RelayType::Nostr)
+            .await
     }
 
     /// Add relay to the inbox relays list and establishes the connection
@@ -208,18 +211,33 @@ impl Whitenoise {
             .await
     }
 
+    async fn disconnect_from_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        if account.nip65_relays.contains(&relay) || account.inbox_relays.contains(&relay) {
+            Ok(())
+        } else {
+            self.nostr
+                .client
+                .remove_relay(relay)
+                .await
+                .map_err(WhitenoiseError::from)
+        }
+    }
+
     pub async fn remove_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
         let original_list = account.nip65_relays.clone();
         account.nip65_relays.remove(&relay);
 
         // Publish updated relay list to original nip65 relays
-        let tags: Vec<Tag> = account.nip65_relays
+        let tags: Vec<Tag> = account
+            .nip65_relays
             .clone()
             .into_iter()
             .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
             .collect();
         tracing::debug!("Publishing relay list tags {:?}", tags);
 
+        // let now = Timestamp::now().as_u64();
+        // let event = EventBuilder::new(RelayType::Nostr.into(), "").tags(tags).custom_created_at(Timestamp::from_secs(now+400));
         let event = EventBuilder::new(RelayType::Nostr.into(), "").tags(tags);
         let keys = self
             .secrets_store
@@ -237,7 +255,7 @@ impl Whitenoise {
             RelayType::Nostr,
         )
         .await?;
-        self.nostr.disconnect_from_relay(relay).await.map_err(WhitenoiseError::from)
+        self.disconnect_from_relay(account, relay).await
     }
 
     pub async fn remove_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
@@ -250,7 +268,7 @@ impl Whitenoise {
         .await?;
         self.publish_relay_list_for_account(account, RelayType::Inbox)
             .await?;
-        self.nostr.disconnect_from_relay(relay).await.map_err(WhitenoiseError::from)
+        self.disconnect_from_relay(account, relay).await
     }
 
     pub async fn remove_key_package_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
@@ -367,9 +385,9 @@ impl Whitenoise {
 
         // 2. Pick the right column name
         let column = match relay_type {
-            RelayType::Nostr       => "nip65_relays",
-            RelayType::Inbox       => "inbox_relays",
-            RelayType::KeyPackage  => "key_package_relays",
+            RelayType::Nostr => "nip65_relays",
+            RelayType::Inbox => "inbox_relays",
+            RelayType::KeyPackage => "key_package_relays",
         };
 
         // 3. Build & execute the SELECT
@@ -388,32 +406,197 @@ impl Whitenoise {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use nostr::types::RelayUrl;
+    use tokio::time::sleep;
 
     use crate::whitenoise::test_utils::test_get_whitenoise;
     use crate::{RelayType, Whitenoise};
 
-    
     #[tokio::test]
     async fn test_add_remove_relay() {
-        let l7777 = RelayUrl::parse("ws://localhost:8080").unwrap();
+        let l7777 = RelayUrl::parse("ws://localhost:7777").unwrap();
         let whitenoise = test_get_whitenoise().await;
         let account = whitenoise.create_identity().await.unwrap();
 
-        // nip65 relays remove
-        whitenoise.remove_nip65_relay(&account, l7777.clone()).await.unwrap();
-        assert_eq!(account.nip65_relays.len(), 1);
-        let relay_list_db = whitenoise.get_account_relays_db(&account.pubkey, RelayType::Nostr).await.unwrap();
-        assert!(Whitenoise::relayurl_dashset_eq(relay_list_db.into_iter().collect(), account.nip65_relays.clone()));
-        let relay_list = whitenoise.fetch_relays_from(account.nip65_relays.clone(), account.pubkey, RelayType::Nostr).await.unwrap();
-        assert!(Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.nip65_relays.clone()), "{relay_list:?}");
+        tracing::info!("NOTE: Identitiy created");
 
+        tracing::info!("Checking add nip65 relay");
+        sleep(Duration::from_secs(1)).await;
+
+        // nip65 relays remove
+        whitenoise
+            .remove_nip65_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        assert_eq!(account.nip65_relays.len(), 1);
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Nostr)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.nip65_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Nostr,
+            )
+            .await
+            .unwrap();
+        assert!(
+            Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.nip65_relays.clone()),
+            "{relay_list:?}"
+        );
+
+        tracing::info!("Checking add nip65 relay");
+        sleep(Duration::from_secs(1)).await;
         // nip65 relays add
-        whitenoise.add_nip65_relay(&account, l7777.clone()).await.unwrap();
-        let relay_list_db = whitenoise.get_account_relays_db(&account.pubkey, RelayType::Nostr).await.unwrap();
-        assert!(Whitenoise::relayurl_dashset_eq(relay_list_db.into_iter().collect(), account.nip65_relays.clone()));
-        let relay_list = whitenoise.fetch_relays_from(account.nip65_relays.clone(), account.pubkey, RelayType::Nostr).await.unwrap();
-        assert!(Whitenoise::relayurl_dashset_eq(relay_list, account.nip65_relays.clone()));
+        whitenoise
+            .add_nip65_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Nostr)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.nip65_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Nostr,
+            )
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list,
+            account.nip65_relays.clone()
+        ));
         assert_eq!(account.nip65_relays.len(), 2);
+
+        tracing::info!("Checking remove inbox relay");
+        sleep(Duration::from_secs(1)).await;
+
+        // inbox relays remove
+        whitenoise
+            .remove_inbox_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        assert_eq!(account.inbox_relays.len(), 1);
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Inbox)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.inbox_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Inbox,
+            )
+            .await
+            .unwrap();
+        assert!(
+            Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.inbox_relays.clone()),
+            "{relay_list:?}"
+        );
+
+        tracing::info!("Checking add inbox relay");
+        sleep(Duration::from_secs(1)).await;
+        // nip65 relays add
+        whitenoise
+            .add_inbox_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Inbox)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.inbox_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Inbox,
+            )
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list,
+            account.inbox_relays.clone()
+        ));
+        assert_eq!(account.nip65_relays.len(), 2);
+
+        tracing::info!("Checking remove key package relay");
+        sleep(Duration::from_secs(1)).await;
+
+        // inbox relays remove
+        whitenoise
+            .remove_key_package_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        assert_eq!(account.key_package_relays.len(), 1);
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::KeyPackage)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.key_package_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::KeyPackage,
+            )
+            .await
+            .unwrap();
+        assert!(
+            Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.key_package_relays.clone()),
+            "{relay_list:?}"
+        );
+
+        tracing::info!("Checking add key package relay");
+        sleep(Duration::from_secs(1)).await;
+        // nip65 relays add
+        whitenoise
+            .add_key_package_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::KeyPackage)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.key_package_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::KeyPackage,
+            )
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list,
+            account.key_package_relays.clone()
+        ));
+        assert_eq!(account.key_package_relays.len(), 2);
     }
 }

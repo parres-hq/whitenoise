@@ -76,13 +76,6 @@ impl NostrManager {
         Ok(())
     }
 
-    pub(crate) async fn disconnect_from_relay(&self, relay: RelayUrl) -> Result<()> {
-        self.client
-            .remove_relay(relay)
-            .await
-            .map_err(NostrManagerError::from)
-    }
-
     pub(crate) fn default_timeout() -> Duration {
         Duration::from_secs(5)
     }

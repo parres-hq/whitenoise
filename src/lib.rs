@@ -97,7 +97,7 @@ fn init_tracing(logs_dir: &std::path::Path) {
             .with_target(true);
 
         Registry::default()
-            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")))
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
             .with(stdout_layer)
             .with(file_layer)
             .init();
