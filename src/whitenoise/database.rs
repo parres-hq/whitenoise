@@ -1,49 +1,36 @@
-use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use sqlx::{
+    migrate::{MigrateDatabase, Migrator},
+    sqlite::SqlitePoolOptions,
+    Sqlite, SqlitePool,
+};
+use std::{
+    path::PathBuf,
+    sync::LazyLock,
+    time::{Duration, SystemTime},
+};
 use thiserror::Error;
 
-const MIGRATION_FILES: &[(&str, &[u8])] = &[
-    (
-        "0001_accounts.sql",
-        include_bytes!("../../db_migrations/0001_accounts.sql"),
-    ),
-    (
-        "0002_add_media_files.sql",
-        include_bytes!("../../db_migrations/0002_add_media_files.sql"),
-    ),
-    (
-        "0003_contacts.sql",
-        include_bytes!("../../db_migrations/0003_contacts.sql"),
-    ),
-    (
-        "0004_accounts_relays.sql",
-        include_bytes!("../../db_migrations/0004_accounts_relays.sql"),
-    ),
-    // Add new migrations here in order, for example:
-    // ("000X_something.sql", include_bytes!("../db_migrations/000X_something.sql")),
-    // ("000Y_another.sql", include_bytes!("../db_migrations/000Y_another.sql")),
-];
+pub static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| sqlx::migrate!("./db_migrations"));
+
+const DB_ACQUIRE_TIMEOUT_SECS: u64 = 5;
+const DB_MAX_CONNECTIONS: u32 = 10;
+const DB_BUSY_TIMEOUT_MS: u32 = 5000;
 
 #[derive(Error, Debug)]
 pub enum DatabaseError {
-    #[error("File system error: {0}")]
-    FileSystem(#[from] std::io::Error),
     #[error("SQLx error: {0}")]
     Sqlx(#[from] sqlx::Error),
-    #[error("Migrate error: {0}")]
-    Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("Migration error: {0}")]
+    Migration(#[from] sqlx::migrate::MigrateError),
+    #[error("File system error: {0}")]
+    FileSystem(#[from] std::io::Error),
 }
 
 #[derive(Clone, Debug)]
 pub struct Database {
     pub pool: SqlitePool,
-    #[allow(unused)]
     pub path: PathBuf,
-    #[allow(unused)]
-    pub last_connected: std::time::SystemTime,
+    pub last_connected: SystemTime,
 }
 
 impl Database {
@@ -53,105 +40,94 @@ impl Database {
             std::fs::create_dir_all(parent)?;
         }
 
-        let db_url = format!("{}", db_path.display());
+        let db_url = format!("sqlite://{}", db_path.display());
 
         // Create database if it doesn't exist
         tracing::debug!("Checking if DB exists...{:?}", db_url);
-        if Sqlite::database_exists(&db_url).await.unwrap_or(false) {
-            tracing::debug!("DB exists");
-        } else {
-            tracing::debug!("DB does not exist, creating...");
-            Sqlite::create_database(&db_url).await.map_err(|e| {
-                tracing::error!("Error creating DB: {:?}", e);
-                DatabaseError::Sqlx(e)
-            })?;
-            tracing::debug!("DB created");
+        match Sqlite::database_exists(&db_url).await {
+            Ok(true) => {
+                tracing::debug!("DB exists");
+            }
+            Ok(false) => {
+                tracing::debug!("DB does not exist, creating...");
+                Sqlite::create_database(&db_url).await.map_err(|e| {
+                    tracing::error!("Error creating DB: {:?}", e);
+                    DatabaseError::Sqlx(e)
+                })?;
+                tracing::debug!("DB created");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Could not check if database exists: {:?}, attempting to create",
+                    e
+                );
+                Sqlite::create_database(&db_url).await.map_err(|e| {
+                    tracing::error!("Error creating DB: {:?}", e);
+                    DatabaseError::Sqlx(e)
+                })?;
+            }
         }
 
-        // Create connection pool with refined settings
+        let pool = Self::create_connection_pool(&db_url).await?;
+
+        // Automatically run migrations
+        MIGRATOR.run(&pool).await?;
+
+        Ok(Self {
+            pool,
+            path: db_path,
+            last_connected: SystemTime::now(),
+        })
+    }
+
+    /// Creates and configures a SQLite connection pool
+    async fn create_connection_pool(db_url: &str) -> Result<SqlitePool, DatabaseError> {
         tracing::debug!("Creating connection pool...");
         let pool = SqlitePoolOptions::new()
-            .acquire_timeout(Duration::from_secs(5))
-            .max_connections(10)
+            .acquire_timeout(Duration::from_secs(DB_ACQUIRE_TIMEOUT_SECS))
+            .max_connections(DB_MAX_CONNECTIONS)
             .after_connect(|conn, _| {
                 Box::pin(async move {
                     let conn = &mut *conn;
-                    // Enable WAL mode
+                    // Enable WAL mode for better concurrent access
                     sqlx::query("PRAGMA journal_mode=WAL")
                         .execute(&mut *conn)
                         .await?;
-                    // Set busy timeout
-                    sqlx::query("PRAGMA busy_timeout=5000")
+                    // Set busy timeout for lock contention
+                    sqlx::query(&format!("PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}"))
                         .execute(&mut *conn)
                         .await?;
                     // Enable foreign keys and triggers
-                    sqlx::query("PRAGMA foreign_keys = ON;")
+                    sqlx::query("PRAGMA foreign_keys = ON")
                         .execute(&mut *conn)
                         .await?;
-                    sqlx::query("PRAGMA recursive_triggers = ON;")
+                    sqlx::query("PRAGMA recursive_triggers = ON")
                         .execute(&mut *conn)
                         .await?;
                     Ok(())
                 })
             })
-            .connect(&format!("{}?mode=rwc", db_url))
+            .connect(&format!("{db_url}?mode=rwc"))
             .await?;
-
-        // Run migrations
-        tracing::debug!("Running migrations...");
-
-        // Extract the parent directory from db_path as the data_dir
-        let data_dir = db_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        tracing::debug!("Using data directory: {:?}", data_dir);
-
-        // Always use embedded migrations by copying them to a temporary directory
-        let temp_dir = data_dir.join("temp_migrations");
-        if temp_dir.exists() {
-            fs::remove_dir_all(&temp_dir)?;
-        }
-        fs::create_dir_all(&temp_dir)?;
-
-        // Copy all migration files from the embedded assets
-        for (filename, content) in MIGRATION_FILES {
-            tracing::debug!("Writing migration file: {}", filename);
-            fs::write(temp_dir.join(filename), content)?;
-        }
-
-        let migrations_path = temp_dir;
-        tracing::debug!("Migrations path: {:?}", migrations_path);
-
-        let migration_result = match sqlx::migrate::Migrator::new(migrations_path.clone()).await {
-            Ok(migrator) => {
-                let result = migrator.run(&pool).await;
-                if result.is_ok() {
-                    tracing::debug!("Migrations applied successfully");
-                }
-                result.map_err(DatabaseError::from)
-            }
-            Err(e) => {
-                tracing::error!("Failed to create migrator: {:?}", e);
-                Err(DatabaseError::Migrate(e))
-            }
-        };
-
-        // Always clean up temp migrations directory
-        if let Err(e) = fs::remove_dir_all(data_dir.join("temp_migrations")) {
-            tracing::warn!("Failed to remove temp migrations directory: {:?}", e);
-        }
-
-        // Return migration result or error
-        migration_result?;
-
-        Ok(Self {
-            pool,
-            path: db_path,
-            last_connected: std::time::SystemTime::now(),
-        })
+        Ok(pool)
     }
 
+    /// Runs all pending database migrations
+    ///
+    /// This method is idempotent - it's safe to call multiple times.
+    /// Only new migrations will be applied.
+    pub async fn migrate_up(&self) -> Result<(), DatabaseError> {
+        MIGRATOR.run(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Deletes all data from all tables while preserving schema
+    ///
+    /// This method:
+    /// - Temporarily disables foreign key constraints
+    /// - Deletes data from all tables in dependency order
+    /// - Re-enables foreign key constraints
+    /// - Uses a transaction to ensure atomicity
     pub async fn delete_all_data(&self) -> Result<(), DatabaseError> {
         let mut txn = self.pool.begin().await?;
 
@@ -161,11 +137,13 @@ impl Database {
             .await?;
 
         // Delete data in reverse order of dependencies
-        // media_files has foreign key to accounts, so delete it first
         sqlx::query("DELETE FROM media_files")
             .execute(&mut *txn)
             .await?;
         sqlx::query("DELETE FROM accounts")
+            .execute(&mut *txn)
+            .await?;
+        sqlx::query("DELETE FROM contacts")
             .execute(&mut *txn)
             .await?;
 
@@ -286,6 +264,11 @@ mod tests {
             .await
             .expect("Failed to insert test media file");
 
+        sqlx::query("INSERT INTO contacts (pubkey, metadata, nip65_relays, inbox_relays, key_package_relays) VALUES ('contact-pubkey', '{}', '[]', '[]', '[]')")
+            .execute(&db.pool)
+            .await
+            .expect("Failed to insert test contact");
+
         // Verify data exists
         let account_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM accounts")
             .fetch_one(&db.pool)
@@ -298,6 +281,12 @@ mod tests {
             .await
             .expect("Failed to count media files");
         assert_eq!(media_count.0, 1);
+
+        let contact_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM contacts")
+            .fetch_one(&db.pool)
+            .await
+            .expect("Failed to count contacts");
+        assert_eq!(contact_count.0, 1);
 
         // Delete all data
         let result = db.delete_all_data().await;
@@ -315,6 +304,12 @@ mod tests {
             .await
             .expect("Failed to count media files after deletion");
         assert_eq!(media_count.0, 0);
+
+        let contact_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM contacts")
+            .fetch_one(&db.pool)
+            .await
+            .expect("Failed to count contacts after deletion");
+        assert_eq!(contact_count.0, 0);
     }
 
     #[tokio::test]
@@ -372,7 +367,7 @@ mod tests {
 
         // Verify the account data
         let account: (String, String, i64, String, String, String) =
-            sqlx::query_as("SELECT * FROM accounts")
+            sqlx::query_as("SELECT pubkey, settings, last_synced, nip65_relays, inbox_relays, key_package_relays FROM accounts")
                 .fetch_one(&db2.pool)
                 .await
                 .expect("Failed to fetch account");
@@ -405,6 +400,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_migrate_up() {
+        let (db, _temp_dir) = create_test_db().await;
+
+        // Migrate up should work without errors (migrations already applied during creation)
+        let result = db.migrate_up().await;
+        assert!(result.is_ok());
+
+        // Verify that all expected tables still exist
+        let tables: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .fetch_all(&db.pool)
+                .await
+                .expect("Failed to fetch table names");
+
+        let table_names: Vec<String> = tables.into_iter().map(|t| t.0).collect();
+        assert!(table_names.contains(&"accounts".to_string()));
+        assert!(table_names.contains(&"media_files".to_string()));
+        assert!(table_names.contains(&"contacts".to_string()));
     }
 
     #[tokio::test]
