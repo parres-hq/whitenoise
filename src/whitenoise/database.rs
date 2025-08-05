@@ -371,17 +371,17 @@ mod tests {
         assert_eq!(account_count.0, 1);
 
         // Verify the account data
-        let account: (String, String, String, String, String, i64) =
+        let account: (String, String, i64, String, String, String) =
             sqlx::query_as("SELECT * FROM accounts")
                 .fetch_one(&db2.pool)
                 .await
                 .expect("Failed to fetch account");
         assert_eq!(account.0, "test-pubkey");
         assert_eq!(account.1, "{}");
-        assert_eq!(account.2, "[1,2]");
-        assert_eq!(account.3, "[]");
-        assert_eq!(account.4, "[1]");
-        assert_eq!(account.5, 0);
+        assert_eq!(account.2, 0);
+        assert_eq!(account.3, "[1,2]");
+        assert_eq!(account.4, "[]");
+        assert_eq!(account.5, "[1]");
     }
 
     #[tokio::test]
