@@ -1,6 +1,7 @@
-use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::Whitenoise;
+use crate::{whitenoise::accounts::Account, WhitenoiseError};
+use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -56,17 +57,17 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Vec<RelayUrl>)` containing the list of relay URLs, or an error if the query fails.
+    /// Returns `Ok(DashSet<RelayUrl>)` containing the list of relay URLs, or an error if the query fails.
     ///
     /// # Errors
     ///
     /// Returns a `WhitenoiseError` if the relay query fails.
     pub async fn fetch_relays_from(
         &self,
-        nip65_relays: Vec<RelayUrl>,
+        nip65_relays: DashSet<RelayUrl>,
         pubkey: PublicKey,
         relay_type: RelayType,
-    ) -> Result<Vec<RelayUrl>> {
+    ) -> Result<DashSet<RelayUrl>> {
         let relays = self
             .nostr
             .fetch_user_relays(pubkey, relay_type, nip65_relays)
@@ -139,7 +140,7 @@ impl Whitenoise {
             .iter()
             .chain(account.inbox_relays.iter())
         {
-            self.nostr.client.add_relay(relay).await?;
+            self.nostr.client.add_relay(relay.clone()).await?;
         }
 
         tracing::debug!("Connecting to the account relays added");
@@ -151,5 +152,451 @@ impl Whitenoise {
         });
 
         Ok(())
+    }
+
+    /// Add relay to the nip65 relays list and establishes the connection
+    /// Update the relay list in the database
+    pub async fn add_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.nostr.connect_to_relay(relay.clone()).await?;
+        account.nip65_relays.insert(relay.clone());
+
+        // It is possible that the user have a relay list published in this added relay
+        // To avoid over-writing it, we check if that event is published
+        let list = DashSet::new();
+        list.insert(relay);
+        let existing_relay_list = self
+            .fetch_relays_from(list, account.pubkey, RelayType::Nostr)
+            .await?;
+        for relay in existing_relay_list {
+            account.nip65_relays.insert(relay);
+        }
+
+        self.update_account_relays_db(
+            &account.pubkey,
+            account.nip65_relays.clone().into_iter().collect(),
+            RelayType::Nostr,
+        )
+        .await?;
+
+        self.publish_relay_list_for_account(account, RelayType::Nostr)
+            .await
+    }
+
+    /// Add relay to the inbox relays list and establishes the connection
+    /// Update the relay list in the database
+    pub async fn add_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.nostr.connect_to_relay(relay.clone()).await?;
+        account.inbox_relays.insert(relay);
+        self.update_account_relays_db(
+            &account.pubkey,
+            account.inbox_relays.clone().into_iter().collect(),
+            RelayType::Inbox,
+        )
+        .await?;
+        self.publish_relay_list_for_account(account, RelayType::Inbox)
+            .await
+    }
+
+    /// Add relay to the inbox relays list, does not establish the connection
+    /// Update the relay list in the database
+    pub async fn add_key_package_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        account.key_package_relays.insert(relay);
+        self.update_account_relays_db(
+            &account.pubkey,
+            account.key_package_relays.clone().into_iter().collect(),
+            RelayType::KeyPackage,
+        )
+        .await?;
+        self.publish_relay_list_for_account(account, RelayType::KeyPackage)
+            .await
+    }
+
+    async fn disconnect_from_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        if account.nip65_relays.contains(&relay) || account.inbox_relays.contains(&relay) {
+            Ok(())
+        } else {
+            self.nostr
+                .client
+                .remove_relay(relay)
+                .await
+                .map_err(WhitenoiseError::from)
+        }
+    }
+
+    pub async fn remove_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        let original_list = account.nip65_relays.clone();
+        account.nip65_relays.remove(&relay);
+
+        // Publish updated relay list to original nip65 relays
+        let tags: Vec<Tag> = account
+            .nip65_relays
+            .clone()
+            .into_iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+        tracing::debug!("Publishing relay list tags {:?}", tags);
+
+        // let now = Timestamp::now().as_u64();
+        // let event = EventBuilder::new(RelayType::Nostr.into(), "").tags(tags).custom_created_at(Timestamp::from_secs(now+400));
+        let event = EventBuilder::new(RelayType::Nostr.into(), "").tags(tags);
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        let result = self
+            .nostr
+            .publish_event_builder_with_signer(event.clone(), original_list, keys)
+            .await?;
+        tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
+
+        self.update_account_relays_db(
+            &account.pubkey,
+            account.nip65_relays.clone().into_iter().collect(),
+            RelayType::Nostr,
+        )
+        .await?;
+        self.disconnect_from_relay(account, relay).await
+    }
+
+    pub async fn remove_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        account.inbox_relays.remove(&relay);
+        self.update_account_relays_db(
+            &account.pubkey,
+            account.inbox_relays.clone().into_iter().collect(),
+            RelayType::Inbox,
+        )
+        .await?;
+        self.publish_relay_list_for_account(account, RelayType::Inbox)
+            .await?;
+        self.disconnect_from_relay(account, relay).await
+    }
+
+    pub async fn remove_key_package_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        account.key_package_relays.remove(&relay);
+        self.update_account_relays_db(
+            &account.pubkey,
+            account.key_package_relays.clone().into_iter().collect(),
+            RelayType::KeyPackage,
+        )
+        .await?;
+        self.publish_relay_list_for_account(account, RelayType::KeyPackage)
+            .await
+    }
+
+    pub(crate) async fn publish_account_relay_info(&self, account: &Account) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        self.publish_relay_list_for_account(account, RelayType::Nostr)
+            .await?;
+        self.publish_relay_list_for_account(account, RelayType::Inbox)
+            .await?;
+        self.publish_relay_list_for_account(account, RelayType::KeyPackage)
+            .await
+    }
+
+    pub(crate) async fn publish_relay_list_for_account(
+        &self,
+        account: &Account,
+        relay_type: RelayType,
+    ) -> Result<()> {
+        // Determine the kind of relay list event to publish
+        let (relay_event_kind, relays_to_publish) = match relay_type {
+            RelayType::Nostr => (Kind::RelayList, account.nip65_relays.clone()),
+            RelayType::Inbox => (Kind::InboxRelays, account.inbox_relays.clone()),
+            RelayType::KeyPackage => (
+                Kind::MlsKeyPackageRelays,
+                account.key_package_relays.clone(),
+            ),
+        };
+
+        let relays_to_use = account.nip65_relays.clone();
+        // Create a minimal relay list event
+        let tags: Vec<Tag> = relays_to_publish
+            .clone()
+            .into_iter()
+            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+            .collect();
+        tracing::debug!("Publishing relay list tags {:?}", tags);
+
+        let event = EventBuilder::new(relay_event_kind, "").tags(tags);
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        let result = self
+            .nostr
+            .publish_event_builder_with_signer(event.clone(), relays_to_use, keys)
+            .await?;
+        tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
+
+        Ok(())
+    }
+
+    pub(crate) async fn update_account_relays_db(
+        &self,
+        pubkey: &PublicKey,
+        relays: Vec<RelayUrl>,
+        relay_type: RelayType,
+    ) -> Result<()> {
+        // 1. Ensure the account exists
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        // 2. Serialize the Vec<RelayUrl> into a JSON string
+        let relays_json = serde_json::to_string(&relays)?;
+
+        // 3. Pick the right column name
+        let column = match relay_type {
+            RelayType::Nostr => "nip65_relays",
+            RelayType::Inbox => "inbox_relays",
+            RelayType::KeyPackage => "key_package_relays",
+        };
+
+        // 4. Build & execute the UPDATE
+        let sql = format!("UPDATE accounts SET {} = ? WHERE pubkey = ?", column);
+        let result = sqlx::query(&sql)
+            .bind(relays_json)
+            .bind(pubkey.to_hex())
+            .execute(&self.database.pool)
+            .await?;
+
+        // 5. Make sure something was updated
+        if result.rows_affected() < 1 {
+            Err(WhitenoiseError::AccountNotFound)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    /// Fetches the list of relays for `pubkey` and the given `relay_type`.
+    async fn get_account_relays_db(
+        &self,
+        pubkey: &PublicKey,
+        relay_type: RelayType,
+    ) -> Result<Vec<RelayUrl>> {
+        // 1. Ensure the account exists
+        if !self.logged_in(pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        // 2. Pick the right column name
+        let column = match relay_type {
+            RelayType::Nostr => "nip65_relays",
+            RelayType::Inbox => "inbox_relays",
+            RelayType::KeyPackage => "key_package_relays",
+        };
+
+        // 3. Build & execute the SELECT
+        let sql = format!("SELECT {} FROM accounts WHERE pubkey = ?", column);
+        let relays_json: String = sqlx::query_scalar(&sql)
+            .bind(pubkey.to_hex())
+            .fetch_one(&self.database.pool)
+            .await?;
+
+        // 4. Deserialize JSON into Vec<RelayUrl>
+        let relays: Vec<RelayUrl> = serde_json::from_str(&relays_json)?;
+
+        Ok(relays)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use nostr::types::RelayUrl;
+    use tokio::time::sleep;
+
+    use crate::whitenoise::test_utils::create_mock_whitenoise;
+    use crate::{RelayType, Whitenoise};
+
+    #[tokio::test]
+    async fn test_add_remove_relay() {
+        let l7777 = RelayUrl::parse("ws://localhost:7777").unwrap();
+        let (whitenoise, _, _) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+
+        tracing::info!("NOTE: Identitiy created");
+
+        tracing::info!("Checking add nip65 relay");
+        sleep(Duration::from_secs(1)).await;
+
+        // nip65 relays remove
+        whitenoise
+            .remove_nip65_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        assert_eq!(account.nip65_relays.len(), 1);
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Nostr)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.nip65_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Nostr,
+            )
+            .await
+            .unwrap();
+        assert!(
+            Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.nip65_relays.clone()),
+            "RELAY ======= {relay_list:?}"
+        );
+
+        tracing::info!("Checking add nip65 relay");
+        sleep(Duration::from_secs(1)).await;
+        // nip65 relays add
+        whitenoise
+            .add_nip65_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Nostr)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.nip65_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Nostr,
+            )
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list,
+            account.nip65_relays.clone()
+        ));
+        assert_eq!(account.nip65_relays.len(), 2);
+
+        tracing::info!("Checking remove inbox relay");
+        sleep(Duration::from_secs(1)).await;
+
+        // inbox relays remove
+        whitenoise
+            .remove_inbox_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        assert_eq!(account.inbox_relays.len(), 1);
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Inbox)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.inbox_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Inbox,
+            )
+            .await
+            .unwrap();
+        assert!(
+            Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.inbox_relays.clone()),
+            "{relay_list:?}"
+        );
+
+        tracing::info!("Checking add inbox relay");
+        sleep(Duration::from_secs(1)).await;
+        // nip65 relays add
+        whitenoise
+            .add_inbox_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Inbox)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.inbox_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::Inbox,
+            )
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list,
+            account.inbox_relays.clone()
+        ));
+        assert_eq!(account.nip65_relays.len(), 2);
+
+        tracing::info!("Checking remove key package relay");
+        sleep(Duration::from_secs(1)).await;
+
+        // inbox relays remove
+        whitenoise
+            .remove_key_package_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        assert_eq!(account.key_package_relays.len(), 1);
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::KeyPackage)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.key_package_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::KeyPackage,
+            )
+            .await
+            .unwrap();
+        assert!(
+            Whitenoise::relayurl_dashset_eq(relay_list.clone(), account.key_package_relays.clone()),
+            "{relay_list:?}"
+        );
+
+        tracing::info!("Checking add key package relay");
+        sleep(Duration::from_secs(1)).await;
+        // nip65 relays add
+        whitenoise
+            .add_key_package_relay(&account, l7777.clone())
+            .await
+            .unwrap();
+        let relay_list_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::KeyPackage)
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list_db.into_iter().collect(),
+            account.key_package_relays.clone()
+        ));
+        let relay_list = whitenoise
+            .fetch_relays_from(
+                account.nip65_relays.clone(),
+                account.pubkey,
+                RelayType::KeyPackage,
+            )
+            .await
+            .unwrap();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            relay_list,
+            account.key_package_relays.clone()
+        ));
+        assert_eq!(account.key_package_relays.len(), 2);
     }
 }

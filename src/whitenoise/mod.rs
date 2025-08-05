@@ -573,6 +573,12 @@ pub mod test_utils {
             event_sender,
             shutdown_sender,
         };
+        // Load all accounts from database
+        let loaded_accounts = whitenoise.load_accounts().await.unwrap();
+        {
+            let mut accounts = whitenoise.write_accounts().await;
+            *accounts = loaded_accounts;
+        }
 
         (whitenoise, data_temp, logs_temp)
     }
@@ -704,7 +710,7 @@ pub mod test_utils {
                 .nostr
                 .publish_event_builder_with_signer(
                     key_package_event_builder,
-                    &account.nip65_relays,
+                    account.key_package_relays.clone(),
                     keys,
                 )
                 .await

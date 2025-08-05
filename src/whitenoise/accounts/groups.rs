@@ -131,7 +131,7 @@ impl Whitenoise {
                     &member_pubkey,
                     welcome_rumor.clone(),
                     vec![Tag::expiration(one_month_future)],
-                    &relays_to_use,
+                    relays_to_use,
                     keys.clone(),
                 )
                 .await
@@ -141,7 +141,7 @@ impl Whitenoise {
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 creator_account.pubkey,
-                group_relays,
+                group_relays.into_iter().collect(),
                 group_ids,
                 keys,
             )
@@ -336,7 +336,7 @@ impl Whitenoise {
                             &member_pubkey,
                             welcome_rumor.clone(),
                             vec![Tag::expiration(one_month_future)],
-                            &contact.inbox_relays,
+                            contact.inbox_relays,
                             keys.clone(),
                         )
                         .await

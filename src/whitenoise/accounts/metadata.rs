@@ -2,6 +2,7 @@ use crate::types::ImageType;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
 use crate::Account;
+use dashmap::DashSet;
 use nostr_blossom::prelude::*;
 use nostr_sdk::prelude::*;
 
@@ -26,7 +27,7 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the metadata query fails.
     pub async fn fetch_metadata_from(
         &self,
-        nip65_relays: Vec<RelayUrl>,
+        nip65_relays: DashSet<RelayUrl>,
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         // First try and fetch from local nostr database
@@ -81,7 +82,7 @@ impl Whitenoise {
         // Publish the event
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event, &account.nip65_relays, keys)
+            .publish_event_builder_with_signer(event, account.nip65_relays.clone(), keys)
             .await?;
 
         tracing::debug!(

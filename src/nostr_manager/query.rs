@@ -5,6 +5,7 @@ use crate::{
     nostr_manager::{NostrManager, Result},
     Account, RelayType,
 };
+use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -15,7 +16,7 @@ impl NostrManager {
 
     pub(crate) async fn fetch_metadata_from(
         &self,
-        nip65_relays: Vec<RelayUrl>,
+        nip65_relays: DashSet<RelayUrl>,
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
@@ -33,17 +34,22 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        nip65_relays: Vec<RelayUrl>,
-    ) -> Result<Vec<RelayUrl>> {
-        let filter = Filter::new()
-            .author(pubkey)
-            .kind(relay_type.into())
-            .limit(1);
+        nip65_relays: DashSet<RelayUrl>,
+    ) -> Result<DashSet<RelayUrl>> {
+        let filter = Filter::new().author(pubkey).kind(relay_type.into());
         let relay_events = self
             .client
             .fetch_events_from(nip65_relays, filter.clone(), self.timeout)
             .await?;
-        Ok(Self::relay_urls_from_events(relay_events))
+        tracing::debug!("Fetched relay events {:?}", relay_events);
+
+        match relay_events
+            .into_iter()
+            .max_by_key(|event| event.created_at)
+        {
+            None => Ok(DashSet::new()),
+            Some(event) => Ok(Self::relay_urls_from_event(event)),
+        }
     }
 
     pub(crate) async fn query_user_contact_list(
@@ -143,7 +149,7 @@ impl NostrManager {
     pub(crate) async fn fetch_user_key_package(
         &self,
         pubkey: PublicKey,
-        urls: Vec<RelayUrl>,
+        urls: DashSet<RelayUrl>,
     ) -> Result<Option<Event>> {
         let filter = Filter::new()
             .kind(Kind::MlsKeyPackage)
