@@ -253,22 +253,11 @@ impl Whitenoise {
         self.secrets_store.store_private_key(&keys)?;
 
         // Generate a petname for the account (two words, separated by a space)
-        let petname_raw = petname::petname(2, " ").unwrap_or_else(|| "Anonymous User".to_string());
-
-        // Capitalize each word in the petname
-        let petname = petname_raw
+        let petname = petname::petname(2, " ")
+            .unwrap_or_else(|| "Anonymous User".to_string())
             .split_whitespace()
-            .map(|word| {
-                let mut chars = word.chars();
-                match chars.next() {
-                    None => String::new(),
-                    Some(first_char) => {
-                        let first_upper = first_char.to_uppercase().collect::<String>();
-                        first_upper + chars.as_str()
-                    }
-                }
-            })
-            .collect::<Vec<String>>()
+            .map(Whitenoise::capitalize_first_letter)
+            .collect::<Vec<_>>()
             .join(" ");
 
         let metadata = Metadata {
