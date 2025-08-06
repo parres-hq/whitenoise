@@ -536,7 +536,7 @@ impl Whitenoise {
     ///
     /// Returns a `WhitenoiseError::AccountNotFound` if the account is not found in the database,
     /// or another `WhitenoiseError` if the database query fails.
-    pub(crate) async fn load_account(&self, pubkey: &PublicKey) -> Result<Account> {
+    pub async fn load_account(&self, pubkey: &PublicKey) -> Result<Account> {
         let account_row =
             sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
                 .bind(pubkey.to_hex().as_str())
