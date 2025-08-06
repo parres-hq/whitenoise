@@ -252,6 +252,33 @@ impl Whitenoise {
         // Add the keys to the secret store
         self.secrets_store.store_private_key(&keys)?;
 
+        // Generate a petname for the account (two words, separated by a space)
+        let petname_raw = petname::petname(2, " ").unwrap_or_else(|| "Anonymous User".to_string());
+
+        // Capitalize each word in the petname
+        let petname = petname_raw
+            .split_whitespace()
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first_char) => {
+                        let first_upper = first_char.to_uppercase().collect::<String>();
+                        first_upper + chars.as_str()
+                    }
+                }
+            })
+            .collect::<Vec<String>>()
+            .join(" ");
+
+        let metadata = Metadata {
+            name: Some(petname.clone()),
+            display_name: Some(petname),
+            ..Default::default()
+        };
+
+        self.update_metadata(&metadata, &account).await?;
+
         self.login(keys.secret_key().to_secret_hex()).await
     }
 
@@ -286,8 +313,7 @@ impl Whitenoise {
             }
             Err(WhitenoiseError::AccountNotFound) => {
                 tracing::debug!(target: "whitenoise::login", "Account not found, adding from keys");
-                let account = self.add_account_from_keys(&keys).await?;
-                account
+                self.add_account_from_keys(&keys).await?
             }
             Err(e) => return Err(e),
         };
