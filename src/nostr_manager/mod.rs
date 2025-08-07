@@ -63,19 +63,6 @@ impl NostrManager {
         Ok(())
     }
 
-    pub(crate) async fn connect_to_relay(&self, relay: RelayUrl) -> Result<()> {
-        let newly_added = self.client.add_relay(relay).await?;
-        if newly_added {
-            tokio::spawn({
-                let client = self.client.clone();
-                async move {
-                    client.connect().await;
-                }
-            });
-        }
-        Ok(())
-    }
-
     pub(crate) fn default_timeout() -> Duration {
         Duration::from_secs(5)
     }

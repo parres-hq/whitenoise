@@ -329,11 +329,15 @@ impl Whitenoise {
             accounts.insert(account.pubkey, account.clone());
         }
 
-        self.publish_account_relay_info(&account).await?;
-
         self.setup_subscriptions(&account).await?;
 
-        self.publish_key_package_for_account(&account).await?;
+        // TODO: This should only query local nostr cached events, not fetch from relays
+        let key_package_event = self
+            .fetch_key_package_event_from(account.key_package_relays.clone(), pubkey)
+            .await?;
+        if key_package_event.is_none() {
+            self.publish_key_package_for_account(&account).await?;
+        }
 
         Ok(account)
     }
@@ -634,11 +638,31 @@ impl Whitenoise {
         })?;
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Keys stored in secret store");
 
+        let mut need_to_publish_nip65_relays = false;
+        let mut need_to_publish_inbox_relays = false;
+        let mut need_to_publish_key_package_relays = false;
         let mut nip65_relays = self
             .fetch_relays_from(Account::default_relays(), keys.public_key, RelayType::Nostr)
             .await?;
         if nip65_relays.is_empty() {
             nip65_relays = Account::default_relays();
+            need_to_publish_nip65_relays = true;
+        }
+
+        let mut inbox_relays = self
+            .fetch_relays_from(nip65_relays.clone(), keys.public_key, RelayType::Inbox)
+            .await?;
+        if inbox_relays.is_empty() {
+            inbox_relays = Account::default_relays();
+            need_to_publish_inbox_relays = true;
+        }
+
+        let mut key_package_relays = self
+            .fetch_relays_from(nip65_relays.clone(), keys.public_key, RelayType::KeyPackage)
+            .await?;
+        if key_package_relays.is_empty() {
+            key_package_relays = Account::default_relays();
+            need_to_publish_key_package_relays = true;
         }
 
         // Step 3: Create account struct and save to database
@@ -647,8 +671,8 @@ impl Whitenoise {
             settings: AccountSettings::default(),
             last_synced: Timestamp::zero(),
             nip65_relays,
-            inbox_relays: Account::default_relays(),
-            key_package_relays: Account::default_relays(),
+            inbox_relays,
+            key_package_relays,
             nostr_mls: Account::create_nostr_mls(keys.public_key(), &self.config.data_dir)?,
         };
 
@@ -661,6 +685,17 @@ impl Whitenoise {
             e
         })?;
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Account saved to database");
+
+        // Only publish new relay lists if we need to
+        if need_to_publish_nip65_relays {
+            self.publish_account_relay_info(&account, &None).await?;
+        }
+        if need_to_publish_inbox_relays {
+            self.publish_account_relay_info(&account, &None).await?;
+        }
+        if need_to_publish_key_package_relays {
+            self.publish_account_relay_info(&account, &None).await?;
+        }
 
         Ok(account)
     }

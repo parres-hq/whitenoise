@@ -420,22 +420,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_group() {
-        let whitenoise = test_get_whitenoise().await;
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Setup creator account
-        let (creator_account, _creator_keys) = setup_login_account(whitenoise).await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
 
         // Setup member accounts
-        let member_accounts = setup_multiple_test_accounts(whitenoise, &creator_account, 2).await;
-        let member_pubkeys: Vec<PublicKey> =
-            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+        let mut member_pubkeys = Vec::new();
+        for _ in 0..2 {
+            let member_account = whitenoise.create_identity().await.unwrap();
+            whitenoise
+                .add_contact(&creator_account, member_account.pubkey)
+                .await
+                .unwrap();
+            member_pubkeys.push(member_account.pubkey);
+        }
 
         // Setup admin accounts (creator + one member as admin)
         let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
 
         // Test for success case
         case_create_group_success(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
@@ -445,7 +451,7 @@ mod tests {
         // // Test case: Key package fetch fails (invalid member)
         // let invalid_member_pubkey = create_test_keys().public_key();
         // case_create_group_key_package_fetch_fails(
-        //     whitenoise,
+        //     &whitenoise,
         //     &creator_account,
         //     vec![invalid_member_pubkey],
         //     admin_pubkeys.clone(),
@@ -454,7 +460,7 @@ mod tests {
 
         // Test case: Empty admin list
         case_create_group_empty_admin_list(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             vec![], // Empty admin list
@@ -464,7 +470,7 @@ mod tests {
         // Test case: Invalid admin pubkey (not a member)
         let non_member_pubkey = create_test_keys().public_key();
         case_create_group_invalid_admin_pubkey(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             vec![creator_account.pubkey, non_member_pubkey],

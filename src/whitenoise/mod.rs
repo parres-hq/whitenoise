@@ -695,10 +695,16 @@ pub mod test_utils {
     ) -> Vec<(Account, Keys)> {
         let mut accounts = Vec::new();
         for _ in 0..count {
-            let (account, keys) = create_test_account();
+            // Generate keys first
+            let keys = create_test_keys();
+            // Use login to create and register the account properly
+            let account = whitenoise
+                .login(keys.secret_key().to_secret_hex())
+                .await
+                .unwrap();
             accounts.push((account.clone(), keys.clone()));
             whitenoise
-                .add_contact(creator_account, keys.public_key())
+                .add_contact(creator_account, account.pubkey)
                 .await
                 .unwrap();
             whitenoise.load_contact(&keys.public_key).await.unwrap();
@@ -878,19 +884,12 @@ mod tests {
         #[tokio::test]
         async fn test_fetch_methods_return_types() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let test_keys = create_test_keys();
-            let pubkey = test_keys.public_key();
-            let account = whitenoise
-                .login(test_keys.secret_key().to_secret_hex())
-                .await;
-            assert!(account.is_ok());
-
-            let account = account.unwrap();
+            let account = whitenoise.create_identity().await.unwrap();
 
             let relays = account.nip65_relays.clone();
 
             // Test all load methods return expected types (though they may be empty in test env)
-            let metadata = whitenoise.fetch_metadata_from(relays, pubkey).await;
+            let metadata = whitenoise.fetch_metadata_from(relays, account.pubkey).await;
             assert!(metadata.is_ok());
 
             let contacts = whitenoise.fetch_contacts(&account.pubkey).await;
@@ -914,22 +913,15 @@ mod tests {
         #[tokio::test]
         async fn test_fetch_aggregated_messages_basic_error() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let test_keys = create_test_keys();
-            let pubkey = test_keys.public_key();
-
-            // Create account but don't initialize nostr_mls
-            let _account = whitenoise
-                .login(test_keys.secret_key().to_secret_hex())
-                .await
-                .unwrap();
+            let account = whitenoise.create_identity().await.unwrap();
 
             // Mock group ID for testing
             let group_id = GroupId::from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
-            // Since login initializes nostr_mls, we should get a different error
+            // Since create_identity initializes nostr_mls, we should get a different error
             // The error should be about the group not existing, not nostr_mls not being initialized
             let result = whitenoise
-                .fetch_aggregated_messages_for_group(&pubkey, &group_id)
+                .fetch_aggregated_messages_for_group(&account.pubkey, &group_id)
                 .await;
 
             // Should return an error (group not found or similar), but not NostrMlsNotInitialized
