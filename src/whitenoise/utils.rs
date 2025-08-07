@@ -123,4 +123,13 @@ impl Whitenoise {
         }
         true
     }
+
+    /// Capitalizes the first letter of a word, leaving the rest unchanged
+    pub(crate) fn capitalize_first_letter(word: &str) -> String {
+        let mut chars = word.chars();
+        match chars.next() {
+            None => String::new(),
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        }
+    }
 }
