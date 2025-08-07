@@ -222,6 +222,20 @@ impl Account {
         let storage = NostrMlsSqliteStorage::new(mls_storage_dir)?;
         Ok(Arc::new(Mutex::new(NostrMls::new(storage))))
     }
+
+    pub(crate) fn load_nostr_group_ids(
+        &self,
+    ) -> core::result::Result<Vec<String>, AccountError> {
+        let groups;
+        {
+            let nostr_mls = self.nostr_mls.lock().unwrap();
+            groups = nostr_mls.get_groups()?;
+        }
+        Ok(groups
+            .iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect())
+    }
 }
 
 impl Whitenoise {
@@ -302,7 +316,9 @@ impl Whitenoise {
             }
             Err(WhitenoiseError::AccountNotFound) => {
                 tracing::debug!(target: "whitenoise::login", "Account not found, adding from keys");
-                self.add_account_from_keys(&keys).await?
+                let account = self.add_account_from_keys(&keys).await?;
+                self.background_fetch_account_data(&account).await?;
+                account
             }
             Err(e) => return Err(e),
         };
@@ -498,6 +514,17 @@ impl Whitenoise {
             };
             // Add the account to the HashMap first, then trigger background fetch
             accounts_map.insert(account.pubkey, account.clone());
+
+            // Trigger background data fetch for each account (non-critical)
+            if let Err(e) = self.background_fetch_account_data(&account).await {
+                tracing::warn!(
+                    target: "whitenoise::load_accounts",
+                    "Failed to trigger background fetch for account {}: {}",
+                    account.pubkey.to_hex(),
+                    e
+                );
+                // Continue - background fetch failure should not prevent account loading
+            }
 
             // Add account relays to the client
             let groups_and_relays = tokio::task::spawn_blocking({
@@ -961,6 +988,72 @@ impl Whitenoise {
                 keys,
             )
             .await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
+        if !self.logged_in(&account.pubkey).await {
+            return Err(WhitenoiseError::AccountNotFound);
+        }
+
+        let group_ids = account.load_nostr_group_ids()?;
+        let nostr = self.nostr.clone();
+        let database = self.database.clone();
+        let signer = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let last_synced = account.last_synced;
+        let account_pubkey = account.pubkey;
+
+        tokio::spawn(async move {
+            tracing::debug!(
+                target: "whitenoise::background_fetch_account_data",
+                "Starting background fetch for account: {} (since: {})",
+                account_pubkey.to_hex(),
+                last_synced
+            );
+
+            match nostr
+                .fetch_all_user_data_to_nostr_cache(signer, last_synced, group_ids)
+                .await
+            {
+                Ok(_) => {
+                    // Update the last_synced timestamp in the database
+                    let current_time = Timestamp::now();
+
+                    if let Err(e) =
+                        sqlx::query("UPDATE accounts SET last_synced = ? WHERE pubkey = ?")
+                            .bind(current_time.to_string())
+                            .bind(account_pubkey.to_hex())
+                            .execute(&database.pool)
+                            .await
+                    {
+                        tracing::error!(
+                            target: "whitenoise::background_fetch_account_data",
+                            "Failed to update last_synced timestamp for account {}: {}",
+                            account_pubkey.to_hex(),
+                            e
+                        );
+                    } else {
+                        tracing::info!(
+                            target: "whitenoise::background_fetch_account_data",
+                            "Successfully fetched data and updated last_synced for account: {}",
+                            account_pubkey.to_hex()
+                        );
+
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::background_fetch_account_data",
+                        "Failed to fetch user data for account {}: {}",
+                        account_pubkey.to_hex(),
+                        e
+                    );
+                }
+            }
+        });
 
         Ok(())
     }
