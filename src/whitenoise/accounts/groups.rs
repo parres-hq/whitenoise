@@ -312,7 +312,11 @@ impl Whitenoise {
                 "Group has no relays configured, using account's default relays"
             );
             // Use the account's default relays as fallback
-            let fallback_relays: std::collections::BTreeSet<RelayUrl> = account.nip65_relays.iter().map(|relay_ref| relay_ref.clone()).collect();
+            let fallback_relays: std::collections::BTreeSet<RelayUrl> = account
+                .nip65_relays
+                .iter()
+                .map(|relay_ref| relay_ref.clone())
+                .collect();
             if fallback_relays.is_empty() {
                 return Err(WhitenoiseError::Other(anyhow::anyhow!(
                     "No relays available for publishing evolution event - both group relays and account relays are empty"

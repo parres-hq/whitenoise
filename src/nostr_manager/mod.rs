@@ -223,7 +223,8 @@ impl NostrManager {
         relays: &BTreeSet<RelayUrl>,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays.iter().cloned().collect()).await?;
+        self.ensure_relays_connected(relays.iter().cloned().collect())
+            .await?;
 
         Ok(self.client.send_event_to(relays, &event).await?)
     }
