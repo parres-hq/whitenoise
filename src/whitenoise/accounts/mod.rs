@@ -223,9 +223,7 @@ impl Account {
         Ok(Arc::new(Mutex::new(NostrMls::new(storage))))
     }
 
-    pub(crate) fn load_nostr_group_ids(
-        &self,
-    ) -> core::result::Result<Vec<String>, AccountError> {
+    pub(crate) fn load_nostr_group_ids(&self) -> core::result::Result<Vec<String>, AccountError> {
         let groups;
         {
             let nostr_mls = self.nostr_mls.lock().unwrap();
@@ -1041,7 +1039,6 @@ impl Whitenoise {
                             "Successfully fetched data and updated last_synced for account: {}",
                             account_pubkey.to_hex()
                         );
-
                     }
                 }
                 Err(e) => {

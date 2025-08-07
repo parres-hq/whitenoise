@@ -737,13 +737,10 @@ impl NostrManager {
         // Fetch all events in parallel
         // We don't need to handle the events, they'll be processed in the background by the event processor.
         let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
-            self.client
-                .fetch_events(metadata_filter, self.timeout),
-            self.client
-                .fetch_events(relay_filter, self.timeout),
+            self.client.fetch_events(metadata_filter, self.timeout),
+            self.client.fetch_events(relay_filter, self.timeout),
             self.client.fetch_events(mls_filter, self.timeout),
-            self.client
-                .fetch_events(giftwrap_filter, self.timeout),
+            self.client.fetch_events(giftwrap_filter, self.timeout),
             self.client
                 .fetch_events(group_messages_filter, self.timeout)
         );
