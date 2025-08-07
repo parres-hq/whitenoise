@@ -528,13 +528,8 @@ mod tests {
     #[tokio::test]
     async fn test_add_contact_logic() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let (account, keys) = create_test_account();
+        let account = whitenoise.create_identity().await.unwrap();
         let contact_pubkey = create_test_keys().public_key();
-
-        // Store account keys
-        whitenoise.secrets_store.store_private_key(&keys).unwrap();
-        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
-        assert!(log_account.is_ok());
 
         // Test the logic of adding a contact (without actual network calls)
         // Load current contact list (will be empty in test environment)
@@ -641,12 +636,7 @@ mod tests {
     #[tokio::test]
     async fn test_contact_validation_logic() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let (account, keys) = create_test_account();
-
-        // Store account keys
-        whitenoise.secrets_store.store_private_key(&keys).unwrap();
-        let log_account = whitenoise.login(keys.secret_key().to_secret_hex()).await;
-        assert!(log_account.is_ok());
+        let account = whitenoise.create_identity().await.unwrap();
 
         let contact_pubkey = create_test_keys().public_key();
 

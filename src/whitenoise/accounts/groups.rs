@@ -2,6 +2,7 @@ use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
 use nostr_mls::prelude::*;
+use std::time::Duration;
 
 impl Whitenoise {
     /// Creates a new MLS group with the specified members and settings
@@ -254,8 +255,13 @@ impl Whitenoise {
         // Fetch key packages for all members
         for pk in members.iter() {
             let contact = self.load_contact(pk).await?;
+            let relays_to_use = if contact.key_package_relays.is_empty() {
+                Account::default_relays()
+            } else {
+                contact.key_package_relays.clone()
+            };
             let some_event = self
-                .fetch_key_package_event_from(contact.key_package_relays.clone(), *pk)
+                .fetch_key_package_event_from(relays_to_use, *pk)
                 .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
@@ -300,52 +306,73 @@ impl Whitenoise {
             )));
         }
 
-        let result = self
-            .nostr
-            .publish_event_to(evolution_event, &group_relays)
-            .await;
-
-        match result {
-            Ok(_event_id) => {
-                // Evolution event published successfully
-                // Fan out the welcome message to all members
-                for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts) {
-                    // Get the public key of the member from the key package event
-                    let key_package_event_id =
-                        welcome_rumor
-                            .tags
-                            .event_ids()
-                            .next()
-                            .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
-                                "No event ID found in welcome rumor"
-                            )))?;
-
-                    let member_pubkey = key_package_events
-                        .iter()
-                        .find(|event| event.id == *key_package_event_id)
-                        .map(|event| event.pubkey)
-                        .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
-                            "No public key found in key package event"
-                        )))?;
-
-                    // Create a timestamp 1 month in the future
-                    use std::ops::Add;
-                    let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-                    self.nostr
-                        .publish_gift_wrap_with_signer(
-                            &member_pubkey,
-                            welcome_rumor.clone(),
-                            vec![Tag::expiration(one_month_future)],
-                            contact.inbox_relays,
-                            keys.clone(),
-                        )
-                        .await
-                        .map_err(WhitenoiseError::from)?;
-                }
+        // Check if we have any relays to publish to and publish the evolution event
+        if group_relays.is_empty() {
+            tracing::warn!(
+                target: "whitenoise::add_members_to_group",
+                "Group has no relays configured, using account's default relays"
+            );
+            // Use the account's default relays as fallback
+            let fallback_relays: std::collections::BTreeSet<RelayUrl> = account
+                .nip65_relays
+                .iter()
+                .map(|relay_ref| relay_ref.clone())
+                .collect();
+            if fallback_relays.is_empty() {
+                return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                    "No relays available for publishing evolution event - both group relays and account relays are empty"
+                )));
             }
-            Err(e) => {
-                return Err(WhitenoiseError::NostrManager(e));
-            }
+            self.nostr
+                .publish_event_to(evolution_event, &fallback_relays)
+                .await?;
+        } else {
+            self.nostr
+                .publish_event_to(evolution_event, &group_relays)
+                .await?;
+        }
+
+        // Evolution event published successfully
+        // Fan out the welcome message to all members
+        for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts) {
+            // Get the public key of the member from the key package event
+            let key_package_event_id =
+                welcome_rumor
+                    .tags
+                    .event_ids()
+                    .next()
+                    .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                        "No event ID found in welcome rumor"
+                    )))?;
+
+            let member_pubkey = key_package_events
+                .iter()
+                .find(|event| event.id == *key_package_event_id)
+                .map(|event| event.pubkey)
+                .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                    "No public key found in key package event"
+                )))?;
+
+            // Create a timestamp 1 month in the future
+            let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
+
+            // Use fallback relays if contact has no inbox relays configured
+            let relays_to_use = if contact.inbox_relays.is_empty() {
+                Account::default_relays()
+            } else {
+                contact.inbox_relays
+            };
+
+            self.nostr
+                .publish_gift_wrap_with_signer(
+                    &member_pubkey,
+                    welcome_rumor.clone(),
+                    vec![Tag::expiration(one_month_future)],
+                    relays_to_use,
+                    keys.clone(),
+                )
+                .await
+                .map_err(WhitenoiseError::from)?;
         }
 
         Ok(())
@@ -420,22 +447,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_group() {
-        let whitenoise = test_get_whitenoise().await;
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Setup creator account
-        let (creator_account, _creator_keys) = setup_login_account(whitenoise).await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
 
         // Setup member accounts
-        let member_accounts = setup_multiple_test_accounts(whitenoise, &creator_account, 2).await;
-        let member_pubkeys: Vec<PublicKey> =
-            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+        let mut member_pubkeys = Vec::new();
+        for _ in 0..2 {
+            let member_account = whitenoise.create_identity().await.unwrap();
+            whitenoise
+                .add_contact(&creator_account, member_account.pubkey)
+                .await
+                .unwrap();
+            member_pubkeys.push(member_account.pubkey);
+        }
 
         // Setup admin accounts (creator + one member as admin)
         let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
 
         // Test for success case
         case_create_group_success(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             admin_pubkeys.clone(),
@@ -445,7 +478,7 @@ mod tests {
         // // Test case: Key package fetch fails (invalid member)
         // let invalid_member_pubkey = create_test_keys().public_key();
         // case_create_group_key_package_fetch_fails(
-        //     whitenoise,
+        //     &whitenoise,
         //     &creator_account,
         //     vec![invalid_member_pubkey],
         //     admin_pubkeys.clone(),
@@ -454,7 +487,7 @@ mod tests {
 
         // Test case: Empty admin list
         case_create_group_empty_admin_list(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             vec![], // Empty admin list
@@ -464,7 +497,7 @@ mod tests {
         // Test case: Invalid admin pubkey (not a member)
         let non_member_pubkey = create_test_keys().public_key();
         case_create_group_invalid_admin_pubkey(
-            whitenoise,
+            &whitenoise,
             &creator_account,
             member_pubkeys.clone(),
             vec![creator_account.pubkey, non_member_pubkey],

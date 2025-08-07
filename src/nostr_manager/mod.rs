@@ -63,19 +63,6 @@ impl NostrManager {
         Ok(())
     }
 
-    pub(crate) async fn connect_to_relay(&self, relay: RelayUrl) -> Result<()> {
-        let newly_added = self.client.add_relay(relay).await?;
-        if newly_added {
-            tokio::spawn({
-                let client = self.client.clone();
-                async move {
-                    client.connect().await;
-                }
-            });
-        }
-        Ok(())
-    }
-
     pub(crate) fn default_timeout() -> Duration {
         Duration::from_secs(5)
     }
@@ -219,8 +206,8 @@ impl NostrManager {
 
     /// Publishes a Nostr event (which is already signed) to the specified relays.
     ///
-    /// This method allows publishing an event to a list of relay URLs. It uses the client's
-    /// built-in relay handling to send the event to the specified relays.
+    /// This method allows publishing an event to a list of relay URLs. It ensures that the client
+    /// is connected to all specified relays before attempting to publish the event.
     ///
     /// # Arguments
     ///
@@ -235,6 +222,10 @@ impl NostrManager {
         event: Event,
         relays: &BTreeSet<RelayUrl>,
     ) -> Result<Output<EventId>> {
+        // Ensure we're connected to all target relays before publishing
+        self.ensure_relays_connected(relays.iter().cloned().collect())
+            .await?;
+
         Ok(self.client.send_event_to(relays, &event).await?)
     }
 

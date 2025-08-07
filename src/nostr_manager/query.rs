@@ -36,19 +36,19 @@ impl NostrManager {
         relay_type: RelayType,
         nip65_relays: DashSet<RelayUrl>,
     ) -> Result<DashSet<RelayUrl>> {
-        let filter = Filter::new().author(pubkey).kind(relay_type.into());
+        let filter = Filter::new()
+            .author(pubkey)
+            .kind(relay_type.into())
+            .limit(1);
         let relay_events = self
             .client
             .fetch_events_from(nip65_relays, filter.clone(), self.timeout)
             .await?;
         tracing::debug!("Fetched relay events {:?}", relay_events);
 
-        match relay_events
-            .into_iter()
-            .max_by_key(|event| event.created_at)
-        {
+        match relay_events.first() {
             None => Ok(DashSet::new()),
-            Some(event) => Ok(Self::relay_urls_from_event(event)),
+            Some(event) => Ok(Self::relay_urls_from_event(event.clone())),
         }
     }
 
