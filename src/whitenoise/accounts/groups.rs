@@ -2,6 +2,7 @@ use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
 use nostr_mls::prelude::*;
+use std::time::Duration;
 
 impl Whitenoise {
     /// Creates a new MLS group with the specified members and settings
@@ -353,8 +354,7 @@ impl Whitenoise {
                 )))?;
 
             // Create a timestamp 1 month in the future
-            use std::ops::Add;
-            let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
+            let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
             // Use fallback relays if contact has no inbox relays configured
             let relays_to_use = if contact.inbox_relays.is_empty() {

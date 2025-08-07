@@ -250,20 +250,16 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn publish_account_relay_info(
-        &self,
-        account: &Account,
-        prior_relays: &Option<DashSet<RelayUrl>>,
-    ) -> Result<()> {
+    pub(crate) async fn publish_account_relay_info(&self, account: &Account) -> Result<()> {
         if !self.logged_in(&account.pubkey).await {
             return Err(WhitenoiseError::AccountNotFound);
         }
 
-        self.publish_relay_list_for_account(account, RelayType::Nostr, prior_relays)
+        self.publish_relay_list_for_account(account, RelayType::Nostr, &None)
             .await?;
-        self.publish_relay_list_for_account(account, RelayType::Inbox, prior_relays)
+        self.publish_relay_list_for_account(account, RelayType::Inbox, &None)
             .await?;
-        self.publish_relay_list_for_account(account, RelayType::KeyPackage, prior_relays)
+        self.publish_relay_list_for_account(account, RelayType::KeyPackage, &None)
             .await
     }
 
@@ -271,7 +267,7 @@ impl Whitenoise {
         &self,
         account: &Account,
         relay_type: RelayType,
-        prior_relays: &Option<DashSet<RelayUrl>>, // If provided, this means at least one relay was removed. We need to publish to the prior relays as well.
+        target_relays: &Option<DashSet<RelayUrl>>, // If provided, this means at least one relay was removed. We need to publish to the prior relays as well.
     ) -> Result<()> {
         // Determine the kind of relay list event to publish
         let (relay_event_kind, relays_to_publish) = match relay_type {
@@ -283,7 +279,7 @@ impl Whitenoise {
             ),
         };
 
-        let relays_to_use = match prior_relays.as_ref() {
+        let relays_to_use = match target_relays.as_ref() {
             Some(relays) => relays,
             None => &account.nip65_relays,
         };
@@ -558,15 +554,15 @@ mod tests {
 
         // Test convenience methods for adding relays
         whitenoise
-            .add_nip65_relay(&account, test_relay.clone())
+            .add_relay_to_account(account.pubkey, test_relay.clone(), RelayType::Nostr)
             .await
             .unwrap();
         whitenoise
-            .add_inbox_relay(&account, test_relay.clone())
+            .add_relay_to_account(account.pubkey, test_relay.clone(), RelayType::Inbox)
             .await
             .unwrap();
         whitenoise
-            .add_key_package_relay(&account, test_relay.clone())
+            .add_relay_to_account(account.pubkey, test_relay.clone(), RelayType::KeyPackage)
             .await
             .unwrap();
 
@@ -578,15 +574,15 @@ mod tests {
 
         // Test convenience methods for removing relays
         whitenoise
-            .remove_nip65_relay(&account, test_relay.clone())
+            .remove_relay_from_account(account.pubkey, test_relay.clone(), RelayType::Nostr)
             .await
             .unwrap();
         whitenoise
-            .remove_inbox_relay(&account, test_relay.clone())
+            .remove_relay_from_account(account.pubkey, test_relay.clone(), RelayType::Inbox)
             .await
             .unwrap();
         whitenoise
-            .remove_key_package_relay(&account, test_relay.clone())
+            .remove_relay_from_account(account.pubkey, test_relay.clone(), RelayType::KeyPackage)
             .await
             .unwrap();
 

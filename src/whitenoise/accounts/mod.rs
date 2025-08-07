@@ -638,15 +638,13 @@ impl Whitenoise {
         })?;
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Keys stored in secret store");
 
-        let mut need_to_publish_nip65_relays = false;
-        let mut need_to_publish_inbox_relays = false;
-        let mut need_to_publish_key_package_relays = false;
+        let mut need_to_publish_relays = false;
         let mut nip65_relays = self
             .fetch_relays_from(Account::default_relays(), keys.public_key, RelayType::Nostr)
             .await?;
         if nip65_relays.is_empty() {
             nip65_relays = Account::default_relays();
-            need_to_publish_nip65_relays = true;
+            need_to_publish_relays = true;
         }
 
         let mut inbox_relays = self
@@ -654,7 +652,7 @@ impl Whitenoise {
             .await?;
         if inbox_relays.is_empty() {
             inbox_relays = Account::default_relays();
-            need_to_publish_inbox_relays = true;
+            need_to_publish_relays = true;
         }
 
         let mut key_package_relays = self
@@ -662,7 +660,7 @@ impl Whitenoise {
             .await?;
         if key_package_relays.is_empty() {
             key_package_relays = Account::default_relays();
-            need_to_publish_key_package_relays = true;
+            need_to_publish_relays = true;
         }
 
         // Step 3: Create account struct and save to database
@@ -687,11 +685,8 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Account saved to database");
 
         // Only publish new relay lists if we need to
-        if need_to_publish_nip65_relays
-            || need_to_publish_inbox_relays
-            || need_to_publish_key_package_relays
-        {
-            self.publish_account_relay_info(&account, &None).await?;
+        if need_to_publish_relays {
+            self.publish_account_relay_info(&account).await?;
         }
 
         Ok(account)
@@ -1098,42 +1093,6 @@ impl Whitenoise {
         };
 
         Ok(relays)
-    }
-
-    /// Convenience method to add a Nostr (NIP-65) relay
-    pub async fn add_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
-        self.add_relay_to_account(account.pubkey, relay, RelayType::Nostr)
-            .await
-    }
-
-    /// Convenience method to remove a Nostr (NIP-65) relay
-    pub async fn remove_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
-        self.remove_relay_from_account(account.pubkey, relay, RelayType::Nostr)
-            .await
-    }
-
-    /// Convenience method to add an inbox relay
-    pub async fn add_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
-        self.add_relay_to_account(account.pubkey, relay, RelayType::Inbox)
-            .await
-    }
-
-    /// Convenience method to remove an inbox relay
-    pub async fn remove_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
-        self.remove_relay_from_account(account.pubkey, relay, RelayType::Inbox)
-            .await
-    }
-
-    /// Convenience method to add a key package relay
-    pub async fn add_key_package_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
-        self.add_relay_to_account(account.pubkey, relay, RelayType::KeyPackage)
-            .await
-    }
-
-    /// Convenience method to remove a key package relay
-    pub async fn remove_key_package_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
-        self.remove_relay_from_account(account.pubkey, relay, RelayType::KeyPackage)
-            .await
     }
 }
 
