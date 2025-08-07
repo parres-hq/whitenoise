@@ -693,6 +693,61 @@ impl NostrManager {
 
         Ok(())
     }
+
+    pub async fn fetch_all_user_data_to_nostr_cache(
+        &self,
+        signer: impl NostrSigner + 'static,
+        last_synced: Timestamp,
+        group_ids: Vec<String>,
+    ) -> Result<()> {
+        let pubkey = signer.get_public_key().await?;
+        self.client.set_signer(signer).await;
+
+        let mut contacts_and_self =
+            match self.client.get_contact_list_public_keys(self.timeout).await {
+                Ok(contacts) => contacts,
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::fetch_all_user_data_to_nostr_cache",
+                        "Failed to get contact list public keys: {}",
+                        e
+                    );
+                    self.client.unset_signer().await;
+                    return Err(NostrManagerError::Client(e));
+                }
+            };
+        contacts_and_self.push(pubkey);
+
+        let metadata_filter = Filter::new()
+            .kind(Kind::Metadata)
+            .authors(contacts_and_self);
+        let relay_filter = Filter::new().author(pubkey).kinds(vec![
+            Kind::RelayList,
+            Kind::InboxRelays,
+            Kind::MlsKeyPackageRelays,
+        ]);
+        let keypackage_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
+        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
+        let group_messages_filter = Filter::new()
+            .kind(Kind::MlsGroupMessage)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
+            .since(last_synced);
+
+        // Fetch all events in parallel
+        // We don't need to handle the events, they'll be processed in the background by the event processor.
+        let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
+            self.client.fetch_events(metadata_filter, self.timeout),
+            self.client.fetch_events(relay_filter, self.timeout),
+            self.client.fetch_events(keypackage_filter, self.timeout),
+            self.client.fetch_events(giftwrap_filter, self.timeout),
+            self.client
+                .fetch_events(group_messages_filter, self.timeout)
+        );
+
+        self.client.unset_signer().await;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
