@@ -703,43 +703,42 @@ impl NostrManager {
         let pubkey = signer.get_public_key().await?;
         self.client.set_signer(signer).await;
 
-        // Create a filter for all metadata-related events (user metadata and contacts)
-        let contacts_pubkeys = self
-            .client
-            .get_contact_list_public_keys(self.timeout)
-            .await?;
+        let mut contacts_and_self =
+            match self.client.get_contact_list_public_keys(self.timeout).await {
+                Ok(contacts) => contacts,
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::fetch_all_user_data_to_nostr_cache",
+                        "Failed to get contact list public keys: {}",
+                        e
+                    );
+                    self.client.unset_signer().await;
+                    return Err(NostrManagerError::Client(e));
+                }
+            };
+        contacts_and_self.push(pubkey);
 
-        let mut metadata_authors = contacts_pubkeys;
-        metadata_authors.push(pubkey);
-
-        let metadata_filter = Filter::new().kind(Kind::Metadata).authors(metadata_authors);
-
-        // Create a filter for all relay-related events
+        let metadata_filter = Filter::new()
+            .kind(Kind::Metadata)
+            .authors(contacts_and_self);
         let relay_filter = Filter::new().author(pubkey).kinds(vec![
             Kind::RelayList,
             Kind::InboxRelays,
             Kind::MlsKeyPackageRelays,
         ]);
-
-        // Create a filter for all MLS-related events
-        let mls_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
-
-        // Create a filter for gift wrapped events
+        let keypackage_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
         let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
-
-        // Create a filter for group messages
         let group_messages_filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
             .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
-            .since(last_synced)
-            .until(Timestamp::now());
+            .since(last_synced);
 
         // Fetch all events in parallel
         // We don't need to handle the events, they'll be processed in the background by the event processor.
         let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
             self.client.fetch_events(metadata_filter, self.timeout),
             self.client.fetch_events(relay_filter, self.timeout),
-            self.client.fetch_events(mls_filter, self.timeout),
+            self.client.fetch_events(keypackage_filter, self.timeout),
             self.client.fetch_events(giftwrap_filter, self.timeout),
             self.client
                 .fetch_events(group_messages_filter, self.timeout)
