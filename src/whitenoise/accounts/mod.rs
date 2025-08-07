@@ -332,13 +332,8 @@ impl Whitenoise {
         self.setup_subscriptions(&account).await?;
 
         // TODO: This should only query local nostr cached events, not fetch from relays
-        let relays_to_use = if account.key_package_relays.is_empty() {
-            Account::default_relays()
-        } else {
-            account.key_package_relays.clone()
-        };
         let key_package_event = self
-            .fetch_key_package_event_from(relays_to_use, pubkey)
+            .fetch_key_package_event_from(account.key_package_relays.clone(), pubkey)
             .await?;
         if key_package_event.is_none() {
             self.publish_key_package_for_account(&account).await?;
@@ -1088,6 +1083,60 @@ impl Whitenoise {
         });
 
         Ok(())
+    }
+
+    /// Helper method to get relay URLs from database for testing purposes
+    #[cfg(test)]
+    pub async fn get_account_relays_db(
+        &self,
+        pubkey: &PublicKey,
+        relay_type: RelayType,
+    ) -> Result<DashSet<RelayUrl>> {
+        let account = self.load_account(pubkey).await?;
+
+        let relays = match relay_type {
+            RelayType::Nostr => account.nip65_relays,
+            RelayType::Inbox => account.inbox_relays,
+            RelayType::KeyPackage => account.key_package_relays,
+        };
+
+        Ok(relays)
+    }
+
+    /// Convenience method to add a Nostr (NIP-65) relay
+    pub async fn add_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.add_relay_to_account(account.pubkey, relay, RelayType::Nostr)
+            .await
+    }
+
+    /// Convenience method to remove a Nostr (NIP-65) relay
+    pub async fn remove_nip65_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.remove_relay_from_account(account.pubkey, relay, RelayType::Nostr)
+            .await
+    }
+
+    /// Convenience method to add an inbox relay
+    pub async fn add_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.add_relay_to_account(account.pubkey, relay, RelayType::Inbox)
+            .await
+    }
+
+    /// Convenience method to remove an inbox relay
+    pub async fn remove_inbox_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.remove_relay_from_account(account.pubkey, relay, RelayType::Inbox)
+            .await
+    }
+
+    /// Convenience method to add a key package relay
+    pub async fn add_key_package_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.add_relay_to_account(account.pubkey, relay, RelayType::KeyPackage)
+            .await
+    }
+
+    /// Convenience method to remove a key package relay
+    pub async fn remove_key_package_relay(&self, account: &Account, relay: RelayUrl) -> Result<()> {
+        self.remove_relay_from_account(account.pubkey, relay, RelayType::KeyPackage)
+            .await
     }
 }
 
