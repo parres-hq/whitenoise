@@ -991,10 +991,6 @@ impl Whitenoise {
     }
 
     pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
         let group_ids = account.load_nostr_group_ids()?;
         let nostr = self.nostr.clone();
         let database = self.database.clone();
