@@ -332,8 +332,13 @@ impl Whitenoise {
         self.setup_subscriptions(&account).await?;
 
         // TODO: This should only query local nostr cached events, not fetch from relays
+        let relays_to_use = if account.key_package_relays.is_empty() {
+            Account::default_relays()
+        } else {
+            account.key_package_relays.clone()
+        };
         let key_package_event = self
-            .fetch_key_package_event_from(account.key_package_relays.clone(), pubkey)
+            .fetch_key_package_event_from(relays_to_use, pubkey)
             .await?;
         if key_package_event.is_none() {
             self.publish_key_package_for_account(&account).await?;

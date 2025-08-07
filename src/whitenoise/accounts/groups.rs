@@ -254,8 +254,13 @@ impl Whitenoise {
         // Fetch key packages for all members
         for pk in members.iter() {
             let contact = self.load_contact(pk).await?;
+            let relays_to_use = if contact.key_package_relays.is_empty() {
+                Account::default_relays()
+            } else {
+                contact.key_package_relays.clone()
+            };
             let some_event = self
-                .fetch_key_package_event_from(contact.key_package_relays.clone(), *pk)
+                .fetch_key_package_event_from(relays_to_use, *pk)
                 .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
@@ -300,52 +305,70 @@ impl Whitenoise {
             )));
         }
 
-        let result = self
-            .nostr
-            .publish_event_to(evolution_event, &group_relays)
-            .await;
-
-        match result {
-            Ok(_event_id) => {
-                // Evolution event published successfully
-                // Fan out the welcome message to all members
-                for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts) {
-                    // Get the public key of the member from the key package event
-                    let key_package_event_id =
-                        welcome_rumor
-                            .tags
-                            .event_ids()
-                            .next()
-                            .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
-                                "No event ID found in welcome rumor"
-                            )))?;
-
-                    let member_pubkey = key_package_events
-                        .iter()
-                        .find(|event| event.id == *key_package_event_id)
-                        .map(|event| event.pubkey)
-                        .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
-                            "No public key found in key package event"
-                        )))?;
-
-                    // Create a timestamp 1 month in the future
-                    use std::ops::Add;
-                    let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-                    self.nostr
-                        .publish_gift_wrap_with_signer(
-                            &member_pubkey,
-                            welcome_rumor.clone(),
-                            vec![Tag::expiration(one_month_future)],
-                            contact.inbox_relays,
-                            keys.clone(),
-                        )
-                        .await
-                        .map_err(WhitenoiseError::from)?;
-                }
+        // Check if we have any relays to publish to and publish the evolution event
+        if group_relays.is_empty() {
+            tracing::warn!(
+                target: "whitenoise::add_members_to_group",
+                "Group has no relays configured, using account's default relays"
+            );
+            // Use the account's default relays as fallback
+            let fallback_relays: std::collections::BTreeSet<RelayUrl> = account.nip65_relays.iter().map(|relay_ref| relay_ref.clone()).collect();
+            if fallback_relays.is_empty() {
+                return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                    "No relays available for publishing evolution event - both group relays and account relays are empty"
+                )));
             }
-            Err(e) => {
-                return Err(WhitenoiseError::NostrManager(e));
-            }
+            self.nostr
+                .publish_event_to(evolution_event, &fallback_relays)
+                .await?;
+        } else {
+            self.nostr
+                .publish_event_to(evolution_event, &group_relays)
+                .await?;
+        }
+
+        // Evolution event published successfully
+        // Fan out the welcome message to all members
+        for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts) {
+            // Get the public key of the member from the key package event
+            let key_package_event_id =
+                welcome_rumor
+                    .tags
+                    .event_ids()
+                    .next()
+                    .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                        "No event ID found in welcome rumor"
+                    )))?;
+
+            let member_pubkey = key_package_events
+                .iter()
+                .find(|event| event.id == *key_package_event_id)
+                .map(|event| event.pubkey)
+                .ok_or(WhitenoiseError::Other(anyhow::anyhow!(
+                    "No public key found in key package event"
+                )))?;
+
+            // Create a timestamp 1 month in the future
+            use std::ops::Add;
+            let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
+
+            // Use fallback relays if contact has no inbox relays configured
+            let relays_to_use = if contact.inbox_relays.is_empty() {
+                Account::default_relays()
+            } else {
+                contact.inbox_relays
+            };
+
+            self.nostr
+                .publish_gift_wrap_with_signer(
+                    &member_pubkey,
+                    welcome_rumor.clone(),
+                    vec![Tag::expiration(one_month_future)],
+                    relays_to_use,
+                    keys.clone(),
+                )
+                .await
+                .map_err(WhitenoiseError::from)?;
         }
 
         Ok(())

@@ -267,7 +267,7 @@ async fn main() -> Result<(), WhitenoiseError> {
                 group_description,
                 None,
                 None,
-                vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+                vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
             ),
         )
         .await?;
@@ -377,6 +377,9 @@ async fn main() -> Result<(), WhitenoiseError> {
         account4.pubkey.to_hex()
     );
 
+    // Wait for the account to fully initialize and publish its events
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
     // Get initial group member count
     let initial_members = whitenoise
         .fetch_group_members(&account1, &test_group.mls_group_id)
@@ -391,10 +394,14 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Add account4 as a new member to the test group (account1 is admin)
     let new_members = vec![account4.pubkey];
+    tracing::info!("Adding account4 as contact to account1...");
     whitenoise
         .add_contact(&account1, account4.pubkey)
         .await
         .unwrap();
+    tracing::info!("✓ Contact added successfully");
+
+    tracing::info!("Adding account4 as member to group...");
     whitenoise
         .add_members_to_group(&account1, &test_group.mls_group_id, new_members)
         .await?;

@@ -206,8 +206,8 @@ impl NostrManager {
 
     /// Publishes a Nostr event (which is already signed) to the specified relays.
     ///
-    /// This method allows publishing an event to a list of relay URLs. It uses the client's
-    /// built-in relay handling to send the event to the specified relays.
+    /// This method allows publishing an event to a list of relay URLs. It ensures that the client
+    /// is connected to all specified relays before attempting to publish the event.
     ///
     /// # Arguments
     ///
@@ -222,6 +222,9 @@ impl NostrManager {
         event: Event,
         relays: &BTreeSet<RelayUrl>,
     ) -> Result<Output<EventId>> {
+        // Ensure we're connected to all target relays before publishing
+        self.ensure_relays_connected(relays.iter().cloned().collect()).await?;
+
         Ok(self.client.send_event_to(relays, &event).await?)
     }
 
