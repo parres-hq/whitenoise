@@ -687,13 +687,10 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::add_account_from_keys", "Account saved to database");
 
         // Only publish new relay lists if we need to
-        if need_to_publish_nip65_relays {
-            self.publish_account_relay_info(&account, &None).await?;
-        }
-        if need_to_publish_inbox_relays {
-            self.publish_account_relay_info(&account, &None).await?;
-        }
-        if need_to_publish_key_package_relays {
+        if need_to_publish_nip65_relays
+            || need_to_publish_inbox_relays
+            || need_to_publish_key_package_relays
+        {
             self.publish_account_relay_info(&account, &None).await?;
         }
 
