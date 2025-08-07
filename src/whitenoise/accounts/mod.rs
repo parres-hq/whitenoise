@@ -994,11 +994,11 @@ impl Whitenoise {
         let group_ids = account.load_nostr_group_ids()?;
         let nostr = self.nostr.clone();
         let database = self.database.clone();
+        let account_pubkey = account.pubkey;
         let signer = self
             .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+            .get_nostr_keys_for_pubkey(&account_pubkey)?;
         let last_synced = account.last_synced;
-        let account_pubkey = account.pubkey;
 
         tokio::spawn(async move {
             tracing::debug!(
@@ -1008,14 +1008,13 @@ impl Whitenoise {
                 last_synced
             );
 
+            let current_time = Timestamp::now();
             match nostr
                 .fetch_all_user_data_to_nostr_cache(signer, last_synced, group_ids)
                 .await
             {
                 Ok(_) => {
                     // Update the last_synced timestamp in the database
-                    let current_time = Timestamp::now();
-
                     if let Err(e) =
                         sqlx::query("UPDATE accounts SET last_synced = ? WHERE pubkey = ?")
                             .bind(current_time.to_string())
