@@ -250,19 +250,6 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn publish_account_relay_info(&self, account: &Account) -> Result<()> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        self.publish_relay_list_for_account(account, RelayType::Nostr, &None)
-            .await?;
-        self.publish_relay_list_for_account(account, RelayType::Inbox, &None)
-            .await?;
-        self.publish_relay_list_for_account(account, RelayType::KeyPackage, &None)
-            .await
-    }
-
     pub(crate) async fn publish_relay_list_for_account(
         &self,
         account: &Account,

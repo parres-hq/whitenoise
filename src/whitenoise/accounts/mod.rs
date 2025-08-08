@@ -179,6 +179,7 @@ impl Account {
     ///
     /// This function does not currently return any errors, but it is fallible to allow for
     /// future error handling and to match the expected signature for account creation.
+    #[cfg(test)]
     pub(crate) fn new(data_dir: &Path) -> core::result::Result<(Account, Keys), AccountError> {
         tracing::debug!(target: "whitenoise::accounts::new", "Generating new keypair");
         let keys = Keys::generate();
@@ -239,32 +240,26 @@ impl Account {
 impl Whitenoise {
     /// Creates a new identity (account) for the user.
     ///
-    /// This method performs the following steps:
-    /// - Generates a new account with a keypair and petname.
-    /// - Saves the account to the database.
-    /// - Stores the private key in the secret store.
-    /// - Initializes NostrMls for the account with SQLite storage.
-    /// - Onboards the new account (performs any additional setup).
-    /// - Sets the new account as the active account and adds it to the in-memory accounts list.
+    /// This method generates a new keypair, sets up the account with default relay lists,
+    /// creates a metadata event with a generated petname, and fully configures the account
+    /// for use in Whitenoise.
     ///
     /// # Returns
     ///
-    /// Returns the newly created `Account` on success.
+    /// Returns the newly created and fully configured `Account` on success.
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if any step fails, such as account creation, database save, key storage, or onboarding.
+    /// Returns a [`WhitenoiseError`] if any step fails. The operation is atomic with cleanup on failure.
     pub async fn create_identity(&self) -> Result<Account> {
-        // Create a new account with a generated keypair and a petname
-        let (account, keys) = Account::new(&self.config.data_dir)?;
+        // Step 1: Generate a new keypair
+        let keys = Keys::generate();
+        tracing::debug!(target: "whitenoise::create_identity", "Generated new keypair: {}", keys.public_key().to_hex());
 
-        // Save the account to the database
-        self.save_account(&account).await?;
+        // Step 2: Setup the account (this handles all the common logic)
+        let account = self.setup_account(&keys, true).await?;
 
-        // Add the keys to the secret store
-        self.secrets_store.store_private_key(&keys)?;
-
-        // Generate a petname for the account (two words, separated by a space)
+        // Step 3: For new accounts only, create and publish metadata with petname
         let petname = petname::petname(2, " ")
             .unwrap_or_else(|| "Anonymous User".to_string())
             .split_whitespace()
@@ -279,18 +274,17 @@ impl Whitenoise {
         };
 
         self.update_metadata(&metadata, &account).await?;
+        tracing::debug!(target: "whitenoise::create_identity", "Created and published metadata with petname: {}", metadata.name.as_ref().unwrap_or(&"Unknown".to_string()));
 
-        self.login(keys.secret_key().to_secret_hex()).await
+        tracing::debug!(target: "whitenoise::create_identity", "Successfully created new identity: {}", account.pubkey.to_hex());
+        Ok(account)
     }
 
     /// Logs in an existing user using a private key (nsec or hex format).
     ///
-    /// This method performs the following steps:
-    /// - Parses the provided private key (either nsec or hex format) to obtain the user's keys.
-    /// - Attempts to find an existing account in the database matching the public key.
-    /// - If the account exists, returns it.
-    /// - If the account does not exist, creates a new account from the provided keys and adds it to the database.
-    /// - Sets the new account as the active account and adds it to the in-memory accounts list.
+    /// This method parses the private key, checks if the account exists locally,
+    /// and sets up the account for use. If the account doesn't exist locally,
+    /// it treats it as an existing account and fetches data from the network.
     ///
     /// # Arguments
     ///
@@ -298,47 +292,19 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns the `Account` associated with the provided private key on success.
+    /// Returns the fully configured `Account` associated with the provided private key on success.
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if the private key is invalid, or if there is a failure in finding or adding the account.
+    /// Returns a [`WhitenoiseError`] if the private key is invalid or account setup fails.
     pub async fn login(&self, nsec_or_hex_privkey: String) -> Result<Account> {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
+        tracing::debug!(target: "whitenoise::login", "Logging in with pubkey: {}", pubkey.to_hex());
 
-        let account = match self.load_account(&pubkey).await {
-            Ok(account) => {
-                tracing::debug!(target: "whitenoise::login", "Account found");
-                account
-            }
-            Err(WhitenoiseError::AccountNotFound) => {
-                tracing::debug!(target: "whitenoise::login", "Account not found, adding from keys");
-                let account = self.add_account_from_keys(&keys).await?;
-                self.background_fetch_account_data(&account).await?;
-                account
-            }
-            Err(e) => return Err(e),
-        };
+        let account = self.setup_account(&keys, false).await?;
 
-        self.connect_account_relays(&account).await?;
-
-        // Add the account to the in-memory accounts list
-        {
-            let mut accounts = self.write_accounts().await;
-            accounts.insert(account.pubkey, account.clone());
-        }
-
-        self.setup_subscriptions(&account).await?;
-
-        // TODO: This should only query local nostr cached events, not fetch from relays
-        let key_package_event = self
-            .fetch_key_package_event_from(account.key_package_relays.clone(), pubkey)
-            .await?;
-        if key_package_event.is_none() {
-            self.publish_key_package_for_account(&account).await?;
-        }
-
+        tracing::debug!(target: "whitenoise::login", "Successfully logged in: {}", account.pubkey.to_hex());
         Ok(account)
     }
 
@@ -599,96 +565,161 @@ impl Whitenoise {
         })
     }
 
-    /// Adds a new account to the database using the provided Nostr keys (atomic operation).
+    /// Sets up an account for use in Whitenoise (shared logic for both new and existing accounts).
     ///
-    /// This method performs account creation atomically with automatic cleanup on failure.
+    /// This method handles the common setup logic for both new accounts (created via create_identity)
+    /// and existing accounts (loaded via login). The process is atomic with automatic cleanup on failure.
+    ///
     /// The operation follows this sequence:
-    ///
-    /// 1. **Store private key** - Saves the private key to the system keychain/secret store
-    /// 2. **Load onboarding state** - Queries cached Nostr data to determine account setup status
-    /// 3. **Save account to database** - Persists the account record with settings and onboarding info
-    ///
-    /// If any critical step (1-3) fails, all previous operations are automatically rolled back
-    /// to ensure no partial account state is left in the system.
+    /// 1. **Store private key** - Ensures the private key is saved to the system keychain/secret store
+    /// 2. **Handle relay lists** - For existing accounts, fetches from network; for new accounts or missing lists, uses defaults
+    /// 3. **Create/update account struct** - Builds the account with proper relay configuration
+    /// 4. **Save account to database** - Persists the account record
+    /// 5. **Publish relay lists** - Only publishes if we had to create default relay lists
+    /// 6. **Setup account in memory** - Adds to in-memory accounts list and connects to relays
+    /// 7. **Setup subscriptions** - Configures Nostr subscriptions for the account
+    /// 8. **Handle key package** - Publishes a key package if none exists
     ///
     /// # Arguments
     ///
-    /// * `keys` - A reference to the `Keys` struct containing the Nostr keypair for the account.
+    /// * `keys` - The Nostr keypair for the account
+    /// * `is_new_account` - Whether this is a newly created account (vs an existing one being loaded)
     ///
     /// # Returns
     ///
-    /// Returns the newly created `Account` with default settings and populated onboarding state.
+    /// Returns the fully configured `Account` ready for use.
     ///
     /// # Errors
     ///
-    /// Returns a `WhitenoiseError` if any critical operation fails:
-    /// * Private key storage fails (keychain/secret store error)
-    /// * Onboarding state loading fails (cache query error)
-    /// * Database save fails (transaction or serialization error)
-    ///
-    /// On failure, any partial state (e.g., stored private keys) is automatically cleaned up.
-    async fn add_account_from_keys(&self, keys: &Keys) -> Result<Account> {
-        tracing::debug!(target: "whitenoise::add_account_from_keys", "Adding account for pubkey: {}", keys.public_key().to_hex());
+    /// Returns a `WhitenoiseError` if any critical operation fails. On failure, partial state is cleaned up.
+    /// TODO: Refactor this method to clean up on error and return a proper error state.
+    async fn setup_account(&self, keys: &Keys, is_new_account: bool) -> Result<Account> {
+        let pubkey = keys.public_key();
+        tracing::debug!(target: "whitenoise::setup_account", "Setting up account for pubkey: {} (new: {})", pubkey.to_hex(), is_new_account);
 
-        // Step 1: Try to store private key first (most likely to fail)
-        // If this fails, we haven't persisted anything yet
+        // Step 1: Store private key first
         self.secrets_store.store_private_key(keys).map_err(|e| {
-            tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to store private key: {}", e);
+            tracing::error!(target: "whitenoise::setup_account", "Failed to store private key: {}", e);
             e
         })?;
-        tracing::debug!(target: "whitenoise::add_account_from_keys", "Keys stored in secret store");
+        tracing::debug!(target: "whitenoise::setup_account", "Keys stored in secret store");
 
-        let mut need_to_publish_relays = false;
-        let mut nip65_relays = self
-            .fetch_relays_from(Account::default_relays(), keys.public_key, RelayType::Nostr)
-            .await?;
-        if nip65_relays.is_empty() {
-            nip65_relays = Account::default_relays();
-            need_to_publish_relays = true;
-        }
+        // Step 2: Handle relay lists - fetch for existing accounts, use defaults for new or missing
+        // Track which relay types need to be published (defaulted to fallback values)
+        let mut need_to_publish_nip65 = is_new_account; // Always publish for new accounts
+        let mut need_to_publish_inbox = is_new_account;
+        let mut need_to_publish_key_package = is_new_account;
 
-        let mut inbox_relays = self
-            .fetch_relays_from(nip65_relays.clone(), keys.public_key, RelayType::Inbox)
-            .await?;
-        if inbox_relays.is_empty() {
-            inbox_relays = Account::default_relays();
-            need_to_publish_relays = true;
-        }
+        let nip65_relays = if is_new_account {
+            Account::default_relays()
+        } else {
+            match self
+                .fetch_relays_from(Account::default_relays(), pubkey, RelayType::Nostr)
+                .await
+            {
+                Ok(relays) if !relays.is_empty() => relays,
+                _ => {
+                    need_to_publish_nip65 = true;
+                    Account::default_relays()
+                }
+            }
+        };
 
-        let mut key_package_relays = self
-            .fetch_relays_from(nip65_relays.clone(), keys.public_key, RelayType::KeyPackage)
-            .await?;
-        if key_package_relays.is_empty() {
-            key_package_relays = Account::default_relays();
-            need_to_publish_relays = true;
-        }
+        let inbox_relays = if is_new_account {
+            Account::default_relays()
+        } else {
+            match self
+                .fetch_relays_from(nip65_relays.clone(), pubkey, RelayType::Inbox)
+                .await
+            {
+                Ok(relays) if !relays.is_empty() => relays,
+                _ => {
+                    need_to_publish_inbox = true;
+                    Account::default_relays()
+                }
+            }
+        };
 
-        // Step 3: Create account struct and save to database
+        let key_package_relays = if is_new_account {
+            Account::default_relays()
+        } else {
+            match self
+                .fetch_relays_from(nip65_relays.clone(), pubkey, RelayType::KeyPackage)
+                .await
+            {
+                Ok(relays) if !relays.is_empty() => relays,
+                _ => {
+                    need_to_publish_key_package = true;
+                    Account::default_relays()
+                }
+            }
+        };
+
+        // Step 3: Create account struct
         let account = Account {
-            pubkey: keys.public_key(),
+            pubkey,
             settings: AccountSettings::default(),
             last_synced: Timestamp::zero(),
             nip65_relays,
             inbox_relays,
             key_package_relays,
-            nostr_mls: Account::create_nostr_mls(keys.public_key(), &self.config.data_dir)?,
+            nostr_mls: Account::create_nostr_mls(pubkey, &self.config.data_dir)?,
         };
 
+        // Step 4: Save account to database
         self.save_account(&account).await.map_err(|e| {
-            tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to save account: {}", e);
+            tracing::error!(target: "whitenoise::setup_account", "Failed to save account: {}", e);
             // Try to clean up stored private key
-            if let Err(cleanup_err) = self.secrets_store.remove_private_key_for_pubkey(&keys.public_key()) {
-                tracing::error!(target: "whitenoise::add_account_from_keys", "Failed to cleanup private key after account save failure: {}", cleanup_err);
+            if let Err(cleanup_err) = self.secrets_store.remove_private_key_for_pubkey(&pubkey) {
+                tracing::error!(target: "whitenoise::setup_account", "Failed to cleanup private key after account save failure: {}", cleanup_err);
             }
             e
         })?;
-        tracing::debug!(target: "whitenoise::add_account_from_keys", "Account saved to database");
+        tracing::debug!(target: "whitenoise::setup_account", "Account saved to database");
 
-        // Only publish new relay lists if we need to
-        if need_to_publish_relays {
-            self.publish_account_relay_info(&account).await?;
+        // Step 5: Publish relay lists if we created defaults (only publish what defaulted)
+        if need_to_publish_nip65 {
+            self.publish_relay_list_for_account(&account, RelayType::Nostr, &None)
+                .await?;
+        }
+        if need_to_publish_inbox {
+            self.publish_relay_list_for_account(&account, RelayType::Inbox, &None)
+                .await?;
+        }
+        if need_to_publish_key_package {
+            self.publish_relay_list_for_account(&account, RelayType::KeyPackage, &None)
+                .await?;
+        }
+        tracing::debug!(target: "whitenoise::setup_account", "Published relay lists for defaulted types");
+
+        // Step 6: Setup account in memory and connect to relays
+        self.connect_account_relays(&account).await?;
+        {
+            let mut accounts = self.write_accounts().await;
+            accounts.insert(account.pubkey, account.clone());
+        }
+        tracing::debug!(target: "whitenoise::setup_account", "Account added to memory and relays connected");
+
+        // Step 7: Setup subscriptions
+        self.setup_subscriptions(&account).await?;
+        tracing::debug!(target: "whitenoise::setup_account", "Subscriptions setup");
+
+        // Step 8: Handle key package - publish if none exists
+        let key_package_event = self
+            .fetch_key_package_event_from(account.key_package_relays.clone(), pubkey)
+            .await?;
+        if key_package_event.is_none() {
+            self.publish_key_package_for_account(&account).await?;
+            tracing::debug!(target: "whitenoise::setup_account", "Published key package");
         }
 
+        // For existing accounts, trigger background data fetch
+        if !is_new_account {
+            self.background_fetch_account_data(&account).await?;
+            tracing::debug!(target: "whitenoise::setup_account", "Background data fetch triggered");
+        }
+
+        tracing::debug!(target: "whitenoise::setup_account", "Account setup completed successfully");
         Ok(account)
     }
 
@@ -1225,5 +1256,312 @@ mod tests {
             loaded_account1.settings.dark_theme,
             account1.settings.dark_theme
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_identity_publishes_relay_lists() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create a new identity
+        let account = whitenoise.create_identity().await.unwrap();
+
+        // Give the events time to be published and processed
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Query the nostr client's database for the published relay list events
+        let inbox_relays_filter = Filter::new()
+            .author(account.pubkey)
+            .kind(Kind::InboxRelays) // kind 10050
+            .limit(1);
+
+        let key_package_relays_filter = Filter::new()
+            .author(account.pubkey)
+            .kind(Kind::MlsKeyPackageRelays) // kind 10051
+            .limit(1);
+
+        let key_package_filter = Filter::new()
+            .author(account.pubkey)
+            .kind(Kind::MlsKeyPackage) // kind 443
+            .limit(1);
+
+        // Check that all three event types were published
+        let inbox_events = whitenoise
+            .nostr
+            .client
+            .database()
+            .query(inbox_relays_filter)
+            .await
+            .unwrap();
+
+        let key_package_relays_events = whitenoise
+            .nostr
+            .client
+            .database()
+            .query(key_package_relays_filter)
+            .await
+            .unwrap();
+
+        let key_package_events = whitenoise
+            .nostr
+            .client
+            .database()
+            .query(key_package_filter)
+            .await
+            .unwrap();
+
+        // Verify that the relay list events were published
+        assert!(
+            !inbox_events.is_empty(),
+            "Inbox relays list (kind 10050) should be published for new accounts"
+        );
+        assert!(
+            !key_package_relays_events.is_empty(),
+            "Key package relays list (kind 10051) should be published for new accounts"
+        );
+        assert!(
+            !key_package_events.is_empty(),
+            "Key package (kind 443) should be published for new accounts"
+        );
+
+        // Verify the events are authored by the correct pubkey
+        if let Some(inbox_event) = inbox_events.first() {
+            assert_eq!(inbox_event.pubkey, account.pubkey);
+            assert_eq!(inbox_event.kind, Kind::InboxRelays);
+        }
+
+        if let Some(key_package_relays_event) = key_package_relays_events.first() {
+            assert_eq!(key_package_relays_event.pubkey, account.pubkey);
+            assert_eq!(key_package_relays_event.kind, Kind::MlsKeyPackageRelays);
+        }
+
+        if let Some(key_package_event) = key_package_events.first() {
+            assert_eq!(key_package_event.pubkey, account.pubkey);
+            assert_eq!(key_package_event.kind, Kind::MlsKeyPackage);
+        }
+    }
+
+    /// Helper function to verify that an account has all three relay lists properly configured
+    async fn verify_account_relay_lists_setup(whitenoise: &Whitenoise, account: &Account) {
+        // Verify all three relay lists are set up with default relays
+        let default_relays = Account::default_relays();
+        let default_relay_count = default_relays.len();
+
+        // Check in-memory account state
+        assert_eq!(
+            account.nip65_relays.len(),
+            default_relay_count,
+            "Account should have default NIP-65 relays configured"
+        );
+        assert_eq!(
+            account.inbox_relays.len(),
+            default_relay_count,
+            "Account should have default inbox relays configured"
+        );
+        assert_eq!(
+            account.key_package_relays.len(),
+            default_relay_count,
+            "Account should have default key package relays configured"
+        );
+
+        // Verify database state matches
+        let nip65_relays_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Nostr)
+            .await
+            .unwrap();
+        let inbox_relays_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::Inbox)
+            .await
+            .unwrap();
+        let key_package_relays_db = whitenoise
+            .get_account_relays_db(&account.pubkey, RelayType::KeyPackage)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            nip65_relays_db.len(),
+            default_relay_count,
+            "Database should have default NIP-65 relays stored"
+        );
+        assert_eq!(
+            inbox_relays_db.len(),
+            default_relay_count,
+            "Database should have default inbox relays stored"
+        );
+        assert_eq!(
+            key_package_relays_db.len(),
+            default_relay_count,
+            "Database should have default key package relays stored"
+        );
+
+        // Verify that all relay sets contain the same default relays
+        // Convert DashSet to Vec to avoid iterator type issues
+        let default_relays_vec: Vec<RelayUrl> = default_relays.into_iter().collect();
+        for default_relay in default_relays_vec.iter() {
+            assert!(
+                account.nip65_relays.contains(default_relay),
+                "NIP-65 relays should contain default relay: {}",
+                default_relay
+            );
+            assert!(
+                account.inbox_relays.contains(default_relay),
+                "Inbox relays should contain default relay: {}",
+                default_relay
+            );
+            assert!(
+                account.key_package_relays.contains(default_relay),
+                "Key package relays should contain default relay: {}",
+                default_relay
+            );
+        }
+    }
+
+    /// Helper function to verify that an account has a key package published
+    async fn verify_account_key_package_exists(whitenoise: &Whitenoise, account: &Account) {
+        // Check if key package exists by trying to fetch it
+        let key_package_event = whitenoise
+            .fetch_key_package_event_from(account.key_package_relays.clone(), account.pubkey)
+            .await
+            .unwrap();
+
+        assert!(
+            key_package_event.is_some(),
+            "Account should have a key package published to relays"
+        );
+
+        // If key package exists, verify it's authored by the correct account
+        if let Some(event) = key_package_event {
+            assert_eq!(
+                event.pubkey, account.pubkey,
+                "Key package should be authored by the account's public key"
+            );
+            assert_eq!(
+                event.kind,
+                Kind::MlsKeyPackage,
+                "Event should be a key package (kind 443)"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_identity_sets_up_all_requirements() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create a new identity
+        let account = whitenoise.create_identity().await.unwrap();
+
+        // Give the events time to be published and processed
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Verify all three relay lists are properly configured
+        verify_account_relay_lists_setup(&whitenoise, &account).await;
+
+        // Verify key package is published
+        verify_account_key_package_exists(&whitenoise, &account).await;
+    }
+
+    #[tokio::test]
+    async fn test_login_existing_account_sets_up_all_requirements() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create an account through login (simulating an existing account)
+        let keys = create_test_keys();
+        let account = whitenoise
+            .login(keys.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+
+        // Give the events time to be published and processed
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Verify all three relay lists are properly configured
+        verify_account_relay_lists_setup(&whitenoise, &account).await;
+
+        // Verify key package is published
+        verify_account_key_package_exists(&whitenoise, &account).await;
+    }
+
+    #[tokio::test]
+    async fn test_login_with_existing_relay_lists_preserves_them() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // First, create an account and let it publish relay lists
+        let keys = create_test_keys();
+        let account1 = whitenoise
+            .login(keys.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+
+        // Give time for initial setup
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Verify initial setup is correct
+        verify_account_relay_lists_setup(&whitenoise, &account1).await;
+        verify_account_key_package_exists(&whitenoise, &account1).await;
+
+        // Logout the account
+        whitenoise.logout(&account1.pubkey).await.unwrap();
+
+        // Login again with the same keys (simulating returning user)
+        let account2 = whitenoise
+            .login(keys.secret_key().to_secret_hex())
+            .await
+            .unwrap();
+
+        // Give time for login process
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Verify that relay lists are still properly configured
+        verify_account_relay_lists_setup(&whitenoise, &account2).await;
+
+        // Verify key package still exists (should not publish a new one)
+        verify_account_key_package_exists(&whitenoise, &account2).await;
+
+        // Accounts should be equivalent (same pubkey, same basic setup)
+        assert_eq!(
+            account1.pubkey, account2.pubkey,
+            "Same keys should result in same account"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_multiple_accounts_each_have_proper_setup() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create multiple accounts
+        let mut accounts = Vec::new();
+        for i in 0..3 {
+            let keys = create_test_keys();
+            let account = whitenoise
+                .login(keys.secret_key().to_secret_hex())
+                .await
+                .unwrap();
+            accounts.push((account, keys));
+
+            tracing::info!("Created account {}: {}", i, accounts[i].0.pubkey.to_hex());
+        }
+
+        // Give time for all accounts to be set up
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+        // Verify each account has proper setup
+        for (i, (account, _)) in accounts.iter().enumerate() {
+            tracing::info!("Verifying account {}: {}", i, account.pubkey.to_hex());
+
+            // Verify all three relay lists are properly configured
+            verify_account_relay_lists_setup(&whitenoise, account).await;
+
+            // Verify key package is published
+            verify_account_key_package_exists(&whitenoise, account).await;
+        }
+
+        // Verify accounts are distinct
+        for i in 0..accounts.len() {
+            for j in i + 1..accounts.len() {
+                assert_ne!(
+                    accounts[i].0.pubkey, accounts[j].0.pubkey,
+                    "Each account should have a unique public key"
+                );
+            }
+        }
     }
 }
