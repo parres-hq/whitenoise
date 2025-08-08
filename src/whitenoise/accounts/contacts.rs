@@ -422,12 +422,48 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn load_contact(&self, pubkey: &PublicKey) -> Result<Contact> {
-        let contact = sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE pubkey = ?")
+    pub(crate) async fn load_contact(
+        &self,
+        pubkey: &PublicKey,
+        account: &Account,
+    ) -> Result<Contact> {
+        let contact = match sqlx::query_as::<_, Contact>("SELECT * FROM contacts WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
             .fetch_one(&self.database.pool)
             .await
-            .map_err(|_| WhitenoiseError::ContactNotFound)?;
+        {
+            Ok(contact) => contact,
+            Err(_) => {
+                let metadata = self
+                    .nostr
+                    .fetch_metadata_from(account.nip65_relays.clone(), *pubkey)
+                    .await?;
+
+                let nip65_relays = self
+                    .fetch_relays_from(account.nip65_relays.clone(), *pubkey, RelayType::Nostr)
+                    .await?;
+
+                let inbox_relays = self
+                    .fetch_relays_from(account.nip65_relays.clone(), *pubkey, RelayType::Inbox)
+                    .await?;
+
+                let key_package_relays = self
+                    .fetch_relays_from(account.nip65_relays.clone(), *pubkey, RelayType::KeyPackage)
+                    .await?;
+
+                let built_contact = Contact {
+                    pubkey: *pubkey,
+                    metadata,
+                    nip65_relays,
+                    inbox_relays,
+                    key_package_relays,
+                };
+
+                self.save_contact_local(&built_contact).await?;
+
+                built_contact
+            }
+        };
 
         tracing::debug!(
             target: "whitenoise::load_contact",

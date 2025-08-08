@@ -46,7 +46,7 @@ impl Whitenoise {
         let mut contacts = Vec::new();
 
         for pk in member_pubkeys.iter() {
-            let contact = self.load_contact(pk).await?;
+            let contact = self.load_contact(pk, creator_account).await?;
             let relays_to_use = contact.get_relays_of_type(RelayType::KeyPackage);
             let some_event = self
                 .fetch_key_package_event_from(relays_to_use, *pk)
@@ -247,7 +247,7 @@ impl Whitenoise {
 
         // Fetch key packages for all members
         for pk in members.iter() {
-            let contact = self.load_contact(pk).await?;
+            let contact = self.load_contact(pk, account).await?;
             let relays_to_use = contact.get_relays_of_type(RelayType::KeyPackage);
             let some_event = self
                 .fetch_key_package_event_from(relays_to_use, *pk)

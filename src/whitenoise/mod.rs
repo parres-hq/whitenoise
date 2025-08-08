@@ -707,7 +707,10 @@ pub mod test_utils {
                 .add_contact(creator_account, account.pubkey)
                 .await
                 .unwrap();
-            whitenoise.load_contact(&keys.public_key).await.unwrap();
+            whitenoise
+                .load_contact(&keys.public_key, creator_account)
+                .await
+                .unwrap();
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
             let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
