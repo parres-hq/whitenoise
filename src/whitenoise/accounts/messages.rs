@@ -251,11 +251,17 @@ impl Whitenoise {
             .tags(tags)
             .tag(Tag::public_key(*recepient_pubkey));
 
+        let relays_to_use = if contact.inbox_relays.is_empty() {
+            Account::default_relays()
+        } else {
+            contact.inbox_relays.clone()
+        };
+
         let _event_id = self
             .nostr
             .publish_event_builder_with_signer(
                 dm_event_builder,
-                contact.inbox_relays.clone(),
+                relays_to_use,
                 sender_keys,
             )
             .await?;
