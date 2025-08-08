@@ -45,7 +45,13 @@ impl Whitenoise {
         let mut contacts = Vec::new();
 
         for pk in member_pubkeys.iter() {
-            let contact = self.load_contact(pk).await?;
+            let contact = match self.load_contact(pk).await {
+                Ok(contact) => contact,
+                Err(WhitenoiseError::ContactNotFound) => {
+                    self.temp_contact_with_defaults(*pk).await?
+                }
+                Err(e) => return Err(e),
+            };
             let relays_to_use = if contact.key_package_relays.is_empty() {
                 Account::default_relays()
             } else {
@@ -254,7 +260,13 @@ impl Whitenoise {
 
         // Fetch key packages for all members
         for pk in members.iter() {
-            let contact = self.load_contact(pk).await?;
+            let contact = match self.load_contact(pk).await {
+                Ok(contact) => contact,
+                Err(WhitenoiseError::ContactNotFound) => {
+                    self.temp_contact_with_defaults(*pk).await?
+                }
+                Err(e) => return Err(e),
+            };
             let relays_to_use = if contact.key_package_relays.is_empty() {
                 Account::default_relays()
             } else {

@@ -305,6 +305,22 @@ impl Whitenoise {
 
         Ok(())
     }
+
+    pub(crate) async fn relays_with_nip65_fallback(
+        &self,
+        pubkey: PublicKey,
+        nip65_relays: DashSet<RelayUrl>,
+        relay_type: RelayType,
+    ) -> Result<DashSet<RelayUrl>> {
+        let relays = self
+            .fetch_relays_from(nip65_relays, pubkey, relay_type)
+            .await?;
+        if relays.is_empty() {
+            Ok(Account::default_relays())
+        } else {
+            Ok(relays)
+        }
+    }
 }
 
 #[cfg(test)]
