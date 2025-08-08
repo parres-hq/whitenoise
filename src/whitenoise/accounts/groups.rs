@@ -1,6 +1,7 @@
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
+use crate::RelayType;
 use nostr_mls::prelude::*;
 use std::time::Duration;
 
@@ -46,11 +47,7 @@ impl Whitenoise {
 
         for pk in member_pubkeys.iter() {
             let contact = self.load_contact(pk).await?;
-            let relays_to_use = if contact.key_package_relays.is_empty() {
-                Account::default_relays()
-            } else {
-                contact.key_package_relays.clone()
-            };
+            let relays_to_use = contact.get_relays_of_type(RelayType::KeyPackage);
             let some_event = self
                 .fetch_key_package_event_from(relays_to_use, *pk)
                 .await?;
@@ -121,11 +118,7 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-            let relays_to_use = if contact.inbox_relays.is_empty() {
-                Account::default_relays()
-            } else {
-                contact.inbox_relays.clone()
-            };
+            let relays_to_use = contact.get_relays_of_type(RelayType::Inbox);
 
             self.nostr
                 .publish_gift_wrap_with_signer(
@@ -255,11 +248,7 @@ impl Whitenoise {
         // Fetch key packages for all members
         for pk in members.iter() {
             let contact = self.load_contact(pk).await?;
-            let relays_to_use = if contact.key_package_relays.is_empty() {
-                Account::default_relays()
-            } else {
-                contact.key_package_relays.clone()
-            };
+            let relays_to_use = contact.get_relays_of_type(RelayType::KeyPackage);
             let some_event = self
                 .fetch_key_package_event_from(relays_to_use, *pk)
                 .await?;
@@ -357,11 +346,7 @@ impl Whitenoise {
             let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
             // Use fallback relays if contact has no inbox relays configured
-            let relays_to_use = if contact.inbox_relays.is_empty() {
-                Account::default_relays()
-            } else {
-                contact.inbox_relays
-            };
+            let relays_to_use = contact.get_relays_of_type(RelayType::Inbox);
 
             self.nostr
                 .publish_gift_wrap_with_signer(

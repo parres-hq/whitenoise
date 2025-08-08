@@ -70,6 +70,33 @@ where
     }
 }
 
+impl Contact {
+    /// Returns the relays to use for this contact of the specified type
+    /// If the contact has no relays of the specified type, it will fallback to nip65 relays
+    /// If the contact has no nip65 relays, it will fallback to default relays
+    pub fn get_relays_of_type(&self, relay_type: RelayType) -> DashSet<RelayUrl> {
+        let relays = match relay_type {
+            RelayType::Nostr => &self.nip65_relays,
+            RelayType::Inbox => &self.inbox_relays,
+            RelayType::KeyPackage => &self.key_package_relays,
+        };
+
+        if relays.is_empty() {
+            self.relay_fallback(relay_type)
+        } else {
+            relays.clone()
+        }
+    }
+
+    fn relay_fallback(&self, relay_type: RelayType) -> DashSet<RelayUrl> {
+        match relay_type {
+            RelayType::Nostr => Account::default_relays(),
+            RelayType::Inbox => self.get_relays_of_type(RelayType::Nostr),
+            RelayType::KeyPackage => self.get_relays_of_type(RelayType::Nostr),
+        }
+    }
+}
+
 impl Whitenoise {
     // ============================================================================
     // CONTACT MANAGEMENT
@@ -699,5 +726,124 @@ mod tests {
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey);
         assert!(signing_keys_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_relays_of_type() {
+        use crate::whitenoise::Whitenoise;
+        use crate::RelayType;
+        use dashmap::DashSet;
+        use nostr_sdk::RelayUrl;
+
+        // Create test relay URLs
+        let nip65_relay = RelayUrl::parse("wss://relay.damus.io").unwrap();
+        let inbox_relay = RelayUrl::parse("wss://inbox.relay.com").unwrap();
+        let key_package_relay = RelayUrl::parse("wss://keypackage.relay.com").unwrap();
+
+        // Create contact with different relay types
+        let contact = super::Contact {
+            pubkey: create_test_keys().public_key(),
+            metadata: None,
+            nip65_relays: {
+                let set = DashSet::new();
+                set.insert(nip65_relay.clone());
+                set
+            },
+            inbox_relays: {
+                let set = DashSet::new();
+                set.insert(inbox_relay.clone());
+                set
+            },
+            key_package_relays: {
+                let set = DashSet::new();
+                set.insert(key_package_relay.clone());
+                set
+            },
+        };
+
+        // Test getting each relay type
+        let nip65_relays = contact.get_relays_of_type(RelayType::Nostr);
+        assert!(Whitenoise::relayurl_dashset_eq(
+            nip65_relays,
+            DashSet::from_iter([nip65_relay])
+        ));
+
+        let inbox_relays = contact.get_relays_of_type(RelayType::Inbox);
+        assert!(Whitenoise::relayurl_dashset_eq(
+            inbox_relays,
+            DashSet::from_iter([inbox_relay])
+        ));
+
+        let key_package_relays = contact.get_relays_of_type(RelayType::KeyPackage);
+        assert!(Whitenoise::relayurl_dashset_eq(
+            key_package_relays,
+            DashSet::from_iter([key_package_relay])
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_relays_of_type_empty_fallback() {
+        use crate::whitenoise::accounts::Account;
+        use crate::whitenoise::Whitenoise;
+        use crate::RelayType;
+        use dashmap::DashSet;
+
+        // Create contact with empty relay sets
+        let contact = super::Contact {
+            pubkey: create_test_keys().public_key(),
+            metadata: None,
+            nip65_relays: DashSet::new(),
+            inbox_relays: DashSet::new(),
+            key_package_relays: DashSet::new(),
+        };
+
+        // Test that empty relays fallback to default_relays
+        let nip65_relays = contact.get_relays_of_type(RelayType::Nostr);
+        let default_relays = Account::default_relays();
+        assert!(Whitenoise::relayurl_dashset_eq(
+            nip65_relays,
+            default_relays.clone()
+        ));
+
+        let inbox_relays = contact.get_relays_of_type(RelayType::Inbox);
+        assert!(Whitenoise::relayurl_dashset_eq(
+            inbox_relays,
+            default_relays.clone()
+        ));
+
+        let key_package_relays = contact.get_relays_of_type(RelayType::KeyPackage);
+        assert!(Whitenoise::relayurl_dashset_eq(
+            key_package_relays,
+            default_relays
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_relays_of_type_fallback_goes_to_nip65_if_available() {
+        use crate::whitenoise::Whitenoise;
+        use crate::RelayType;
+        use dashmap::DashSet;
+
+        let nip65_relay = RelayUrl::parse("wss://relay.damus.io").unwrap();
+
+        let contact = super::Contact {
+            pubkey: create_test_keys().public_key(),
+            metadata: None,
+            nip65_relays: DashSet::from_iter([nip65_relay.clone()]),
+            inbox_relays: DashSet::new(),
+            key_package_relays: DashSet::new(),
+        };
+
+        let inbox_relays = contact.get_relays_of_type(RelayType::Inbox);
+        assert!(Whitenoise::relayurl_dashset_eq(
+            inbox_relays,
+            DashSet::from_iter([nip65_relay.clone()])
+        ));
+
+        let key_package_relays = contact.get_relays_of_type(RelayType::KeyPackage);
+        assert!(Whitenoise::relayurl_dashset_eq(
+            key_package_relays,
+            DashSet::from_iter([nip65_relay])
+        ));
     }
 }
