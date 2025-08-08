@@ -476,6 +476,24 @@ impl Whitenoise {
 
         Ok(())
     }
+
+    pub(crate) async fn temp_contact_with_defaults(&self, pubkey: PublicKey) -> Result<Contact> {
+        Ok(Contact {
+            pubkey,
+            metadata: None,
+            nip65_relays: Account::default_relays(),
+            inbox_relays: self
+                .relays_with_nip65_fallback(pubkey, Account::default_relays(), RelayType::Inbox)
+                .await?,
+            key_package_relays: self
+                .relays_with_nip65_fallback(
+                    pubkey,
+                    Account::default_relays(),
+                    RelayType::KeyPackage,
+                )
+                .await?,
+        })
+    }
 }
 
 #[cfg(test)]
