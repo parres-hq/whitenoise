@@ -57,6 +57,53 @@ impl Default for AccountSettings {
     }
 }
 
+/// A cleanup guard that ensures atomic operation during account setup.
+///
+/// This guard is created after successfully saving an account to the database.
+/// If any subsequent operation fails, the cleanup must be explicitly performed
+/// by calling `cleanup()` since async operations can't be performed in Drop.
+struct AccountSetupCleanupGuard {
+    pubkey: PublicKey,
+    should_cleanup: bool,
+}
+
+impl AccountSetupCleanupGuard {
+    /// Creates a new cleanup guard for the given account.
+    fn new(pubkey: &PublicKey) -> Self {
+        Self {
+            pubkey: *pubkey,
+            should_cleanup: true,
+        }
+    }
+
+    /// Marks the operation as successful, disabling cleanup.
+    /// This should be called when all account setup steps complete successfully.
+    fn success(mut self) {
+        self.should_cleanup = false;
+    }
+
+    /// Performs cleanup of the database record and private key.
+    /// This should be called if any error occurs after the account is saved to database.
+    async fn cleanup(&self, whitenoise: &Whitenoise) {
+        if self.should_cleanup {
+            tracing::warn!(target: "whitenoise::setup_account", "Account setup failed, cleaning up persisted state for pubkey: {}", self.pubkey.to_hex());
+
+            // Clean up database record
+            if let Err(e) = whitenoise.delete_account(&self.pubkey).await {
+                tracing::error!(target: "whitenoise::setup_account", "Failed to cleanup database record during rollback: {}", e);
+            }
+
+            // Clean up private key from secrets store
+            if let Err(e) = whitenoise
+                .secrets_store
+                .remove_private_key_for_pubkey(&self.pubkey)
+            {
+                tracing::error!(target: "whitenoise::setup_account", "Failed to cleanup private key during rollback: {}", e);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Account {
     pub pubkey: PublicKey,
@@ -298,16 +345,10 @@ impl Whitenoise {
     ///
     /// Returns a [`WhitenoiseError`] if the private key is invalid or account setup fails.
     pub async fn login(&self, nsec_or_hex_privkey: String) -> Result<Account> {
-        // Step 1: Parse the private key
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
         tracing::debug!(target: "whitenoise::login", "Logging in with pubkey: {}", pubkey.to_hex());
 
-        // Step 2: Check if account exists locally (but don't fail if it doesn't)
-        let account_exists_locally = self.load_account(&pubkey).await.is_ok();
-        tracing::debug!(target: "whitenoise::login", "Account exists locally: {}", account_exists_locally);
-
-        // Step 3: Setup the account (treating it as existing account to fetch from network)
         let account = self.setup_account(&keys, false).await?;
 
         tracing::debug!(target: "whitenoise::login", "Successfully logged in: {}", account.pubkey.to_hex());
@@ -602,7 +643,7 @@ impl Whitenoise {
         let pubkey = keys.public_key();
         tracing::debug!(target: "whitenoise::setup_account", "Setting up account for pubkey: {} (new: {})", pubkey.to_hex(), is_new_account);
 
-        // Step 1: Store private key first (most likely to fail)
+        // Step 1: Store private key first
         self.secrets_store.store_private_key(keys).map_err(|e| {
             tracing::error!(target: "whitenoise::setup_account", "Failed to store private key: {}", e);
             e
@@ -610,7 +651,10 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::setup_account", "Keys stored in secret store");
 
         // Step 2: Handle relay lists - fetch for existing accounts, use defaults for new or missing
-        let mut need_to_publish_relays = is_new_account; // Always publish for new accounts
+        // Track which relay types need to be published (defaulted to fallback values)
+        let mut need_to_publish_nip65 = is_new_account; // Always publish for new accounts
+        let mut need_to_publish_inbox = is_new_account;
+        let mut need_to_publish_key_package = is_new_account;
 
         let nip65_relays = if is_new_account {
             Account::default_relays()
@@ -621,7 +665,7 @@ impl Whitenoise {
             {
                 Ok(relays) if !relays.is_empty() => relays,
                 _ => {
-                    need_to_publish_relays = true;
+                    need_to_publish_nip65 = true;
                     Account::default_relays()
                 }
             }
@@ -636,7 +680,7 @@ impl Whitenoise {
             {
                 Ok(relays) if !relays.is_empty() => relays,
                 _ => {
-                    need_to_publish_relays = true;
+                    need_to_publish_inbox = true;
                     Account::default_relays()
                 }
             }
@@ -651,7 +695,7 @@ impl Whitenoise {
             {
                 Ok(relays) if !relays.is_empty() => relays,
                 _ => {
-                    need_to_publish_relays = true;
+                    need_to_publish_key_package = true;
                     Account::default_relays()
                 }
             }
@@ -679,21 +723,53 @@ impl Whitenoise {
         })?;
         tracing::debug!(target: "whitenoise::setup_account", "Account saved to database");
 
-        // Step 5: Publish relay lists if we created defaults
-        if need_to_publish_relays {
-            // We can't use publish_account_relay_info here because the account isn't "logged in" yet
-            // So we call the individual relay publishing functions directly
-            self.publish_relay_list_for_account(&account, RelayType::Nostr, &None)
-                .await?;
-            self.publish_relay_list_for_account(&account, RelayType::Inbox, &None)
-                .await?;
-            self.publish_relay_list_for_account(&account, RelayType::KeyPackage, &None)
-                .await?;
-            tracing::debug!(target: "whitenoise::setup_account", "Published relay lists");
+        // Create cleanup guard to ensure atomic operation - if any step after database save fails,
+        // we need to clean up both the database record and the private key
+        let cleanup_guard = AccountSetupCleanupGuard::new(&pubkey);
+
+        // Define a macro to handle errors with cleanup
+        macro_rules! handle_error {
+            ($result:expr, $error_msg:expr) => {
+                match $result {
+                    Ok(val) => val,
+                    Err(e) => {
+                        tracing::error!(target: "whitenoise::setup_account", "{}: {}", $error_msg, e);
+                        cleanup_guard.cleanup(self).await;
+                        return Err(e);
+                    }
+                }
+            };
         }
 
+        // Step 5: Publish relay lists if we created defaults (only publish what defaulted)
+        if need_to_publish_nip65 {
+            handle_error!(
+                self.publish_relay_list_for_account(&account, RelayType::Nostr, &None)
+                    .await,
+                "Failed to publish NIP-65 relay list"
+            );
+        }
+        if need_to_publish_inbox {
+            handle_error!(
+                self.publish_relay_list_for_account(&account, RelayType::Inbox, &None)
+                    .await,
+                "Failed to publish inbox relay list"
+            );
+        }
+        if need_to_publish_key_package {
+            handle_error!(
+                self.publish_relay_list_for_account(&account, RelayType::KeyPackage, &None)
+                    .await,
+                "Failed to publish key package relay list"
+            );
+        }
+        tracing::debug!(target: "whitenoise::setup_account", "Published relay lists for defaulted types");
+
         // Step 6: Setup account in memory and connect to relays
-        self.connect_account_relays(&account).await?;
+        handle_error!(
+            self.connect_account_relays(&account).await,
+            "Failed to connect account relays"
+        );
         {
             let mut accounts = self.write_accounts().await;
             accounts.insert(account.pubkey, account.clone());
@@ -701,23 +777,37 @@ impl Whitenoise {
         tracing::debug!(target: "whitenoise::setup_account", "Account added to memory and relays connected");
 
         // Step 7: Setup subscriptions
-        self.setup_subscriptions(&account).await?;
+        handle_error!(
+            self.setup_subscriptions(&account).await,
+            "Failed to setup subscriptions"
+        );
         tracing::debug!(target: "whitenoise::setup_account", "Subscriptions setup");
 
         // Step 8: Handle key package - publish if none exists
-        let key_package_event = self
-            .fetch_key_package_event_from(account.key_package_relays.clone(), pubkey)
-            .await?;
+        let key_package_event = handle_error!(
+            self.fetch_key_package_event_from(account.key_package_relays.clone(), pubkey)
+                .await,
+            "Failed to fetch key package event"
+        );
         if key_package_event.is_none() {
-            self.publish_key_package_for_account(&account).await?;
+            handle_error!(
+                self.publish_key_package_for_account(&account).await,
+                "Failed to publish key package"
+            );
             tracing::debug!(target: "whitenoise::setup_account", "Published key package");
         }
 
         // For existing accounts, trigger background data fetch
         if !is_new_account {
-            self.background_fetch_account_data(&account).await?;
+            handle_error!(
+                self.background_fetch_account_data(&account).await,
+                "Failed to trigger background data fetch"
+            );
             tracing::debug!(target: "whitenoise::setup_account", "Background data fetch triggered");
         }
+
+        // If we reach here, everything succeeded - disable cleanup
+        cleanup_guard.success();
 
         tracing::debug!(target: "whitenoise::setup_account", "Account setup completed successfully");
         Ok(account)
