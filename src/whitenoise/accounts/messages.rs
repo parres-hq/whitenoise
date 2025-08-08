@@ -231,35 +231,4 @@ impl Whitenoise {
 
         Ok((inner_event, event_id))
     }
-    /// Publish the message in encrypted form for the recepient to the relays as per nip04
-    pub async fn send_direct_message_nip04(
-        &self,
-        account: &Account,
-        recepient_pubkey: &PublicKey,
-        content: String,
-        tags: Vec<Tag>,
-    ) -> Result<()> {
-        let sender_keys = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
-
-        let contact = self.load_contact(recepient_pubkey).await?;
-
-        let encrypted_message =
-            nostr::nips::nip04::encrypt(sender_keys.secret_key(), recepient_pubkey, &content)?;
-        let dm_event_builder = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_message)
-            .tags(tags)
-            .tag(Tag::public_key(*recepient_pubkey));
-
-        let _event_id = self
-            .nostr
-            .publish_event_builder_with_signer(
-                dm_event_builder,
-                contact.inbox_relays.clone(),
-                sender_keys,
-            )
-            .await?;
-
-        Ok(())
-    }
 }
