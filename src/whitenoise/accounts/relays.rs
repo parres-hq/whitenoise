@@ -274,12 +274,10 @@ impl Whitenoise {
         // Create a minimal relay list event
         let tags: Vec<Tag> = match relay_type {
             RelayType::Nostr => relays_to_publish
-                .clone()
                 .into_iter()
                 .map(|url| Tag::reference(url.to_string()))
                 .collect(),
             RelayType::Inbox | RelayType::KeyPackage => relays_to_publish
-                .clone()
                 .into_iter()
                 .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
                 .collect(),
