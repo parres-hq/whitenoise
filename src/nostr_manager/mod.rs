@@ -488,39 +488,35 @@ impl NostrManager {
     }
 
     fn relay_urls_from_event(event: Event) -> DashSet<RelayUrl> {
-        // Different relay list kinds use different tag types:
-        // - Kind::RelayList (10002) uses "r" tags (TagKind::SingleLetter)
-        // - Kind::InboxRelays (10050) and Kind::MlsKeyPackageRelays (10051) use "relay" tags (TagKind::Relay)
-        let tag_filter: Box<dyn Fn(&Tag) -> bool> = match event.kind {
-            Kind::RelayList => {
-                // For Kind::RelayList (10002), look for "r" tags (reference tags)
-                Box::new(|tag| {
-                    tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
-                })
-            }
-            Kind::InboxRelays | Kind::MlsKeyPackageRelays => {
-                // For Kind::InboxRelays (10050) and Kind::MlsKeyPackageRelays (10051), look for "relay" tags
-                Box::new(|tag| tag.kind() == TagKind::Relay)
-            }
-            _ => {
-                // For unknown/unsupported kinds, try both tag types for backward compatibility
-                Box::new(|tag| {
-                    tag.kind() == TagKind::Relay
-                        || tag.kind()
-                            == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
-                })
-            }
-        };
-
         event
             .tags
             .into_iter()
-            .filter(|tag| tag_filter(tag))
+            .filter(|tag| Self::is_relay_list_tag_for_event_kind(tag, event.kind))
             .filter_map(|tag| {
                 tag.content()
                     .and_then(|content| RelayUrl::parse(content).ok())
             })
             .collect()
+    }
+
+    /// Determines if a tag is relevant for the given relay list event kind.
+    /// Different relay list kinds use different tag types:
+    /// - Kind::RelayList (10002) uses "r" tags (TagKind::SingleLetter)
+    /// - Kind::InboxRelays (10050) and Kind::MlsKeyPackageRelays (10051) use "relay" tags (TagKind::Relay)
+    fn is_relay_list_tag_for_event_kind(tag: &Tag, kind: Kind) -> bool {
+        match kind {
+            Kind::RelayList => Self::is_r_tag(tag),
+            Kind::InboxRelays | Kind::MlsKeyPackageRelays => Self::is_relay_tag(tag),
+            _ => Self::is_relay_tag(tag) || Self::is_r_tag(tag), // backward compatibility
+        }
+    }
+
+    fn is_r_tag(tag: &Tag) -> bool {
+        tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+    }
+
+    fn is_relay_tag(tag: &Tag) -> bool {
+        tag.kind() == TagKind::Relay
     }
 
     /// Permanently deletes all Nostr data managed by this NostrManager instance.
