@@ -488,10 +488,34 @@ impl NostrManager {
     }
 
     fn relay_urls_from_event(event: Event) -> DashSet<RelayUrl> {
+        // Different relay list kinds use different tag types:
+        // - Kind::RelayList (10002) uses "r" tags (TagKind::SingleLetter)
+        // - Kind::InboxRelays (10050) and Kind::MlsKeyPackageRelays (10051) use "relay" tags (TagKind::Relay)
+        let tag_filter: Box<dyn Fn(&Tag) -> bool> = match event.kind {
+            Kind::RelayList => {
+                // For Kind::RelayList (10002), look for "r" tags (reference tags)
+                Box::new(|tag| {
+                    tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+                })
+            }
+            Kind::InboxRelays | Kind::MlsKeyPackageRelays => {
+                // For Kind::InboxRelays (10050) and Kind::MlsKeyPackageRelays (10051), look for "relay" tags
+                Box::new(|tag| tag.kind() == TagKind::Relay)
+            }
+            _ => {
+                // For unknown/unsupported kinds, try both tag types for backward compatibility
+                Box::new(|tag| {
+                    tag.kind() == TagKind::Relay
+                        || tag.kind()
+                            == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+                })
+            }
+        };
+
         event
             .tags
             .into_iter()
-            .filter(|tag| tag.kind() == TagKind::Relay)
+            .filter(|tag| tag_filter(tag))
             .filter_map(|tag| {
                 tag.content()
                     .and_then(|content| RelayUrl::parse(content).ok())
@@ -1013,5 +1037,166 @@ mod tests {
         // Extract contacts
         let contacts = extract_contacts_from_event(&event);
         assert_eq!(contacts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_relay_urls_from_event_relay_list() {
+        use nostr_sdk::prelude::*;
+
+        // Test Kind::RelayList (10002) with "r" tags
+        let keys = Keys::generate();
+
+        let r_tags = vec![
+            Tag::reference("wss://relay1.example.com"),
+            Tag::reference("wss://relay2.example.com"),
+            // Add a relay tag that should be ignored for RelayList
+            Tag::custom(TagKind::Relay, ["wss://should-be-ignored.com"]),
+        ];
+
+        let event = EventBuilder::new(Kind::RelayList, "")
+            .tags(r_tags)
+            .sign(&keys)
+            .await
+            .unwrap();
+
+        let parsed_relays = NostrManager::relay_urls_from_event(event);
+
+        assert_eq!(parsed_relays.len(), 2);
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://relay1.example.com").unwrap()));
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://relay2.example.com").unwrap()));
+        assert!(!parsed_relays.contains(&RelayUrl::parse("wss://should-be-ignored.com").unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_relay_urls_from_event_inbox_relays() {
+        use nostr_sdk::prelude::*;
+
+        // Test Kind::InboxRelays (10050) with "relay" tags
+        let keys = Keys::generate();
+
+        let relay_tags = vec![
+            Tag::custom(TagKind::Relay, ["wss://inbox1.example.com"]),
+            Tag::custom(TagKind::Relay, ["wss://inbox2.example.com"]),
+            // Add an "r" tag that should be ignored for InboxRelays
+            Tag::reference("wss://should-be-ignored.com"),
+        ];
+
+        let event = EventBuilder::new(Kind::InboxRelays, "")
+            .tags(relay_tags)
+            .sign(&keys)
+            .await
+            .unwrap();
+
+        let parsed_relays = NostrManager::relay_urls_from_event(event);
+
+        assert_eq!(parsed_relays.len(), 2);
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://inbox1.example.com").unwrap()));
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://inbox2.example.com").unwrap()));
+        assert!(!parsed_relays.contains(&RelayUrl::parse("wss://should-be-ignored.com").unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_relay_urls_from_event_key_package_relays() {
+        use nostr_sdk::prelude::*;
+
+        // Test Kind::MlsKeyPackageRelays (10051) with "relay" tags
+        let keys = Keys::generate();
+
+        let relay_tags = vec![
+            Tag::custom(TagKind::Relay, ["wss://keypackage1.example.com"]),
+            Tag::custom(TagKind::Relay, ["wss://keypackage2.example.com"]),
+            // Add an "r" tag that should be ignored for MlsKeyPackageRelays
+            Tag::reference("wss://should-be-ignored.com"),
+        ];
+
+        let event = EventBuilder::new(Kind::MlsKeyPackageRelays, "")
+            .tags(relay_tags)
+            .sign(&keys)
+            .await
+            .unwrap();
+
+        let parsed_relays = NostrManager::relay_urls_from_event(event);
+
+        assert_eq!(parsed_relays.len(), 2);
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://keypackage1.example.com").unwrap()));
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://keypackage2.example.com").unwrap()));
+        assert!(!parsed_relays.contains(&RelayUrl::parse("wss://should-be-ignored.com").unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_relay_urls_from_event_unknown_kind_backward_compatibility() {
+        use nostr_sdk::prelude::*;
+
+        // Test unknown kind with both "r" and "relay" tags (backward compatibility)
+        let keys = Keys::generate();
+
+        let mixed_tags = vec![
+            Tag::reference("wss://r-tag-relay.example.com"),
+            Tag::custom(TagKind::Relay, ["wss://relay-tag-relay.example.com"]),
+        ];
+
+        let event = EventBuilder::new(Kind::Custom(9999), "")
+            .tags(mixed_tags)
+            .sign(&keys)
+            .await
+            .unwrap();
+
+        let parsed_relays = NostrManager::relay_urls_from_event(event);
+
+        assert_eq!(parsed_relays.len(), 2);
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://r-tag-relay.example.com").unwrap()));
+        assert!(
+            parsed_relays.contains(&RelayUrl::parse("wss://relay-tag-relay.example.com").unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relay_urls_from_event_invalid_urls_filtered() {
+        use nostr_sdk::prelude::*;
+
+        // Test that invalid URLs are filtered out
+        let keys = Keys::generate();
+
+        let tags = vec![
+            Tag::reference("wss://valid-relay.example.com"),
+            Tag::reference("not a valid url"),
+            Tag::reference("wss://another-valid.example.com"),
+        ];
+
+        let event = EventBuilder::new(Kind::RelayList, "")
+            .tags(tags)
+            .sign(&keys)
+            .await
+            .unwrap();
+
+        let parsed_relays = NostrManager::relay_urls_from_event(event);
+
+        assert_eq!(parsed_relays.len(), 2);
+        assert!(parsed_relays.contains(&RelayUrl::parse("wss://valid-relay.example.com").unwrap()));
+        assert!(
+            parsed_relays.contains(&RelayUrl::parse("wss://another-valid.example.com").unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relay_urls_from_event_empty_tags() {
+        use nostr_sdk::prelude::*;
+
+        // Test event with no relay tags
+        let keys = Keys::generate();
+
+        let tags = vec![
+            Tag::custom(TagKind::Custom("alt".into()), ["Some description"]),
+            Tag::custom(TagKind::Custom("d".into()), ["identifier"]),
+        ];
+
+        let event = EventBuilder::new(Kind::RelayList, "")
+            .tags(tags)
+            .sign(&keys)
+            .await
+            .unwrap();
+
+        let parsed_relays = NostrManager::relay_urls_from_event(event);
+        assert!(parsed_relays.is_empty());
     }
 }

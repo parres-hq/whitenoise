@@ -272,11 +272,16 @@ impl Whitenoise {
         };
 
         // Create a minimal relay list event
-        let tags: Vec<Tag> = relays_to_publish
-            .clone()
-            .into_iter()
-            .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
-            .collect();
+        let tags: Vec<Tag> = match relay_type {
+            RelayType::Nostr => relays_to_publish
+                .into_iter()
+                .map(|url| Tag::reference(url.to_string()))
+                .collect(),
+            RelayType::Inbox | RelayType::KeyPackage => relays_to_publish
+                .into_iter()
+                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .collect(),
+        };
         tracing::debug!("Publishing relay list tags {:?}", tags);
 
         let event = EventBuilder::new(relay_event_kind, "").tags(tags);
@@ -680,6 +685,200 @@ mod tests {
     #[should_panic(expected = "Invalid relay type")]
     async fn test_invalid_relay_type_conversion() {
         let _ = RelayType::from("invalid".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_tag_creation_for_relay_types() {
+        use nostr_sdk::prelude::*;
+
+        // Test tag creation logic directly (without publishing)
+        let test_url = "wss://test.relay.com";
+
+        // Test Nostr relay type creates "r" tags (Tag::reference)
+        let r_tag = Tag::reference(test_url);
+        assert_eq!(
+            r_tag.kind(),
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+        );
+        assert_eq!(r_tag.content(), Some(test_url));
+
+        // Test Inbox/KeyPackage relay types create "relay" tags (Tag::custom)
+        let relay_tag = Tag::custom(TagKind::Relay, [test_url]);
+        assert_eq!(relay_tag.kind(), TagKind::Relay);
+        assert_eq!(relay_tag.content(), Some(test_url));
+
+        // Verify they are different tag types
+        assert_ne!(r_tag.kind(), relay_tag.kind());
+    }
+
+    #[tokio::test]
+    async fn test_relay_list_tag_types() {
+        use nostr_sdk::prelude::*;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+
+        // Add test relays to the account
+        let test_relay_1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+        let test_relay_2 = RelayUrl::parse("wss://relay2.example.com").unwrap();
+
+        // Add relays for each type
+        whitenoise
+            .add_relay_to_account(account.pubkey, test_relay_1.clone(), RelayType::Nostr)
+            .await
+            .unwrap();
+        whitenoise
+            .add_relay_to_account(account.pubkey, test_relay_2.clone(), RelayType::Inbox)
+            .await
+            .unwrap();
+        whitenoise
+            .add_relay_to_account(account.pubkey, test_relay_1.clone(), RelayType::KeyPackage)
+            .await
+            .unwrap();
+
+        // Wait for events to be published
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Test Kind::RelayList (10002) uses "r" tags
+        let relay_list_filter = Filter::new()
+            .author(account.pubkey)
+            .kind(Kind::RelayList)
+            .limit(1);
+
+        let relay_list_events = whitenoise
+            .nostr
+            .client
+            .database()
+            .query(relay_list_filter)
+            .await
+            .unwrap();
+
+        assert!(
+            !relay_list_events.is_empty(),
+            "Should have published a relay list event (kind 10002)"
+        );
+
+        let relay_list_event = relay_list_events.iter().next().unwrap();
+
+        // Verify it contains "r" tags (Tag::reference creates these)
+        let r_tags: Vec<_> = relay_list_event
+            .tags
+            .iter()
+            .filter(|tag| {
+                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+            })
+            .collect();
+
+        assert!(
+            !r_tags.is_empty(),
+            "Relay list event (kind 10002) should contain 'r' tags"
+        );
+
+        // Verify it does NOT contain "relay" tags
+        let relay_tags: Vec<_> = relay_list_event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::Relay)
+            .collect();
+
+        assert!(
+            relay_tags.is_empty(),
+            "Relay list event (kind 10002) should NOT contain 'relay' tags"
+        );
+
+        // Test Kind::InboxRelays (10050) uses "relay" tags
+        let inbox_relays_filter = Filter::new()
+            .author(account.pubkey)
+            .kind(Kind::InboxRelays)
+            .limit(1);
+
+        let inbox_relays_events = whitenoise
+            .nostr
+            .client
+            .database()
+            .query(inbox_relays_filter)
+            .await
+            .unwrap();
+
+        assert!(
+            !inbox_relays_events.is_empty(),
+            "Should have published an inbox relays event (kind 10050)"
+        );
+
+        let inbox_relays_event = inbox_relays_events.iter().next().unwrap();
+
+        // Verify it contains "relay" tags (Tag::custom creates these)
+        let relay_tags: Vec<_> = inbox_relays_event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::Relay)
+            .collect();
+
+        assert!(
+            !relay_tags.is_empty(),
+            "Inbox relays event (kind 10050) should contain 'relay' tags"
+        );
+
+        // Verify it does NOT contain "r" tags
+        let r_tags: Vec<_> = inbox_relays_event
+            .tags
+            .iter()
+            .filter(|tag| {
+                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+            })
+            .collect();
+
+        assert!(
+            r_tags.is_empty(),
+            "Inbox relays event (kind 10050) should NOT contain 'r' tags"
+        );
+
+        // Test Kind::MlsKeyPackageRelays (10051) uses "relay" tags
+        let key_package_relays_filter = Filter::new()
+            .author(account.pubkey)
+            .kind(Kind::MlsKeyPackageRelays)
+            .limit(1);
+
+        let key_package_relays_events = whitenoise
+            .nostr
+            .client
+            .database()
+            .query(key_package_relays_filter)
+            .await
+            .unwrap();
+
+        assert!(
+            !key_package_relays_events.is_empty(),
+            "Should have published a key package relays event (kind 10051)"
+        );
+
+        let key_package_relays_event = key_package_relays_events.iter().next().unwrap();
+
+        // Verify it contains "relay" tags (Tag::custom creates these)
+        let relay_tags: Vec<_> = key_package_relays_event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::Relay)
+            .collect();
+
+        assert!(
+            !relay_tags.is_empty(),
+            "Key package relays event (kind 10051) should contain 'relay' tags"
+        );
+
+        // Verify it does NOT contain "r" tags
+        let r_tags: Vec<_> = key_package_relays_event
+            .tags
+            .iter()
+            .filter(|tag| {
+                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+            })
+            .collect();
+
+        assert!(
+            r_tags.is_empty(),
+            "Key package relays event (kind 10051) should NOT contain 'r' tags"
+        );
     }
 
     #[tokio::test]
