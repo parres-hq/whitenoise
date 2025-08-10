@@ -257,13 +257,10 @@ impl Whitenoise {
         target_relays: &Option<DashSet<RelayUrl>>, // If provided, this means at least one relay was removed. We need to publish to the prior relays as well.
     ) -> Result<()> {
         // Determine the kind of relay list event to publish
-        let (relay_event_kind, relays_to_publish) = match relay_type {
-            RelayType::Nostr => (Kind::RelayList, account.nip65_relays.clone()),
-            RelayType::Inbox => (Kind::InboxRelays, account.inbox_relays.clone()),
-            RelayType::KeyPackage => (
-                Kind::MlsKeyPackageRelays,
-                account.key_package_relays.clone(),
-            ),
+        let relays_to_publish = match relay_type {
+            RelayType::Nostr => account.nip65_relays.clone(),
+            RelayType::Inbox => account.inbox_relays.clone(),
+            RelayType::KeyPackage => account.key_package_relays.clone(),
         };
 
         let relays_to_use = match target_relays.as_ref() {
@@ -271,29 +268,42 @@ impl Whitenoise {
             None => &account.nip65_relays,
         };
 
-        // Create a minimal relay list event
+        self.publish_relay_list_for_pubkey(
+            account.pubkey,
+            relays_to_publish,
+            relay_type,
+            relays_to_use.clone(),
+        )
+        .await
+    }
+
+    pub(crate) async fn publish_relay_list_for_pubkey(
+        &self,
+        pubkey: PublicKey,
+        relay_list: DashSet<RelayUrl>,
+        relay_type: RelayType,
+        target_relays: DashSet<RelayUrl>,
+    ) -> Result<()> {
         let tags: Vec<Tag> = match relay_type {
-            RelayType::Nostr => relays_to_publish
+            RelayType::Nostr => relay_list
                 .into_iter()
                 .map(|url| Tag::reference(url.to_string()))
                 .collect(),
-            RelayType::Inbox | RelayType::KeyPackage => relays_to_publish
+            RelayType::Inbox | RelayType::KeyPackage => relay_list
                 .into_iter()
                 .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
                 .collect(),
         };
         tracing::debug!("Publishing relay list tags {:?}", tags);
-
+        let relay_event_kind = Kind::from(relay_type);
         let event = EventBuilder::new(relay_event_kind, "").tags(tags);
-        let keys = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let keys = self.secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
 
         let result = self
             .nostr
-            .publish_event_builder_with_signer(event.clone(), relays_to_use.clone(), keys)
+            .publish_event_builder_with_signer(event, target_relays, keys)
             .await?;
-        tracing::debug!(target: "whitenoise::publish_relay_list", "Published relay list event to Nostr: {:?}", result);
+        tracing::debug!(target: "whitenoise::publish_relay_list_for_pubkey", "Published relay list event to Nostr: {:?}", result);
 
         Ok(())
     }
@@ -303,7 +313,9 @@ impl Whitenoise {
 mod tests {
     use std::time::Duration;
 
+    use dashmap::DashSet;
     use nostr::types::RelayUrl;
+    use nostr_sdk::prelude::*;
     use tokio::time::sleep;
 
     use crate::whitenoise::test_utils::create_mock_whitenoise;
@@ -933,5 +945,167 @@ mod tests {
             db_account_after.nip65_relays.clone(),
             memory_account_after.nip65_relays.clone()
         ));
+    }
+
+    #[tokio::test]
+    async fn test_publish_relay_list_for_pubkey_nostr_type() {
+        let (whitenoise, _, _) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+
+        // Test relay URLs
+        let relay1 = RelayUrl::parse("wss://test1.example.com").unwrap();
+        let relay2 = RelayUrl::parse("wss://test2.example.com").unwrap();
+        let target_relay = RelayUrl::parse("wss://target.example.com").unwrap();
+
+        // Create relay lists
+        let relay_list = DashSet::from_iter([relay1.clone(), relay2.clone()]);
+        let target_relays = DashSet::from_iter([target_relay]);
+
+        // Call the function with Nostr relay type
+        whitenoise
+            .publish_relay_list_for_pubkey(
+                account.pubkey,
+                relay_list,
+                RelayType::Nostr,
+                target_relays,
+            )
+            .await
+            .unwrap();
+
+        // Query for the published event
+        let filter = Filter::new()
+            .author(account.pubkey)
+            .kind(Kind::RelayList)
+            .limit(1);
+
+        let events = whitenoise
+            .nostr
+            .client
+            .database()
+            .query(filter)
+            .await
+            .unwrap();
+        assert!(!events.is_empty(), "RelayList event should be published");
+
+        let event = events.iter().next().unwrap();
+
+        // Should contain "r" tags (Tag::reference creates these)
+        let r_tags: Vec<_> = event
+            .tags
+            .iter()
+            .filter(|tag| {
+                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+            })
+            .collect();
+
+        assert_eq!(r_tags.len(), 2, "Should have 2 'r' tags");
+
+        // Should NOT contain "relay" tags
+        let relay_tags: Vec<_> = event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::Relay)
+            .collect();
+
+        assert!(relay_tags.is_empty(), "Should NOT contain 'relay' tags");
+
+        // Verify tag content matches our relay URLs
+        let tag_urls: Vec<String> = r_tags
+            .iter()
+            .filter_map(|tag| tag.content())
+            .map(|s| s.to_string())
+            .collect();
+
+        assert!(tag_urls.contains(&relay1.to_string()));
+        assert!(tag_urls.contains(&relay2.to_string()));
+
+        // Verify event has empty content
+        assert!(event.content.is_empty(), "Should have empty content");
+    }
+
+    #[tokio::test]
+    async fn test_publish_relay_list_for_pubkey_inbox_and_keypackage_types() {
+        let (whitenoise, _, _) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+
+        // Test relay URLs
+        let relay1 = RelayUrl::parse("wss://inbox1.example.com").unwrap();
+        let relay2 = RelayUrl::parse("wss://inbox2.example.com").unwrap();
+        let target_relay = RelayUrl::parse("wss://target.example.com").unwrap();
+
+        // Create relay lists
+        let relay_list = DashSet::from_iter([relay1.clone(), relay2.clone()]);
+        let target_relays = DashSet::from_iter([target_relay]);
+
+        // Test both Inbox and KeyPackage types (they use the same tag format)
+        for (relay_type, expected_kind) in [
+            (RelayType::Inbox, Kind::InboxRelays),
+            (RelayType::KeyPackage, Kind::MlsKeyPackageRelays),
+        ] {
+            // Call the function
+            whitenoise
+                .publish_relay_list_for_pubkey(
+                    account.pubkey,
+                    relay_list.clone(),
+                    relay_type,
+                    target_relays.clone(),
+                )
+                .await
+                .unwrap();
+
+            // Query for the published event
+            let filter = Filter::new()
+                .author(account.pubkey)
+                .kind(expected_kind)
+                .limit(1);
+
+            let events = whitenoise
+                .nostr
+                .client
+                .database()
+                .query(filter)
+                .await
+                .unwrap();
+            assert!(
+                !events.is_empty(),
+                "{:?} event should be published",
+                expected_kind
+            );
+
+            let event = events.iter().next().unwrap();
+
+            // Should contain "relay" tags (Tag::custom creates these)
+            let relay_tags: Vec<_> = event
+                .tags
+                .iter()
+                .filter(|tag| tag.kind() == TagKind::Relay)
+                .collect();
+
+            assert_eq!(relay_tags.len(), 2, "Should have 2 'relay' tags");
+
+            // Should NOT contain "r" tags
+            let r_tags: Vec<_> = event
+                .tags
+                .iter()
+                .filter(|tag| {
+                    tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R))
+                })
+                .collect();
+
+            assert!(r_tags.is_empty(), "Should NOT contain 'r' tags");
+
+            // Verify tag content matches our relay URLs
+            let tag_urls: Vec<String> = relay_tags
+                .iter()
+                .filter_map(|tag| tag.content())
+                .map(|s| s.to_string())
+                .collect();
+
+            assert!(tag_urls.contains(&relay1.to_string()));
+            assert!(tag_urls.contains(&relay2.to_string()));
+
+            // Verify event has empty content
+            assert!(event.content.is_empty(), "Should have empty content");
+        }
     }
 }
