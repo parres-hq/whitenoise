@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use dashmap::DashSet;
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
@@ -55,6 +56,20 @@ impl Default for AccountSettings {
             lockdown_mode: false,
         }
     }
+}
+
+#[derive(Clone)]
+pub struct AccountNew {
+    pub id: i64,
+    pub pubkey: PublicKey,
+    pub user_id: i64,
+    pub settings: AccountSettings,
+    pub last_synced_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[doc(hidden)]
+    #[allow(dead_code)] // TODO: Remove when AccountNew is fully integrated
+    pub(crate) nostr_mls: Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>>,
 }
 
 #[derive(Clone)]
@@ -215,7 +230,7 @@ impl Account {
             .collect()
     }
 
-    fn create_nostr_mls(
+    pub(crate) fn create_nostr_mls(
         pubkey: PublicKey,
         data_dir: &Path,
     ) -> core::result::Result<Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>>, AccountError> {
