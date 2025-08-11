@@ -128,7 +128,8 @@ impl Whitenoise {
         Ok(relays)
     }
 
-    pub async fn save_user(&self, user: &User) -> Result<(), DatabaseError> {
+    #[allow(dead_code)]
+    pub(crate) async fn save_user(&self, user: &User) -> Result<(), DatabaseError> {
         sqlx::query(
             "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
