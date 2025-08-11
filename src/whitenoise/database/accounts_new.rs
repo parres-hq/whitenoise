@@ -152,7 +152,8 @@ impl Whitenoise {
         Ok(users)
     }
 
-    pub async fn save_account_new(&self, account: &AccountNew) -> Result<(), DatabaseError> {
+    #[allow(dead_code)]
+    pub(crate) async fn save_account_new(&self, account: &AccountNew) -> Result<(), DatabaseError> {
         sqlx::query("INSERT INTO accounts_new (pubkey, user_id, settings, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(account.pubkey.to_hex().as_str())
             .bind(account.user_id)
