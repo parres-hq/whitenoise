@@ -10,6 +10,10 @@ use std::{
 };
 use thiserror::Error;
 
+pub mod accounts_new;
+pub mod relays_new;
+pub mod users_new;
+
 pub static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| sqlx::migrate!("./db_migrations"));
 
 const DB_ACQUIRE_TIMEOUT_SECS: u64 = 5;
@@ -24,6 +28,8 @@ pub enum DatabaseError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error("File system error: {0}")]
     FileSystem(#[from] std::io::Error),
+    #[error("Invalid timestamp: {timestamp} cannot be converted to DateTime")]
+    InvalidTimestamp { timestamp: i64 },
 }
 
 #[derive(Clone, Debug)]
