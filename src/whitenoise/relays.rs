@@ -961,10 +961,10 @@ mod tests {
         let (whitenoise, _, _) = create_mock_whitenoise().await;
         let account = whitenoise.create_identity().await.unwrap();
 
-        // Test relay URLs
-        let relay1 = RelayUrl::parse("wss://test1.example.com").unwrap();
-        let relay2 = RelayUrl::parse("wss://test2.example.com").unwrap();
-        let target_relay = RelayUrl::parse("wss://target.example.com").unwrap();
+        // Test relay URLs - use localhost relays that are available in test environment
+        let relay1 = RelayUrl::parse("ws://localhost:7777").unwrap();
+        let relay2 = RelayUrl::parse("ws://localhost:8080").unwrap();
+        let target_relay = RelayUrl::parse("ws://localhost:7777").unwrap();
 
         // Create relay lists
         let relay_list = DashSet::from_iter([relay1.clone(), relay2.clone()]);
@@ -1040,10 +1040,10 @@ mod tests {
         let (whitenoise, _, _) = create_mock_whitenoise().await;
         let account = whitenoise.create_identity().await.unwrap();
 
-        // Test relay URLs
-        let relay1 = RelayUrl::parse("wss://inbox1.example.com").unwrap();
-        let relay2 = RelayUrl::parse("wss://inbox2.example.com").unwrap();
-        let target_relay = RelayUrl::parse("wss://target.example.com").unwrap();
+        // Test relay URLs - use localhost relays that are available in test environment
+        let relay1 = RelayUrl::parse("ws://localhost:7777").unwrap();
+        let relay2 = RelayUrl::parse("ws://localhost:8080").unwrap();
+        let target_relay = RelayUrl::parse("ws://localhost:7777").unwrap();
 
         // Create relay lists
         let relay_list = DashSet::from_iter([relay1.clone(), relay2.clone()]);

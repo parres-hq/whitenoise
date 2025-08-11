@@ -129,8 +129,8 @@ impl Whitenoise {
     ) -> Result<Vec<User>, WhitenoiseError> {
         let user_rows = sqlx::query_as::<_, UserRow>(
             "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at
-             FROM account_followers af
-             JOIN users_new u ON af.user_id = u.id
+             FROM account_follows af
+             JOIN users u ON af.user_id = u.id
              WHERE af.account_id = ?",
         )
         .bind(account.id)
@@ -797,16 +797,16 @@ mod tests {
             test_users.push((user_pubkey, metadata.clone()));
         }
 
-        // Now manually insert the account_followers relationships
+        // Now manually insert the account_follows relationships
         // First we need to get the actual account ID and user IDs from the database
         let saved_account = whitenoise.load_account_new(&account_pubkey).await.unwrap();
 
         for (user_pubkey, _) in &test_users {
             let saved_user = whitenoise.load_user(user_pubkey).await.unwrap();
 
-            // Insert into account_followers table
+            // Insert into account_follows table
             sqlx::query(
-                "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+                "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
             )
             .bind(saved_account.id)
             .bind(saved_user.id)
@@ -929,7 +929,7 @@ mod tests {
 
         // Insert the follower relationship
         sqlx::query(
-            "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+            "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
         )
         .bind(saved_account.id)
         .bind(saved_user.id)
@@ -1003,7 +1003,7 @@ mod tests {
         let saved_user = whitenoise.load_user(&user_pubkey).await.unwrap();
 
         sqlx::query(
-            "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+            "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
         )
         .bind(saved_account.id)
         .bind(saved_user.id)
@@ -1111,7 +1111,7 @@ mod tests {
             let saved_user = whitenoise.load_user(user_pubkey).await.unwrap();
 
             sqlx::query(
-                "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+                "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
             )
             .bind(saved_account.id)
             .bind(saved_user.id)

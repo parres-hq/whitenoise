@@ -10,7 +10,7 @@ CREATE TABLE accounts_new (
 );
 
 -- New users table
-CREATE TABLE users_new (
+CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pubkey TEXT NOT NULL UNIQUE,
     metadata JSONB,
@@ -18,8 +18,8 @@ CREATE TABLE users_new (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- New account_followers table
-CREATE TABLE account_followers (
+-- New account_follows table
+CREATE TABLE account_follows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE account_followers (
 -- New relays table
 CREATE TABLE relays (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    url TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -55,20 +55,20 @@ BEGIN
     UPDATE accounts_new SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
--- Trigger for users_new table
-CREATE TRIGGER update_users_new_updated_at
-    AFTER UPDATE ON users_new
+-- Trigger for users table
+CREATE TRIGGER update_users_updated_at
+    AFTER UPDATE ON users
     FOR EACH ROW
 BEGIN
-    UPDATE users_new SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
--- Trigger for account_followers table
-CREATE TRIGGER update_account_followers_updated_at
-    AFTER UPDATE ON account_followers
+-- Trigger for account_follows table
+CREATE TRIGGER update_account_follows_updated_at
+    AFTER UPDATE ON account_follows
     FOR EACH ROW
 BEGIN
-    UPDATE account_followers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    UPDATE account_follows SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- Trigger for relays table
