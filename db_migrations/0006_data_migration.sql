@@ -1,3 +1,7 @@
+-- Add unique index to user_relays table to prevent duplicate entries
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_relays_unique
+ON user_relays (user_id, relay_id, relay_type);
+
 -- Step 1: Migrate contacts to users table
 INSERT INTO users (pubkey, metadata)
 SELECT
@@ -42,7 +46,7 @@ WHERE json_valid(contacts.key_package_relays)
 
 -- Step 3: Create user_relays relationships
 -- Insert nip65_relays relationships
-INSERT INTO user_relays (user_id, relay_id, relay_type)
+INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type)
 SELECT DISTINCT
     u.id as user_id,
     r.id as relay_id,
@@ -56,7 +60,7 @@ WHERE json_valid(c.nip65_relays)
   AND json_extract(relay_value.value, '$') != '';
 
 -- Insert inbox_relays relationships
-INSERT INTO user_relays (user_id, relay_id, relay_type)
+INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type)
 SELECT DISTINCT
     u.id as user_id,
     r.id as relay_id,
@@ -70,7 +74,7 @@ WHERE json_valid(c.inbox_relays)
   AND json_extract(relay_value.value, '$') != '';
 
 -- Insert key_package_relays relationships
-INSERT INTO user_relays (user_id, relay_id, relay_type)
+INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type)
 SELECT DISTINCT
     u.id as user_id,
     r.id as relay_id,
@@ -116,7 +120,7 @@ WHERE json_valid(accounts.key_package_relays)
 
 -- Step 5: Create user_relays relationships from accounts table
 -- Insert accounts.nip65_relays relationships
-INSERT INTO user_relays (user_id, relay_id, relay_type)
+INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type)
 SELECT DISTINCT
     u.id as user_id,
     r.id as relay_id,
@@ -130,7 +134,7 @@ WHERE json_valid(a.nip65_relays)
   AND json_extract(relay_value.value, '$') != '';
 
 -- Insert accounts.inbox_relays relationships
-INSERT INTO user_relays (user_id, relay_id, relay_type)
+INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type)
 SELECT DISTINCT
     u.id as user_id,
     r.id as relay_id,
@@ -144,7 +148,7 @@ WHERE json_valid(a.inbox_relays)
   AND json_extract(relay_value.value, '$') != '';
 
 -- Insert accounts.key_package_relays relationships
-INSERT INTO user_relays (user_id, relay_id, relay_type)
+INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type)
 SELECT DISTINCT
     u.id as user_id,
     r.id as relay_id,
