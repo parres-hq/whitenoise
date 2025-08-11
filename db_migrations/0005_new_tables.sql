@@ -1,7 +1,7 @@
 -- New accounts table
 CREATE TABLE accounts_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    pubkey TEXT NOT NULL, -- Hex encoded nostr public key
+    pubkey TEXT NOT NULL UNIQUE, -- Hex encoded nostr public key
     user_id INTEGER NOT NULL, -- Foreign key to the users table
     settings JSONB NOT NULL,
     last_synced_at DATETIME,
@@ -12,7 +12,7 @@ CREATE TABLE accounts_new (
 -- New users table
 CREATE TABLE users_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    pubkey TEXT NOT NULL,
+    pubkey TEXT NOT NULL UNIQUE,
     metadata JSONB,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
