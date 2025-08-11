@@ -1,5 +1,7 @@
 use super::DatabaseError;
 use crate::whitenoise::accounts::{Account, AccountNew, AccountSettings};
+use crate::whitenoise::database::users::UserRow;
+use crate::whitenoise::users::User;
 use crate::{Whitenoise, WhitenoiseError};
 use chrono::{DateTime, Utc};
 use nostr_sdk::PublicKey;
@@ -96,7 +98,8 @@ where
 }
 
 impl Whitenoise {
-    pub async fn load_account_new(
+    #[allow(dead_code)]
+    pub(crate) async fn load_account_new(
         &self,
         pubkey: &PublicKey,
     ) -> Result<AccountNew, WhitenoiseError> {
@@ -119,7 +122,38 @@ impl Whitenoise {
         })
     }
 
-    pub async fn save_account_new(&self, account: &AccountNew) -> Result<(), DatabaseError> {
+    #[allow(dead_code)]
+    pub(crate) async fn load_follows(
+        &self,
+        account: &AccountNew,
+    ) -> Result<Vec<User>, WhitenoiseError> {
+        let user_rows = sqlx::query_as::<_, UserRow>(
+            "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at
+             FROM account_followers af
+             JOIN users_new u ON af.user_id = u.id
+             WHERE af.account_id = ?",
+        )
+        .bind(account.id)
+        .fetch_all(&self.database.pool)
+        .await
+        .map_err(|_| WhitenoiseError::AccountNotFound)?;
+
+        let users = user_rows
+            .into_iter()
+            .map(|row| User {
+                id: row.id,
+                pubkey: row.pubkey,
+                metadata: row.metadata,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            })
+            .collect();
+
+        Ok(users)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn save_account_new(&self, account: &AccountNew) -> Result<(), DatabaseError> {
         sqlx::query("INSERT INTO accounts_new (pubkey, user_id, settings, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(account.pubkey.to_hex().as_str())
             .bind(account.user_id)
@@ -614,6 +648,14 @@ mod tests {
 
         let loaded = loaded_account.unwrap();
         assert!(loaded.last_synced_at.is_none());
+        assert_eq!(
+            loaded.created_at.timestamp_millis(),
+            test_created_at.timestamp_millis()
+        );
+        assert_eq!(
+            loaded.updated_at.timestamp_millis(),
+            test_updated_at.timestamp_millis()
+        );
         assert_eq!(loaded.settings, test_settings);
     }
 
@@ -692,5 +734,405 @@ mod tests {
             account.updated_at.timestamp_millis(),
             original_account.updated_at.timestamp_millis()
         );
+    }
+
+    // Tests for load_follows method
+    #[tokio::test]
+    async fn test_load_follows_multiple_followers() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+        use crate::whitenoise::users::User;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test account
+        let account_pubkey = nostr_sdk::Keys::generate().public_key();
+        let account_user_id = 1i64;
+        let account_settings = AccountSettings::default();
+        let test_timestamp = chrono::Utc::now();
+
+        let account = AccountNew {
+            id: 1,
+            pubkey: account_pubkey,
+            user_id: account_user_id,
+            settings: account_settings,
+            last_synced_at: None,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
+                .unwrap(),
+        };
+
+        // Save the account first
+        whitenoise.save_account_new(&account).await.unwrap();
+
+        // Create test users that will be followers
+        let mut test_users = Vec::new();
+        let user_metadata_vec = vec![
+            nostr_sdk::Metadata::new()
+                .name("Alice")
+                .display_name("Alice Wonderland")
+                .about("The first user"),
+            nostr_sdk::Metadata::new()
+                .name("Bob")
+                .display_name("Bob Builder")
+                .about("The second user"),
+            nostr_sdk::Metadata::new()
+                .name("Charlie")
+                .display_name("Charlie Chaplin")
+                .about("The third user"),
+        ];
+
+        for metadata in user_metadata_vec.iter() {
+            let user_pubkey = nostr_sdk::Keys::generate().public_key();
+            let user = User {
+                id: 0, // Will be set by database
+                pubkey: user_pubkey,
+                metadata: metadata.clone(),
+                created_at: test_timestamp,
+                updated_at: test_timestamp,
+            };
+
+            // Save user first
+            whitenoise.save_user(&user).await.unwrap();
+            test_users.push((user_pubkey, metadata.clone()));
+        }
+
+        // Now manually insert the account_followers relationships
+        // First we need to get the actual account ID and user IDs from the database
+        let saved_account = whitenoise.load_account_new(&account_pubkey).await.unwrap();
+
+        for (user_pubkey, _) in &test_users {
+            let saved_user = whitenoise.load_user(user_pubkey).await.unwrap();
+
+            // Insert into account_followers table
+            sqlx::query(
+                "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+            )
+            .bind(saved_account.id)
+            .bind(saved_user.id)
+            .bind(test_timestamp.timestamp_millis())
+            .bind(test_timestamp.timestamp_millis())
+            .execute(&whitenoise.database.pool)
+            .await
+            .unwrap();
+        }
+
+        // Test load_follows
+        let followers = whitenoise.load_follows(&saved_account).await.unwrap();
+
+        // Verify we got all followers
+        assert_eq!(followers.len(), 3);
+
+        // Verify the followers match our test users
+        for (expected_pubkey, expected_metadata) in &test_users {
+            let follower = followers.iter().find(|f| &f.pubkey == expected_pubkey);
+            assert!(
+                follower.is_some(),
+                "Expected follower with pubkey {} not found",
+                expected_pubkey
+            );
+
+            let follower = follower.unwrap();
+            assert_eq!(follower.metadata.name, expected_metadata.name);
+            assert_eq!(
+                follower.metadata.display_name,
+                expected_metadata.display_name
+            );
+            assert_eq!(follower.metadata.about, expected_metadata.about);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_follows_no_followers() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test account
+        let account_pubkey = nostr_sdk::Keys::generate().public_key();
+        let account_user_id = 1i64;
+        let account_settings = AccountSettings::default();
+        let test_timestamp = chrono::Utc::now();
+
+        let account = AccountNew {
+            id: 1,
+            pubkey: account_pubkey,
+            user_id: account_user_id,
+            settings: account_settings,
+            last_synced_at: None,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
+                .unwrap(),
+        };
+
+        // Save the account
+        whitenoise.save_account_new(&account).await.unwrap();
+        let saved_account = whitenoise.load_account_new(&account_pubkey).await.unwrap();
+
+        // Test load_follows with no followers
+        let followers = whitenoise.load_follows(&saved_account).await.unwrap();
+
+        // Verify empty result
+        assert_eq!(followers.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_load_follows_single_follower() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+        use crate::whitenoise::users::User;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test account
+        let account_pubkey = nostr_sdk::Keys::generate().public_key();
+        let account_user_id = 1i64;
+        let account_settings = AccountSettings::default();
+        let test_timestamp = chrono::Utc::now();
+
+        let account = AccountNew {
+            id: 1,
+            pubkey: account_pubkey,
+            user_id: account_user_id,
+            settings: account_settings,
+            last_synced_at: None,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
+                .unwrap(),
+        };
+
+        // Save the account
+        whitenoise.save_account_new(&account).await.unwrap();
+
+        // Create a single test user
+        let user_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user_metadata = nostr_sdk::Metadata::new()
+            .name("SingleUser")
+            .display_name("Single User")
+            .about("The only follower");
+
+        let user = User {
+            id: 0,
+            pubkey: user_pubkey,
+            metadata: user_metadata.clone(),
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+
+        // Save user
+        whitenoise.save_user(&user).await.unwrap();
+
+        // Get the saved account and user with their database IDs
+        let saved_account = whitenoise.load_account_new(&account_pubkey).await.unwrap();
+        let saved_user = whitenoise.load_user(&user_pubkey).await.unwrap();
+
+        // Insert the follower relationship
+        sqlx::query(
+            "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+        )
+        .bind(saved_account.id)
+        .bind(saved_user.id)
+        .bind(test_timestamp.timestamp_millis())
+        .bind(test_timestamp.timestamp_millis())
+        .execute(&whitenoise.database.pool)
+        .await
+        .unwrap();
+
+        // Test load_follows
+        let followers = whitenoise.load_follows(&saved_account).await.unwrap();
+
+        // Verify single follower
+        assert_eq!(followers.len(), 1);
+        let follower = &followers[0];
+        assert_eq!(follower.pubkey, user_pubkey);
+        assert_eq!(follower.metadata.name, user_metadata.name);
+        assert_eq!(follower.metadata.display_name, user_metadata.display_name);
+        assert_eq!(follower.metadata.about, user_metadata.about);
+    }
+
+    #[tokio::test]
+    async fn test_load_follows_with_complex_user_metadata() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+        use crate::whitenoise::users::User;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test account
+        let account_pubkey = nostr_sdk::Keys::generate().public_key();
+        let account_user_id = 1i64;
+        let test_timestamp = chrono::Utc::now();
+
+        let account = AccountNew {
+            id: 1,
+            pubkey: account_pubkey,
+            user_id: account_user_id,
+            settings: AccountSettings::default(),
+            last_synced_at: None,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
+                .unwrap(),
+        };
+
+        whitenoise.save_account_new(&account).await.unwrap();
+
+        // Create a user with complex metadata
+        let user_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user_metadata = nostr_sdk::Metadata::new()
+            .name("ComplexUser")
+            .display_name("Complex User Display")
+            .about("A user with comprehensive metadata including special characters: 🚀 and emojis")
+            .picture(nostr::types::url::Url::parse("https://example.com/avatar.jpg").unwrap())
+            .banner(nostr::types::url::Url::parse("https://example.com/banner.jpg").unwrap())
+            .nip05("complex@example.com")
+            .lud06("lnurl1dp68gurn8ghj7urp0v4kxvern9eehqurfdcsk6arpdd5kuemmduhxcmmrdaehgu3wd3skuep0dejhctnwda3kxvd09eszuekd0v8rqnrpwcxk7trj0ae8gmmwv9unx2txvg6xqmwpwejkcmmfd9c");
+
+        let user = User {
+            id: 0,
+            pubkey: user_pubkey,
+            metadata: user_metadata.clone(),
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+
+        whitenoise.save_user(&user).await.unwrap();
+
+        // Create the follower relationship
+        let saved_account = whitenoise.load_account_new(&account_pubkey).await.unwrap();
+        let saved_user = whitenoise.load_user(&user_pubkey).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+        )
+        .bind(saved_account.id)
+        .bind(saved_user.id)
+        .bind(test_timestamp.timestamp_millis())
+        .bind(test_timestamp.timestamp_millis())
+        .execute(&whitenoise.database.pool)
+        .await
+        .unwrap();
+
+        // Test load_follows
+        let followers = whitenoise.load_follows(&saved_account).await.unwrap();
+
+        // Verify complex metadata is preserved
+        assert_eq!(followers.len(), 1);
+        let follower = &followers[0];
+        assert_eq!(follower.pubkey, user_pubkey);
+        assert_eq!(follower.metadata.name, user_metadata.name);
+        assert_eq!(follower.metadata.display_name, user_metadata.display_name);
+        assert_eq!(follower.metadata.about, user_metadata.about);
+        assert_eq!(follower.metadata.picture, user_metadata.picture);
+        assert_eq!(follower.metadata.banner, user_metadata.banner);
+        assert_eq!(follower.metadata.nip05, user_metadata.nip05);
+        assert_eq!(follower.metadata.lud06, user_metadata.lud06);
+    }
+
+    #[tokio::test]
+    async fn test_load_follows_account_with_invalid_id() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create an account with an invalid ID that doesn't exist in the database
+        let fake_account = AccountNew {
+            id: 99999, // Non-existent ID
+            pubkey: nostr_sdk::Keys::generate().public_key(),
+            user_id: 1,
+            settings: AccountSettings::default(),
+            last_synced_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            nostr_mls: Account::create_nostr_mls(
+                nostr_sdk::Keys::generate().public_key(),
+                &whitenoise.config.data_dir,
+            )
+            .unwrap(),
+        };
+
+        // Test load_follows with non-existent account
+        let result = whitenoise.load_follows(&fake_account).await;
+
+        // Should return empty list rather than error since no followers exist
+        assert!(result.is_ok());
+        let followers = result.unwrap();
+        assert_eq!(followers.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_load_follows_ordering_consistency() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+        use crate::whitenoise::users::User;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test account
+        let account_pubkey = nostr_sdk::Keys::generate().public_key();
+        let test_timestamp = chrono::Utc::now();
+
+        let account = AccountNew {
+            id: 1,
+            pubkey: account_pubkey,
+            user_id: 1,
+            settings: AccountSettings::default(),
+            last_synced_at: None,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
+                .unwrap(),
+        };
+
+        whitenoise.save_account_new(&account).await.unwrap();
+
+        // Create multiple users with predictable names
+        let user_names = vec!["Alpha", "Beta", "Charlie", "Delta", "Echo"];
+        let mut test_users = Vec::new();
+
+        for name in user_names {
+            let user_pubkey = nostr_sdk::Keys::generate().public_key();
+            let user_metadata = nostr_sdk::Metadata::new().name(name);
+
+            let user = User {
+                id: 0,
+                pubkey: user_pubkey,
+                metadata: user_metadata,
+                created_at: test_timestamp,
+                updated_at: test_timestamp,
+            };
+
+            whitenoise.save_user(&user).await.unwrap();
+            test_users.push(user_pubkey);
+        }
+
+        // Create follower relationships
+        let saved_account = whitenoise.load_account_new(&account_pubkey).await.unwrap();
+        for user_pubkey in &test_users {
+            let saved_user = whitenoise.load_user(user_pubkey).await.unwrap();
+
+            sqlx::query(
+                "INSERT INTO account_followers (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+            )
+            .bind(saved_account.id)
+            .bind(saved_user.id)
+            .bind(test_timestamp.timestamp_millis())
+            .bind(test_timestamp.timestamp_millis())
+            .execute(&whitenoise.database.pool)
+            .await
+            .unwrap();
+        }
+
+        // Test load_follows multiple times to ensure consistent ordering
+        let followers1 = whitenoise.load_follows(&saved_account).await.unwrap();
+        let followers2 = whitenoise.load_follows(&saved_account).await.unwrap();
+
+        assert_eq!(followers1.len(), 5);
+        assert_eq!(followers2.len(), 5);
+
+        // Results should be consistent between calls
+        for (i, follower) in followers1.iter().enumerate() {
+            assert_eq!(follower.pubkey, followers2[i].pubkey);
+            assert_eq!(follower.metadata.name, followers2[i].metadata.name);
+        }
     }
 }

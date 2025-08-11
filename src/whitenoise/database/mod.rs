@@ -11,8 +11,9 @@ use std::{
 use thiserror::Error;
 
 pub mod accounts_new;
-pub mod relays_new;
-pub mod users_new;
+pub mod relays;
+pub mod user_relays;
+pub mod users;
 
 pub static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| sqlx::migrate!("./db_migrations"));
 

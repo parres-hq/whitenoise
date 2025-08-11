@@ -1,9 +1,18 @@
 use crate::whitenoise::error::Result;
 use crate::whitenoise::Whitenoise;
 use crate::{whitenoise::accounts::Account, WhitenoiseError};
+use chrono::{DateTime, Utc};
 use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct Relay {
+    pub id: i64,
+    pub url: RelayUrl,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RelayType {
@@ -972,6 +981,9 @@ mod tests {
             .await
             .unwrap();
 
+        // Wait for events to be published
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
         // Query for the published event
         let filter = Filter::new()
             .author(account.pubkey)
@@ -1052,6 +1064,9 @@ mod tests {
                 )
                 .await
                 .unwrap();
+
+            // Wait for events to be published
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             // Query for the published event
             let filter = Filter::new()

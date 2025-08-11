@@ -17,8 +17,8 @@ int-test:
 
 # Run all tests (unit tests, integration tests, and doc tests)
 test:
-    RUST_LOG=error cargo test --all-features --all-targets
-    RUST_LOG=error cargo test --all-features --doc
+    cargo test --all-features --all-targets
+    cargo test --all-features --doc
 
 # Check clippy
 check-clippy:

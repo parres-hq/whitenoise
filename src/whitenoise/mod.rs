@@ -13,7 +13,9 @@ pub mod database;
 pub mod error;
 mod event_processor;
 pub mod message_aggregator;
+pub mod relays;
 pub mod secrets_store;
+pub mod users;
 pub mod utils;
 
 use crate::init_tracing;
