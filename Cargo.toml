@@ -28,12 +28,12 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-nostr = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507", features = [ "std" ] }
-nostr-mls = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
-nostr-mls-sqlite-storage = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
-nwc = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
-nostr-blossom = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507" }
-nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev = "8b6a68a92b9e56728d6135169feb1bbec678e507", features = [
+nostr = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "d70bed548d2e1399b758ad8bb7da9f058a716064", features = [ "std" ] }
+nostr-mls = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "d70bed548d2e1399b758ad8bb7da9f058a716064" }
+nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "d70bed548d2e1399b758ad8bb7da9f058a716064" }
+nwc = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "d70bed548d2e1399b758ad8bb7da9f058a716064" }
+nostr-blossom = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "d70bed548d2e1399b758ad8bb7da9f058a716064" }
+nostr-sdk = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "d70bed548d2e1399b758ad8bb7da9f058a716064", features = [
     "lmdb",
     "nip04",
     "nip44",
@@ -42,17 +42,17 @@ nostr-sdk = { version = "0.42", git="https://github.com/rust-nostr/nostr", rev =
 ] }
 
 # LOCAL RUST_NOSTR FOR DEVELOPMENT
-# nostr = { version = "0.42", path="../rust-nostr/crates/nostr", features = [ "std" ] }
-# nostr-mls = { version = "0.42", path="../rust-nostr/mls/nostr-mls" }
-# nostr-mls-sqlite-storage = { version = "0.42", path="../rust-nostr/mls/nostr-mls-sqlite-storage" }
-# nostr-sdk = { version = "0.42", path="../rust-nostr/crates/nostr-sdk", features = [
+# nostr = { version = "0.43", path="../rust-nostr/crates/nostr", features = [ "std" ] }
+# nostr-mls = { version = "0.43", path="../rust-nostr/mls/nostr-mls" }
+# nostr-mls-sqlite-storage = { version = "0.43", path="../rust-nostr/mls/nostr-mls-sqlite-storage" }
+# nostr-sdk = { version = "0.43", path="../rust-nostr/crates/nostr-sdk", features = [
 #     "lmdb",
 #     "nip04",
 #     "nip44",
 #     "nip47",
 #     "nip59",
 # ] }
-# nwc = { version = "0.42", path="../rust-nostr/crates/nwc" }
+# nwc = { version = "0.43", path="../rust-nostr/crates/nwc" }
 
 petname = "2.0.2"
 rand = "0.9"
