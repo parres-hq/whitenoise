@@ -981,6 +981,9 @@ mod tests {
             .await
             .unwrap();
 
+        // Wait for events to be published
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
         // Query for the published event
         let filter = Filter::new()
             .author(account.pubkey)
@@ -1061,6 +1064,9 @@ mod tests {
                 )
                 .await
                 .unwrap();
+
+            // Wait for events to be published
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             // Query for the published event
             let filter = Filter::new()
