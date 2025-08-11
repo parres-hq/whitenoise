@@ -2,6 +2,10 @@
 # Development
 ######################
 
+# Default recipe - show available commands
+default:
+    @just --list
+
 # Clear local data dirs (ensure you're not running docker compose before running)
 clear-dev-data:
     rm -rf ./dev/data/*
