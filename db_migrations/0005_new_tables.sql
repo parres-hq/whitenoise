@@ -22,7 +22,7 @@ CREATE TABLE users_new (
 CREATE TABLE account_followers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
-    followed_id INTEGER NOT NULL, -- This is the user_id of the followed user
+    user_id INTEGER NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -44,3 +44,46 @@ CREATE TABLE user_relays (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Triggers to automatically update updated_at field on row updates
+
+-- Trigger for accounts_new table
+CREATE TRIGGER update_accounts_new_updated_at
+    AFTER UPDATE ON accounts_new
+    FOR EACH ROW
+BEGIN
+    UPDATE accounts_new SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Trigger for users_new table
+CREATE TRIGGER update_users_new_updated_at
+    AFTER UPDATE ON users_new
+    FOR EACH ROW
+BEGIN
+    UPDATE users_new SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Trigger for account_followers table
+CREATE TRIGGER update_account_followers_updated_at
+    AFTER UPDATE ON account_followers
+    FOR EACH ROW
+BEGIN
+    UPDATE account_followers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Trigger for relays table
+CREATE TRIGGER update_relays_updated_at
+    AFTER UPDATE ON relays
+    FOR EACH ROW
+BEGIN
+    UPDATE relays SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Trigger for user_relays table
+CREATE TRIGGER update_user_relays_updated_at
+    AFTER UPDATE ON user_relays
+    FOR EACH ROW
+BEGIN
+    UPDATE user_relays SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
