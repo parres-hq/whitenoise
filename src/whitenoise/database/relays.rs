@@ -1,21 +1,23 @@
 use super::DatabaseError;
+use crate::whitenoise::relays::Relay;
+use crate::{Whitenoise, WhitenoiseError};
 use chrono::{DateTime, Utc};
 use nostr_sdk::RelayUrl;
 
 #[allow(dead_code)]
 #[derive(Debug)]
-struct RelayNewRow {
+pub(crate) struct RelayRow {
     // id is the primary key
-    id: i64,
+    pub id: i64,
     // url is the URL of the relay
-    url: RelayUrl,
+    pub url: RelayUrl,
     // created_at is the timestamp of the relay creation
-    created_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
     // updated_at is the timestamp of the last update
-    updated_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
-impl<'r, R> sqlx::FromRow<'r, R> for RelayNewRow
+impl<'r, R> sqlx::FromRow<'r, R> for RelayRow
 where
     R: sqlx::Row,
     &'r str: sqlx::ColumnIndex<R>,
@@ -53,12 +55,42 @@ where
                 source: Box::new(e),
             })?;
 
-        Ok(RelayNewRow {
+        Ok(RelayRow {
             id,
             url,
             created_at,
             updated_at,
         })
+    }
+}
+
+impl Whitenoise {
+    #[allow(dead_code)]
+    pub(crate) async fn load_relay(&self, url: &RelayUrl) -> Result<Relay, WhitenoiseError> {
+        let relay_row = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
+            .bind(url.to_string().as_str())
+            .fetch_one(&self.database.pool)
+            .await
+            .map_err(|_| WhitenoiseError::RelayNotFound)?;
+
+        Ok(Relay {
+            id: relay_row.id,
+            url: relay_row.url,
+            created_at: relay_row.created_at,
+            updated_at: relay_row.updated_at,
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn save_relay(&self, relay: &Relay) -> Result<(), DatabaseError> {
+        sqlx::query("INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
+            .bind(relay.url.to_string().as_str())
+            .bind(relay.created_at.timestamp_millis())
+            .bind(relay.updated_at.timestamp_millis())
+            .execute(&self.database.pool)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+        Ok(())
     }
 }
 
@@ -109,7 +141,7 @@ mod tests {
             .await
             .unwrap();
 
-        let relay_row = RelayNewRow::from_row(&row).unwrap();
+        let relay_row = RelayRow::from_row(&row).unwrap();
 
         assert_eq!(relay_row.url, test_url);
         assert_eq!(relay_row.created_at.timestamp_millis(), test_timestamp);
@@ -147,7 +179,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let relay_row = RelayNewRow::from_row(&row).unwrap();
+            let relay_row = RelayRow::from_row(&row).unwrap();
             let expected_url = RelayUrl::parse(url_str).unwrap();
             assert_eq!(relay_row.url, expected_url);
 
@@ -192,7 +224,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let result = RelayNewRow::from_row(&row);
+            let result = RelayRow::from_row(&row);
             assert!(
                 result.is_err(),
                 "Expected error for invalid URL: {}",
@@ -234,7 +266,7 @@ mod tests {
             .await
             .unwrap();
 
-        let relay_row = RelayNewRow::from_row(&row).unwrap();
+        let relay_row = RelayRow::from_row(&row).unwrap();
         assert_eq!(relay_row.created_at.timestamp_millis(), 0);
         assert_eq!(relay_row.updated_at.timestamp_millis(), 0);
 
@@ -261,7 +293,7 @@ mod tests {
             .await
             .unwrap();
 
-        let relay_row = RelayNewRow::from_row(&row).unwrap();
+        let relay_row = RelayRow::from_row(&row).unwrap();
         assert_eq!(relay_row.created_at.timestamp_millis(), future_timestamp);
         assert_eq!(relay_row.updated_at.timestamp_millis(), future_timestamp);
     }
@@ -287,7 +319,7 @@ mod tests {
             .await
             .unwrap();
 
-        let relay_row = RelayNewRow::from_row(&row).unwrap();
+        let relay_row = RelayRow::from_row(&row).unwrap();
         let expected_url = RelayUrl::parse(test_url_str).unwrap();
         assert_eq!(relay_row.url, expected_url);
     }
@@ -313,7 +345,7 @@ mod tests {
             .await
             .unwrap();
 
-        let relay_row = RelayNewRow::from_row(&row).unwrap();
+        let relay_row = RelayRow::from_row(&row).unwrap();
         let expected_url = RelayUrl::parse(test_url_str).unwrap();
         assert_eq!(relay_row.url, expected_url);
     }
@@ -341,7 +373,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = RelayNewRow::from_row(&row);
+        let result = RelayRow::from_row(&row);
         assert!(result.is_err());
 
         if let Err(sqlx::Error::ColumnDecode { index, .. }) = result {
@@ -371,7 +403,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = RelayNewRow::from_row(&row);
+        let result = RelayRow::from_row(&row);
         assert!(result.is_err());
 
         if let Err(sqlx::Error::ColumnDecode { index, .. }) = result {

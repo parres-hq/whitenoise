@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use dashmap::DashSet;
-use nostr::key::PublicKey;
 
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
