@@ -83,7 +83,81 @@ WHERE json_valid(c.key_package_relays)
   AND json_extract(relay_value.value, '$') IS NOT NULL
   AND json_extract(relay_value.value, '$') != '';
 
--- Step 4: Migrate accounts to accounts_new table
+-- Step 4: Extract and insert unique relay URLs from accounts table
+-- Extract from accounts.nip65_relays
+INSERT OR IGNORE INTO relays (url)
+SELECT DISTINCT
+    json_extract(relay_value.value, '$') as url
+FROM accounts,
+     json_each(accounts.nip65_relays) as relay_value
+WHERE json_valid(accounts.nip65_relays)
+  AND json_extract(relay_value.value, '$') IS NOT NULL
+  AND json_extract(relay_value.value, '$') != '';
+
+-- Extract from accounts.inbox_relays
+INSERT OR IGNORE INTO relays (url)
+SELECT DISTINCT
+    json_extract(relay_value.value, '$') as url
+FROM accounts,
+     json_each(accounts.inbox_relays) as relay_value
+WHERE json_valid(accounts.inbox_relays)
+  AND json_extract(relay_value.value, '$') IS NOT NULL
+  AND json_extract(relay_value.value, '$') != '';
+
+-- Extract from accounts.key_package_relays
+INSERT OR IGNORE INTO relays (url)
+SELECT DISTINCT
+    json_extract(relay_value.value, '$') as url
+FROM accounts,
+     json_each(accounts.key_package_relays) as relay_value
+WHERE json_valid(accounts.key_package_relays)
+  AND json_extract(relay_value.value, '$') IS NOT NULL
+  AND json_extract(relay_value.value, '$') != '';
+
+-- Step 5: Create user_relays relationships from accounts table
+-- Insert accounts.nip65_relays relationships
+INSERT INTO user_relays (user_id, relay_id, relay_type)
+SELECT DISTINCT
+    u.id as user_id,
+    r.id as relay_id,
+    'nip65' as relay_type
+FROM accounts a
+JOIN users u ON u.pubkey = a.pubkey
+JOIN relays r ON r.url = json_extract(relay_value.value, '$'),
+     json_each(a.nip65_relays) as relay_value
+WHERE json_valid(a.nip65_relays)
+  AND json_extract(relay_value.value, '$') IS NOT NULL
+  AND json_extract(relay_value.value, '$') != '';
+
+-- Insert accounts.inbox_relays relationships
+INSERT INTO user_relays (user_id, relay_id, relay_type)
+SELECT DISTINCT
+    u.id as user_id,
+    r.id as relay_id,
+    'inbox' as relay_type
+FROM accounts a
+JOIN users u ON u.pubkey = a.pubkey
+JOIN relays r ON r.url = json_extract(relay_value.value, '$'),
+     json_each(a.inbox_relays) as relay_value
+WHERE json_valid(a.inbox_relays)
+  AND json_extract(relay_value.value, '$') IS NOT NULL
+  AND json_extract(relay_value.value, '$') != '';
+
+-- Insert accounts.key_package_relays relationships
+INSERT INTO user_relays (user_id, relay_id, relay_type)
+SELECT DISTINCT
+    u.id as user_id,
+    r.id as relay_id,
+    'key_package' as relay_type
+FROM accounts a
+JOIN users u ON u.pubkey = a.pubkey
+JOIN relays r ON r.url = json_extract(relay_value.value, '$'),
+     json_each(a.key_package_relays) as relay_value
+WHERE json_valid(a.key_package_relays)
+  AND json_extract(relay_value.value, '$') IS NOT NULL
+  AND json_extract(relay_value.value, '$') != '';
+
+-- Step 6: Migrate accounts to accounts_new table
 INSERT INTO accounts_new (pubkey, user_id, settings, last_synced_at)
 SELECT
     a.pubkey,
