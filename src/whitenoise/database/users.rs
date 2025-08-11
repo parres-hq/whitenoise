@@ -79,7 +79,7 @@ where
 impl Whitenoise {
     #[allow(dead_code)]
     pub(crate) async fn load_user(&self, pubkey: &PublicKey) -> Result<User, WhitenoiseError> {
-        let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users_new WHERE pubkey = ?")
+        let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
             .fetch_one(&self.database.pool)
             .await
@@ -131,7 +131,7 @@ impl Whitenoise {
     #[allow(dead_code)]
     pub(crate) async fn save_user(&self, user: &User) -> Result<(), DatabaseError> {
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(user.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&user.metadata).unwrap())
@@ -156,7 +156,7 @@ mod tests {
 
         // Create the users table with the new schema
         sqlx::query(
-            "CREATE TABLE users_new (
+            "CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pubkey TEXT NOT NULL,
                 metadata JSONB,
@@ -186,7 +186,7 @@ mod tests {
 
         // Insert test data
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(test_metadata_json)
@@ -197,7 +197,7 @@ mod tests {
         .unwrap();
 
         // Test from_row implementation
-        let row: SqliteRow = sqlx::query("SELECT * FROM users_new WHERE pubkey = ?")
+        let row: SqliteRow = sqlx::query("SELECT * FROM users WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .fetch_one(&pool)
             .await
@@ -223,7 +223,7 @@ mod tests {
         let test_timestamp = chrono::Utc::now().timestamp_millis();
 
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(test_metadata_json)
@@ -233,7 +233,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row: SqliteRow = sqlx::query("SELECT * FROM users_new WHERE pubkey = ?")
+        let row: SqliteRow = sqlx::query("SELECT * FROM users WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .fetch_one(&pool)
             .await
@@ -254,7 +254,7 @@ mod tests {
         let test_timestamp = chrono::Utc::now().timestamp_millis();
 
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(invalid_pubkey)
         .bind(test_metadata_json)
@@ -264,7 +264,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row: SqliteRow = sqlx::query("SELECT * FROM users_new WHERE pubkey = ?")
+        let row: SqliteRow = sqlx::query("SELECT * FROM users WHERE pubkey = ?")
             .bind(invalid_pubkey)
             .fetch_one(&pool)
             .await
@@ -289,7 +289,7 @@ mod tests {
         let test_timestamp = chrono::Utc::now().timestamp_millis();
 
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(invalid_json)
@@ -299,7 +299,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row: SqliteRow = sqlx::query("SELECT * FROM users_new WHERE pubkey = ?")
+        let row: SqliteRow = sqlx::query("SELECT * FROM users WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .fetch_one(&pool)
             .await
@@ -325,7 +325,7 @@ mod tests {
 
         // Test with timestamp 0 (Unix epoch)
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(&test_metadata_json)
@@ -335,7 +335,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row: SqliteRow = sqlx::query("SELECT * FROM users_new WHERE pubkey = ?")
+        let row: SqliteRow = sqlx::query("SELECT * FROM users WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .fetch_one(&pool)
             .await
@@ -358,7 +358,7 @@ mod tests {
         let invalid_timestamp = i64::MAX; // This will be too large for DateTime conversion
 
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(&test_metadata_json)
@@ -368,7 +368,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row: SqliteRow = sqlx::query("SELECT * FROM users_new WHERE pubkey = ?")
+        let row: SqliteRow = sqlx::query("SELECT * FROM users WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .fetch_one(&pool)
             .await
@@ -384,14 +384,14 @@ mod tests {
         }
 
         // Clean up and test invalid updated_at timestamp
-        sqlx::query("DELETE FROM users_new WHERE pubkey = ?")
+        sqlx::query("DELETE FROM users WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .execute(&pool)
             .await
             .unwrap();
 
         sqlx::query(
-            "INSERT INTO users_new (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(test_pubkey.to_hex())
         .bind(&test_metadata_json)
@@ -401,7 +401,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row: SqliteRow = sqlx::query("SELECT * FROM users_new WHERE pubkey = ?")
+        let row: SqliteRow = sqlx::query("SELECT * FROM users WHERE pubkey = ?")
             .bind(test_pubkey.to_hex())
             .fetch_one(&pool)
             .await
