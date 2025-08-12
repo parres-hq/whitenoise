@@ -6,6 +6,7 @@ use crate::types::ProcessableEvent;
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
+mod event_handlers;
 
 impl Whitenoise {
     // ============================================================================
@@ -36,7 +37,7 @@ impl Whitenoise {
     /// Extract the account pubkey from a subscription_id
     /// Subscription IDs follow the format: {hashed_pubkey}_{subscription_type}
     /// where hashed_pubkey = SHA256(session salt || accouny_pubkey)[..12]
-    pub(crate) async fn extract_pubkey_from_subscription_id(
+    async fn extract_pubkey_from_subscription_id(
         &self,
         subscription_id: &str,
     ) -> Option<PublicKey> {
@@ -182,119 +183,10 @@ impl Whitenoise {
             event
         );
 
-        // Extract the target pubkey from the event's 'p' tag
-        let target_pubkey = event
-            .tags
-            .iter()
-            .find(|tag| tag.kind() == TagKind::p())
-            .and_then(|tag| tag.content())
-            .and_then(|pubkey_str| PublicKey::parse(pubkey_str).ok())
-            .ok_or_else(|| {
-                WhitenoiseError::InvalidEvent(
-                    "No valid target pubkey found in 'p' tag for giftwrap event".to_string(),
-                )
-            })?;
+        let target_account = self.account_from_subscription_id(subscription_id).await?;
+        validate_giftwrap_target(&target_account, &event)?;
 
-        tracing::debug!(
-            target: "whitenoise::event_processor::process_giftwrap",
-            "Processing giftwrap for target account: {} (author: {})",
-            target_pubkey.to_hex(),
-            event.pubkey.to_hex()
-        );
-
-        // Validate that this matches the subscription_id if available
-        if let Some(sub_id) = subscription_id {
-            if let Some(sub_pubkey) = self.extract_pubkey_from_subscription_id(&sub_id).await {
-                if target_pubkey != sub_pubkey {
-                    return Err(WhitenoiseError::InvalidEvent(format!(
-                        "Giftwrap target pubkey {} does not match subscription pubkey {} - possible routing error",
-                        target_pubkey.to_hex(),
-                        sub_pubkey.to_hex()
-                    )));
-                }
-            }
-        }
-
-        let target_account = self.read_account_by_pubkey(&target_pubkey).await?;
-
-        tracing::info!(
-            target: "whitenoise::event_processor::process_giftwrap",
-            "Giftwrap received for account: {} - processing not yet implemented",
-            target_pubkey.to_hex()
-        );
-
-        let keys = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&target_pubkey)?;
-
-        let unwrapped = extract_rumor(&keys, &event).await.map_err(|e| {
-            WhitenoiseError::Configuration(format!("Failed to decrypt giftwrap: {}", e))
-        })?;
-
-        match unwrapped.rumor.kind {
-            Kind::MlsWelcome => {
-                self.process_welcome(&target_account, event, unwrapped.rumor)
-                    .await?;
-            }
-            Kind::PrivateDirectMessage => {
-                tracing::debug!(
-                    target: "whitenoise::event_processor::process_giftwrap",
-                    "Received private direct message: {:?}",
-                    unwrapped.rumor
-                );
-            }
-            _ => {
-                tracing::debug!(
-                    target: "whitenoise::event_processor::process_giftwrap",
-                    "Received unhandled giftwrap of kind {:?}",
-                    unwrapped.rumor.kind
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn process_welcome(
-        &self,
-        account: &Account,
-        event: Event,
-        rumor: UnsignedEvent,
-    ) -> Result<()> {
-        // Process the welcome message - lock scope is minimal
-        {
-            let nostr_mls = &*account.nostr_mls.lock().unwrap();
-            nostr_mls
-                .process_welcome(&event.id, &rumor)
-                .map_err(WhitenoiseError::NostrMlsError)?;
-            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Processed welcome event");
-        } // nostr_mls lock released here
-
-        let key_package_event_id: Option<EventId> = rumor
-            .tags
-            .iter()
-            .find(|tag| {
-                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E))
-            })
-            .and_then(|tag| tag.content())
-            .and_then(|content| EventId::parse(content).ok());
-
-        if let Some(key_package_event_id) = key_package_event_id {
-            self.delete_key_package_from_relays_for_account(
-                account,
-                &key_package_event_id,
-                false, // For now we don't want to delete the key packages from MLS storage
-            )
-            .await?;
-            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Deleted used key package from relays");
-
-            self.publish_key_package_for_account(account).await?;
-            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Published new key package");
-        } else {
-            tracing::warn!(target: "whitenoise::event_processor::process_welcome", "No key package event id found in welcome event");
-        }
-
-        Ok(())
+        self.handle_giftwrap(&target_account, event).await
     }
 
     /// Process MLS group messages with account awareness
@@ -309,6 +201,25 @@ impl Whitenoise {
             event
         );
 
+        let target_account = self.account_from_subscription_id(subscription_id).await?;
+
+        self.handle_mls_message(&target_account, event).await
+    }
+
+    /// Process relay messages for logging/monitoring
+    async fn process_relay_message(&self, relay_url: RelayUrl, message_type: String) {
+        tracing::debug!(
+            target: "whitenoise::event_processor::process_relay_message",
+            "Processing message from {}: {}",
+            relay_url,
+            message_type
+        );
+    }
+
+    async fn account_from_subscription_id(
+        &self,
+        subscription_id: Option<String>,
+    ) -> Result<Account> {
         let sub_id = subscription_id.ok_or_else(|| {
             WhitenoiseError::InvalidEvent(
                 "MLS message received without subscription ID".to_string(),
@@ -331,30 +242,33 @@ impl Whitenoise {
             target_pubkey.to_hex()
         );
 
-        let target_account = self.read_account_by_pubkey(&target_pubkey).await?;
+        self.read_account_by_pubkey(&target_pubkey).await
+    }
+}
 
-        let nostr_mls = &*target_account.nostr_mls.lock().unwrap();
-        match nostr_mls.process_message(&event) {
-            Ok(result) => {
-                tracing::debug!(target: "whitenoise::event_processor::process_mls_message", "Processed MLS message - Result: {:?}", result);
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!(target: "whitenoise::event_processor::process_mls_message", "MLS message processing failed for account {}: {}", target_pubkey.to_hex(), e);
-                Err(WhitenoiseError::NostrMlsError(e))
-            }
-        }
+fn validate_giftwrap_target(account: &Account, event: &Event) -> Result<()> {
+    // Extract the target pubkey from the event's 'p' tag
+    let target_pubkey = event
+        .tags
+        .iter()
+        .find(|tag| tag.kind() == TagKind::p())
+        .and_then(|tag| tag.content())
+        .and_then(|pubkey_str| PublicKey::parse(pubkey_str).ok())
+        .ok_or_else(|| {
+            WhitenoiseError::InvalidEvent(
+                "No valid target pubkey found in 'p' tag for giftwrap event".to_string(),
+            )
+        })?;
+
+    if target_pubkey != account.pubkey {
+        return Err(WhitenoiseError::InvalidEvent(format!(
+            "Giftwrap target pubkey {} does not match account pubkey {} - possible routing error",
+            target_pubkey.to_hex(),
+            account.pubkey.to_hex()
+        )));
     }
 
-    /// Process relay messages for logging/monitoring
-    async fn process_relay_message(&self, relay_url: RelayUrl, message_type: String) {
-        tracing::debug!(
-            target: "whitenoise::event_processor::process_relay_message",
-            "Processing message from {}: {}",
-            relay_url,
-            message_type
-        );
-    }
+    Ok(())
 }
 
 #[cfg(test)]
