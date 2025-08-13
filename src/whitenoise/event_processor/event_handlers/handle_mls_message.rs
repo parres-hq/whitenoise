@@ -46,7 +46,7 @@ mod tests {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
         let creator_account = whitenoise.create_identity().await.unwrap();
         // Create one member account, set contact, publish key package
-        let members = setup_multiple_test_accounts(&whitenoise, &creator_account, 1).await;
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
         let member_pubkey = members[0].0.pubkey;
 
         // Give time for key package publish to propagate in test relays
@@ -106,7 +106,7 @@ mod tests {
         // Arrange: Whitenoise and accounts
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
         let creator_account = whitenoise.create_identity().await.unwrap();
-        let members = setup_multiple_test_accounts(&whitenoise, &creator_account, 1).await;
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
         let member_pubkey = members[0].0.pubkey;
         tokio::time::sleep(Duration::from_millis(300)).await;
 

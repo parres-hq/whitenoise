@@ -44,7 +44,7 @@ impl Whitenoise {
     ) -> Result<()> {
         // Process the welcome message - lock scope is minimal
         {
-            let nostr_mls = &*account.nostr_mls.lock().unwrap();
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
             nostr_mls
                 .process_welcome(&event.id, &rumor)
                 .map_err(WhitenoiseError::NostrMlsError)?;
@@ -108,8 +108,8 @@ mod tests {
         let (welcome_rumor, _unused_keys) = tokio::task::spawn_blocking({
             let creator_account = creator_account.clone();
             let key_pkg_event = key_pkg_event.clone();
+            let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
             move || -> core::result::Result<(UnsignedEvent, Keys), nostr_mls::error::Error> {
-                let nostr_mls = creator_account.nostr_mls.lock().unwrap();
 
                 let create_group_result = nostr_mls.create_group(
                     &creator_account.pubkey,
@@ -149,7 +149,7 @@ mod tests {
 
         // Create creator and one member account; setup publishes key packages and contacts
         let creator_account = whitenoise.create_identity().await.unwrap();
-        let members = setup_multiple_test_accounts(&whitenoise, &creator_account, 1).await;
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
         let member_account = members[0].0.clone();
 
         // Build a real MLS Welcome giftwrap addressed to the member
