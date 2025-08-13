@@ -1,5 +1,5 @@
 // use crate::media::blossom::BlossomClient;
-use crate::types::{NostrEncryptionMethod, ProcessableEvent};
+use crate::types::ProcessableEvent;
 use crate::whitenoise::relays::Relay;
 
 use ::rand::RngCore;
