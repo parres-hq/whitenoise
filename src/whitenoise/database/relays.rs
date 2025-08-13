@@ -4,7 +4,6 @@ use crate::{Whitenoise, WhitenoiseError};
 use chrono::{DateTime, Utc};
 use nostr_sdk::RelayUrl;
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct RelayRow {
     // id is the primary key
@@ -64,12 +63,11 @@ where
     }
 }
 
-impl Whitenoise {
-    #[allow(dead_code)]
-    pub(crate) async fn load_relay(&self, url: &RelayUrl) -> Result<Relay, WhitenoiseError> {
+impl Relay {
+    pub(crate) async fn find_by_url(url: &RelayUrl, whitenoise: &Whitenoise) -> Result<Relay, WhitenoiseError> {
         let relay_row = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
             .bind(url.to_string().as_str())
-            .fetch_one(&self.database.pool)
+            .fetch_one(&whitenoise.database.pool)
             .await
             .map_err(|_| WhitenoiseError::RelayNotFound)?;
 
@@ -81,13 +79,12 @@ impl Whitenoise {
         })
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn save_relay(&self, relay: &Relay) -> Result<(), DatabaseError> {
+    pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
         sqlx::query("INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
-            .bind(relay.url.to_string().as_str())
-            .bind(relay.created_at.timestamp_millis())
-            .bind(relay.updated_at.timestamp_millis())
-            .execute(&self.database.pool)
+            .bind(self.url.to_string().as_str())
+            .bind(self.created_at.timestamp_millis())
+            .bind(self.updated_at.timestamp_millis())
+            .execute(&whitenoise.database.pool)
             .await
             .map_err(DatabaseError::Sqlx)?;
         Ok(())

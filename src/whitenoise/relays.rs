@@ -73,13 +73,14 @@ impl Whitenoise {
     /// Returns a `WhitenoiseError` if the relay query fails.
     pub async fn fetch_relays_from(
         &self,
-        nip65_relays: DashSet<RelayUrl>,
+        nip65_relays: &Vec<Relay>,
         pubkey: PublicKey,
         relay_type: RelayType,
-    ) -> Result<DashSet<RelayUrl>> {
+    ) -> Result<Vec<Relay>> {
+        let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let relays = self
             .nostr
-            .fetch_user_relays(pubkey, relay_type, nip65_relays)
+            .fetch_user_relays(pubkey, relay_type, urls)
             .await?;
         Ok(relays)
     }
@@ -119,6 +120,7 @@ impl Whitenoise {
     ) -> Result<Vec<(RelayUrl, RelayStatus)>> {
         // Get all relay URLs for this user across all types
         // Combine all relay URLs into one list, removing duplicates
+
         let mut all_relays = Vec::new();
         all_relays.extend(account.nip65_relays.clone());
         all_relays.extend(account.inbox_relays.clone());
@@ -265,16 +267,20 @@ impl Whitenoise {
         relay_type: RelayType,
         target_relays: &Option<DashSet<RelayUrl>>, // If provided, this means at least one relay was removed. We need to publish to the prior relays as well.
     ) -> Result<()> {
+        let user= self.load_user(&account.pubkey).await?;
+        let user_nip65_relays_vec = self.load_user_relays(&user, RelayType::Nostr).await?;
+        let user_nip65_relays = DashSet::from_iter(user_nip65_relays_vec.into_iter().map(|r| r.url));
+
         // Determine the kind of relay list event to publish
         let relays_to_publish = match relay_type {
-            RelayType::Nostr => account.nip65_relays.clone(),
-            RelayType::Inbox => account.inbox_relays.clone(),
-            RelayType::KeyPackage => account.key_package_relays.clone(),
+            RelayType::Nostr => user_nip65_relays.clone(),
+            RelayType::Inbox => DashSet::from_iter(self.load_user_relays(&user, RelayType::Inbox).await?.into_iter().map(|r| r.url)),
+            RelayType::KeyPackage => DashSet::from_iter(self.load_user_relays(&user, RelayType::KeyPackage).await?.into_iter().map(|r| r.url)),
         };
 
         let relays_to_use = match target_relays.as_ref() {
             Some(relays) => relays,
-            None => &account.nip65_relays,
+            None => &user_nip65_relays,
         };
 
         self.publish_relay_list_for_pubkey(
@@ -289,18 +295,18 @@ impl Whitenoise {
     pub(crate) async fn publish_relay_list_for_pubkey(
         &self,
         pubkey: PublicKey,
-        relay_list: DashSet<RelayUrl>,
+        relay_list: Vec<Relay>,
         relay_type: RelayType,
-        target_relays: DashSet<RelayUrl>,
+        target_relays: Vec<Relay>,
     ) -> Result<()> {
         let tags: Vec<Tag> = match relay_type {
             RelayType::Nostr => relay_list
                 .into_iter()
-                .map(|url| Tag::reference(url.to_string()))
+                .map(|relay| Tag::reference(relay.url.to_string()))
                 .collect(),
             RelayType::Inbox | RelayType::KeyPackage => relay_list
                 .into_iter()
-                .map(|url| Tag::custom(TagKind::Relay, [url.to_string()]))
+                .map(|relay| Tag::custom(TagKind::Relay, [relay.url.to_string()]))
                 .collect(),
         };
         tracing::debug!("Publishing relay list tags {:?}", tags);

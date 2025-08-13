@@ -1,10 +1,10 @@
 // use crate::media::blossom::BlossomClient;
 use crate::types::{NostrEncryptionMethod, ProcessableEvent};
+use crate::whitenoise::relays::Relay;
 
 use ::rand::RngCore;
-use dashmap::DashSet;
 use nostr_sdk::prelude::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
@@ -220,13 +220,12 @@ impl NostrManager {
     pub(crate) async fn publish_event_to(
         &self,
         event: Event,
-        relays: &BTreeSet<RelayUrl>,
+        relays: &Vec<Relay>,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays.iter().cloned().collect())
-            .await?;
-
-        Ok(self.client.send_event_to(relays, &event).await?)
+        self.ensure_relays_connected(relays.clone()).await?;
+        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+        Ok(self.client.send_event_to(urls, &event).await?)
     }
 
     /// Publishes a Nostr event using a temporary signer.
@@ -247,16 +246,16 @@ impl NostrManager {
     pub(crate) async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
-        relays: DashSet<RelayUrl>,
+        relays: Vec<Relay>,
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
         self.ensure_relays_connected(relays.clone()).await?;
-
+        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         self.client.set_signer(signer).await;
         let result = self
             .client
-            .send_event_builder_to(relays, event_builder.clone())
+            .send_event_builder_to(urls, event_builder.clone())
             .await?;
         self.client.unset_signer().await;
         Ok(result)
@@ -295,16 +294,15 @@ impl NostrManager {
         receiver: &PublicKey,
         rumor: UnsignedEvent,
         extra_tags: Vec<Tag>,
-        relays: DashSet<RelayUrl>,
+        relays: Vec<Relay>,
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
         self.ensure_relays_connected(relays.clone()).await?;
-
+        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         let wrapped_event = EventBuilder::gift_wrap(&signer, receiver, rumor, extra_tags).await?;
-
         self.client.set_signer(signer).await;
-        let result = self.client.send_event_to(relays, &wrapped_event).await?;
+        let result = self.client.send_event_to(urls, &wrapped_event).await?;
         self.client.unset_signer().await;
         Ok(result)
     }
@@ -327,9 +325,9 @@ impl NostrManager {
     pub(crate) async fn setup_account_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: DashSet<RelayUrl>,
-        inbox_relays: DashSet<RelayUrl>,
-        group_relays: DashSet<RelayUrl>,
+        user_relays: Vec<Relay>,
+        inbox_relays: Vec<Relay>,
+        group_relays: Vec<Relay>,
         nostr_group_ids: Vec<String>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
@@ -350,7 +348,7 @@ impl NostrManager {
     pub(crate) async fn setup_group_messages_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: DashSet<RelayUrl>,
+        user_relays: Vec<Relay>,
         nostr_group_ids: Vec<String>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
@@ -487,7 +485,7 @@ impl NostrManager {
         }
     }
 
-    fn relay_urls_from_event(event: Event) -> DashSet<RelayUrl> {
+    fn relay_urls_from_event(event: Event) -> HashSet<RelayUrl> {
         event
             .tags
             .into_iter()
@@ -623,7 +621,7 @@ impl NostrManager {
     /// nostr_manager.ensure_relays_connected(&user_relays).await?;
     /// // Now safe to call client.subscribe_with_id_to(user_relays, ...)
     /// ```
-    pub(crate) async fn ensure_relays_connected(&self, relays: DashSet<RelayUrl>) -> Result<()> {
+    pub(crate) async fn ensure_relays_connected(&self, relays: Vec<Relay>) -> Result<()> {
         if relays.is_empty() {
             return Ok(());
         }
@@ -637,15 +635,15 @@ impl NostrManager {
         // Track newly added relays for connection
         let mut newly_added_relays = Vec::new();
 
-        for relay_url in relays {
+        for relay in relays {
             // Check if we're already connected to this relay by attempting to get its status
-            match self.client.relay(relay_url.clone()).await {
+            match self.client.relay(relay.url.clone()).await {
                 Ok(_) => {
                     // Relay already exists in the client, skip
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::ensure_relays_connected",
                         "Relay {} already connected",
-                        relay_url
+                        relay.url
                     );
                 }
                 Err(_) => {
@@ -653,23 +651,23 @@ impl NostrManager {
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::ensure_relays_connected",
                         "Adding new relay: {}",
-                        relay_url
+                        relay.url
                     );
 
-                    match self.client.add_relay(relay_url.clone()).await {
+                    match self.client.add_relay(relay.url.clone()).await {
                         Ok(_) => {
-                            newly_added_relays.push(relay_url.clone());
+                            newly_added_relays.push(relay.url.clone());
                             tracing::debug!(
                                 target: "whitenoise::nostr_manager::ensure_relays_connected",
                                 "Successfully added relay: {}",
-                                relay_url
+                                relay.url
                             );
                         }
                         Err(e) => {
                             tracing::warn!(
                                 target: "whitenoise::nostr_manager::ensure_relays_connected",
                                 "Failed to add relay {}: {}",
-                                relay_url,
+                                relay.url,
                                 e
                             );
                             // Continue with other relays rather than failing completely

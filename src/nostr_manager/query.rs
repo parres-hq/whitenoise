@@ -8,6 +8,7 @@ use crate::{
 use dashmap::DashSet;
 use nostr_sdk::prelude::*;
 use std::collections::{HashMap, HashSet};
+use crate::whitenoise::relays::Relay;
 
 impl NostrManager {
     pub(crate) async fn query_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
@@ -108,7 +109,7 @@ impl NostrManager {
 
         let events = self
             .client
-            .fetch_events_from(account.nip65_relays.clone(), filter, self.timeout)
+            .fetch_events_from(urls, filter, self.timeout)
             .await?;
 
         let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
@@ -149,8 +150,9 @@ impl NostrManager {
     pub(crate) async fn fetch_user_key_package(
         &self,
         pubkey: PublicKey,
-        urls: DashSet<RelayUrl>,
+        relays: Vec<Relay>,
     ) -> Result<Option<Event>> {
+        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         let filter = Filter::new()
             .kind(Kind::MlsKeyPackage)
             .author(pubkey)

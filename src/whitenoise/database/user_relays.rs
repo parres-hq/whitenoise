@@ -2,7 +2,6 @@ use super::DatabaseError;
 use crate::whitenoise::relays::RelayType;
 use chrono::{DateTime, Utc};
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct UserRelayRow {
     // user_id is the ID of the user

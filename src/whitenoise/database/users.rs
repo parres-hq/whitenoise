@@ -76,29 +76,33 @@ where
     }
 }
 
-impl Whitenoise {
-    #[allow(dead_code)]
-    pub(crate) async fn load_user(&self, pubkey: &PublicKey) -> Result<User, WhitenoiseError> {
+impl Into<User> for UserRow {
+    fn into(self) -> User {
+        User {
+            id: Some(self.id),
+            pubkey: self.pubkey,
+            metadata: self.metadata,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+impl User {
+    pub(crate) async fn find_by_pubkey(pubkey: &PublicKey, whitenoise: &Whitenoise) -> Result<User, WhitenoiseError> {
         let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
-            .fetch_one(&self.database.pool)
+            .fetch_one(&whitenoise.database.pool)
             .await
             .map_err(|_| WhitenoiseError::UserNotFound)?;
 
-        Ok(User {
-            id: user_row.id,
-            pubkey: user_row.pubkey,
-            metadata: user_row.metadata,
-            created_at: user_row.created_at,
-            updated_at: user_row.updated_at,
-        })
+        Ok(user_row.into())
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn load_user_relays(
+    pub(crate) async fn relays(
         &self,
-        user: &User,
         relay_type: RelayType,
+        whitenoise: &Whitenoise
     ) -> Result<Vec<Relay>, WhitenoiseError> {
         let relay_type_str = String::from(relay_type);
 
@@ -108,9 +112,9 @@ impl Whitenoise {
              INNER JOIN user_relays ur ON r.id = ur.relay_id
              WHERE ur.user_id = ? AND ur.relay_type = ?",
         )
-        .bind(user.id)
+        .bind(self.id)
         .bind(relay_type_str)
-        .fetch_all(&self.database.pool)
+        .fetch_all(&whitenoise.database.pool)
         .await
         .map_err(DatabaseError::Sqlx)
         .map_err(WhitenoiseError::Database)?;
@@ -128,19 +132,34 @@ impl Whitenoise {
         Ok(relays)
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn save_user(&self, user: &User) -> Result<(), DatabaseError> {
-        sqlx::query(
+    pub async fn save(&self, whitenoise: &Whitenoise) -> Result<User, WhitenoiseError> {
+        let mut tx = whitenoise.database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
+
+        let result = sqlx::query(
             "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
-        .bind(user.pubkey.to_hex().as_str())
-        .bind(serde_json::to_string(&user.metadata).unwrap())
-        .bind(user.created_at.timestamp_millis())
-        .bind(user.updated_at.timestamp_millis())
-        .execute(&self.database.pool)
+        .bind(self.pubkey.to_hex().as_str())
+        .bind(serde_json::to_string(&self.metadata).unwrap())
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .execute(&mut *tx)
+        .await
+        .map_err(DatabaseError::Sqlx)
+        .map_err(WhitenoiseError::Database)?;
+
+        let inserted_id = result.last_insert_rowid();
+
+        let inserted_user = sqlx::query_as::<_, UserRow>(
+            "SELECT * FROM users WHERE id = ?",
+        )
+        .bind(inserted_id)
+        .fetch_one(&mut *tx)
         .await
         .map_err(DatabaseError::Sqlx)?;
-        Ok(())
+
+        tx.commit().await.map_err(DatabaseError::Sqlx)?;
+
+        Ok(inserted_user.into())
     }
 }
 
@@ -418,7 +437,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_user_success() {
+    async fn test_save_success() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -432,20 +451,19 @@ mod tests {
         let test_created_at = chrono::Utc::now();
         let test_updated_at = chrono::Utc::now();
 
+        // Test save
         let user = User {
-            id: 1, // Will be overridden by database auto-increment
+            id: None,
             pubkey: test_pubkey,
             metadata: test_metadata.clone(),
             created_at: test_created_at,
             updated_at: test_updated_at,
         };
-
-        // Test save_user
-        let result = whitenoise.save_user(&user).await;
+        let result = user.save(&whitenoise).await;
         assert!(result.is_ok());
 
         // Test that we can load it back (this verifies it was saved correctly)
-        let loaded_user = whitenoise.load_user(&test_pubkey).await;
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
         assert!(loaded_user.is_ok());
 
         let loaded = loaded_user.unwrap();
@@ -464,7 +482,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_user_with_minimal_metadata() {
+    async fn test_save_with_minimal_metadata() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -475,18 +493,18 @@ mod tests {
         let test_updated_at = chrono::Utc::now();
 
         let user = User {
-            id: 1,
+            id: None,
             pubkey: test_pubkey,
             metadata: test_metadata.clone(),
             created_at: test_created_at,
             updated_at: test_updated_at,
         };
 
-        let result = whitenoise.save_user(&user).await;
+        let result = user.save(&whitenoise).await;
         assert!(result.is_ok());
 
         // Verify it was saved correctly by loading it back
-        let loaded_user = whitenoise.load_user(&test_pubkey).await;
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
         assert!(loaded_user.is_ok());
 
         let loaded = loaded_user.unwrap();
@@ -509,7 +527,7 @@ mod tests {
 
         // Try to load a non-existent user
         let non_existent_pubkey = nostr_sdk::Keys::generate().public_key();
-        let result = whitenoise.load_user(&non_existent_pubkey).await;
+        let result = User::find_by_pubkey(&non_existent_pubkey, &whitenoise).await;
 
         assert!(result.is_err());
         if let Err(WhitenoiseError::UserNotFound) = result {
@@ -537,7 +555,7 @@ mod tests {
         let test_updated_at = chrono::Utc::now();
 
         let original_user = User {
-            id: 1,
+            id: Some(1),
             pubkey: test_pubkey,
             metadata: test_metadata.clone(),
             created_at: test_created_at,
@@ -545,11 +563,18 @@ mod tests {
         };
 
         // Save the user
-        let save_result = whitenoise.save_user(&original_user).await;
+        let dummy_user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let save_result = dummy_user.save(&whitenoise).await;
         assert!(save_result.is_ok());
 
         // Load the user back
-        let loaded_user = whitenoise.load_user(&test_pubkey).await;
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
         assert!(loaded_user.is_ok());
 
         let user = loaded_user.unwrap();
@@ -577,7 +602,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_user_with_complex_metadata() {
+    async fn test_save_with_complex_metadata() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -615,7 +640,7 @@ mod tests {
             let test_pubkey = nostr_sdk::Keys::generate().public_key();
 
             let user = User {
-                id: 1,
+                id: None,
                 pubkey: test_pubkey,
                 metadata: metadata.clone(),
                 created_at: test_timestamp,
@@ -623,11 +648,11 @@ mod tests {
             };
 
             // Save the user
-            let save_result = whitenoise.save_user(&user).await;
+            let save_result = user.save(&whitenoise).await;
             assert!(save_result.is_ok(), "Failed to save {}", description);
 
             // Load the user back
-            let loaded_user = whitenoise.load_user(&test_pubkey).await;
+            let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
             assert!(loaded_user.is_ok(), "Failed to load {}", description);
 
             let loaded = loaded_user.unwrap();
@@ -670,7 +695,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_user_relays_success() {
+    async fn test_relays_success() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -681,7 +706,7 @@ mod tests {
         let test_timestamp = chrono::Utc::now();
 
         let user = User {
-            id: 1,
+            id: None,
             pubkey: test_pubkey,
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
@@ -689,11 +714,11 @@ mod tests {
         };
 
         // Save the user first
-        let save_result = whitenoise.save_user(&user).await;
+        let save_result = user.save(&whitenoise).await;
         assert!(save_result.is_ok());
 
         // Load the user to get the actual database ID
-        let loaded_user = whitenoise.load_user(&test_pubkey).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
 
         // Create test relays
         let relay1_url = nostr_sdk::RelayUrl::parse("wss://relay1.example.com").unwrap();
@@ -720,9 +745,9 @@ mod tests {
         };
 
         // Save relays to database
-        whitenoise.save_relay(&relay1).await.unwrap();
-        whitenoise.save_relay(&relay2).await.unwrap();
-        whitenoise.save_relay(&relay3).await.unwrap();
+        relay1.save(&whitenoise).await.unwrap();
+        relay2.save(&whitenoise).await.unwrap();
+        relay3.save(&whitenoise).await.unwrap();
 
         // Insert into user_relays table
         sqlx::query(
@@ -762,8 +787,8 @@ mod tests {
         .unwrap();
 
         // Test loading nostr relays
-        let nostr_relays = whitenoise
-            .load_user_relays(&loaded_user, RelayType::Nostr)
+        let nostr_relays = loaded_user
+            .relays(RelayType::Nostr, &whitenoise)
             .await
             .unwrap();
 
@@ -774,8 +799,8 @@ mod tests {
         assert!(!relay_urls.contains(&&relay3_url));
 
         // Test loading inbox relays
-        let inbox_relays = whitenoise
-            .load_user_relays(&loaded_user, RelayType::Inbox)
+        let inbox_relays = loaded_user
+            .relays(RelayType::Inbox, &whitenoise)
             .await
             .unwrap();
 
@@ -783,8 +808,8 @@ mod tests {
         assert_eq!(inbox_relays[0].url, relay3_url);
 
         // Test loading key package relays (should be empty)
-        let key_package_relays = whitenoise
-            .load_user_relays(&loaded_user, RelayType::KeyPackage)
+        let key_package_relays = loaded_user
+            .relays(RelayType::KeyPackage, &whitenoise)
             .await
             .unwrap();
 
@@ -792,7 +817,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_user_relays_empty_result() {
+    async fn test_relays_empty_result() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -803,7 +828,7 @@ mod tests {
         let test_timestamp = chrono::Utc::now();
 
         let user = User {
-            id: 1,
+            id: None,
             pubkey: test_pubkey,
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
@@ -811,12 +836,12 @@ mod tests {
         };
 
         // Save the user first
-        whitenoise.save_user(&user).await.unwrap();
-        let loaded_user = whitenoise.load_user(&test_pubkey).await.unwrap();
+        user.save(&whitenoise).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
 
         // Test loading relays when none exist
-        let result = whitenoise
-            .load_user_relays(&loaded_user, RelayType::Nostr)
+        let result = loaded_user
+            .relays(RelayType::Nostr, &whitenoise)
             .await
             .unwrap();
 
@@ -824,7 +849,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_user_relays_multiple_relay_types() {
+    async fn test_relays_multiple_relay_types() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -835,15 +860,15 @@ mod tests {
         let test_timestamp = chrono::Utc::now();
 
         let user = User {
-            id: 1,
+            id: None,
             pubkey: test_pubkey,
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
 
-        whitenoise.save_user(&user).await.unwrap();
-        let loaded_user = whitenoise.load_user(&test_pubkey).await.unwrap();
+        user.save(&whitenoise).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
 
         // Create and save a test relay
         let relay_url = nostr_sdk::RelayUrl::parse("wss://multi.example.com").unwrap();
@@ -853,7 +878,7 @@ mod tests {
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
-        whitenoise.save_relay(&relay).await.unwrap();
+        relay.save(&whitenoise).await.unwrap();
 
         // Add the same relay for different types
         for relay_type in ["nostr", "inbox", "key_package"] {
@@ -872,8 +897,8 @@ mod tests {
 
         // Test each relay type returns the same relay
         for relay_type in [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage] {
-            let relays = whitenoise
-                .load_user_relays(&loaded_user, relay_type)
+            let relays = loaded_user
+                .relays(relay_type, &whitenoise)
                 .await
                 .unwrap();
 
@@ -883,7 +908,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_user_relays_different_users() {
+    async fn test_relays_different_users() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -894,7 +919,7 @@ mod tests {
         let test_timestamp = chrono::Utc::now();
 
         let user1 = User {
-            id: 1,
+            id: None,
             pubkey: user1_pubkey,
             metadata: Metadata::new().name("User 1"),
             created_at: test_timestamp,
@@ -902,18 +927,18 @@ mod tests {
         };
 
         let user2 = User {
-            id: 2,
+            id: None,
             pubkey: user2_pubkey,
             metadata: Metadata::new().name("User 2"),
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
 
-        whitenoise.save_user(&user1).await.unwrap();
-        whitenoise.save_user(&user2).await.unwrap();
+        user1.save(&whitenoise).await.unwrap();
+        user2.save(&whitenoise).await.unwrap();
 
-        let loaded_user1 = whitenoise.load_user(&user1_pubkey).await.unwrap();
-        let loaded_user2 = whitenoise.load_user(&user2_pubkey).await.unwrap();
+        let loaded_user1 = User::find_by_pubkey(&user1_pubkey, &whitenoise).await.unwrap();
+        let loaded_user2 = User::find_by_pubkey(&user2_pubkey, &whitenoise).await.unwrap();
 
         // Create test relays
         let relay1_url = nostr_sdk::RelayUrl::parse("wss://user1.example.com").unwrap();
@@ -932,8 +957,8 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        whitenoise.save_relay(&relay1).await.unwrap();
-        whitenoise.save_relay(&relay2).await.unwrap();
+        relay1.save(&whitenoise).await.unwrap();
+        relay2.save(&whitenoise).await.unwrap();
 
         // Associate relay1 with user1 and relay2 with user2
         sqlx::query(
@@ -961,12 +986,12 @@ mod tests {
         .unwrap();
 
         // Test that each user gets only their own relays
-        let user1_relays = whitenoise
-            .load_user_relays(&loaded_user1, RelayType::Nostr)
+        let user1_relays = loaded_user1
+            .relays(RelayType::Nostr, &whitenoise)
             .await
             .unwrap();
-        let user2_relays = whitenoise
-            .load_user_relays(&loaded_user2, RelayType::Nostr)
+        let user2_relays = loaded_user2
+            .relays(RelayType::Nostr, &whitenoise)
             .await
             .unwrap();
 
@@ -978,7 +1003,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_user_relays_relay_properties() {
+    async fn test_relays_relay_properties() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -989,15 +1014,15 @@ mod tests {
         let test_timestamp = chrono::Utc::now();
 
         let user = User {
-            id: 1,
+            id: None,
             pubkey: test_pubkey,
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
 
-        whitenoise.save_user(&user).await.unwrap();
-        let loaded_user = whitenoise.load_user(&test_pubkey).await.unwrap();
+        user.save(&whitenoise).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
 
         // Create test relay with specific timestamps
         let relay_url = nostr_sdk::RelayUrl::parse("wss://properties.example.com").unwrap();
@@ -1011,7 +1036,7 @@ mod tests {
             updated_at: relay_updated_at,
         };
 
-        whitenoise.save_relay(&relay).await.unwrap();
+        relay.save(&whitenoise).await.unwrap();
 
         // Associate with user
         sqlx::query(
@@ -1027,8 +1052,8 @@ mod tests {
         .unwrap();
 
         // Load relays and verify all properties
-        let relays = whitenoise
-            .load_user_relays(&loaded_user, RelayType::Nostr)
+        let relays = loaded_user
+            .relays(RelayType::Nostr, &whitenoise)
             .await
             .unwrap();
 

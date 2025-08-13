@@ -161,15 +161,6 @@ impl Whitenoise {
         Ok(contacts)
     }
 
-    pub async fn fetch_key_package_event_from(
-        &self,
-        urls: DashSet<RelayUrl>,
-        pubkey: PublicKey,
-    ) -> Result<Option<Event>> {
-        let key_package = self.nostr.fetch_user_key_package(pubkey, urls).await?;
-        Ok(key_package)
-    }
-
     /// Adds a contact to the user's contact list and publishes the updated list to Nostr.
     ///
     /// This method loads the current contact list, validates that the contact doesn't already exist,

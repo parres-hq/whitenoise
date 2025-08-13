@@ -2,7 +2,7 @@
 //! This mostly handles subscribing and processing events as they come in while the user is active.
 
 use crate::nostr_manager::{NostrManager, Result};
-use dashmap::DashSet;
+use crate::whitenoise::relays::Relay;
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
 
@@ -20,9 +20,9 @@ impl NostrManager {
     pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
-        user_relays: DashSet<RelayUrl>,
-        inbox_relays: DashSet<RelayUrl>,
-        group_relays: DashSet<RelayUrl>,
+        user_relays: Vec<Relay>,
+        inbox_relays: Vec<Relay>,
+        group_relays: Vec<Relay>,
         nostr_group_ids: Vec<String>,
     ) -> Result<()> {
         // Set up core subscriptions in parallel
@@ -46,7 +46,7 @@ impl NostrManager {
     async fn setup_user_events_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: DashSet<RelayUrl>,
+        user_relays: Vec<Relay>,
     ) -> Result<()> {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
@@ -64,8 +64,9 @@ impl NostrManager {
             ])
             .author(pubkey);
 
+        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         self.client
-            .subscribe_with_id_to(user_relays, subscription_id, user_events_filter, None)
+            .subscribe_with_id_to(urls, subscription_id, user_events_filter, None)
             .await?;
 
         Ok(())
@@ -75,7 +76,7 @@ impl NostrManager {
     async fn setup_giftwrap_subscription(
         &self,
         pubkey: PublicKey,
-        inbox_relays: DashSet<RelayUrl>,
+        inbox_relays: Vec<Relay>,
     ) -> Result<()> {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
@@ -85,8 +86,9 @@ impl NostrManager {
 
         let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
 
+        let urls: Vec<RelayUrl> = inbox_relays.iter().map(|r| r.url.clone()).collect();
         self.client
-            .subscribe_with_id_to(inbox_relays, subscription_id, giftwrap_filter, None)
+            .subscribe_with_id_to(urls, subscription_id, giftwrap_filter, None)
             .await?;
 
         Ok(())
@@ -96,7 +98,7 @@ impl NostrManager {
     pub(crate) async fn setup_contacts_metadata_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: DashSet<RelayUrl>,
+        user_relays: Vec<Relay>,
     ) -> Result<()> {
         let contacts_pubkeys = self
             .client
@@ -115,9 +117,9 @@ impl NostrManager {
         let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
 
         let contacts_metadata_filter = Filter::new().kind(Kind::Metadata).authors(contacts_pubkeys);
-
+        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         self.client
-            .subscribe_with_id_to(user_relays, subscription_id, contacts_metadata_filter, None)
+            .subscribe_with_id_to(urls, subscription_id, contacts_metadata_filter, None)
             .await?;
 
         Ok(())
@@ -128,12 +130,14 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         nostr_group_ids: Vec<String>,
-        group_relays: DashSet<RelayUrl>,
+        group_relays: Vec<Relay>,
     ) -> Result<()> {
         if nostr_group_ids.is_empty() {
             // No groups yet, skip subscription
             return Ok(());
         }
+
+
 
         // Ensure we're connected to all group relays before subscribing
         self.ensure_relays_connected(group_relays.clone()).await?;
@@ -145,8 +149,9 @@ impl NostrManager {
             .kind(Kind::MlsGroupMessage)
             .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids);
 
+        let urls: Vec<RelayUrl> = group_relays.iter().map(|r| r.url.clone()).collect();
         self.client
-            .subscribe_with_id_to(group_relays, subscription_id, mls_message_filter, None)
+            .subscribe_with_id_to(urls, subscription_id, mls_message_filter, None)
             .await?;
 
         Ok(())
