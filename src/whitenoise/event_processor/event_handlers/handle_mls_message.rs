@@ -64,33 +64,19 @@ mod tests {
             .unwrap();
 
         // Build a valid MLS group message event for the new group
-        let message_event = tokio::task::spawn_blocking({
-            let account = creator_account.clone();
-            move || -> core::result::Result<Event, nostr_mls::error::Error> {
-                let nostr_mls =
-                    Account::create_nostr_mls(account.pubkey, &whitenoise.config.data_dir).unwrap();
-                let groups = nostr_mls.get_groups()?;
-                let group_id = groups
-                    .first()
-                    .expect("group must exist")
-                    .mls_group_id
-                    .clone();
+        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let groups = nostr_mls.get_groups().unwrap();
+        let group_id = groups.first().expect("group must exist").mls_group_id.clone();
 
-                let mut inner = UnsignedEvent::new(
-                    account.pubkey,
-                    Timestamp::now(),
-                    Kind::TextNote,
-                    vec![],
-                    "hello from test".to_string(),
-                );
-                inner.ensure_id();
-                let evt = nostr_mls.create_message(&group_id, inner)?;
-                Ok(evt)
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        let mut inner = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::TextNote,
+            vec![],
+            "hello from test".to_string(),
+        );
+        inner.ensure_id();
+        let message_event = nostr_mls.create_message(&group_id, inner).unwrap();
 
         // Act
         let result = whitenoise
@@ -122,32 +108,18 @@ mod tests {
             .unwrap();
 
         // Create a valid MLS message event for that group
-        let valid_event = tokio::task::spawn_blocking({
-            let account = creator_account.clone();
-            move || -> core::result::Result<Event, nostr_mls::error::Error> {
-                let nostr_mls =
-                    Account::create_nostr_mls(account.pubkey, &whitenoise.config.data_dir).unwrap();
-                let groups = nostr_mls.get_groups()?;
-                let group_id = groups
-                    .first()
-                    .expect("group must exist")
-                    .mls_group_id
-                    .clone();
-                let mut inner = UnsignedEvent::new(
-                    account.pubkey,
-                    Timestamp::now(),
-                    Kind::TextNote,
-                    vec![],
-                    "msg".to_string(),
-                );
-                inner.ensure_id();
-                let evt = nostr_mls.create_message(&group_id, inner)?;
-                Ok(evt)
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let groups = nostr_mls.get_groups().unwrap();
+        let group_id = groups.first().expect("group must exist").mls_group_id.clone();
+        let mut inner = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::TextNote,
+            vec![],
+            "msg".to_string(),
+        );
+        inner.ensure_id();
+        let valid_event = nostr_mls.create_message(&group_id, inner).unwrap();
 
         // Corrupt it by changing the kind so MLS processing fails
         let mut bad_event = valid_event.clone();

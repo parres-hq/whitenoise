@@ -105,32 +105,19 @@ mod tests {
             .expect("member must have a published key package");
 
         // Create the group via nostr_mls directly to obtain welcome rumor
-        let (welcome_rumor, _unused_keys) = tokio::task::spawn_blocking({
-            let creator_account = creator_account.clone();
-            let key_pkg_event = key_pkg_event.clone();
-            let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
-            move || -> core::result::Result<(UnsignedEvent, Keys), nostr_mls::error::Error> {
+        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let create_group_result = nostr_mls.create_group(
+            &creator_account.pubkey,
+            vec![key_pkg_event],
+            vec![creator_account.pubkey],
+            create_nostr_group_config_data(),
+        ).unwrap();
 
-                let create_group_result = nostr_mls.create_group(
-                    &creator_account.pubkey,
-                    vec![key_pkg_event],
-                    vec![creator_account.pubkey],
-                    create_nostr_group_config_data(),
-                )?;
-
-                let rumor = create_group_result
-                    .welcome_rumors
-                    .first()
-                    .expect("welcome rumor exists")
-                    .clone();
-
-                // Return rumor plus a dummy Keys placeholder; will not be used outside
-                Ok((rumor, Keys::generate()))
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        let welcome_rumor = create_group_result
+            .welcome_rumors
+            .first()
+            .expect("welcome rumor exists")
+            .clone();
 
         // Use the creator's real keys as signer to build the giftwrap
         let creator_signer = whitenoise

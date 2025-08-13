@@ -146,35 +146,32 @@ impl Whitenoise {
 
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
 
-        let result = tokio::task::spawn_blocking(move || {
-            let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
-            if let Some(welcome) = welcome {
-                nostr_mls.accept_welcome(&welcome)?;
+        let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
+        let result = if let Some(welcome) = welcome {
+            nostr_mls.accept_welcome(&welcome)?;
 
-                let groups = nostr_mls.get_groups()?;
-                let mut group_relays = Vec::new();
-                let group_ids = groups
-                    .iter()
-                    .map(|g| hex::encode(g.nostr_group_id))
-                    .collect::<Vec<_>>();
+            let groups = nostr_mls.get_groups()?;
+            let mut group_relays = Vec::new();
+            let group_ids = groups
+                .iter()
+                .map(|g| hex::encode(g.nostr_group_id))
+                .collect::<Vec<_>>();
 
-                // Collect all relays from all groups into a single vector
-                for group in &groups {
-                    let relays = nostr_mls.get_relays(&group.mls_group_id)?;
-                    group_relays.extend(relays);
-                }
-
-                // Remove duplicates by sorting and deduplicating
-                group_relays.sort();
-                group_relays.dedup();
-                Ok((group_ids, group_relays))
-            } else {
-                Err(WhitenoiseError::WelcomeNotFound)
+            // Collect all relays from all groups into a single vector
+            for group in &groups {
+                let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                group_relays.extend(relays);
             }
-        })
-        .await?;
 
-        let (group_ids, group_relays) = result?;
+            // Remove duplicates by sorting and deduplicating
+            group_relays.sort();
+            group_relays.dedup();
+            Ok((group_ids, group_relays))
+        } else {
+            Err(WhitenoiseError::WelcomeNotFound)
+        }?;
+
+        let (group_ids, group_relays) = result;
 
         let mut relays = HashSet::new();
         for relay in group_relays {

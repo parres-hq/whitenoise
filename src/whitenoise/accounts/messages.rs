@@ -71,22 +71,12 @@ impl Whitenoise {
         let (inner_event, event_id) =
             self.create_unsigned_nostr_event(&account.pubkey, &message, kind, tags)?;
 
-        let (message_event, group_relays, message) = tokio::task::spawn_blocking({
-            let account = account.clone();
-            let group_id = group_id.clone();
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-
-                let message_event = nostr_mls.create_message(&group_id, inner_event)?;
-                let message = nostr_mls
-                    .get_message(&event_id)?
-                    .ok_or(nostr_mls::error::Error::MessageNotFound)?;
-                let relays = nostr_mls.get_relays(&group_id)?;
-
-                Ok((message_event, relays, message))
-            }
-        })
-        .await??;
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let message_event = nostr_mls.create_message(&group_id, inner_event)?;
+        let message = nostr_mls
+            .get_message(&event_id)?
+            .ok_or(WhitenoiseError::NostrMlsError(nostr_mls::error::Error::MessageNotFound))?;
+        let group_relays = nostr_mls.get_relays(&group_id)?;
 
         let mut relays: HashSet<Relay> = HashSet::new();
         for relay in group_relays {
@@ -196,16 +186,8 @@ impl Whitenoise {
         // Get account to access nostr_mls instance
         let account = Account::find_by_pubkey(pubkey, self).await?;
 
-        let raw_messages = tokio::task::spawn_blocking({
-            let group_id = group_id.clone();
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-
-                // Fetch raw messages from nostr_mls
-                nostr_mls.get_messages(&group_id)
-            }
-        })
-        .await??;
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let raw_messages = nostr_mls.get_messages(&group_id)?;
         // Use the aggregator to process the messages
         self.message_aggregator
             .aggregate_messages_for_group(

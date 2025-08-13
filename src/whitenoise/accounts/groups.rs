@@ -60,29 +60,18 @@ impl Whitenoise {
         let group_relays = config.relays.clone();
 
         let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir).unwrap();
-        let (create_group_result, group_ids) = tokio::task::spawn_blocking({
-            let creator_account = creator_account.clone();
-            let key_package_events = key_package_events.clone();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-                // Fetch key packages for all members
-                let create_group_result = nostr_mls.create_group(
-                    &creator_account.pubkey,
-                    key_package_events,
-                    admin_pubkeys,
-                    config,
-                )?;
+        let create_group_result = nostr_mls.create_group(
+            &creator_account.pubkey,
+            key_package_events.clone(),
+            admin_pubkeys,
+            config,
+        )?;
 
-                let group_ids = nostr_mls
-                    .get_groups()?
-                    .into_iter()
-                    .map(|g| hex::encode(g.nostr_group_id))
-                    .collect::<Vec<_>>();
-
-                Ok((create_group_result, group_ids))
-            }
-        })
-        .await
-        .map_err(WhitenoiseError::from)??;
+        let group_ids = nostr_mls
+            .get_groups()?
+            .into_iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect::<Vec<_>>();
 
         let group = create_group_result.group;
         let welcome_rumors = create_group_result.welcome_rumors;
@@ -248,23 +237,14 @@ impl Whitenoise {
             users.push(user);
         }
 
-        let (update_result, group_relays) = tokio::task::spawn_blocking({
-            let key_package_events = key_package_events.clone();
-            let account = account.clone();
-            let group_id = group_id.clone();
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-                let update_result = nostr_mls.add_members(&group_id, &key_package_events)?;
-                // Merge the pending commit immediately after creating it
-                // This ensures our local state is correct before publishing
-                nostr_mls.merge_pending_commit(&group_id)?;
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let update_result = nostr_mls.add_members(&group_id, &key_package_events)?;
+        // Merge the pending commit immediately after creating it
+        // This ensures our local state is correct before publishing
+        nostr_mls.merge_pending_commit(&group_id)?;
 
-                // Publish the evolution event to the group
-                let group_relays = nostr_mls.get_relays(&group_id)?;
-                Ok((update_result, group_relays))
-            }
-        })
-        .await??;
+        // Publish the evolution event to the group
+        let group_relays = nostr_mls.get_relays(&group_id)?;
 
         let mut relays = HashSet::new();
         for relay in group_relays.clone() {
@@ -389,18 +369,10 @@ impl Whitenoise {
         group_id: &GroupId,
         members: Vec<PublicKey>,
     ) -> Result<()> {
-        let (update_result, group_relays) = tokio::task::spawn_blocking({
-            let account = account.clone();
-            let group_id = group_id.clone();
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-                let update_result = nostr_mls.remove_members(&group_id, &members)?;
-                nostr_mls.merge_pending_commit(&group_id)?;
-                let group_relays = nostr_mls.get_relays(&group_id)?;
-                Ok((update_result, group_relays))
-            }
-        })
-        .await??;
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let update_result = nostr_mls.remove_members(&group_id, &members)?;
+        nostr_mls.merge_pending_commit(&group_id)?;
+        let group_relays = nostr_mls.get_relays(&group_id)?;
 
         let evolution_event = update_result.evolution_event;
 
