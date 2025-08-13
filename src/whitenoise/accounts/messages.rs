@@ -1,8 +1,10 @@
 use crate::types::MessageWithTokens;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
+use crate::whitenoise::relays::Relay;
 use crate::Account;
 use nostr_mls::prelude::*;
+use std::collections::HashSet;
 
 impl Whitenoise {
     /// Sends a message to a specific group and returns the message with parsed tokens.
@@ -69,11 +71,11 @@ impl Whitenoise {
         let (inner_event, event_id) =
             self.create_unsigned_nostr_event(&account.pubkey, &message, kind, tags)?;
 
-        let (message_event, relays, message) = tokio::task::spawn_blocking({
+        let (message_event, group_relays, message) = tokio::task::spawn_blocking({
             let account = account.clone();
             let group_id = group_id.clone();
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
             move || -> core::result::Result<_, nostr_mls::error::Error> {
-                let nostr_mls = account.nostr_mls.lock().unwrap();
 
                 let message_event = nostr_mls.create_message(&group_id, inner_event)?;
                 let message = nostr_mls
@@ -86,7 +88,13 @@ impl Whitenoise {
         })
         .await??;
 
-        self.nostr.publish_event_to(message_event, &relays).await?;
+        let mut relays: HashSet<Relay> = HashSet::new();
+        for relay in group_relays {
+            let db_relay = Relay::find_by_url(&relay, self).await?;
+            relays.insert(db_relay);
+        }
+
+        self.nostr.publish_event_to(message_event, &relays.into_iter().collect()).await?;
 
         let tokens = self.nostr.parse(&message.content);
 
@@ -143,7 +151,7 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<MessageWithTokens>> {
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
         let messages = nostr_mls.get_messages(group_id)?;
         let messages_with_tokens = messages
             .iter()
@@ -186,12 +194,12 @@ impl Whitenoise {
         group_id: &GroupId,
     ) -> Result<Vec<crate::whitenoise::message_aggregator::ChatMessage>> {
         // Get account to access nostr_mls instance
-        let account = self.read_account_by_pubkey(pubkey).await?;
+        let account = Account::find_by_pubkey(pubkey, self).await?;
 
         let raw_messages = tokio::task::spawn_blocking({
             let group_id = group_id.clone();
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
             move || -> core::result::Result<_, nostr_mls::error::Error> {
-                let nostr_mls = account.nostr_mls.lock().unwrap();
 
                 // Fetch raw messages from nostr_mls
                 nostr_mls.get_messages(&group_id)

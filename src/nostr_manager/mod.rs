@@ -4,7 +4,7 @@ use crate::whitenoise::relays::Relay;
 
 use ::rand::RngCore;
 use nostr_sdk::prelude::*;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
@@ -392,9 +392,10 @@ impl NostrManager {
     pub(crate) async fn update_contacts_metadata_subscription_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: DashSet<RelayUrl>,
+        user_relays: Vec<Relay>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
+        self.ensure_relays_connected(user_relays.clone()).await?;
         self.client.set_signer(signer).await;
         let result = self
             .setup_contacts_metadata_subscription(pubkey, user_relays)

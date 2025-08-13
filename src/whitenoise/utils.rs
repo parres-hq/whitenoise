@@ -1,5 +1,4 @@
 use crate::whitenoise::error::WhitenoiseError;
-use dashmap::DashSet;
 use nostr::{types::RelayUrl, PublicKey, ToBech32};
 
 use super::Whitenoise;
@@ -111,19 +110,6 @@ impl Whitenoise {
             })
     }
 
-    pub(crate) fn relayurl_dashset_eq(left: DashSet<RelayUrl>, right: DashSet<RelayUrl>) -> bool {
-        if left.len() != right.len() {
-            return false;
-        }
-
-        for l in left {
-            if !right.contains(&l) {
-                return false;
-            }
-        }
-        true
-    }
-
     /// Capitalizes the first letter of a word, leaving the rest unchanged
     pub(crate) fn capitalize_first_letter(word: &str) -> String {
         let mut chars = word.chars();
@@ -144,35 +130,6 @@ mod tests {
         assert_eq!(Whitenoise::capitalize_first_letter("5atoshi"), "5atoshi");
         assert_eq!(Whitenoise::capitalize_first_letter(""), "");
         assert_eq!(Whitenoise::capitalize_first_letter("ßtraße"), "SStraße");
-    }
-
-    #[test]
-    fn test_relayurl_dashset_eq() {
-        let relay1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
-        let relay2 = RelayUrl::parse("wss://relay2.example.com").unwrap();
-
-        let set1 = DashSet::new();
-        set1.insert(relay1.clone());
-        set1.insert(relay2.clone());
-
-        let set2 = DashSet::new();
-        set2.insert(relay1.clone());
-        set2.insert(relay2.clone());
-
-        let empty_set = DashSet::new();
-        let other_empty_set = DashSet::new();
-
-        // Sets with the same elements are equal
-        assert!(Whitenoise::relayurl_dashset_eq(set1.clone(), set2.clone()));
-        // Empty sets are equal
-        assert!(Whitenoise::relayurl_dashset_eq(
-            empty_set.clone(),
-            other_empty_set.clone()
-        ));
-
-        // Sets with different elements are not equal
-        assert!(!Whitenoise::relayurl_dashset_eq(set1, other_empty_set));
-        assert!(!Whitenoise::relayurl_dashset_eq(empty_set, set2));
     }
 
     #[test]

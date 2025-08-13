@@ -92,7 +92,14 @@ mod tests {
     ) -> Event {
         // Fetch a real key package event for the member from relays
         let key_pkg_event = whitenoise
-            .fetch_key_package_event_from(creator_account.key_package_relays.clone(), member_pubkey)
+            .nostr
+            .fetch_user_key_package(
+                member_pubkey,
+                creator_account
+                    .key_package_relays(&whitenoise)
+                    .await
+                    .unwrap(),
+            )
             .await
             .unwrap()
             .expect("member must have a published key package");

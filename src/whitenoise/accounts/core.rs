@@ -1,69 +1,21 @@
-use thiserror::Error;
-
-use crate::nostr_manager::NostrManagerError;
-use crate::whitenoise::error::{Result, WhitenoiseError};
+use crate::whitenoise::accounts::Account;
+use crate::whitenoise::accounts::AccountError;
 use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::User;
-use crate::whitenoise::Whitenoise;
+use crate::whitenoise::{Whitenoise, WhitenoiseError};
+use crate::whitenoise::error::Result;
+use crate::types::ImageType;
 use crate::RelayType;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::path::Path;
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use std::sync::Arc;
-use std::sync::Mutex;
-
-
-#[derive(Error, Debug)]
-pub enum AccountError {
-    #[error("Failed to parse public key: {0}")]
-    PublicKeyError(#[from] nostr_sdk::key::Error),
-
-    #[error("Failed to initialize Nostr manager: {0}")]
-    NostrManagerError(#[from] NostrManagerError),
-
-    #[error("Nostr MLS error: {0}")]
-    NostrMlsError(#[from] nostr_mls::Error),
-
-    #[error("Nostr MLS SQLite storage error: {0}")]
-    NostrMlsSqliteStorageError(#[from] nostr_mls_sqlite_storage::error::Error),
-
-    #[error("Nostr MLS not initialized")]
-    NostrMlsNotInitialized,
-
-    #[error("Whitenoise not initialized")]
-    WhitenoiseNotInitialized,
-}
-
-#[derive(Clone)]
-pub struct Account {
-    pub id: Option<i64>,
-    pub pubkey: PublicKey,
-    pub user_id: i64,
-    pub last_synced_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    #[doc(hidden)]
-    pub(crate) nostr_mls: Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>>,
-}
-
-impl std::fmt::Debug for Account {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Account")
-            .field("id", &self.id)
-            .field("pubkey", &self.pubkey)
-            .field("user_id", &self.user_id)
-            .field("last_synced_at", &self.last_synced_at)
-            .field("created_at", &self.created_at)
-            .field("updated_at", &self.updated_at)
-            .field("nostr_mls", &"<REDACTED>")
-            .finish()
-    }
-}
+use nostr_blossom::client::BlossomClient;
 
 impl Account {
-    pub(crate) async fn new(keys: Option<Keys>, data_dir: &Path) -> Result<(Account, Keys)> {
+    pub(crate) async fn new(keys: Option<Keys>) -> Result<(Account, Keys)> {
         tracing::debug!(target: "whitenoise::accounts::new", "Generating new keypair");
         let keys = keys.unwrap_or_else(Keys::generate);
         let whitenoise =
@@ -79,7 +31,6 @@ impl Account {
             last_synced_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            nostr_mls: Self::create_nostr_mls(keys.public_key, data_dir)?,
         };
 
         Ok((account, keys))
@@ -88,18 +39,18 @@ impl Account {
     pub(crate) fn create_nostr_mls(
         pubkey: PublicKey,
         data_dir: &Path,
-    ) -> core::result::Result<Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>>, AccountError> {
+    ) -> core::result::Result<NostrMls<NostrMlsSqliteStorage>, AccountError> {
         let mls_storage_dir = data_dir.join("mls").join(pubkey.to_hex());
         let storage = NostrMlsSqliteStorage::new(mls_storage_dir)?;
-        Ok(Arc::new(Mutex::new(NostrMls::new(storage))))
+        Ok(NostrMls::new(storage))
     }
 
-    pub(crate) fn load_nostr_group_ids(&self) -> core::result::Result<Vec<String>, AccountError> {
-        let groups;
-        {
-            let nostr_mls = self.nostr_mls.lock().unwrap();
-            groups = nostr_mls.get_groups()?;
-        }
+    pub(crate) fn load_nostr_group_ids(
+        &self,
+        whitenoise: &Whitenoise,
+    ) -> core::result::Result<Vec<String>, AccountError> {
+        let nostr_mls = Account::create_nostr_mls(self.pubkey, &whitenoise.config.data_dir)?;
+        let groups = nostr_mls.get_groups()?;
         Ok(groups
             .iter()
             .map(|g| hex::encode(g.nostr_group_id))
@@ -120,6 +71,47 @@ impl Account {
             .iter()
             .map(|url| RelayUrl::parse(url).unwrap())
             .collect()
+    }
+
+    pub(crate) async fn connect_relays(&self, whitenoise: &Whitenoise) -> Result<()> {
+        let mut relays = HashSet::new();
+        relays.extend(self.nip65_relays(whitenoise).await?);
+        relays.extend(self.inbox_relays(whitenoise).await?);
+        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+        for url in urls {
+            whitenoise.nostr.client.add_relay(url).await?;
+        }
+        whitenoise.nostr.client.connect().await;
+        Ok(())
+    }
+
+    pub(crate) async fn nip65_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+        let user = self.user(whitenoise).await?;
+        let relays = user.relays(RelayType::Nostr, whitenoise).await?;
+        Ok(relays)
+    }
+
+    pub(crate) async fn inbox_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+        let user = self.user(whitenoise).await?;
+        let relays = user.relays(RelayType::Inbox, whitenoise).await?;
+        Ok(relays)
+    }
+
+    pub(crate) async fn key_package_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+        let user = self.user(whitenoise).await?;
+        let relays = user.relays(RelayType::KeyPackage, whitenoise).await?;
+        Ok(relays)
+    }
+
+    pub(crate) async fn update_metadata(
+        &self,
+        metadata: &Metadata,
+        whitenoise: &Whitenoise,
+    ) -> Result<()> {
+        let mut user = self.user(whitenoise).await?;
+        user.metadata = metadata.clone();
+        user.save(whitenoise).await?;
+        Ok(())
     }
 }
 
@@ -170,29 +162,17 @@ impl Whitenoise {
             }
 
             // Add account relays to the client
-            let groups_and_relays = tokio::task::spawn_blocking({
-                // clone whatever you need into the closure…
-                let account = account.clone();
-                move || -> core::result::Result<_, nostr_mls::error::Error> {
-                    // this runs on a dedicated “blocking” thread,
-                    // so we can call blocking_lock() on the tokio::Mutex
-                    let nostr_mls = account.nostr_mls.lock().unwrap();
-
-                    let mut all_relays = Vec::new();
-                    let groups = nostr_mls.get_groups()?;
-                    for group in groups {
-                        let relays = nostr_mls.get_relays(&group.mls_group_id)?;
-                        all_relays.push(relays);
-                    }
-                    Ok(all_relays)
+            let nostr_mls =
+                Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+            let groups = nostr_mls.get_groups()?;
+            let mut relays_to_add = HashSet::new();
+            for group in groups {
+                let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                for relay in relays {
+                    relays_to_add.insert(relay);
                 }
-            })
-            .await
-            .map_err(WhitenoiseError::from)??;
-
-            for group_relays in groups_and_relays {
-                self.nostr.add_relays(group_relays).await?;
             }
+            self.nostr.add_relays(relays_to_add).await?;
         }
 
         tracing::info!(
@@ -308,7 +288,7 @@ impl Whitenoise {
     }
 
     async fn create_base_account_with_private_key(&self, keys: &Keys) -> Result<Account> {
-        let account = Account::new(Some(keys.clone()), &self.config.data_dir).await?;
+        let account = Account::new(Some(keys.clone())).await?;
 
         self.secrets_store.store_private_key(keys).map_err(|e| {
             tracing::error!(target: "whitenoise::setup_account", "Failed to store private key: {}", e);
@@ -321,7 +301,7 @@ impl Whitenoise {
     async fn persist_and_activate_account(&self, account: &Account) -> Result<()> {
         self.persist_account(account).await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Account saved to database");
-        self.connect_account_relays(account).await?;
+        account.connect_relays(&self).await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Relays connected");
         self.setup_subscriptions(account).await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Subscriptions setup");
@@ -443,16 +423,18 @@ impl Whitenoise {
     }
 
     pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
-        let group_ids = account.load_nostr_group_ids()?;
+        let group_ids = account.load_nostr_group_ids(&self)?;
         let nostr = self.nostr.clone();
         let database = self.database.clone();
         let account_pubkey = account.pubkey;
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account_pubkey)?;
-        let last_synced_timestamp = account.last_synced_at.clone()
-                .map(|dt| Timestamp::from(dt.timestamp() as u64))
-                .unwrap_or_else(|| Timestamp::from(0));
+        let last_synced_timestamp = account
+            .last_synced_at
+            .clone()
+            .map(|dt| Timestamp::from(dt.timestamp() as u64))
+            .unwrap_or_else(|| Timestamp::from(0));
 
         tokio::spawn(async move {
             tracing::debug!(
@@ -507,7 +489,8 @@ impl Whitenoise {
         let mut group_relays = HashSet::new();
         let groups: Vec<group_types::Group>;
         {
-            let nostr_mls = &*account.nostr_mls.lock().unwrap();
+            let nostr_mls =
+                Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
             groups = nostr_mls.get_groups()?;
             // Collect all relays from all groups into a single vector
             for group in &groups {
@@ -547,139 +530,93 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn encoded_key_package(
-        &self,
-        account: &Account,
-    ) -> Result<(String, [Tag; 4])> {
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
-        let key_package_relay_urls = account
-            .key_package_relays(&self)
-            .await?
-            .iter()
-            .map(|r| r.url.clone())
-            .collect::<Vec<RelayUrl>>();
-        let result = nostr_mls
-            .create_key_package_for_event(&account.pubkey, key_package_relay_urls)
-            .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
-
-        Ok(result)
+    pub async fn update_account_metadata(&self, account: &Account, metadata: &Metadata) -> Result<()> {
+        let mut user = account.user(&self).await?;
+        user.metadata = metadata.clone();
+        user.save(&self).await?;
+        Ok(())
     }
 
-    /// Publishes the MLS key package for the given account to its key package relays.
+    /// Uploads a profile picture to a Blossom server.
     ///
-    /// This method attempts to acquire the `nostr_mls` lock, generate a key package event,
-    /// and publish it to the account's key package relays. If successful, the key package
-    /// is published to Nostr; otherwise, onboarding status is updated accordingly.
+    /// This method performs the following steps:
+    /// 1. Creates a Blossom client for the specified server
+    /// 2. Retrieves the user's Nostr keys for authentication
+    /// 3. Reads the image file from the filesystem
+    /// 4. Uploads the image blob to the Blossom server with the appropriate content type
+    ///
+    /// The Blossom protocol provides content-addressable storage, ensuring the image
+    /// can be retrieved by its hash. This method only handles the upload process and
+    /// does not automatically update the user's metadata.
     ///
     /// # Arguments
     ///
-    /// * `account` - A reference to the `Account` whose key package will be published.
+    /// * `pubkey` - A reference to the `PublicKey` of the account uploading the profile picture
+    /// * `server` - The `Url` of the Blossom server to upload to
+    /// * `file_path` - `&str` pointing to the image file to be uploaded
+    /// * `image_type` - The `ImageType` enum specifying the image format (JPG, JPEG, PNG, GIF, or WebP)
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success.
+    /// Returns `Ok(String)` containing the full URL of the uploaded image
     ///
     /// # Errors
     ///
-    /// Returns a `WhitenoiseError` if the lock cannot be acquired, if the key package cannot be generated,
-    /// or if publishing to Nostr fails.
-    pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
-        // Extract key package data while holding the lock
-        let (encoded_key_package, tags) = self.encoded_key_package(account).await?;
-
-        let signer = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let key_package_event_builder =
-            EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package).tags(tags);
-
-        let result = self
-            .nostr
-            .publish_event_builder_with_signer(
-                key_package_event_builder,
-                account.key_package_relays(&self).await?,
-                signer,
-            )
-            .await?;
-
-        tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
-
-        Ok(())
-    }
-
-    /// Deletes the key package from the relays for the given account.
+    /// Returns a `WhitenoiseError` if:
+    /// * The account is not found or not logged in
+    /// * The user's Nostr keys cannot be retrieved from the secrets store
+    /// * The image file cannot be read from the filesystem
+    /// * The upload to the Blossom server fails (network error, authentication failure, etc.)
     ///
-    /// This method deletes the key package from the relays for the given account.
+    /// # Example
     ///
-    /// # Arguments
+    /// ```rust,ignore
+    /// use url::Url;
+    /// use crate::types::ImageType;
     ///
-    /// * `account` - A reference to the `Account` whose key package will be deleted.
-    /// * `event_id` - The `EventId` of the key package to delete.
-    /// * `key_package_relays` - A vector of `RelayUrl` specifying the relays to delete the key package from.
-    /// * `delete_mls_stored_keys` - A boolean indicating whether to delete the key package from MLS storage.
+    /// let server_url = Url::parse("http://localhost:3000").unwrap();
+    /// let image_path = "./profile.png";
     ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success.
-    pub(crate) async fn delete_key_package_from_relays_for_account(
+    /// let image_url = whitenoise.upload_profile_picture(
+    ///     &user_pubkey,
+    ///     server_url,
+    ///     image_path,
+    ///     ImageType::Png
+    /// ).await?;
+    /// ```
+    pub async fn upload_profile_picture(
         &self,
-        account: &Account,
-        event_id: &EventId,
-        delete_mls_stored_keys: bool,
-    ) -> Result<()> {
-        let key_package_filter = Filter::new()
-            .id(*event_id)
-            .kind(Kind::MlsKeyPackage)
-            .author(account.pubkey);
+        pubkey: PublicKey,
+        server: Url,
+        file_path: &str,
+        image_type: ImageType,
+    ) -> Result<String> {
+        let client = BlossomClient::new(server);
+        let keys = self.secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
+        let data = tokio::fs::read(file_path).await?;
 
-        let key_package_events = self
-            .nostr
-            .fetch_events_with_filter(key_package_filter)
-            .await?;
-        let signer = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let descriptor = client
+            .upload_blob(data, Some(image_type.content_type()), None, Some(&keys))
+            .await
+            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
 
-        if let Some(event) = key_package_events.first() {
-            if delete_mls_stored_keys {
-                let nostr_mls = &*account.nostr_mls.lock().unwrap();
-                let key_package = nostr_mls.parse_key_package(event)?;
-                nostr_mls.delete_key_package_from_storage(&key_package)?;
-            }
-
-            let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
-
-            self.nostr
-                .publish_event_builder_with_signer(
-                    builder,
-                    account.key_package_relays(&self).await?,
-                    signer,
-                )
-                .await?;
-        } else {
-            tracing::warn!(target: "whitenoise::delete_key_package_from_relays_for_account", "Key package event not found for account: {}", account.pubkey.to_hex());
-            return Ok(());
-        }
-
-        Ok(())
+        Ok(descriptor.url.to_string())
     }
 }
 
 #[cfg(test)]
 pub mod test_utils {
-    use std::{path::PathBuf, sync::Arc};
-
     use nostr::key::PublicKey;
     use nostr_mls::NostrMls;
     use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
-    use std::sync::Mutex;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     pub fn data_dir() -> PathBuf {
         TempDir::new().unwrap().path().to_path_buf()
     }
 
-    pub fn create_nostr_mls(pubkey: PublicKey) -> Arc<Mutex<NostrMls<NostrMlsSqliteStorage>>> {
+    pub fn create_nostr_mls(pubkey: PublicKey) -> NostrMls<NostrMlsSqliteStorage> {
         super::Account::create_nostr_mls(pubkey, &data_dir()).unwrap()
     }
 }
@@ -688,6 +625,7 @@ pub mod test_utils {
 mod tests {
     use super::*;
     use crate::whitenoise::test_utils::*;
+    use crate::whitenoise::accounts::Account;
 
     #[tokio::test]
     #[ignore]

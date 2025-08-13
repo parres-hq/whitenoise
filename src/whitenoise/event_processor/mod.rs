@@ -13,8 +13,6 @@ impl Whitenoise {
     // EVENT PROCESSING
     // ============================================================================
 
-    // Private Helper Methods =====================================================
-
     /// Start the event processing loop in a background task
     pub(crate) async fn start_event_processing_loop(
         whitenoise: &'static Whitenoise,
@@ -239,16 +237,18 @@ impl Whitenoise {
         let target_pubkey = self
             .extract_pubkey_from_subscription_id(&sub_id)
             .await
-            .map_err(|_| WhitenoiseError::InvalidEvent(format!(
-                "Cannot extract pubkey from subscription ID: {}",
-                sub_id
-            )))?;
+            .map_err(|_| {
+                WhitenoiseError::InvalidEvent(format!(
+                    "Cannot extract pubkey from subscription ID: {}",
+                    sub_id
+                ))
+            })?;
 
-            tracing::debug!(
-            target: "whitenoise::event_processor::process_mls_message",
-            "Processing MLS message for account: {}",
-            target_pubkey.to_hex()
-            );
+        tracing::debug!(
+        target: "whitenoise::event_processor::process_mls_message",
+        "Processing MLS message for account: {}",
+        target_pubkey.to_hex()
+        );
 
         Account::find_by_pubkey(&target_pubkey, &self).await
     }

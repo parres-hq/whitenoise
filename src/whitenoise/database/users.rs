@@ -89,7 +89,31 @@ impl Into<User> for UserRow {
 }
 
 impl User {
-    pub(crate) async fn find_by_pubkey(pubkey: &PublicKey, whitenoise: &Whitenoise) -> Result<User, WhitenoiseError> {
+    pub(crate) async fn find_or_create_by_pubkey(
+        pubkey: &PublicKey,
+        whitenoise: &Whitenoise,
+    ) -> Result<User, WhitenoiseError> {
+        match User::find_by_pubkey(pubkey, whitenoise).await {
+            Ok(user) => Ok(user),
+            Err(WhitenoiseError::UserNotFound) => {
+                let user = User {
+                    id: None,
+                    pubkey: pubkey.clone(),
+                    metadata: Metadata::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                };
+                user.save(whitenoise).await?;
+                Ok(user)
+            },
+            _ => Err(WhitenoiseError::Other(anyhow::anyhow!("Unexpected error"))),
+        }
+    }
+
+    pub(crate) async fn find_by_pubkey(
+        pubkey: &PublicKey,
+        whitenoise: &Whitenoise,
+    ) -> Result<User, WhitenoiseError> {
         let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
             .fetch_one(&whitenoise.database.pool)
@@ -102,7 +126,7 @@ impl User {
     pub(crate) async fn relays(
         &self,
         relay_type: RelayType,
-        whitenoise: &Whitenoise
+        whitenoise: &Whitenoise,
     ) -> Result<Vec<Relay>, WhitenoiseError> {
         let relay_type_str = String::from(relay_type);
 
@@ -132,8 +156,13 @@ impl User {
         Ok(relays)
     }
 
-    pub async fn save(&self, whitenoise: &Whitenoise) -> Result<User, WhitenoiseError> {
-        let mut tx = whitenoise.database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
+    pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<User, WhitenoiseError> {
+        let mut tx = whitenoise
+            .database
+            .pool
+            .begin()
+            .await
+            .map_err(DatabaseError::Sqlx)?;
 
         let result = sqlx::query(
             "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
@@ -149,13 +178,11 @@ impl User {
 
         let inserted_id = result.last_insert_rowid();
 
-        let inserted_user = sqlx::query_as::<_, UserRow>(
-            "SELECT * FROM users WHERE id = ?",
-        )
-        .bind(inserted_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(DatabaseError::Sqlx)?;
+        let inserted_user = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE id = ?")
+            .bind(inserted_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
 
         tx.commit().await.map_err(DatabaseError::Sqlx)?;
 
@@ -718,7 +745,9 @@ mod tests {
         assert!(save_result.is_ok());
 
         // Load the user to get the actual database ID
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         // Create test relays
         let relay1_url = nostr_sdk::RelayUrl::parse("wss://relay1.example.com").unwrap();
@@ -837,7 +866,9 @@ mod tests {
 
         // Save the user first
         user.save(&whitenoise).await.unwrap();
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         // Test loading relays when none exist
         let result = loaded_user
@@ -868,7 +899,9 @@ mod tests {
         };
 
         user.save(&whitenoise).await.unwrap();
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         // Create and save a test relay
         let relay_url = nostr_sdk::RelayUrl::parse("wss://multi.example.com").unwrap();
@@ -897,10 +930,7 @@ mod tests {
 
         // Test each relay type returns the same relay
         for relay_type in [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage] {
-            let relays = loaded_user
-                .relays(relay_type, &whitenoise)
-                .await
-                .unwrap();
+            let relays = loaded_user.relays(relay_type, &whitenoise).await.unwrap();
 
             assert_eq!(relays.len(), 1);
             assert_eq!(relays[0].url, relay_url);
@@ -937,8 +967,12 @@ mod tests {
         user1.save(&whitenoise).await.unwrap();
         user2.save(&whitenoise).await.unwrap();
 
-        let loaded_user1 = User::find_by_pubkey(&user1_pubkey, &whitenoise).await.unwrap();
-        let loaded_user2 = User::find_by_pubkey(&user2_pubkey, &whitenoise).await.unwrap();
+        let loaded_user1 = User::find_by_pubkey(&user1_pubkey, &whitenoise)
+            .await
+            .unwrap();
+        let loaded_user2 = User::find_by_pubkey(&user2_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         // Create test relays
         let relay1_url = nostr_sdk::RelayUrl::parse("wss://user1.example.com").unwrap();
@@ -1022,7 +1056,9 @@ mod tests {
         };
 
         user.save(&whitenoise).await.unwrap();
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         // Create test relay with specific timestamps
         let relay_url = nostr_sdk::RelayUrl::parse("wss://properties.example.com").unwrap();

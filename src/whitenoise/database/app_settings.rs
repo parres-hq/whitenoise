@@ -1,8 +1,8 @@
 use crate::whitenoise::app_settings::{AppSettings, ThemeMode};
-use std::str::FromStr;
 use crate::whitenoise::error::WhitenoiseError;
 use crate::Whitenoise;
 use chrono::{DateTime, Utc};
+use std::str::FromStr;
 
 #[derive(Debug)]
 struct AppSettingsRow {
@@ -25,23 +25,25 @@ where
         let created_at_i64: i64 = row.try_get("created_at")?;
         let updated_at_i64: i64 = row.try_get("updated_at")?;
 
-        let created_at = DateTime::from_timestamp_millis(created_at_i64)
-            .ok_or_else(|| sqlx::Error::ColumnDecode {
+        let created_at = DateTime::from_timestamp_millis(created_at_i64).ok_or_else(|| {
+            sqlx::Error::ColumnDecode {
                 index: "created_at".to_string(),
                 source: Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Invalid timestamp",
                 )),
-            })?;
+            }
+        })?;
 
-        let updated_at = DateTime::from_timestamp_millis(updated_at_i64)
-            .ok_or_else(|| sqlx::Error::ColumnDecode {
+        let updated_at = DateTime::from_timestamp_millis(updated_at_i64).ok_or_else(|| {
+            sqlx::Error::ColumnDecode {
                 index: "updated_at".to_string(),
                 source: Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Invalid timestamp",
                 )),
-            })?;
+            }
+        })?;
 
         Ok(AppSettingsRow {
             id,
@@ -69,25 +71,20 @@ impl AppSettingsRow {
 
 impl AppSettings {
     /// Loads the app settings from the database
-    pub async fn load_app_settings(&self, whitenoise: Option<&Whitenoise>) -> Result<AppSettings, WhitenoiseError> {
-        let whitenoise = match whitenoise {
-            Some(whitenoise) => whitenoise,
-            None => Whitenoise::get_instance()?,
-        };
-        let settings_row = sqlx::query_as::<_, AppSettingsRow>("SELECT * FROM app_settings WHERE id = 1")
-            .fetch_one(&whitenoise.database.pool)
-            .await
-            .map_err(|_| WhitenoiseError::Configuration("App settings not found".to_string()))?;
+    pub(crate) async fn load(whitenoise: &Whitenoise) -> Result<AppSettings, WhitenoiseError> {
+        let settings_row =
+            sqlx::query_as::<_, AppSettingsRow>("SELECT * FROM app_settings WHERE id = 1")
+                .fetch_one(&whitenoise.database.pool)
+                .await
+                .map_err(|_| {
+                    WhitenoiseError::Configuration("App settings not found".to_string())
+                })?;
 
         settings_row.into_app_settings()
     }
 
     /// Saves or updates the app settings in the database
-    pub async fn save_app_settings(&self, settings: &AppSettings, whitenoise: Option<&Whitenoise>) -> Result<(), WhitenoiseError> {
-        let whitenoise = match whitenoise {
-            Some(whitenoise) => whitenoise,
-            None => Whitenoise::get_instance()?,
-        };
+    pub(crate) async fn save(settings: &AppSettings, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
         sqlx::query(
             "INSERT OR REPLACE INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)"
         )
@@ -103,11 +100,7 @@ impl AppSettings {
     }
 
     /// Updates just the theme mode in the app settings
-    pub async fn update_theme_mode(&self, theme_mode: ThemeMode, whitenoise: Option<&Whitenoise>) -> Result<(), WhitenoiseError> {
-        let whitenoise = match whitenoise {
-            Some(whitenoise) => whitenoise,
-            None => Whitenoise::get_instance()?,
-        };
+    pub(crate) async fn update_theme_mode(theme_mode: ThemeMode, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
         sqlx::query("UPDATE app_settings SET theme_mode = ?, updated_at = ? WHERE id = 1")
             .bind(theme_mode.to_string())
             .bind(Utc::now().timestamp_millis())
@@ -176,8 +169,14 @@ mod tests {
 
         assert_eq!(app_settings_row.id, test_id);
         assert_eq!(app_settings_row.theme_mode, test_theme_mode);
-        assert_eq!(app_settings_row.created_at.timestamp_millis(), test_created_at);
-        assert_eq!(app_settings_row.updated_at.timestamp_millis(), test_updated_at);
+        assert_eq!(
+            app_settings_row.created_at.timestamp_millis(),
+            test_created_at
+        );
+        assert_eq!(
+            app_settings_row.updated_at.timestamp_millis(),
+            test_updated_at
+        );
     }
 
     #[tokio::test]
@@ -193,7 +192,10 @@ mod tests {
 
         for (theme_str, expected_theme) in test_cases {
             // Insert test data
-            sqlx::query("DELETE FROM app_settings").execute(&pool).await.unwrap();
+            sqlx::query("DELETE FROM app_settings")
+                .execute(&pool)
+                .await
+                .unwrap();
 
             sqlx::query(
                 "INSERT INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
@@ -306,11 +308,7 @@ mod tests {
 
     #[test]
     fn test_theme_mode_roundtrip() {
-        let test_cases = vec![
-            ThemeMode::Light,
-            ThemeMode::Dark,
-            ThemeMode::System,
-        ];
+        let test_cases = vec![ThemeMode::Light, ThemeMode::Dark, ThemeMode::System];
 
         for theme in test_cases {
             let theme_str = theme.to_string();

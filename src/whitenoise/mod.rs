@@ -1,9 +1,9 @@
 use anyhow::Context;
 use nostr_mls::prelude::*;
-use tokio::sync::mpsc::{self, Sender};
-use tokio::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::OnceCell;
 
 pub mod accounts;
 pub mod app_settings;
@@ -410,7 +410,6 @@ impl Whitenoise {
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
-    use crate::whitenoise::accounts::test_utils::*;
     use tempfile::TempDir;
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
@@ -425,7 +424,7 @@ pub mod test_utils {
     }
 
     pub(crate) async fn create_test_account() -> (Account, Keys) {
-        let (account, keys) = Account::new(None, &data_dir()).await.unwrap();
+        let (account, keys) = Account::new(None).await.unwrap();
         (account, keys)
     }
 
@@ -608,7 +607,6 @@ pub mod test_utils {
 
     pub(crate) async fn setup_multiple_test_accounts(
         whitenoise: &Whitenoise,
-        creator_account: &Account,
         count: usize,
     ) -> Vec<(Account, Keys)> {
         let mut accounts = Vec::new();
@@ -621,14 +619,6 @@ pub mod test_utils {
                 .await
                 .unwrap();
             accounts.push((account.clone(), keys.clone()));
-            whitenoise
-                .add_contact(creator_account, account.pubkey)
-                .await
-                .unwrap();
-            whitenoise
-                .load_contact(&keys.public_key, creator_account)
-                .await
-                .unwrap();
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
             let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
@@ -637,7 +627,7 @@ pub mod test_utils {
                 .nostr
                 .publish_event_builder_with_signer(
                     key_package_event_builder,
-                    account.key_package_relays.clone(),
+                    account.key_package_relays(&whitenoise).await.unwrap(),
                     keys,
                 )
                 .await
@@ -722,7 +712,7 @@ mod tests {
         #[tokio::test]
         async fn test_whitenoise_initialization() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            assert!(whitenoise.load_accounts().await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise).await.unwrap().is_empty());
 
             // Verify directories were created
             assert!(whitenoise.config.data_dir.exists());
@@ -749,8 +739,8 @@ mod tests {
             // Both should have valid configurations (they'll be different temp dirs, which is fine)
             assert!(whitenoise1.config.data_dir.exists());
             assert!(whitenoise2.config.data_dir.exists());
-            assert!(whitenoise1.load_accounts().await.unwrap().is_empty());
-            assert!(whitenoise2.load_accounts().await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise1).await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise2).await.unwrap().is_empty());
         }
     }
 
@@ -777,7 +767,7 @@ mod tests {
             assert!(result.is_ok());
 
             // Verify cleanup
-            assert!(whitenoise.load_accounts().await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise).await.unwrap().is_empty());
             assert!(!test_log_file.exists());
 
             // MLS directory should be recreated as empty
@@ -792,21 +782,6 @@ mod tests {
     // For complete isolation, implement the trait-based mocking described above
     mod api_tests {
         use super::*;
-
-        #[tokio::test]
-        async fn test_fetch_methods_return_types() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let account = whitenoise.create_identity().await.unwrap();
-
-            let relays = account.nip65_relays.clone();
-
-            // Test all load methods return expected types (though they may be empty in test env)
-            let metadata = whitenoise.fetch_metadata_from(relays, account.pubkey).await;
-            assert!(metadata.is_ok());
-
-            let contacts = whitenoise.fetch_contacts(&account.pubkey).await;
-            assert!(contacts.is_ok());
-        }
 
         #[tokio::test]
         async fn test_message_aggregator_access() {

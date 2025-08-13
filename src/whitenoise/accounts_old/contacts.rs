@@ -97,69 +97,7 @@ impl Contact {
 }
 
 impl Whitenoise {
-    // ============================================================================
-    // CONTACT MANAGEMENT
-    // ============================================================================
 
-    /// Loads a user's contact list from the Nostr network.
-    ///
-    /// This method retrieves the user's contact list, which contains the public keys
-    /// of other users they follow. For each contact, it also includes their metadata
-    /// if available.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - The `PublicKey` of the user whose contact list should be fetched.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(HashMap<PublicKey, Option<Metadata>>)` where the keys are the public keys
-    /// of contacts and the values are their associated metadata (if available).
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if the contact list query fails.
-    pub async fn fetch_contacts(
-        &self,
-        pubkey: &PublicKey,
-    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        let account = self.get_account(pubkey).await?;
-        let contacts = self.nostr.fetch_user_contact_list(&account).await?;
-        Ok(contacts)
-    }
-
-    /// Queries a user's contact list from local storage or cache.
-    ///
-    /// This method retrieves the user's contact list from local storage or cache first,
-    /// falling back to the network if necessary. This is more efficient than `fetch_contacts`
-    /// when the contact list may already be available locally. For each contact, it also
-    /// includes their metadata if available.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - The `PublicKey` of the user whose contact list should be queried.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(HashMap<PublicKey, Option<Metadata>>)` where the keys are the public keys
-    /// of contacts and the values are their associated metadata (if available).
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if:
-    /// * The account is not logged in (`AccountNotFound`)
-    /// * The contact list query fails
-    pub async fn query_contacts(
-        &self,
-        pubkey: PublicKey,
-    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        if !self.logged_in(&pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        let contacts = self.nostr.query_user_contact_list(pubkey).await?;
-        Ok(contacts)
-    }
 
     /// Adds a contact to the user's contact list and publishes the updated list to Nostr.
     ///

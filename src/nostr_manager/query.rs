@@ -1,14 +1,13 @@
 //! Query functions for NostrManager
 //! This handles fetching events from the database cache.
 
+use crate::whitenoise::relays::Relay;
 use crate::{
     nostr_manager::{NostrManager, Result},
-    Account, RelayType,
+    RelayType,
 };
-use dashmap::DashSet;
 use nostr_sdk::prelude::*;
-use std::collections::{HashMap, HashSet};
-use crate::whitenoise::relays::Relay;
+use std::collections::HashSet;
 
 impl NostrManager {
     pub(crate) async fn query_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
@@ -17,13 +16,14 @@ impl NostrManager {
 
     pub(crate) async fn fetch_metadata_from(
         &self,
-        nip65_relays: DashSet<RelayUrl>,
+        nip65_relays: Vec<Relay>,
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+        let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let events: Events = self
             .client
-            .fetch_events_from(nip65_relays, filter, self.timeout)
+            .fetch_events_from(urls, filter, self.timeout)
             .await?;
         match events.first() {
             Some(event) => Ok(Some(Metadata::try_from(event)?)),
@@ -35,116 +35,23 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        nip65_relays: DashSet<RelayUrl>,
-    ) -> Result<DashSet<RelayUrl>> {
+        nip65_relays: Vec<Relay>,
+    ) -> Result<HashSet<RelayUrl>> {
         let filter = Filter::new()
             .author(pubkey)
             .kind(relay_type.into())
             .limit(1);
+        let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let relay_events = self
             .client
-            .fetch_events_from(nip65_relays, filter.clone(), self.timeout)
+            .fetch_events_from(urls, filter.clone(), self.timeout)
             .await?;
         tracing::debug!("Fetched relay events {:?}", relay_events);
 
         match relay_events.first() {
-            None => Ok(DashSet::new()),
+            None => Ok(HashSet::new()),
             Some(event) => Ok(Self::relay_urls_from_event(event.clone())),
         }
-    }
-
-    pub(crate) async fn query_user_contact_list(
-        &self,
-        pubkey: PublicKey,
-    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        let filter = Filter::new()
-            .kind(Kind::ContactList)
-            .author(pubkey)
-            .limit(1);
-        let events = self.client.database().query(filter).await?;
-
-        let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
-            event
-                .tags
-                .iter()
-                .filter(|tag| tag.kind() == TagKind::p())
-                .filter_map(|tag| tag.content())
-                .filter_map(|s| PublicKey::from_hex(s).ok())
-                .collect()
-        } else {
-            HashSet::new()
-        };
-
-        if contacts_pubkeys.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let mut contacts_metadata = HashMap::new();
-        let meta_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(contacts_pubkeys.clone());
-        let meta_events = self.client.database().query(meta_filter).await?;
-
-        for event in meta_events {
-            contacts_metadata.insert(event.pubkey, Metadata::from_json(&event.content).ok());
-            contacts_pubkeys.remove(&event.pubkey);
-        }
-
-        // Adding contacts whose metadata is missing
-        for contact in contacts_pubkeys {
-            contacts_metadata.insert(contact, None);
-        }
-
-        Ok(contacts_metadata)
-    }
-
-    pub(crate) async fn fetch_user_contact_list(
-        &self,
-        account: &Account,
-    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        let filter = Filter::new()
-            .kind(Kind::ContactList)
-            .author(account.pubkey)
-            .limit(1);
-
-        let events = self
-            .client
-            .fetch_events_from(urls, filter, self.timeout)
-            .await?;
-
-        let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
-            event
-                .tags
-                .iter()
-                .filter(|tag| tag.kind() == TagKind::p())
-                .filter_map(|tag| tag.content())
-                .filter_map(|s| PublicKey::from_hex(s).ok())
-                .collect()
-        } else {
-            HashSet::new()
-        };
-
-        if contacts_pubkeys.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let mut contacts_metadata = HashMap::new();
-        let meta_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(contacts_pubkeys.clone());
-        let meta_events = self.client.fetch_events(meta_filter, self.timeout).await?;
-
-        for event in meta_events {
-            contacts_metadata.insert(event.pubkey, Metadata::from_json(&event.content).ok());
-            contacts_pubkeys.remove(&event.pubkey);
-        }
-
-        // Adding contacts whose metadata is missing
-        for contact in contacts_pubkeys {
-            contacts_metadata.insert(contact, None);
-        }
-
-        Ok(contacts_metadata)
     }
 
     pub(crate) async fn fetch_user_key_package(

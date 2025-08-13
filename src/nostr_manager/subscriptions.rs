@@ -137,8 +137,6 @@ impl NostrManager {
             return Ok(());
         }
 
-
-
         // Ensure we're connected to all group relays before subscribing
         self.ensure_relays_connected(group_relays.clone()).await?;
 

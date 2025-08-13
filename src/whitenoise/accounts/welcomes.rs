@@ -1,6 +1,10 @@
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
+use crate::whitenoise::accounts::Account;
+use crate::whitenoise::relays::Relay;
 use nostr_mls::prelude::*;
+use std::collections::HashSet;
+
 
 impl Whitenoise {
     /// Fetches a specific welcome invitation by its event ID.
@@ -46,9 +50,8 @@ impl Whitenoise {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.get_account(pubkey).await?;
-
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
+        let account = Account::find_by_pubkey(pubkey, self).await?;
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
         let welcome = nostr_mls
             .get_welcome(&welcome_event_id)?
             .ok_or(WhitenoiseError::WelcomeNotFound)?;
@@ -90,9 +93,9 @@ impl Whitenoise {
     /// # }
     /// ```
     pub async fn fetch_welcomes(&self, pubkey: &PublicKey) -> Result<Vec<welcome_types::Welcome>> {
-        let account = self.get_account(pubkey).await?;
+        let account = Account::find_by_pubkey(pubkey, self).await?;
 
-        let nostr_mls = account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
         let welcomes = nostr_mls.get_pending_welcomes()?;
         Ok(welcomes)
     }
@@ -138,12 +141,12 @@ impl Whitenoise {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.get_account(pubkey).await?;
+        let account = Account::find_by_pubkey(pubkey, self).await?;
         let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
 
-        let result = tokio::task::spawn_blocking(move || {
-            let nostr_mls = account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
 
+        let result = tokio::task::spawn_blocking(move || {
             let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
             if let Some(welcome) = welcome {
                 nostr_mls.accept_welcome(&welcome)?;
@@ -173,10 +176,16 @@ impl Whitenoise {
 
         let (group_ids, group_relays) = result?;
 
+        let mut relays = HashSet::new();
+        for relay in group_relays {
+            let db_relay = Relay::find_by_url(&relay, self).await?;
+            relays.insert(db_relay);
+        }
+
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 *pubkey,
-                group_relays.into_iter().collect(),
+                relays.into_iter().collect(),
                 group_ids,
                 keys,
             )
@@ -228,9 +237,9 @@ impl Whitenoise {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
-        let account = self.get_account(pubkey).await?;
+        let account = Account::find_by_pubkey(pubkey, self).await?;
 
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
         let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
         if let Some(welcome) = welcome {
             nostr_mls.decline_welcome(&welcome)?;
@@ -254,7 +263,7 @@ mod tests {
         let (creator_account, _creator_keys) = setup_login_account(whitenoise).await;
 
         // Setup member accounts
-        let member_accounts = setup_multiple_test_accounts(whitenoise, &creator_account, 2).await;
+        let member_accounts = setup_multiple_test_accounts(whitenoise, 2).await;
         let member_pubkeys: Vec<PublicKey> =
             member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
 

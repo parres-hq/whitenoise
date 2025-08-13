@@ -5,9 +5,6 @@ use crate::whitenoise::users::User;
 use crate::{Whitenoise, WhitenoiseError};
 use chrono::{DateTime, Utc};
 use nostr_sdk::PublicKey;
-use std::path::Path;
-use nostr_sdk::Metadata;
-use crate::whitenoise::relays::{Relay, RelayType};
 use sqlx::Row;
 
 #[allow(dead_code)]
@@ -92,9 +89,7 @@ where
 
 impl AccountRow {
     /// Converts an AccountRow to an Account by creating the required NostrMls instance.
-    pub(crate) fn into_account(self, data_dir: &Path) -> Result<Account, WhitenoiseError> {
-        let nostr_mls = Account::create_nostr_mls(self.pubkey, data_dir)?;
-
+    pub(crate) fn into_account(self) -> Result<Account, WhitenoiseError> {
         Ok(Account {
             id: Some(self.id),
             pubkey: self.pubkey,
@@ -102,7 +97,6 @@ impl AccountRow {
             last_synced_at: self.last_synced_at,
             created_at: self.created_at,
             updated_at: self.updated_at,
-            nostr_mls,
         })
     }
 }
@@ -114,12 +108,15 @@ impl Account {
             .await
             .map_err(|_| WhitenoiseError::AccountNotFound)?;
 
-        account_rows.into_iter().map(|row| row.into_account(&whitenoise.config.data_dir)).collect::<Result<Vec<Account>, WhitenoiseError>>()
+        account_rows
+            .into_iter()
+            .map(|row| row.into_account())
+            .collect::<Result<Vec<Account>, WhitenoiseError>>()
     }
 
     pub(crate) async fn find_by_pubkey(
         pubkey: &PublicKey,
-        whitenoise: &Whitenoise
+        whitenoise: &Whitenoise,
     ) -> Result<Account, WhitenoiseError> {
         let account_row =
             sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
@@ -135,7 +132,6 @@ impl Account {
             last_synced_at: account_row.last_synced_at,
             created_at: account_row.created_at,
             updated_at: account_row.updated_at,
-            nostr_mls: Account::create_nostr_mls(account_row.pubkey, &whitenoise.config.data_dir)?,
         })
     }
 
@@ -151,7 +147,7 @@ impl Account {
     pub(crate) async fn follows(
         &self,
         account: &Account,
-        whitenoise: &Whitenoise
+        whitenoise: &Whitenoise,
     ) -> Result<Vec<User>, WhitenoiseError> {
         let user_rows = sqlx::query_as::<_, UserRow>(
             "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at
@@ -178,41 +174,26 @@ impl Account {
         Ok(users)
     }
 
-    pub(crate) async fn nip65_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>, WhitenoiseError> {
-        let user = self.user(whitenoise).await?;
-        let relays = user.relays(RelayType::Nostr, whitenoise).await?;
-        Ok(relays)
-    }
-
-    pub(crate) async fn inbox_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>, WhitenoiseError> {
-        let user = self.user(whitenoise).await?;
-        let relays = user.relays(RelayType::Inbox, whitenoise).await?;
-        Ok(relays)
-    }
-
-    pub(crate) async fn key_package_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>, WhitenoiseError> {
-        let user = self.user(whitenoise).await?;
-        let relays = user.relays(RelayType::KeyPackage, whitenoise).await?;
-        Ok(relays)
-    }
-
-    pub(crate) async fn update_metadata(&self, metadata: &Metadata, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
-        let mut user = self.user(whitenoise).await?;
-        user.metadata = metadata.clone();
-        user.save(whitenoise).await?;
-        Ok(())
-    }
-
-    pub(crate) async fn is_following_user(&self, user: &User, whitenoise: &Whitenoise) -> Result<bool, WhitenoiseError> {
-        let result = sqlx::query("SELECT COUNT(*) FROM account_follows WHERE account_id = ? AND user_id = ?")
-            .bind(self.id)
-            .bind(user.id)
-            .fetch_one(&whitenoise.database.pool)
-            .await?;
+    pub(crate) async fn is_following_user(
+        &self,
+        user: &User,
+        whitenoise: &Whitenoise,
+    ) -> Result<bool, WhitenoiseError> {
+        let result = sqlx::query(
+            "SELECT COUNT(*) FROM account_follows WHERE account_id = ? AND user_id = ?",
+        )
+        .bind(self.id)
+        .bind(user.id)
+        .fetch_one(&whitenoise.database.pool)
+        .await?;
         Ok(result.get::<i64, _>(0) > 0)
     }
 
-    pub(crate) async fn follow_user(&self, user: &User, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn follow_user(
+        &self,
+        user: &User,
+        whitenoise: &Whitenoise,
+    ) -> Result<(), WhitenoiseError> {
         sqlx::query("INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
             .bind(self.id)
             .bind(user.id)
@@ -224,7 +205,11 @@ impl Account {
         Ok(())
     }
 
-    pub(crate) async fn unfollow_user(&self, user: &User, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn unfollow_user(
+        &self,
+        user: &User,
+        whitenoise: &Whitenoise,
+    ) -> Result<(), WhitenoiseError> {
         sqlx::query("DELETE FROM account_follows WHERE account_id = ? AND user_id = ?")
             .bind(self.id)
             .bind(user.id)
@@ -260,7 +245,6 @@ impl Account {
             Ok(())
         }
     }
-
 }
 
 #[cfg(test)]
@@ -453,8 +437,6 @@ mod tests {
         }
     }
 
-
-
     #[tokio::test]
     async fn test_account_row_from_row_invalid_timestamps() {
         let pool = setup_test_db().await;
@@ -579,7 +561,6 @@ mod tests {
             last_synced_at: test_last_synced,
             created_at: test_created_at,
             updated_at: test_updated_at,
-            nostr_mls: Account::create_nostr_mls(test_pubkey, &whitenoise.config.data_dir).unwrap(),
         };
 
         // Test save_account
@@ -622,7 +603,6 @@ mod tests {
             last_synced_at: None, // Test with None
             created_at: test_created_at,
             updated_at: test_updated_at,
-            nostr_mls: Account::create_nostr_mls(test_pubkey, &whitenoise.config.data_dir).unwrap(),
         };
 
         let result = account.save(&whitenoise).await;
@@ -682,7 +662,6 @@ mod tests {
             last_synced_at: test_last_synced,
             created_at: test_created_at,
             updated_at: test_updated_at,
-            nostr_mls: Account::create_nostr_mls(test_pubkey, &whitenoise.config.data_dir).unwrap(),
         };
 
         // Save the account
@@ -734,8 +713,6 @@ mod tests {
             last_synced_at: None,
             created_at: test_timestamp,
             updated_at: test_timestamp,
-            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
-                .unwrap(),
         };
 
         // Save the account first
@@ -776,10 +753,14 @@ mod tests {
 
         // Now manually insert the account_follows relationships
         // First we need to get the actual account ID and user IDs from the database
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise).await.unwrap();
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         for (user_pubkey, _) in &test_users {
-            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise).await.unwrap();
+            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise)
+                .await
+                .unwrap();
 
             // Insert into account_follows table
             sqlx::query(
@@ -795,7 +776,10 @@ mod tests {
         }
 
         // Test follows
-        let followers = saved_account.follows(&saved_account, &whitenoise).await.unwrap();
+        let followers = saved_account
+            .follows(&saved_account, &whitenoise)
+            .await
+            .unwrap();
 
         // Verify we got all followers
         assert_eq!(followers.len(), 3);
@@ -837,16 +821,19 @@ mod tests {
             last_synced_at: None,
             created_at: test_timestamp,
             updated_at: test_timestamp,
-            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
-                .unwrap(),
         };
 
         // Save the account
         account.save(&whitenoise).await.unwrap();
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise).await.unwrap();
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         // Test follows with no followers
-        let followers = saved_account.follows(&saved_account, &whitenoise).await.unwrap();
+        let followers = saved_account
+            .follows(&saved_account, &whitenoise)
+            .await
+            .unwrap();
 
         // Verify empty result
         assert_eq!(followers.len(), 0);
@@ -871,8 +858,6 @@ mod tests {
             last_synced_at: None,
             created_at: test_timestamp,
             updated_at: test_timestamp,
-            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
-                .unwrap(),
         };
 
         // Save the account
@@ -897,8 +882,12 @@ mod tests {
         user.save(&whitenoise).await.unwrap();
 
         // Get the saved account and user with their database IDs
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise).await.unwrap();
-        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise).await.unwrap();
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+            .await
+            .unwrap();
+        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         // Insert the follower relationship
         sqlx::query(
@@ -913,7 +902,10 @@ mod tests {
         .unwrap();
 
         // Test follows
-        let followers = saved_account.follows(&saved_account, &whitenoise).await.unwrap();
+        let followers = saved_account
+            .follows(&saved_account, &whitenoise)
+            .await
+            .unwrap();
 
         // Verify single follower
         assert_eq!(followers.len(), 1);
@@ -943,8 +935,6 @@ mod tests {
             last_synced_at: None,
             created_at: test_timestamp,
             updated_at: test_timestamp,
-            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
-                .unwrap(),
         };
 
         account.save(&whitenoise).await.unwrap();
@@ -971,8 +961,12 @@ mod tests {
         user.save(&whitenoise).await.unwrap();
 
         // Create the follower relationship
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise).await.unwrap();
-        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise).await.unwrap();
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+            .await
+            .unwrap();
+        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise)
+            .await
+            .unwrap();
 
         sqlx::query(
             "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
@@ -986,7 +980,10 @@ mod tests {
         .unwrap();
 
         // Test follows
-        let followers = saved_account.follows(&saved_account, &whitenoise).await.unwrap();
+        let followers = saved_account
+            .follows(&saved_account, &whitenoise)
+            .await
+            .unwrap();
 
         // Verify complex metadata is preserved
         assert_eq!(followers.len(), 1);
@@ -1015,11 +1012,6 @@ mod tests {
             last_synced_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
-            nostr_mls: Account::create_nostr_mls(
-                nostr_sdk::Keys::generate().public_key(),
-                &whitenoise.config.data_dir,
-            )
-            .unwrap(),
         };
 
         // Test follows with non-existent account
@@ -1049,8 +1041,6 @@ mod tests {
             last_synced_at: None,
             created_at: test_timestamp,
             updated_at: test_timestamp,
-            nostr_mls: Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)
-                .unwrap(),
         };
 
         account.save(&whitenoise).await.unwrap();
@@ -1076,9 +1066,13 @@ mod tests {
         }
 
         // Create follower relationships
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise).await.unwrap();
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+            .await
+            .unwrap();
         for user_pubkey in &test_users {
-            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise).await.unwrap();
+            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise)
+                .await
+                .unwrap();
 
             sqlx::query(
                 "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
@@ -1093,8 +1087,14 @@ mod tests {
         }
 
         // Test follows multiple times to ensure consistent ordering
-        let followers1 = saved_account.follows(&saved_account, &whitenoise).await.unwrap();
-        let followers2 = saved_account.follows(&saved_account, &whitenoise).await.unwrap();
+        let followers1 = saved_account
+            .follows(&saved_account, &whitenoise)
+            .await
+            .unwrap();
+        let followers2 = saved_account
+            .follows(&saved_account, &whitenoise)
+            .await
+            .unwrap();
 
         assert_eq!(followers1.len(), 5);
         assert_eq!(followers2.len(), 5);

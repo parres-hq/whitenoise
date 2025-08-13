@@ -64,7 +64,10 @@ where
 }
 
 impl Relay {
-    pub(crate) async fn find_by_url(url: &RelayUrl, whitenoise: &Whitenoise) -> Result<Relay, WhitenoiseError> {
+    pub(crate) async fn find_by_url(
+        url: &RelayUrl,
+        whitenoise: &Whitenoise,
+    ) -> Result<Relay, WhitenoiseError> {
         let relay_row = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
             .bind(url.to_string().as_str())
             .fetch_one(&whitenoise.database.pool)

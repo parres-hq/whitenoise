@@ -11,7 +11,7 @@ impl Whitenoise {
           account.pubkey.to_hex()
         );
 
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
         match nostr_mls.process_message(&event) {
             Ok(result) => {
                 tracing::debug!(
@@ -67,7 +67,8 @@ mod tests {
         let message_event = tokio::task::spawn_blocking({
             let account = creator_account.clone();
             move || -> core::result::Result<Event, nostr_mls::error::Error> {
-                let nostr_mls = account.nostr_mls.lock().unwrap();
+                let nostr_mls =
+                    Account::create_nostr_mls(account.pubkey, &whitenoise.config.data_dir).unwrap();
                 let groups = nostr_mls.get_groups()?;
                 let group_id = groups
                     .first()
@@ -124,7 +125,8 @@ mod tests {
         let valid_event = tokio::task::spawn_blocking({
             let account = creator_account.clone();
             move || -> core::result::Result<Event, nostr_mls::error::Error> {
-                let nostr_mls = account.nostr_mls.lock().unwrap();
+                let nostr_mls =
+                    Account::create_nostr_mls(account.pubkey, &whitenoise.config.data_dir).unwrap();
                 let groups = nostr_mls.get_groups()?;
                 let group_id = groups
                     .first()
