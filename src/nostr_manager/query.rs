@@ -31,6 +31,31 @@ impl NostrManager {
         }
     }
 
+    pub(crate) async fn publish_relay_list_with_signer(
+        &self,
+        relay_list: Vec<Relay>,
+        relay_type: RelayType,
+        target_relays: Vec<Relay>,
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        let tags: Vec<Tag> = match relay_type {
+            RelayType::Nostr => relay_list
+                .into_iter()
+                .map(|relay| Tag::reference(relay.url.to_string()))
+                .collect(),
+            RelayType::Inbox | RelayType::KeyPackage => relay_list
+                .into_iter()
+                .map(|relay| Tag::custom(TagKind::Relay, [relay.url.to_string()]))
+                .collect(),
+        };
+        tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Publishing relay list tags {:?}", tags);
+        let event = EventBuilder::new(relay_type.into(), "").tags(tags);
+        let result = self.publish_event_builder_with_signer(event, target_relays, signer).await?;
+        tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Published relay list event to Nostr: {:?}", result);
+
+        Ok(())
+    }
+
     pub(crate) async fn fetch_user_relays(
         &self,
         pubkey: PublicKey,

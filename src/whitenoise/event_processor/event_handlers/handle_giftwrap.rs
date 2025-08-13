@@ -96,7 +96,7 @@ mod tests {
             .fetch_user_key_package(
                 member_pubkey,
                 creator_account
-                    .key_package_relays(&whitenoise)
+                    .key_package_relays(whitenoise)
                     .await
                     .unwrap(),
             )

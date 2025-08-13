@@ -1,18 +1,18 @@
+use crate::types::ImageType;
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::accounts::AccountError;
+use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::User;
 use crate::whitenoise::{Whitenoise, WhitenoiseError};
-use crate::whitenoise::error::Result;
-use crate::types::ImageType;
 use crate::RelayType;
 use chrono::Utc;
+use nostr_blossom::client::BlossomClient;
+use nostr_mls::prelude::*;
+use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
-use nostr_mls::prelude::*;
-use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
-use nostr_blossom::client::BlossomClient;
 
 impl Account {
     pub(crate) async fn new(keys: Option<Keys>) -> Result<(Account, Keys)> {
@@ -22,7 +22,7 @@ impl Account {
             Whitenoise::get_instance().map_err(|_e| AccountError::WhitenoiseNotInitialized)?;
 
         let mut user = User::new(keys.public_key);
-        user = user.save(&whitenoise).await?;
+        user = user.save(whitenoise).await?;
 
         let account = Account {
             id: None,
@@ -277,9 +277,9 @@ impl Whitenoise {
     ///
     /// Returns a [`WhitenoiseError`] if there is a failure in removing the account or its private key.
     pub async fn logout(&self, pubkey: &PublicKey) -> Result<()> {
-        let account = Account::find_by_pubkey(pubkey, &self).await?;
+        let account = Account::find_by_pubkey(pubkey, self).await?;
         // Delete the account from the database
-        account.delete(&self).await?;
+        account.delete(self).await?;
 
         // Remove the private key from the secret store
         self.secrets_store.remove_private_key_for_pubkey(pubkey)?;
@@ -324,7 +324,7 @@ impl Whitenoise {
             ..Default::default()
         };
 
-        account.update_metadata(&metadata, &self).await?;
+        account.update_metadata(&metadata, self).await?;
         tracing::debug!(target: "whitenoise::setup_metadata", "Created and published metadata with petname: {}", metadata.name.as_ref().unwrap_or(&"Unknown".to_string()));
         Ok(())
     }
@@ -357,10 +357,10 @@ impl Whitenoise {
 
     async fn setup_relays_for_existing_account(&self, account: &mut Account) -> Result<()> {
         let pubkey = account.pubkey;
-        let nip65_relays = account.nip65_relays(&self).await?;
+        let nip65_relays = account.nip65_relays(self).await?;
         let mut default_relays = Vec::new();
         for relay in Account::default_relays() {
-            default_relays.push(Relay::find_by_url(&relay, &self).await?);
+            default_relays.push(Relay::find_by_url(&relay, self).await?);
         }
 
         self.fetch_or_publish_default_relays(pubkey, RelayType::Nostr, &default_relays)
@@ -381,22 +381,31 @@ impl Whitenoise {
         source_relays: &Vec<Relay>,
     ) -> Result<Vec<Relay>> {
         match self
-            .fetch_relays_from(source_relays, pubkey, relay_type)
+            .nostr
+            .fetch_user_relays(pubkey, relay_type, source_relays.clone())
             .await
         {
-            Ok(relays) if !relays.is_empty() => Ok(relays),
+            Ok(relays) if !relays.is_empty() => {
+                let mut relays_vec = Vec::new();
+                for relay in relays {
+                    relays_vec.push(Relay::find_by_url(&relay, &self).await?);
+                }
+                Ok(relays_vec)
+            }
             _ => {
                 let mut default_relays = Vec::new();
                 for relay in Account::default_relays() {
-                    default_relays.push(Relay::find_by_url(&relay, &self).await?);
+                    default_relays.push(Relay::find_by_url(&relay, self).await?);
                 }
-                self.publish_relay_list_for_pubkey(
-                    pubkey,
-                    default_relays.clone(),
-                    relay_type,
-                    source_relays.clone(),
-                )
-                .await?;
+                let keys = self.secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
+                self.nostr
+                    .publish_relay_list_with_signer(
+                        default_relays.clone(),
+                        relay_type,
+                        source_relays.clone(),
+                        keys,
+                    )
+                    .await?;
                 Ok(default_relays)
             }
         }
@@ -405,25 +414,30 @@ impl Whitenoise {
     async fn setup_relays_for_new_account(&self, account: &mut Account) -> Result<()> {
         let mut default_relays = Vec::new();
         for relay in Account::default_relays() {
-            default_relays.push(Relay::find_by_url(&relay, &self).await?);
+            default_relays.push(Relay::find_by_url(&relay, self).await?);
         }
+
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
         // New accounts use default relays for all relay types
         for relay_type in [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage] {
-            self.publish_relay_list_for_pubkey(
-                account.pubkey,
-                default_relays.clone(),
-                relay_type,
-                default_relays.clone(),
-            )
-            .await?;
+            self.nostr
+                .publish_relay_list_with_signer(
+                    default_relays.clone(),
+                    relay_type,
+                    default_relays.clone(),
+                    keys.clone(),
+                )
+                .await?;
         }
 
         Ok(())
     }
 
     pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
-        let group_ids = account.load_nostr_group_ids(&self)?;
+        let group_ids = account.load_nostr_group_ids(self)?;
         let nostr = self.nostr.clone();
         let database = self.database.clone();
         let account_pubkey = account.pubkey;
@@ -432,7 +446,6 @@ impl Whitenoise {
             .get_nostr_keys_for_pubkey(&account_pubkey)?;
         let last_synced_timestamp = account
             .last_synced_at
-            .clone()
             .map(|dt| Timestamp::from(dt.timestamp() as u64))
             .unwrap_or_else(|| Timestamp::from(0));
 
@@ -530,7 +543,11 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub async fn update_account_metadata(&self, account: &Account, metadata: &Metadata) -> Result<()> {
+    pub async fn update_account_metadata(
+        &self,
+        account: &Account,
+        metadata: &Metadata,
+    ) -> Result<()> {
         let mut user = account.user(&self).await?;
         user.metadata = metadata.clone();
         user.save(&self).await?;
@@ -624,8 +641,8 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::whitenoise::test_utils::*;
     use crate::whitenoise::accounts::Account;
+    use crate::whitenoise::test_utils::*;
 
     #[tokio::test]
     #[ignore]

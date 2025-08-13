@@ -432,60 +432,6 @@ impl NostrManager {
         invite_events
     }
 
-    #[allow(dead_code)]
-    pub async fn encrypt_content(
-        &self,
-        content: String,
-        pubkey: String,
-        method: NostrEncryptionMethod,
-    ) -> Result<String> {
-        let recipient_pubkey = PublicKey::from_hex(&pubkey).unwrap();
-        let signer = self.client.signer().await.unwrap();
-        match method {
-            NostrEncryptionMethod::Nip04 => {
-                let encrypted = signer
-                    .nip04_encrypt(&recipient_pubkey, &content)
-                    .await
-                    .unwrap();
-                Ok(encrypted)
-            }
-            NostrEncryptionMethod::Nip44 => {
-                let encrypted = signer
-                    .nip44_encrypt(&recipient_pubkey, &content)
-                    .await
-                    .unwrap();
-                Ok(encrypted)
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    pub async fn decrypt_content(
-        &self,
-        content: String,
-        pubkey: String,
-        method: NostrEncryptionMethod,
-    ) -> Result<String> {
-        let author_pubkey = PublicKey::from_hex(&pubkey).unwrap();
-        let signer = self.client.signer().await.unwrap();
-        match method {
-            NostrEncryptionMethod::Nip04 => {
-                let decrypted = signer
-                    .nip04_decrypt(&author_pubkey, &content)
-                    .await
-                    .unwrap();
-                Ok(decrypted)
-            }
-            NostrEncryptionMethod::Nip44 => {
-                let decrypted = signer
-                    .nip44_decrypt(&author_pubkey, &content)
-                    .await
-                    .unwrap();
-                Ok(decrypted)
-            }
-        }
-    }
-
     fn relay_urls_from_event(event: Event) -> HashSet<RelayUrl> {
         event
             .tags

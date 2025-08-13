@@ -76,14 +76,14 @@ where
     }
 }
 
-impl Into<User> for UserRow {
-    fn into(self) -> User {
+impl From<UserRow> for User {
+    fn from(val: UserRow) -> Self {
         User {
-            id: Some(self.id),
-            pubkey: self.pubkey,
-            metadata: self.metadata,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
+            id: Some(val.id),
+            pubkey: val.pubkey,
+            metadata: val.metadata,
+            created_at: val.created_at,
+            updated_at: val.updated_at,
         }
     }
 }
@@ -98,7 +98,7 @@ impl User {
             Err(WhitenoiseError::UserNotFound) => {
                 let user = User {
                     id: None,
-                    pubkey: pubkey.clone(),
+                    pubkey: *pubkey,
                     metadata: Metadata::new(),
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
