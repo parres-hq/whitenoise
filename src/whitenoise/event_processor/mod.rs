@@ -40,23 +40,33 @@ impl Whitenoise {
     async fn extract_pubkey_from_subscription_id(
         &self,
         subscription_id: &str,
-    ) -> Option<PublicKey> {
-        if let Some(underscore_pos) = subscription_id.find('_') {
-            let hash_str = &subscription_id[..underscore_pos];
-            // Get all accounts and find the one whose hash matches
-            let accounts = self.accounts.read().await;
-            for pubkey in accounts.keys() {
-                let mut hasher = Sha256::new();
-                hasher.update(self.nostr.session_salt());
-                hasher.update(pubkey.to_bytes());
-                let hash = hasher.finalize();
-                let pubkey_hash = format!("{:x}", hash)[..12].to_string();
-                if pubkey_hash == hash_str {
-                    return Some(*pubkey);
-                }
+    ) -> Result<PublicKey> {
+        let underscore_pos = subscription_id.find('_');
+        if underscore_pos.is_none() {
+            return Err(WhitenoiseError::InvalidEvent(format!(
+                "Invalid subscription ID: {}",
+                subscription_id
+            )));
+        }
+
+        let hash_str = &subscription_id[..underscore_pos.unwrap()];
+        // Get all accounts and find the one whose hash matches
+        let accounts = Account::all(&self).await?;
+        for account in accounts.iter() {
+            let mut hasher = Sha256::new();
+            hasher.update(self.nostr.session_salt());
+            hasher.update(account.pubkey.to_bytes());
+            let hash = hasher.finalize();
+            let pubkey_hash = format!("{:x}", hash)[..12].to_string();
+            if pubkey_hash == hash_str {
+                return Ok(account.pubkey.clone());
             }
         }
-        None
+
+        Err(WhitenoiseError::InvalidEvent(format!(
+            "No account found for subscription hash: {}",
+            hash_str
+        )))
     }
 
     /// Main event processing loop
@@ -229,20 +239,18 @@ impl Whitenoise {
         let target_pubkey = self
             .extract_pubkey_from_subscription_id(&sub_id)
             .await
-            .ok_or_else(|| {
-                WhitenoiseError::InvalidEvent(format!(
-                    "Cannot extract pubkey from subscription ID: {}",
-                    sub_id
-                ))
-            })?;
+            .map_err(|_| WhitenoiseError::InvalidEvent(format!(
+                "Cannot extract pubkey from subscription ID: {}",
+                sub_id
+            )))?;
 
-        tracing::debug!(
+            tracing::debug!(
             target: "whitenoise::event_processor::process_mls_message",
             "Processing MLS message for account: {}",
             target_pubkey.to_hex()
-        );
+            );
 
-        self.read_account_by_pubkey(&target_pubkey).await
+        Account::find_by_pubkey(&target_pubkey, &self).await
     }
 }
 
@@ -294,19 +302,19 @@ mod tests {
         let extracted = whitenoise
             .extract_pubkey_from_subscription_id(subscription_id)
             .await;
-        assert!(extracted.is_none());
+        assert!(extracted.is_err());
 
         let invalid_case = "no_underscore";
         let extracted = whitenoise
             .extract_pubkey_from_subscription_id(invalid_case)
             .await;
-        assert!(extracted.is_none());
+        assert!(extracted.is_err());
 
         let multi_underscore_id = "abc123_user_events_extra";
         let result = whitenoise
             .extract_pubkey_from_subscription_id(multi_underscore_id)
             .await;
-        assert!(result.is_none());
+        assert!(result.is_err());
     }
 
     #[tokio::test]
