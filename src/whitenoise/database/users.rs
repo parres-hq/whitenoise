@@ -92,9 +92,9 @@ impl User {
     pub(crate) async fn find_or_create_by_pubkey(
         pubkey: &PublicKey,
         whitenoise: &Whitenoise,
-    ) -> Result<User, WhitenoiseError> {
+    ) -> Result<(User, bool), WhitenoiseError> {
         match User::find_by_pubkey(pubkey, whitenoise).await {
-            Ok(user) => Ok(user),
+            Ok(user) => Ok((user, false)),
             Err(WhitenoiseError::UserNotFound) => {
                 let user = User {
                     id: None,
@@ -104,7 +104,7 @@ impl User {
                     updated_at: Utc::now(),
                 };
                 user.save(whitenoise).await?;
-                Ok(user)
+                Ok((user, true))
             },
             _ => Err(WhitenoiseError::Other(anyhow::anyhow!("Unexpected error"))),
         }

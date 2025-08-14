@@ -49,6 +49,17 @@ pub struct AppSettings {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            id: 1,
+            theme_mode: ThemeMode::System,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+}
+
 impl AppSettings {
     pub fn new(theme_mode: ThemeMode) -> Self {
         Self {

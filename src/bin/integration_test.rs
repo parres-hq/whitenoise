@@ -4,7 +4,8 @@ use nostr_mls::groups::NostrGroupConfigData;
 use std::path::PathBuf;
 
 use nostr_sdk::prelude::*;
-use whitenoise::{AccountSettings, GroupId, Whitenoise, WhitenoiseConfig, WhitenoiseError};
+use whitenoise::ThemeMode;
+use whitenoise::{Whitenoise, WhitenoiseConfig, WhitenoiseError};
 
 /// Test backend for Whitenoise
 #[derive(Parser, Debug)]
@@ -35,7 +36,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Verify initial state
     tracing::info!("Verifying initial state...");
-    assert_eq!(whitenoise.get_accounts_count().await, 0);
+    assert_eq!(whitenoise.get_accounts_count().await?, 0);
     tracing::info!("✓ Started with 0 accounts");
 
     // ========================================
@@ -47,13 +48,13 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Creating first account...");
     let account1 = whitenoise.create_identity().await?;
     tracing::info!("✓ First account created: {}", account1.pubkey.to_hex());
-    assert_eq!(whitenoise.get_accounts_count().await, 1);
+    assert_eq!(whitenoise.get_accounts_count().await?, 1);
 
     // Create second account
     tracing::info!("Creating second account...");
     let account2 = whitenoise.create_identity().await?;
     tracing::info!("✓ Second account created: {}", account2.pubkey.to_hex());
-    assert_eq!(whitenoise.get_accounts_count().await, 2);
+    assert_eq!(whitenoise.get_accounts_count().await?, 2);
 
     // Test login with known keys
     tracing::info!("Testing login with known keys...");
@@ -111,7 +112,7 @@ async fn main() -> Result<(), WhitenoiseError> {
         .login(known_keys.secret_key().to_secret_hex())
         .await?;
     tracing::info!("✓ Logged in account: {}", account3.pubkey.to_hex());
-    assert_eq!(whitenoise.get_accounts_count().await, 3);
+    assert_eq!(whitenoise.get_accounts_count().await?, 3);
     assert_eq!(account3.pubkey, known_pubkey);
 
     // Wait for background fetch
@@ -124,15 +125,9 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Test metadata fetching
     tracing::info!("Testing metadata fetching...");
-    let loaded_metadata = whitenoise
-        .fetch_metadata_from(account3.nip65_relays.clone(), account3.pubkey)
-        .await?;
-    if let Some(metadata) = loaded_metadata {
-        assert_eq!(metadata.name, Some("Known User".to_string()));
-        tracing::info!("✓ Metadata fetched correctly");
-    } else {
-        tracing::warn!("Metadata not found - may be expected in test environment");
-    }
+    let metadata = whitenoise.user_metadata(&account3.pubkey).await?;
+    assert_eq!(metadata.name, Some("Known User".to_string()));
+    tracing::info!("✓ Metadata fetched correctly");
 
     // Test metadata update
     tracing::info!("Testing metadata update...");
@@ -149,41 +144,28 @@ async fn main() -> Result<(), WhitenoiseError> {
     };
 
     whitenoise
-        .update_metadata(&updated_metadata, &account3)
+        .update_account_metadata(&account3, &updated_metadata)
         .await?;
     tracing::info!("✓ Metadata updated successfully");
 
     // ========================================
-    // ACCOUNT SETTINGS TESTING
+    // APP SETTINGS TESTING
     // ========================================
-    tracing::info!("=== Testing Account Settings ===");
+    tracing::info!("=== Testing App Settings ===");
 
     // Test fetching default settings
-    let settings = whitenoise.load_account_settings(&account1.pubkey).await?;
-    assert_eq!(settings, AccountSettings::default());
+    let settings = whitenoise.app_settings().await?;
+    assert_eq!(settings.theme_mode, ThemeMode::System);
     tracing::info!("✓ Default settings fetched correctly");
 
     // Test updating settings
-    let new_settings = AccountSettings {
-        dark_theme: false,
-        dev_mode: true,
-        lockdown_mode: true,
-    };
-    whitenoise
-        .update_account_settings(&account1.pubkey, &new_settings)
-        .await?;
+    whitenoise.update_theme_mode(ThemeMode::Dark).await?;
     tracing::info!("✓ Settings updated successfully");
 
     // Verify settings were updated
-    let updated_settings = whitenoise.load_account_settings(&account1.pubkey).await?;
-    assert_eq!(updated_settings, new_settings);
+    let updated_settings = whitenoise.app_settings().await?;
+    assert_eq!(updated_settings.theme_mode, ThemeMode::Dark);
     tracing::info!("✓ Settings verified after update");
-
-    // Test error case - non-existent account
-    let fake_pubkey = Keys::generate().public_key();
-    let result = whitenoise.load_account_settings(&fake_pubkey).await;
-    assert!(matches!(result, Err(WhitenoiseError::AccountNotFound)));
-    tracing::info!("✓ Correctly handled non-existent account error");
 
     // ========================================
     // CONTACT MANAGEMENT TESTING
@@ -196,28 +178,28 @@ async fn main() -> Result<(), WhitenoiseError> {
     let test_contact3 = Keys::generate().public_key();
 
     // Test initial empty contact list
-    let initial_contacts = whitenoise.fetch_contacts(&account1.pubkey).await?;
+    let initial_contacts = whitenoise.follows(&account1).await?;
     assert_eq!(initial_contacts.len(), 0);
     tracing::info!("✓ Initial contact list is empty");
 
     // Test adding a contact
-    whitenoise.add_contact(&account1, test_contact1).await?;
+    whitenoise.follow_user(&account1, &test_contact1).await?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Added first contact");
 
     // Test adding a second contact
-    whitenoise.add_contact(&account1, test_contact2).await?;
+    whitenoise.follow_user(&account1, &test_contact2).await?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Added second contact");
 
     // Test removing a contact
-    whitenoise.remove_contact(&account1, test_contact1).await?;
+    whitenoise.unfollow_user(&account1, &test_contact1).await?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Removed first contact");
 
     // Test bulk contact update
     let bulk_contacts = vec![test_contact2, test_contact3];
-    whitenoise.update_contacts(&account1, bulk_contacts).await?;
+    whitenoise.follow_users(&account1, bulk_contacts).await?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Updated contacts in bulk");
 
@@ -462,8 +444,9 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - non-admin trying to add members
     tracing::info!("Testing error handling - non-admin adding members...");
     let account7 = whitenoise.create_identity().await?;
+    let account7_user = whitenoise.user(&account7.pubkey).await?;
     whitenoise
-        .add_contact(&account4, account7.pubkey)
+        .follow_user(&account4, &account7_user)
         .await
         .unwrap();
     let non_admin_result = whitenoise

@@ -10,10 +10,6 @@ use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 
 impl NostrManager {
-    pub(crate) async fn query_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
-        Ok(self.client.database().metadata(pubkey).await?)
-    }
-
     pub(crate) async fn fetch_metadata_from(
         &self,
         nip65_relays: Vec<Relay>,

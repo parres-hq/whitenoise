@@ -238,13 +238,13 @@ impl Whitenoise {
         }
 
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-        let update_result = nostr_mls.add_members(&group_id, &key_package_events)?;
+        let update_result = nostr_mls.add_members(group_id, &key_package_events)?;
         // Merge the pending commit immediately after creating it
         // This ensures our local state is correct before publishing
-        nostr_mls.merge_pending_commit(&group_id)?;
+        nostr_mls.merge_pending_commit(group_id)?;
 
         // Publish the evolution event to the group
-        let group_relays = nostr_mls.get_relays(&group_id)?;
+        let group_relays = nostr_mls.get_relays(group_id)?;
 
         let mut relays = HashSet::new();
         for relay in group_relays.clone() {
@@ -370,9 +370,9 @@ impl Whitenoise {
         members: Vec<PublicKey>,
     ) -> Result<()> {
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-        let update_result = nostr_mls.remove_members(&group_id, &members)?;
-        nostr_mls.merge_pending_commit(&group_id)?;
-        let group_relays = nostr_mls.get_relays(&group_id)?;
+        let update_result = nostr_mls.remove_members(group_id, &members)?;
+        nostr_mls.merge_pending_commit(group_id)?;
+        let group_relays = nostr_mls.get_relays(group_id)?;
 
         let evolution_event = update_result.evolution_event;
 

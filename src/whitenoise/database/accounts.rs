@@ -218,6 +218,13 @@ impl Account {
         Ok(())
     }
 
+    pub(crate) async fn follow_users(&self, users: &[User], whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+        for user in users {
+            self.follow_user(user, whitenoise).await?;
+        }
+        Ok(())
+    }
+
     pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
         sqlx::query("INSERT INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
             .bind(self.pubkey.to_hex().as_str())

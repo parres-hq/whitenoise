@@ -10,7 +10,7 @@ impl Whitenoise {
     ) -> Result<(String, [Tag; 4])> {
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
         let key_package_relay_urls = account
-            .key_package_relays(&self)
+            .key_package_relays(self)
             .await?
             .iter()
             .map(|r| r.url.clone())
@@ -54,7 +54,7 @@ impl Whitenoise {
             .nostr
             .publish_event_builder_with_signer(
                 key_package_event_builder,
-                account.key_package_relays(&self).await?,
+                account.key_package_relays(self).await?,
                 signer,
             )
             .await?;
@@ -110,7 +110,7 @@ impl Whitenoise {
             self.nostr
                 .publish_event_builder_with_signer(
                     builder,
-                    account.key_package_relays(&self).await?,
+                    account.key_package_relays(self).await?,
                     signer,
                 )
                 .await?;

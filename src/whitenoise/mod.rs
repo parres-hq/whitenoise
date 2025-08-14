@@ -217,6 +217,16 @@ impl Whitenoise {
         {
             let accounts = Account::all(whitenoise_ref).await?;
             for account in accounts {
+                // Trigger background data fetch for each account (non-critical)
+                if let Err(e) = whitenoise_ref.background_fetch_account_data(&account).await {
+                    tracing::warn!(
+                        target: "whitenoise::load_accounts",
+                        "Failed to trigger background fetch for account {}: {}",
+                        account.pubkey.to_hex(),
+                        e
+                    );
+                    // Continue - background fetch failure should not prevent account loading
+                }
                 // Setup subscriptions for this account
                 match whitenoise_ref.setup_subscriptions(&account).await {
                     Ok(()) => {
