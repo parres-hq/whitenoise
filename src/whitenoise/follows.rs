@@ -155,7 +155,7 @@ impl Whitenoise {
     /// }
     /// ```
     pub async fn follows(&self, account: &Account) -> Result<Vec<User>> {
-        account.follows(account, self).await
+        account.follows(self).await
     }
 
     pub async fn follow_users(&self, account: &Account, pubkeys: &[PublicKey]) -> Result<()> {

@@ -147,7 +147,6 @@ impl Account {
 
     pub(crate) async fn follows(
         &self,
-        account: &Account,
         whitenoise: &Whitenoise,
     ) -> Result<Vec<User>, WhitenoiseError> {
         let user_rows = sqlx::query_as::<_, UserRow>(
@@ -156,7 +155,7 @@ impl Account {
              JOIN users u ON af.user_id = u.id
              WHERE af.account_id = ?",
         )
-        .bind(account.id)
+        .bind(self.id)
         .fetch_all(&whitenoise.database.pool)
         .await
         .map_err(|_| WhitenoiseError::AccountNotFound)?;
@@ -789,7 +788,7 @@ mod tests {
 
         // Test follows
         let followers = saved_account
-            .follows(&saved_account, &whitenoise)
+            .follows(&whitenoise)
             .await
             .unwrap();
 
@@ -843,7 +842,7 @@ mod tests {
 
         // Test follows with no followers
         let followers = saved_account
-            .follows(&saved_account, &whitenoise)
+            .follows(&whitenoise)
             .await
             .unwrap();
 
@@ -915,7 +914,7 @@ mod tests {
 
         // Test follows
         let followers = saved_account
-            .follows(&saved_account, &whitenoise)
+            .follows(&whitenoise)
             .await
             .unwrap();
 
@@ -993,7 +992,7 @@ mod tests {
 
         // Test follows
         let followers = saved_account
-            .follows(&saved_account, &whitenoise)
+            .follows(&whitenoise)
             .await
             .unwrap();
 
@@ -1027,7 +1026,7 @@ mod tests {
         };
 
         // Test follows with non-existent account
-        let result = fake_account.follows(&fake_account, &whitenoise).await;
+        let result = fake_account.follows(&whitenoise).await;
 
         // Should return empty list rather than error since no followers exist
         assert!(result.is_ok());
@@ -1100,11 +1099,11 @@ mod tests {
 
         // Test follows multiple times to ensure consistent ordering
         let followers1 = saved_account
-            .follows(&saved_account, &whitenoise)
+            .follows(&whitenoise)
             .await
             .unwrap();
         let followers2 = saved_account
-            .follows(&saved_account, &whitenoise)
+            .follows(&whitenoise)
             .await
             .unwrap();
 
