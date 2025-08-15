@@ -189,7 +189,12 @@ impl User {
         Ok(updated_user.into())
     }
 
-    pub(crate) async fn add_relay(&self, relay: &Relay, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn add_relay(
+        &self,
+        relay: &Relay,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<(), WhitenoiseError> {
         let mut tx = whitenoise
             .database
             .pool
@@ -232,15 +237,22 @@ impl User {
         Ok(())
     }
 
-    pub(crate) async fn remove_relay(&self, relay: &Relay, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
-        let result = sqlx::query("DELETE FROM user_relays WHERE user_id = ? AND relay_id = ? AND relay_type = ?")
-            .bind(self.id)
-            .bind(relay.id)
-            .bind(String::from(relay_type))
-            .execute(&whitenoise.database.pool)
-            .await
-            .map_err(DatabaseError::Sqlx)
-            .map_err(WhitenoiseError::Database)?;
+    pub(crate) async fn remove_relay(
+        &self,
+        relay: &Relay,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<(), WhitenoiseError> {
+        let result = sqlx::query(
+            "DELETE FROM user_relays WHERE user_id = ? AND relay_id = ? AND relay_type = ?",
+        )
+        .bind(self.id)
+        .bind(relay.id)
+        .bind(String::from(relay_type))
+        .execute(&whitenoise.database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)
+        .map_err(WhitenoiseError::Database)?;
 
         if result.rows_affected() < 1 {
             Err(WhitenoiseError::UserRelayNotFound)

@@ -195,7 +195,7 @@ impl Account {
         user: &User,
         whitenoise: &Whitenoise,
     ) -> Result<(), WhitenoiseError> {
-        sqlx::query("INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT OR REPLACE INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
             .bind(self.id)
             .bind(user.id)
             .bind(self.created_at.timestamp_millis())
@@ -231,7 +231,7 @@ impl Account {
     }
 
     pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
-        sqlx::query("INSERT INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+        sqlx::query("INSERT OR REPLACE INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
             .bind(self.pubkey.to_hex().as_str())
             .bind(self.user_id)
             .bind(self.last_synced_at.map(|ts| ts.timestamp_millis()))

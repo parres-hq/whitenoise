@@ -101,13 +101,15 @@ impl Relay {
             .await
             .map_err(DatabaseError::Sqlx)?;
 
-        let result = sqlx::query("INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
-            .bind(self.url.to_string().as_str())
-            .bind(self.created_at.timestamp_millis())
-            .bind(self.updated_at.timestamp_millis())
-            .execute(&whitenoise.database.pool)
-            .await
-            .map_err(DatabaseError::Sqlx)?;
+        let result = sqlx::query(
+            "INSERT OR REPLACE INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)",
+        )
+        .bind(self.url.to_string().as_str())
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .execute(&whitenoise.database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
 
         let inserted_id = result.last_insert_rowid();
 

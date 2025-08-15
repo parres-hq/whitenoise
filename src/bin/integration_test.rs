@@ -33,17 +33,17 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let whitenoise = Whitenoise::get_instance()?;
 
-    tracing::info!("=== Starting Whitenoise Integration Test ===");
+    tracing::info!("=================================== Starting Whitenoise Integration Test ===================================");
 
     // Verify initial state
     tracing::info!("Verifying initial state...");
     assert_eq!(whitenoise.get_accounts_count().await?, 0);
     tracing::info!("✓ Started with 0 accounts");
 
-    // ========================================
+    // ***************************************************************
     // ACCOUNT CREATION AND LOGIN TESTING
-    // ========================================
-    tracing::info!("=== Testing Account Creation and Login ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Account Creation ===================================");
 
     // Create first account
     tracing::info!("Creating first account...");
@@ -57,6 +57,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("✓ Second account created: {}", account2.pubkey.to_hex());
     assert_eq!(whitenoise.get_accounts_count().await?, 2);
 
+    tracing::info!("=================================== Testing Account Login ===================================");
     // Test login with known keys
     tracing::info!("Testing login with known keys...");
     let known_keys = Keys::generate();
@@ -70,7 +71,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
     test_client.connect().await;
     test_client.set_signer(known_keys.clone()).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
     // Publish metadata
     let metadata = Metadata {
@@ -88,13 +89,17 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Publish relay lists
     let relay_urls: Vec<String> = dev_relays.iter().map(|s| s.to_string()).collect();
+    let nip65_relay_tags: Vec<Tag> = relay_urls
+        .iter()
+        .map(|url| Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)), [url.clone()]))
+        .collect();
     let relay_tags: Vec<Tag> = relay_urls
         .iter()
         .map(|url| Tag::custom(TagKind::Relay, [url.clone()]))
         .collect();
 
     test_client
-        .send_event_builder(EventBuilder::new(Kind::RelayList, "").tags(relay_tags.clone()))
+        .send_event_builder(EventBuilder::new(Kind::RelayList, "").tags(nip65_relay_tags.clone()))
         .await
         .unwrap();
     test_client
@@ -108,6 +113,9 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     test_client.disconnect().await;
 
+    // Wait for event publishing
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
     // Now login with the known keys
     let account3 = whitenoise
         .login(known_keys.secret_key().to_secret_hex())
@@ -117,12 +125,12 @@ async fn main() -> Result<(), WhitenoiseError> {
     assert_eq!(account3.pubkey, known_pubkey);
 
     // Wait for background fetch
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
-    // ========================================
+    // ***************************************************************
     // METADATA AND ONBOARDING TESTING
-    // ========================================
-    tracing::info!("=== Testing Metadata and Onboarding ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Metadata and Onboarding ===================================");
 
     // Test metadata fetching
     tracing::info!("Testing metadata fetching...");
@@ -149,10 +157,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         .await?;
     tracing::info!("✓ Metadata updated successfully");
 
-    // ========================================
+    // ***************************************************************
     // APP SETTINGS TESTING
-    // ========================================
-    tracing::info!("=== Testing App Settings ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing App Settings ===================================");
 
     // Test fetching default settings
     let settings = whitenoise.app_settings().await?;
@@ -168,10 +176,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     assert_eq!(updated_settings.theme_mode, ThemeMode::Dark);
     tracing::info!("✓ Settings verified after update");
 
-    // ========================================
+    // ***************************************************************
     // CONTACT MANAGEMENT TESTING
-    // ========================================
-    tracing::info!("=== Testing Contact Management ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Contact Management ===================================");
 
     // Test with account1
     let test_contact1 = Keys::generate().public_key();
@@ -223,10 +231,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         tracing::warn!("Expected error for non-existent contact removal, but got success");
     }
 
-    // ========================================
+    // ***************************************************************
     // GROUP CREATION TESTING
-    // ========================================
-    tracing::info!("=== Testing Group Creation ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Group Creation ===================================");
 
     // Create a test group with account1 as creator and account2 as member
     // Both were created via create_identity() so they should have published key packages
@@ -262,10 +270,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     );
     tracing::info!("  Admin count: {}", test_group.admin_pubkeys.len());
 
-    // ========================================
+    // ***************************************************************
     // MESSAGE SENDING TESTING
-    // ========================================
-    tracing::info!("=== Testing Message Sending ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Message Sending ===================================");
 
     // Test sending a simple text message (account1 is the group creator)
     tracing::info!("Testing simple text message...");
@@ -345,10 +353,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         }
     }
 
-    // ========================================
+    // ***************************************************************
     // GROUP MEMBER MANAGEMENT TESTING
-    // ========================================
-    tracing::info!("=== Testing Group Member Management ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Group Member Management ===================================");
 
     // Test adding members to an existing group
     tracing::info!("Testing adding members to group...");
@@ -530,10 +538,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     );
     tracing::info!("✓ Successfully sent message after adding members");
 
-    // ========================================
+    // ***************************************************************
     // ADVANCED MESSAGE TESTING (Reactions, Replies, Deletions)
-    // ========================================
-    tracing::info!("=== Testing Advanced Message Types ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Advanced Message Types ===================================");
 
     // Wait a bit to ensure message are stored before we reference them
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -665,7 +673,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     assert_eq!(final_message_with_tokens.message.content, final_message);
     tracing::info!("✓ Final test message sent successfully");
 
-    tracing::info!("=== Advanced Message Testing Complete ===");
+    tracing::info!("=================================== Advanced Message Testing Complete ===================================");
     tracing::info!("Summary of messages sent:");
     tracing::info!("  • 5 chat messages (kind 9)");
     tracing::info!("  • 2 reactions (kind 7) with proper e-tag targeting");
@@ -675,10 +683,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         "  • All advanced messages sent by account1 (group creator) for MLS timing reliability"
     );
 
-    // ========================================
+    // ***************************************************************
     // MESSAGE AGGREGATION TESTING
-    // ========================================
-    tracing::info!("=== Testing Message Aggregation ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Message Aggregation ===================================");
 
     // Wait for message events to be processed and become available
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -867,7 +875,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // Report aggregation statistics
-    tracing::info!("=== Aggregation Statistics ===");
+    tracing::info!("=================================== Aggregation Statistics ===================================");
     tracing::info!(
         "  Total aggregated chat messages: {}",
         aggregated_messages.len()
@@ -967,10 +975,10 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     tracing::info!("✓ Message aggregation testing completed successfully");
 
-    // ========================================
+    // ***************************************************************
     // MEMBER REMOVAL TESTING
-    // ========================================
-    tracing::info!("=== Testing Group Member Removal ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Group Member Removal ===================================");
 
     // Get current member count before removal
     let pre_removal_members = whitenoise
@@ -997,10 +1005,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     assert!(!post_single_removal_members.contains(&account4.pubkey));
     tracing::info!("✓ Single member removal verified");
 
-    // ========================================
+    // ***************************************************************
     // LOGOUT TESTING
-    // ========================================
-    tracing::info!("=== Testing Account Logout ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Account Logout ===================================");
 
     // Logout account2 (after group creation and message testing)
     tracing::info!("Logging out account2...");
@@ -1052,10 +1060,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         }
     }
 
-    // ========================================
+    // ***************************************************************
     // FINAL VERIFICATION
-    // ========================================
-    tracing::info!("=== Final Verification ===");
+    // ***************************************************************
+    tracing::info!("=================================== Final Verification ===================================");
 
     // Verify final account state
     let final_accounts = whitenoise.get_accounts().await.unwrap();
@@ -1069,7 +1077,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     assert!(!final_accounts.contains(&account2)); // account2 was logged out
     tracing::info!("✓ Final account state is correct");
 
-    tracing::info!("=== Integration Test Completed Successfully ===");
+    tracing::info!("=================================== Integration Test Completed Successfully ===================================");
     tracing::info!("All public API functionality has been tested:");
     tracing::info!("  ✓ Account creation and login");
     tracing::info!("  ✓ Metadata fetching and updating");
