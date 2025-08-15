@@ -20,17 +20,21 @@ impl NostrManager {
     pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<Relay>,
-        inbox_relays: Vec<Relay>,
-        group_relays: Vec<Relay>,
-        nostr_group_ids: Vec<String>,
+        user_relays: &[Relay],
+        inbox_relays: &[Relay],
+        group_relays: &[Relay],
+        nostr_group_ids: &[String],
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_account_subscriptions",
+            "Setting up account subscriptions"
+        );
         // Set up core subscriptions in parallel
         let (user_events_result, giftwrap_result, contacts_result, groups_result) = tokio::join!(
-            self.setup_user_events_subscription(pubkey, user_relays.clone()),
-            self.setup_giftwrap_subscription(pubkey, inbox_relays.clone()),
-            self.setup_contacts_metadata_subscription(pubkey, user_relays.clone()),
-            self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays.clone())
+            self.setup_user_events_subscription(pubkey, user_relays),
+            self.setup_giftwrap_subscription(pubkey, inbox_relays),
+            self.setup_contacts_metadata_subscription(pubkey, user_relays),
+            self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays)
         );
 
         // Handle results
@@ -46,13 +50,17 @@ impl NostrManager {
     async fn setup_user_events_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<Relay>,
+        user_relays: &[Relay],
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_user_events_subscription",
+            "Setting up user events subscription"
+        );
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
 
         // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(user_relays.clone()).await?;
+        self.ensure_relays_connected(user_relays).await?;
 
         // Combine all user event types into a single subscription
         let user_events_filter = Filter::new()
@@ -69,6 +77,10 @@ impl NostrManager {
             .subscribe_with_id_to(urls, subscription_id, user_events_filter, None)
             .await?;
 
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_user_events_subscription",
+            "User events subscription set up"
+        );
         Ok(())
     }
 
@@ -76,13 +88,17 @@ impl NostrManager {
     async fn setup_giftwrap_subscription(
         &self,
         pubkey: PublicKey,
-        inbox_relays: Vec<Relay>,
+        inbox_relays: &[Relay],
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_giftwrap_subscription",
+            "Setting up giftwrap subscription"
+        );
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
 
         // Ensure we're connected to all inbox relays before subscribing
-        self.ensure_relays_connected(inbox_relays.clone()).await?;
+        self.ensure_relays_connected(inbox_relays).await?;
 
         let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
 
@@ -91,6 +107,10 @@ impl NostrManager {
             .subscribe_with_id_to(urls, subscription_id, giftwrap_filter, None)
             .await?;
 
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_giftwrap_subscription",
+            "Giftwrap subscription set up"
+        );
         Ok(())
     }
 
@@ -98,8 +118,13 @@ impl NostrManager {
     pub(crate) async fn setup_contacts_metadata_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<Relay>,
+        user_relays: &[Relay],
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_contacts_metadata_subscription",
+            "Setting up contacts metadata subscription using user relays, {:?}",
+            user_relays
+        );
         let contacts_pubkeys = self
             .client
             .get_contact_list_public_keys(self.timeout)
@@ -111,7 +136,7 @@ impl NostrManager {
         }
 
         // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(user_relays.clone()).await?;
+        self.ensure_relays_connected(user_relays).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
@@ -122,6 +147,10 @@ impl NostrManager {
             .subscribe_with_id_to(urls, subscription_id, contacts_metadata_filter, None)
             .await?;
 
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_contacts_metadata_subscription",
+            "Contacts metadata subscription set up"
+        );
         Ok(())
     }
 
@@ -129,16 +158,20 @@ impl NostrManager {
     pub(crate) async fn setup_group_messages_subscription(
         &self,
         pubkey: PublicKey,
-        nostr_group_ids: Vec<String>,
-        group_relays: Vec<Relay>,
+        nostr_group_ids: &[String],
+        group_relays: &[Relay],
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_group_messages_subscription",
+            "Setting up group messages subscription"
+        );
         if nostr_group_ids.is_empty() {
             // No groups yet, skip subscription
             return Ok(());
         }
 
         // Ensure we're connected to all group relays before subscribing
-        self.ensure_relays_connected(group_relays.clone()).await?;
+        self.ensure_relays_connected(group_relays).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));
@@ -152,6 +185,10 @@ impl NostrManager {
             .subscribe_with_id_to(urls, subscription_id, mls_message_filter, None)
             .await?;
 
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_group_messages_subscription",
+            "Group messages subscription set up"
+        );
         Ok(())
     }
 }

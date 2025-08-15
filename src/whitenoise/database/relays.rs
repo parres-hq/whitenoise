@@ -4,7 +4,7 @@ use crate::{Whitenoise, WhitenoiseError};
 use chrono::{DateTime, Utc};
 use nostr_sdk::RelayUrl;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct RelayRow {
     // id is the primary key
     pub id: i64,
@@ -63,6 +63,17 @@ where
     }
 }
 
+impl From<RelayRow> for Relay {
+    fn from(val: RelayRow) -> Self {
+        Relay {
+            id: Some(val.id),
+            url: val.url,
+            created_at: val.created_at,
+            updated_at: val.updated_at,
+        }
+    }
+}
+
 impl Relay {
     pub(crate) async fn find_by_url(
         url: &RelayUrl,
@@ -75,22 +86,40 @@ impl Relay {
             .map_err(|_| WhitenoiseError::RelayNotFound)?;
 
         Ok(Relay {
-            id: relay_row.id,
+            id: Some(relay_row.id),
             url: relay_row.url,
             created_at: relay_row.created_at,
             updated_at: relay_row.updated_at,
         })
     }
 
-    pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
-        sqlx::query("INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
+    pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<Relay, WhitenoiseError> {
+        let mut tx = whitenoise
+            .database
+            .pool
+            .begin()
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        let result = sqlx::query("INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
             .bind(self.url.to_string().as_str())
             .bind(self.created_at.timestamp_millis())
             .bind(self.updated_at.timestamp_millis())
             .execute(&whitenoise.database.pool)
             .await
             .map_err(DatabaseError::Sqlx)?;
-        Ok(())
+
+        let inserted_id = result.last_insert_rowid();
+
+        let inserted_relay = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE id = ?")
+            .bind(inserted_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        tx.commit().await.map_err(DatabaseError::Sqlx)?;
+
+        Ok(inserted_relay.into())
     }
 }
 

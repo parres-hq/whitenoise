@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum ThemeMode {
     Light,
     Dark,
@@ -84,7 +84,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if:
+    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
     /// * Database query fails
     /// * Settings deserialization fails
     /// * Default settings cannot be created or saved
@@ -116,7 +116,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if:
+    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
     /// * Loading current settings fails
     /// * Saving updated settings fails
     /// * Database operations fail
@@ -131,8 +131,6 @@ impl Whitenoise {
     /// whitenoise.update_theme_mode(ThemeMode::System).await?;
     /// ```
     pub async fn update_theme_mode(&self, theme_mode: ThemeMode) -> Result<()> {
-        let mut settings = AppSettings::load(self).await?;
-        settings.theme_mode = theme_mode;
-        AppSettings::save(&settings, self).await
+        AppSettings::update_theme_mode(theme_mode, self).await
     }
 }

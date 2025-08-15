@@ -10,6 +10,7 @@ pub mod app_settings;
 pub mod database;
 pub mod error;
 mod event_processor;
+pub mod follows;
 pub mod message_aggregator;
 pub mod relays;
 pub mod secrets_store;
@@ -188,6 +189,13 @@ impl Whitenoise {
             shutdown_sender,
         };
 
+        // Create default relays in the database if they don't exist
+        // TODO: Make this batch fetch and insert all relays at once
+        for relay in Account::default_relays() {
+            let _ = whitenoise.find_or_create_relay(&relay).await?;
+        }
+
+        // Add default relays to the Nostr client if they aren't already added
         if whitenoise.nostr.client.relays().await.is_empty() {
             // First time starting the app
             for relay in Account::default_relays() {
@@ -637,7 +645,7 @@ pub mod test_utils {
                 .nostr
                 .publish_event_builder_with_signer(
                     key_package_event_builder,
-                    account.key_package_relays(&whitenoise).await.unwrap(),
+                    &account.key_package_relays(whitenoise).await.unwrap(),
                     keys,
                 )
                 .await

@@ -3,6 +3,7 @@ use clap::Parser;
 use nostr_mls::groups::NostrGroupConfigData;
 use std::path::PathBuf;
 
+use nostr_mls::prelude::*;
 use nostr_sdk::prelude::*;
 use whitenoise::ThemeMode;
 use whitenoise::{Whitenoise, WhitenoiseConfig, WhitenoiseError};
@@ -199,12 +200,12 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Test bulk contact update
     let bulk_contacts = vec![test_contact2, test_contact3];
-    whitenoise.follow_users(&account1, bulk_contacts).await?;
+    whitenoise.follow_users(&account1, &bulk_contacts).await?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Updated contacts in bulk");
 
     // Test error handling - duplicate contact
-    let result = whitenoise.add_contact(&account1, test_contact2).await;
+    let result = whitenoise.follow_user(&account1, &test_contact2).await;
     if result.is_err() {
         tracing::info!("✓ Correctly handled duplicate contact error");
     } else {
@@ -214,7 +215,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - removing non-existent contact
     let non_existent_contact = Keys::generate().public_key();
     let result = whitenoise
-        .remove_contact(&account1, non_existent_contact)
+        .unfollow_user(&account1, &non_existent_contact)
         .await;
     if result.is_err() {
         tracing::info!("✓ Correctly handled non-existent contact removal error");
@@ -235,7 +236,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let admin_pubkeys = vec![account1.pubkey]; // account1 as admin/creator
 
     whitenoise
-        .add_contact(&account1, account2.pubkey)
+        .follow_user(&account1, &account2.pubkey)
         .await
         .unwrap();
 
@@ -378,7 +379,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let new_members = vec![account4.pubkey];
     tracing::info!("Adding account4 as contact to account1...");
     whitenoise
-        .add_contact(&account1, account4.pubkey)
+        .follow_user(&account1, &account4.pubkey)
         .await
         .unwrap();
     tracing::info!("✓ Contact added successfully");
@@ -417,11 +418,11 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Add both accounts as members
     let bulk_new_members = vec![account5.pubkey, account6.pubkey];
     whitenoise
-        .add_contact(&account1, account5.pubkey)
+        .follow_user(&account1, &account5.pubkey)
         .await
         .unwrap();
     whitenoise
-        .add_contact(&account1, account6.pubkey)
+        .follow_user(&account1, &account6.pubkey)
         .await
         .unwrap();
     whitenoise
@@ -446,7 +447,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let account7 = whitenoise.create_identity().await?;
     let account7_user = whitenoise.user(&account7.pubkey).await?;
     whitenoise
-        .follow_user(&account4, &account7_user)
+        .follow_user(&account4, &account7_user.pubkey)
         .await
         .unwrap();
     let non_admin_result = whitenoise
@@ -464,7 +465,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Test error handling - adding to non-existent group
     whitenoise
-        .add_contact(&account1, account7.pubkey)
+        .follow_user(&account1, &account7.pubkey)
         .await
         .unwrap();
     tracing::info!("Testing error handling - adding to non-existent group...");
@@ -488,7 +489,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing error handling - adding user without key package...");
     let no_keypackage_user = Keys::generate().public_key();
     whitenoise
-        .add_contact(&account1, no_keypackage_user)
+        .follow_user(&account1, &no_keypackage_user)
         .await
         .unwrap();
     let no_keypackage_result = whitenoise
@@ -1005,14 +1006,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Logging out account2...");
     whitenoise.logout(&account2.clone().pubkey).await?;
     // We now have more accounts due to member addition testing: account1, account3, account4, account5, account6, account7
-    assert_eq!(whitenoise.get_accounts_count().await, 6);
-    assert!(whitenoise.logged_in(&account1.pubkey).await);
-    assert!(!whitenoise.logged_in(&account2.clone().pubkey).await);
-    assert!(whitenoise.logged_in(&account3.pubkey).await);
-    assert!(whitenoise.logged_in(&account4.pubkey).await);
-    assert!(whitenoise.logged_in(&account5.pubkey).await);
-    assert!(whitenoise.logged_in(&account6.pubkey).await);
-    assert!(whitenoise.logged_in(&account7.pubkey).await);
+    assert_eq!(whitenoise.get_accounts_count().await.unwrap(), 6);
     tracing::info!("✓ Account2 logged out successfully");
 
     // Test error handling - logged out account trying to remove members
@@ -1064,25 +1058,16 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("=== Final Verification ===");
 
     // Verify final account state
-    let final_accounts = whitenoise.fetch_accounts().await?;
+    let final_accounts = whitenoise.get_accounts().await.unwrap();
     assert_eq!(final_accounts.len(), 6); // account1, account3, account4, account5, account6, account7 should remain
-    assert!(final_accounts.contains_key(&account1.pubkey));
-    assert!(final_accounts.contains_key(&account3.pubkey));
-    assert!(final_accounts.contains_key(&account4.pubkey));
-    assert!(final_accounts.contains_key(&account5.pubkey));
-    assert!(final_accounts.contains_key(&account6.pubkey));
-    assert!(final_accounts.contains_key(&account7.pubkey));
-    assert!(!final_accounts.contains_key(&account2.clone().pubkey)); // account2 was logged out
+    assert!(final_accounts.contains(&account1));
+    assert!(final_accounts.contains(&account3));
+    assert!(final_accounts.contains(&account4));
+    assert!(final_accounts.contains(&account5));
+    assert!(final_accounts.contains(&account6));
+    assert!(final_accounts.contains(&account7));
+    assert!(!final_accounts.contains(&account2)); // account2 was logged out
     tracing::info!("✓ Final account state is correct");
-
-    // Verify accounts are still logged in
-    assert!(whitenoise.logged_in(&account1.pubkey).await);
-    assert!(whitenoise.logged_in(&account3.pubkey).await);
-    assert!(whitenoise.logged_in(&account4.pubkey).await);
-    assert!(whitenoise.logged_in(&account5.pubkey).await);
-    assert!(whitenoise.logged_in(&account6.pubkey).await);
-    assert!(whitenoise.logged_in(&account7.pubkey).await);
-    tracing::info!("✓ Account login states are correct");
 
     tracing::info!("=== Integration Test Completed Successfully ===");
     tracing::info!("All public API functionality has been tested:");

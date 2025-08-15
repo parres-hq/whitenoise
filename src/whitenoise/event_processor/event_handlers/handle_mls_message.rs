@@ -64,9 +64,14 @@ mod tests {
             .unwrap();
 
         // Build a valid MLS group message event for the new group
-        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let nostr_mls =
+            Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
         let groups = nostr_mls.get_groups().unwrap();
-        let group_id = groups.first().expect("group must exist").mls_group_id.clone();
+        let group_id = groups
+            .first()
+            .expect("group must exist")
+            .mls_group_id
+            .clone();
 
         let mut inner = UnsignedEvent::new(
             creator_account.pubkey,
@@ -108,9 +113,14 @@ mod tests {
             .unwrap();
 
         // Create a valid MLS message event for that group
-        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let nostr_mls =
+            Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
         let groups = nostr_mls.get_groups().unwrap();
-        let group_id = groups.first().expect("group must exist").mls_group_id.clone();
+        let group_id = groups
+            .first()
+            .expect("group must exist")
+            .mls_group_id
+            .clone();
         let mut inner = UnsignedEvent::new(
             creator_account.pubkey,
             Timestamp::now(),

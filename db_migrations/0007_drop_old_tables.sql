@@ -20,7 +20,7 @@ END;
 DROP TABLE IF EXISTS accounts;
 DROP TABLE IF EXISTS contacts;
 
-RENAME TABLE accounts_new TO accounts;
+ALTER TABLE accounts_new RENAME TO accounts;
 
 ALTER TABLE accounts DROP COLUMN settings;
 

@@ -1,7 +1,7 @@
 use crate::types::MessageWithTokens;
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::Whitenoise;
 use crate::whitenoise::relays::Relay;
+use crate::whitenoise::Whitenoise;
 use crate::Account;
 use nostr_mls::prelude::*;
 use std::collections::HashSet;
@@ -72,11 +72,13 @@ impl Whitenoise {
             self.create_unsigned_nostr_event(&account.pubkey, &message, kind, tags)?;
 
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-        let message_event = nostr_mls.create_message(&group_id, inner_event)?;
+        let message_event = nostr_mls.create_message(group_id, inner_event)?;
         let message = nostr_mls
             .get_message(&event_id)?
-            .ok_or(WhitenoiseError::NostrMlsError(nostr_mls::error::Error::MessageNotFound))?;
-        let group_relays = nostr_mls.get_relays(&group_id)?;
+            .ok_or(WhitenoiseError::NostrMlsError(
+                nostr_mls::error::Error::MessageNotFound,
+            ))?;
+        let group_relays = nostr_mls.get_relays(group_id)?;
 
         let mut relays: HashSet<Relay> = HashSet::new();
         for relay in group_relays {
@@ -84,7 +86,9 @@ impl Whitenoise {
             relays.insert(db_relay);
         }
 
-        self.nostr.publish_event_to(message_event, &relays.into_iter().collect()).await?;
+        self.nostr
+            .publish_event_to(message_event, &relays.into_iter().collect::<Vec<_>>())
+            .await?;
 
         let tokens = self.nostr.parse(&message.content);
 
@@ -187,7 +191,7 @@ impl Whitenoise {
         let account = Account::find_by_pubkey(pubkey, self).await?;
 
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
-        let raw_messages = nostr_mls.get_messages(&group_id)?;
+        let raw_messages = nostr_mls.get_messages(group_id)?;
         // Use the aggregator to process the messages
         self.message_aggregator
             .aggregate_messages_for_group(

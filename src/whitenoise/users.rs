@@ -1,11 +1,11 @@
 use crate::whitenoise::error::Result;
-use crate::whitenoise::Whitenoise;
 use crate::whitenoise::relays::{Relay, RelayType};
+use crate::whitenoise::Whitenoise;
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct User {
     pub id: Option<i64>,
     pub pubkey: PublicKey,
@@ -96,7 +96,7 @@ impl Whitenoise {
     ///
     /// ```rust,no_run
     /// use nostr_sdk::PublicKey;
-    /// use whitenoise::{Whitenoise, RelayType};
+    /// use whitenoise::{RelayType, Whitenoise};
     ///
     /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// let pubkey = PublicKey::parse("npub1...")?;

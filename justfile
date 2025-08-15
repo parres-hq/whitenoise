@@ -13,7 +13,14 @@ clear-dev-data:
 # Run integration_test binary using the local relays and data dirs
 int-test:
     rm -rf ./dev/data/integration_test/
-    RUST_LOG=critical,integration_test=debug cargo run --bin integration_test -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+    RUST_LOG=debug,\
+    sqlx=info,\
+    refinery_core=error,\
+    keyring=info,\
+    nostr_relay_pool=error,\
+    nostr_mls_sqlite_storage=error,\
+    integration_test=debug \
+    cargo run --bin integration_test -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
 # Run all tests (unit tests, integration tests, and doc tests)
 test:

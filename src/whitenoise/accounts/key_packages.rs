@@ -54,7 +54,7 @@ impl Whitenoise {
             .nostr
             .publish_event_builder_with_signer(
                 key_package_event_builder,
-                account.key_package_relays(self).await?,
+                &account.key_package_relays(self).await?,
                 signer,
             )
             .await?;
@@ -110,7 +110,7 @@ impl Whitenoise {
             self.nostr
                 .publish_event_builder_with_signer(
                     builder,
-                    account.key_package_relays(self).await?,
+                    &account.key_package_relays(self).await?,
                     signer,
                 )
                 .await?;

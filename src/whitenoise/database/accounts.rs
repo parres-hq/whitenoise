@@ -8,6 +8,7 @@ use nostr_sdk::PublicKey;
 use sqlx::Row;
 
 #[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct AccountRow {
     // id is the primary key
     id: i64,
@@ -218,7 +219,11 @@ impl Account {
         Ok(())
     }
 
-    pub(crate) async fn follow_users(&self, users: &[User], whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn follow_users(
+        &self,
+        users: &[User],
+        whitenoise: &Whitenoise,
+    ) -> Result<(), WhitenoiseError> {
         for user in users {
             self.follow_user(user, whitenoise).await?;
         }

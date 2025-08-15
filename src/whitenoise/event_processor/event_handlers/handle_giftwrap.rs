@@ -44,7 +44,8 @@ impl Whitenoise {
     ) -> Result<()> {
         // Process the welcome message - lock scope is minimal
         {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+            let nostr_mls =
+                Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
             nostr_mls
                 .process_welcome(&event.id, &rumor)
                 .map_err(WhitenoiseError::NostrMlsError)?;
@@ -95,7 +96,7 @@ mod tests {
             .nostr
             .fetch_user_key_package(
                 member_pubkey,
-                creator_account
+                &creator_account
                     .key_package_relays(whitenoise)
                     .await
                     .unwrap(),
@@ -105,13 +106,16 @@ mod tests {
             .expect("member must have a published key package");
 
         // Create the group via nostr_mls directly to obtain welcome rumor
-        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
-        let create_group_result = nostr_mls.create_group(
-            &creator_account.pubkey,
-            vec![key_pkg_event],
-            vec![creator_account.pubkey],
-            create_nostr_group_config_data(),
-        ).unwrap();
+        let nostr_mls =
+            Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let create_group_result = nostr_mls
+            .create_group(
+                &creator_account.pubkey,
+                vec![key_pkg_event],
+                vec![creator_account.pubkey],
+                create_nostr_group_config_data(),
+            )
+            .unwrap();
 
         let welcome_rumor = create_group_result
             .welcome_rumors

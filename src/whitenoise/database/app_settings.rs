@@ -4,7 +4,7 @@ use crate::Whitenoise;
 use chrono::{DateTime, Utc};
 use std::str::FromStr;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct AppSettingsRow {
     id: i64,
     theme_mode: String,
@@ -84,7 +84,11 @@ impl AppSettings {
     }
 
     /// Saves or updates the app settings in the database
-    pub(crate) async fn save(settings: &AppSettings, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    #[allow(dead_code)]
+    pub(crate) async fn save(
+        settings: &AppSettings,
+        whitenoise: &Whitenoise,
+    ) -> Result<(), WhitenoiseError> {
         sqlx::query(
             "INSERT OR REPLACE INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)"
         )
@@ -100,7 +104,10 @@ impl AppSettings {
     }
 
     /// Updates just the theme mode in the app settings
-    pub(crate) async fn update_theme_mode(theme_mode: ThemeMode, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn update_theme_mode(
+        theme_mode: ThemeMode,
+        whitenoise: &Whitenoise,
+    ) -> Result<(), WhitenoiseError> {
         sqlx::query("UPDATE app_settings SET theme_mode = ?, updated_at = ? WHERE id = 1")
             .bind(theme_mode.to_string())
             .bind(Utc::now().timestamp_millis())

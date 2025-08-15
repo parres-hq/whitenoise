@@ -53,6 +53,7 @@ pub struct NostrManager {
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
 
 impl NostrManager {
+    #[allow(dead_code)]
     pub(crate) async fn add_relays<I>(&self, relays: I) -> Result<()>
     where
         I: IntoIterator<Item = RelayUrl>,
@@ -220,10 +221,10 @@ impl NostrManager {
     pub(crate) async fn publish_event_to(
         &self,
         event: Event,
-        relays: &Vec<Relay>,
+        relays: &[Relay],
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays.clone()).await?;
+        self.ensure_relays_connected(relays).await?;
         let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         Ok(self.client.send_event_to(urls, &event).await?)
     }
@@ -246,11 +247,11 @@ impl NostrManager {
     pub(crate) async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
-        relays: Vec<Relay>,
+        relays: &[Relay],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays.clone()).await?;
+        self.ensure_relays_connected(relays).await?;
         let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         self.client.set_signer(signer).await;
         let result = self
@@ -293,14 +294,15 @@ impl NostrManager {
         &self,
         receiver: &PublicKey,
         rumor: UnsignedEvent,
-        extra_tags: Vec<Tag>,
-        relays: Vec<Relay>,
+        extra_tags: &[Tag],
+        relays: &[Relay],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays.clone()).await?;
+        self.ensure_relays_connected(relays).await?;
         let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
-        let wrapped_event = EventBuilder::gift_wrap(&signer, receiver, rumor, extra_tags).await?;
+        let wrapped_event =
+            EventBuilder::gift_wrap(&signer, receiver, rumor, extra_tags.to_vec()).await?;
         self.client.set_signer(signer).await;
         let result = self.client.send_event_to(urls, &wrapped_event).await?;
         self.client.unset_signer().await;
@@ -325,12 +327,16 @@ impl NostrManager {
     pub(crate) async fn setup_account_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<Relay>,
-        inbox_relays: Vec<Relay>,
-        group_relays: Vec<Relay>,
-        nostr_group_ids: Vec<String>,
+        user_relays: &[Relay],
+        inbox_relays: &[Relay],
+        group_relays: &[Relay],
+        nostr_group_ids: &[String],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_account_subscriptions_with_signer",
+            "Setting up account subscriptions with signer"
+        );
         self.client.set_signer(signer).await;
         let result = self
             .setup_account_subscriptions(
@@ -348,8 +354,8 @@ impl NostrManager {
     pub(crate) async fn setup_group_messages_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<Relay>,
-        nostr_group_ids: Vec<String>,
+        user_relays: &[Relay],
+        nostr_group_ids: &[String],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         self.client.set_signer(signer).await;
@@ -389,13 +395,14 @@ impl NostrManager {
     /// let signer = MySigner::new();
     /// nostr_manager.update_contacts_metadata_subscription_with_signer(pubkey, relays, signer).await?;
     /// ```
+    #[allow(dead_code)]
     pub(crate) async fn update_contacts_metadata_subscription_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: Vec<Relay>,
+        user_relays: &[Relay],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
-        self.ensure_relays_connected(user_relays.clone()).await?;
+        self.ensure_relays_connected(user_relays).await?;
         self.client.set_signer(signer).await;
         let result = self
             .setup_contacts_metadata_subscription(pubkey, user_relays)
@@ -417,11 +424,11 @@ impl NostrManager {
     ///
     /// A vector of tuples containing the gift-wrap event id and the inner welcome event (the gift wrap rumor event)
     #[allow(dead_code)]
-    async fn extract_invite_events(&self, gw_events: Vec<Event>) -> Vec<(EventId, UnsignedEvent)> {
+    async fn extract_invite_events(&self, gw_events: &[Event]) -> Vec<(EventId, UnsignedEvent)> {
         let mut invite_events: Vec<(EventId, UnsignedEvent)> = Vec::new();
 
-        for event in gw_events {
-            if let Ok(unwrapped) = extract_rumor(&self.client.signer().await.unwrap(), &event).await
+        for event in gw_events.iter() {
+            if let Ok(unwrapped) = extract_rumor(&self.client.signer().await.unwrap(), event).await
             {
                 if unwrapped.rumor.kind == Kind::MlsWelcome {
                     invite_events.push((event.id, unwrapped.rumor));
@@ -527,6 +534,7 @@ impl NostrManager {
     }
 
     /// Get the status of a specific relay
+    #[allow(dead_code)]
     pub async fn get_relay_status(&self, relay_url: &RelayUrl) -> Result<RelayStatus> {
         let relay = self.client.relay(relay_url).await?;
         Ok(relay.status())
@@ -568,7 +576,7 @@ impl NostrManager {
     /// nostr_manager.ensure_relays_connected(&user_relays).await?;
     /// // Now safe to call client.subscribe_with_id_to(user_relays, ...)
     /// ```
-    pub(crate) async fn ensure_relays_connected(&self, relays: Vec<Relay>) -> Result<()> {
+    pub(crate) async fn ensure_relays_connected(&self, relays: &[Relay]) -> Result<()> {
         if relays.is_empty() {
             return Ok(());
         }
@@ -582,7 +590,7 @@ impl NostrManager {
         // Track newly added relays for connection
         let mut newly_added_relays = Vec::new();
 
-        for relay in relays {
+        for relay in relays.iter() {
             // Check if we're already connected to this relay by attempting to get its status
             match self.client.relay(relay.url.clone()).await {
                 Ok(_) => {

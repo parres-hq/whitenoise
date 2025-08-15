@@ -1,10 +1,12 @@
+use crate::whitenoise::error::Result;
+use crate::whitenoise::Whitenoise;
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Relay {
-    pub id: i64,
+    pub id: Option<i64>,
     pub url: RelayUrl,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -44,6 +46,30 @@ impl From<RelayType> for Kind {
             RelayType::Nostr => Kind::RelayList,
             RelayType::Inbox => Kind::InboxRelays,
             RelayType::KeyPackage => Kind::MlsKeyPackageRelays,
+        }
+    }
+}
+
+impl Relay {
+    pub fn new(url: &RelayUrl) -> Self {
+        Relay {
+            id: None,
+            url: url.clone(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+}
+
+impl Whitenoise {
+    pub async fn find_or_create_relay(&self, url: &RelayUrl) -> Result<Relay> {
+        match Relay::find_by_url(url, self).await {
+            Ok(relay) => Ok(relay),
+            Err(_) => {
+                let relay = Relay::new(url);
+                let new_relay = relay.save(self).await?;
+                Ok(new_relay)
+            }
         }
     }
 }

@@ -1,10 +1,9 @@
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::Whitenoise;
 use crate::whitenoise::accounts::Account;
+use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::relays::Relay;
+use crate::whitenoise::Whitenoise;
 use nostr_mls::prelude::*;
 use std::collections::HashSet;
-
 
 impl Whitenoise {
     /// Fetches a specific welcome invitation by its event ID.
@@ -182,8 +181,8 @@ impl Whitenoise {
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 *pubkey,
-                relays.into_iter().collect(),
-                group_ids,
+                &relays.into_iter().collect::<Vec<_>>(),
+                &group_ids,
                 keys,
             )
             .await

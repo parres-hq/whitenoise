@@ -3,6 +3,7 @@ use thiserror::Error;
 use crate::nostr_manager::NostrManagerError;
 use chrono::{DateTime, Utc};
 use nostr_mls::prelude::*;
+use serde::{Deserialize, Serialize};
 
 pub mod core;
 pub mod groups;
@@ -31,7 +32,7 @@ pub enum AccountError {
     WhitenoiseNotInitialized,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub struct Account {
     pub id: Option<i64>,
     pub pubkey: PublicKey,
@@ -39,17 +40,4 @@ pub struct Account {
     pub last_synced_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-impl std::fmt::Debug for Account {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Account")
-            .field("id", &self.id)
-            .field("pubkey", &self.pubkey)
-            .field("user_id", &self.user_id)
-            .field("last_synced_at", &self.last_synced_at)
-            .field("created_at", &self.created_at)
-            .field("updated_at", &self.updated_at)
-            .finish()
-    }
 }

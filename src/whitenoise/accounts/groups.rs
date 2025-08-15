@@ -1,7 +1,7 @@
 use crate::whitenoise::accounts::Account;
-use crate::whitenoise::users::User;
-use crate::whitenoise::relays::Relay;
 use crate::whitenoise::error::{Result, WhitenoiseError};
+use crate::whitenoise::relays::Relay;
+use crate::whitenoise::users::User;
 use crate::whitenoise::Whitenoise;
 use crate::RelayType;
 use nostr_mls::prelude::*;
@@ -47,7 +47,7 @@ impl Whitenoise {
         for pk in member_pubkeys.iter() {
             let user = User::find_by_pubkey(pk, self).await?;
             let kp_relays = user.relays(RelayType::KeyPackage, self).await?;
-            let some_event = self.nostr.fetch_user_key_package(*pk, kp_relays).await?;
+            let some_event = self.nostr.fetch_user_key_package(*pk, &kp_relays).await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
@@ -59,7 +59,8 @@ impl Whitenoise {
 
         let group_relays = config.relays.clone();
 
-        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls =
+            Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir).unwrap();
         let create_group_result = nostr_mls.create_group(
             &creator_account.pubkey,
             key_package_events.clone(),
@@ -110,8 +111,8 @@ impl Whitenoise {
                 .publish_gift_wrap_with_signer(
                     &member_pubkey,
                     welcome_rumor.clone(),
-                    vec![Tag::expiration(one_month_future)],
-                    relays_to_use,
+                    &[Tag::expiration(one_month_future)],
+                    &relays_to_use,
                     keys.clone(),
                 )
                 .await
@@ -127,8 +128,8 @@ impl Whitenoise {
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 creator_account.pubkey,
-                relays.into_iter().collect(),
-                group_ids,
+                &relays.into_iter().collect::<Vec<_>>(),
+                &group_ids,
                 keys,
             )
             .await
@@ -229,7 +230,10 @@ impl Whitenoise {
         for pk in members.iter() {
             let user = User::find_by_pubkey(pk, self).await?;
             let relays_to_use = user.relays(RelayType::KeyPackage, self).await?;
-            let some_event = self.nostr.fetch_user_key_package(*pk, relays_to_use).await?;
+            let some_event = self
+                .nostr
+                .fetch_user_key_package(*pk, &relays_to_use)
+                .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
@@ -287,7 +291,7 @@ impl Whitenoise {
                 .await?;
         } else {
             self.nostr
-                .publish_event_to(evolution_event, &relays.into_iter().collect())
+                .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
                 .await?;
         }
 
@@ -322,8 +326,8 @@ impl Whitenoise {
                 .publish_gift_wrap_with_signer(
                     &member_pubkey,
                     welcome_rumor.clone(),
-                    vec![Tag::expiration(one_month_future)],
-                    relays_to_use,
+                    &[Tag::expiration(one_month_future)],
+                    &relays_to_use,
                     keys.clone(),
                 )
                 .await
@@ -383,7 +387,7 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_event_to(evolution_event, &relays.into_iter().collect())
+            .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
             .await?;
         Ok(())
     }
@@ -406,8 +410,13 @@ mod tests {
         let mut member_pubkeys = Vec::new();
         for _ in 0..2 {
             let member_account = whitenoise.create_identity().await.unwrap();
-            let member_user = User::find_by_pubkey(&member_account.pubkey, &whitenoise).await.unwrap();
-            creator_account.follow_user(&member_user, &whitenoise).await.unwrap();
+            let member_user = User::find_by_pubkey(&member_account.pubkey, &whitenoise)
+                .await
+                .unwrap();
+            creator_account
+                .follow_user(&member_user, &whitenoise)
+                .await
+                .unwrap();
             member_pubkeys.push(member_account.pubkey);
         }
 

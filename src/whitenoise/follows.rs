@@ -20,7 +20,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if:
+    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
     /// * The account lacks a valid database ID
     /// * The user with the specified public key is not found
     /// * Database operation fails (e.g., connection issues, constraint violations)
@@ -66,7 +66,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if:
+    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
     /// * The account lacks a valid database ID
     /// * The user with the specified public key is not found
     /// * Database operation fails (e.g., connection issues)
@@ -101,7 +101,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if:
+    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
     /// * The account lacks a valid database ID
     /// * The user with the specified public key is not found
     /// * Database query fails (e.g., connection issues)
@@ -139,7 +139,7 @@ impl Whitenoise {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if:
+    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
     /// * The account lacks a valid database ID
     /// * Database query fails (e.g., connection issues)
     /// * Account is not found in the database

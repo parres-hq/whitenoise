@@ -10,9 +10,10 @@ use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 
 impl NostrManager {
+    #[allow(dead_code)]
     pub(crate) async fn fetch_metadata_from(
         &self,
-        nip65_relays: Vec<Relay>,
+        nip65_relays: &[Relay],
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
@@ -29,24 +30,26 @@ impl NostrManager {
 
     pub(crate) async fn publish_relay_list_with_signer(
         &self,
-        relay_list: Vec<Relay>,
+        relay_list: &[Relay],
         relay_type: RelayType,
-        target_relays: Vec<Relay>,
+        target_relays: &[Relay],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         let tags: Vec<Tag> = match relay_type {
             RelayType::Nostr => relay_list
-                .into_iter()
+                .iter()
                 .map(|relay| Tag::reference(relay.url.to_string()))
                 .collect(),
             RelayType::Inbox | RelayType::KeyPackage => relay_list
-                .into_iter()
+                .iter()
                 .map(|relay| Tag::custom(TagKind::Relay, [relay.url.to_string()]))
                 .collect(),
         };
         tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Publishing relay list tags {:?}", tags);
         let event = EventBuilder::new(relay_type.into(), "").tags(tags);
-        let result = self.publish_event_builder_with_signer(event, target_relays, signer).await?;
+        let result = self
+            .publish_event_builder_with_signer(event, target_relays, signer)
+            .await?;
         tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Published relay list event to Nostr: {:?}", result);
 
         Ok(())
@@ -56,7 +59,7 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        nip65_relays: Vec<Relay>,
+        nip65_relays: &[Relay],
     ) -> Result<HashSet<RelayUrl>> {
         let filter = Filter::new()
             .author(pubkey)
@@ -78,7 +81,7 @@ impl NostrManager {
     pub(crate) async fn fetch_user_key_package(
         &self,
         pubkey: PublicKey,
-        relays: Vec<Relay>,
+        relays: &[Relay],
     ) -> Result<Option<Event>> {
         let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         let filter = Filter::new()

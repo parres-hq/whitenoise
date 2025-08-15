@@ -41,6 +41,9 @@ pub enum WhitenoiseError {
     #[error("Relay not found")]
     RelayNotFound,
 
+    #[error("User relay not found")]
+    UserRelayNotFound,
+
     #[error("Account not authorized")]
     AccountNotAuthorized,
 

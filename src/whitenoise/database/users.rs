@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct UserRow {
     // id is the primary key
     pub id: i64,
@@ -105,7 +105,7 @@ impl User {
                 };
                 user.save(whitenoise).await?;
                 Ok((user, true))
-            },
+            }
             _ => Err(WhitenoiseError::Other(anyhow::anyhow!("Unexpected error"))),
         }
     }
@@ -146,7 +146,7 @@ impl User {
         let relays = relay_rows
             .into_iter()
             .map(|row| Relay {
-                id: row.id,
+                id: Some(row.id),
                 url: row.url,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
@@ -187,6 +187,60 @@ impl User {
         tx.commit().await.map_err(DatabaseError::Sqlx)?;
 
         Ok(inserted_user.into())
+    }
+
+    pub(crate) async fn add_relay(&self, relay: &Relay, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+        let mut tx = whitenoise
+            .database
+            .pool
+            .begin()
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        let relay_result = sqlx::query("INSERT OR IGNORE INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
+            .bind(relay.url.to_string())
+            .bind(relay.created_at.timestamp_millis())
+            .bind(relay.updated_at.timestamp_millis())
+            .execute(&mut *tx)
+            .await
+            .map_err(DatabaseError::Sqlx)
+            .map_err(WhitenoiseError::Database)?;
+
+        let relay_id = relay_result.last_insert_rowid();
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(self.id)
+        .bind(relay_id)
+        .bind(String::from(relay_type))
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .execute(&mut *tx)
+        .await
+        .map_err(DatabaseError::Sqlx)
+        .map_err(WhitenoiseError::Database)?;
+
+        tx.commit().await.map_err(DatabaseError::Sqlx)?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn remove_relay(&self, relay: &Relay, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+        let result = sqlx::query("DELETE FROM user_relays WHERE user_id = ? AND relay_id = ? AND relay_type = ?")
+            .bind(self.id)
+            .bind(relay.id)
+            .bind(String::from(relay_type))
+            .execute(&whitenoise.database.pool)
+            .await
+            .map_err(DatabaseError::Sqlx)
+            .map_err(WhitenoiseError::Database)?;
+
+        if result.rows_affected() < 1 {
+            Err(WhitenoiseError::UserRelayNotFound)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -755,19 +809,19 @@ mod tests {
         let relay3_url = nostr_sdk::RelayUrl::parse("wss://relay3.example.com").unwrap();
 
         let relay1 = Relay {
-            id: 1,
+            id: Some(1),
             url: relay1_url.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
         let relay2 = Relay {
-            id: 2,
+            id: Some(2),
             url: relay2_url.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
         let relay3 = Relay {
-            id: 3,
+            id: Some(3),
             url: relay3_url.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
@@ -906,7 +960,7 @@ mod tests {
         // Create and save a test relay
         let relay_url = nostr_sdk::RelayUrl::parse("wss://multi.example.com").unwrap();
         let relay = Relay {
-            id: 1,
+            id: Some(1),
             url: relay_url.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
@@ -979,13 +1033,13 @@ mod tests {
         let relay2_url = nostr_sdk::RelayUrl::parse("wss://user2.example.com").unwrap();
 
         let relay1 = Relay {
-            id: 1,
+            id: Some(1),
             url: relay1_url.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
         let relay2 = Relay {
-            id: 2,
+            id: Some(2),
             url: relay2_url.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
@@ -1066,7 +1120,7 @@ mod tests {
         let relay_updated_at = chrono::Utc::now() - chrono::Duration::minutes(30);
 
         let relay = Relay {
-            id: 1,
+            id: Some(1),
             url: relay_url.clone(),
             created_at: relay_created_at,
             updated_at: relay_updated_at,
@@ -1106,6 +1160,6 @@ mod tests {
             relay_updated_at.timestamp_millis()
         );
         // ID should be set by database
-        assert!(loaded_relay.id > 0);
+        assert!(loaded_relay.id.is_some());
     }
 }
