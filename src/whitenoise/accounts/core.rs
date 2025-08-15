@@ -120,6 +120,7 @@ impl Account {
         metadata: &Metadata,
         whitenoise: &Whitenoise,
     ) -> Result<()> {
+        tracing::debug!(target: "whitenoise::accounts::update_metadata", "Updating metadata for account: {:?}", self.pubkey);
         let mut user = self.user(whitenoise).await?;
         user.metadata = metadata.clone();
         user.save(whitenoise).await?;
@@ -318,12 +319,15 @@ impl Whitenoise {
             default_relays.push(Relay::find_by_url(&relay, self).await?);
         }
 
+        tracing::debug!(target: "whitenoise::setup_relays_for_new_account", "Found {} default relays", default_relays.len());
+
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
         // New accounts use default relays for all relay types
         for relay_type in [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage] {
+            tracing::debug!(target: "whitenoise::setup_relays_for_new_account", "Setting up {:?} relays", relay_type);
             // Create UserRelays
             for relay in &default_relays {
                 tracing::debug!(target: "whitenoise::setup_relays_for_new_account", "Adding {:?} relay to account: {:?}", relay_type, account.pubkey);
@@ -331,6 +335,7 @@ impl Whitenoise {
             }
 
             // Publish relay list even if it's empty
+            tracing::debug!(target: "whitenoise::setup_relays_for_new_account", "Publishing {:?} relay list", relay_type);
             self.nostr
                 .publish_relay_list_with_signer(
                     &default_relays,

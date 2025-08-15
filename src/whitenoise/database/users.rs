@@ -164,29 +164,29 @@ impl User {
             .await
             .map_err(DatabaseError::Sqlx)?;
 
-        let result = sqlx::query(
-            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        // Use INSERT OR REPLACE to handle both insert and update cases
+        sqlx::query(
+            "INSERT OR REPLACE INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(self.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&self.metadata).unwrap())
         .bind(self.created_at.timestamp_millis())
-        .bind(self.updated_at.timestamp_millis())
+        .bind(Utc::now().timestamp_millis())
         .execute(&mut *tx)
         .await
         .map_err(DatabaseError::Sqlx)
         .map_err(WhitenoiseError::Database)?;
 
-        let inserted_id = result.last_insert_rowid();
-
-        let inserted_user = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE id = ?")
-            .bind(inserted_id)
+        // Get the user by pubkey since INSERT OR REPLACE might change the id
+        let updated_user = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
+            .bind(self.pubkey.to_hex().as_str())
             .fetch_one(&mut *tx)
             .await
             .map_err(DatabaseError::Sqlx)?;
 
         tx.commit().await.map_err(DatabaseError::Sqlx)?;
 
-        Ok(inserted_user.into())
+        Ok(updated_user.into())
     }
 
     pub(crate) async fn add_relay(&self, relay: &Relay, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
@@ -197,7 +197,7 @@ impl User {
             .await
             .map_err(DatabaseError::Sqlx)?;
 
-        let relay_result = sqlx::query("INSERT OR IGNORE INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
+        sqlx::query("INSERT OR IGNORE INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
             .bind(relay.url.to_string())
             .bind(relay.created_at.timestamp_millis())
             .bind(relay.updated_at.timestamp_millis())
@@ -206,7 +206,13 @@ impl User {
             .map_err(DatabaseError::Sqlx)
             .map_err(WhitenoiseError::Database)?;
 
-        let relay_id = relay_result.last_insert_rowid();
+        // Get the relay ID (whether newly inserted or existing)
+        let relay_id: i64 = sqlx::query_scalar("SELECT id FROM relays WHERE url = ?")
+            .bind(relay.url.to_string())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(DatabaseError::Sqlx)
+            .map_err(WhitenoiseError::Database)?;
 
         sqlx::query(
             "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -838,7 +844,7 @@ mod tests {
         )
         .bind(loaded_user.id)
         .bind(1) // relay1
-        .bind("nostr")
+        .bind("nip65")
         .bind(test_timestamp.timestamp_millis())
         .bind(test_timestamp.timestamp_millis())
         .execute(&whitenoise.database.pool)
@@ -850,7 +856,7 @@ mod tests {
         )
         .bind(loaded_user.id)
         .bind(2) // relay2
-        .bind("nostr")
+        .bind("nip65")
         .bind(test_timestamp.timestamp_millis())
         .bind(test_timestamp.timestamp_millis())
         .execute(&whitenoise.database.pool)
@@ -968,7 +974,7 @@ mod tests {
         relay.save(&whitenoise).await.unwrap();
 
         // Add the same relay for different types
-        for relay_type in ["nostr", "inbox", "key_package"] {
+        for relay_type in ["nip65", "inbox", "key_package"] {
             sqlx::query(
                 "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             )
@@ -1054,7 +1060,7 @@ mod tests {
         )
         .bind(loaded_user1.id)
         .bind(1)
-        .bind("nostr")
+        .bind("nip65")
         .bind(test_timestamp.timestamp_millis())
         .bind(test_timestamp.timestamp_millis())
         .execute(&whitenoise.database.pool)
@@ -1066,7 +1072,7 @@ mod tests {
         )
         .bind(loaded_user2.id)
         .bind(2)
-        .bind("nostr")
+        .bind("nip65")
         .bind(test_timestamp.timestamp_millis())
         .bind(test_timestamp.timestamp_millis())
         .execute(&whitenoise.database.pool)
@@ -1134,7 +1140,7 @@ mod tests {
         )
         .bind(loaded_user.id)
         .bind(1)
-        .bind("nostr")
+        .bind("nip65")
         .bind(test_timestamp.timestamp_millis())
         .bind(test_timestamp.timestamp_millis())
         .execute(&whitenoise.database.pool)

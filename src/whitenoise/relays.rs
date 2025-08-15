@@ -22,7 +22,7 @@ pub enum RelayType {
 impl From<String> for RelayType {
     fn from(s: String) -> Self {
         match s.to_lowercase().as_str() {
-            "nostr" => Self::Nostr,
+            "nip65" => Self::Nostr,
             "inbox" => Self::Inbox,
             "key_package" => Self::KeyPackage,
             _ => panic!("Invalid relay type: {}", s),
@@ -33,7 +33,7 @@ impl From<String> for RelayType {
 impl From<RelayType> for String {
     fn from(relay_type: RelayType) -> Self {
         match relay_type {
-            RelayType::Nostr => "nostr".to_string(),
+            RelayType::Nostr => "nip65".to_string(),
             RelayType::Inbox => "inbox".to_string(),
             RelayType::KeyPackage => "key_package".to_string(),
         }

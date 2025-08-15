@@ -19,6 +19,7 @@ int-test:
     keyring=info,\
     nostr_relay_pool=error,\
     nostr_mls_sqlite_storage=error,\
+    tungstenite=error,\
     integration_test=debug \
     cargo run --bin integration_test -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
