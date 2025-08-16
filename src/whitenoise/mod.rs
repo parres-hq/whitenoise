@@ -309,7 +309,7 @@ impl Whitenoise {
     ///
     /// // Then access the instance from anywhere in your application
     /// let whitenoise = Whitenoise::get_instance()?;
-    /// let account_count = whitenoise.get_accounts_count().await;
+    /// let account_count = whitenoise.get_accounts_count().await?;
     /// println!("Number of accounts: {}", account_count);
     /// # Ok(())
     /// # }

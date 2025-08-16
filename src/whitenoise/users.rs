@@ -48,13 +48,13 @@ impl Whitenoise {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
+    /// ```rust
     /// use nostr_sdk::PublicKey;
     /// use whitenoise::Whitenoise;
     ///
     /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// let pubkey = PublicKey::parse("npub1...")?;
-    /// let user = whitenoise.user(&pubkey).await?;
+    /// let user = whitenoise.find_user_by_pubkey(&pubkey).await?;
     /// println!("Found user: {:?}", user.metadata.name);
     /// # Ok(())
     /// # }
@@ -98,13 +98,13 @@ impl Whitenoise {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
+    /// ```rust
     /// use nostr_sdk::PublicKey;
     /// use whitenoise::{RelayType, Whitenoise};
     ///
     /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// let pubkey = PublicKey::parse("npub1...")?;
-    /// let user = whitenoise.user(&pubkey).await?;
+    /// let user = whitenoise.find_user_by_pubkey(&pubkey).await?;
     ///
     /// // Get user's inbox relays for private messaging
     /// let inbox_relays = whitenoise.user_relays(&user, RelayType::Inbox).await?;
@@ -117,14 +117,14 @@ impl Whitenoise {
     /// }
     ///
     /// // Get user's general Nostr relays
-    /// let nostr_relays = whitenoise.user_relays(&user, RelayType::Nostr).await?;
+    /// let nip65_relays = whitenoise.user_relays(&user, RelayType::Nip65).await?;
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// # Relay Types
     ///
-    /// - `RelayType::Nostr` - General purpose relays from NIP-65 relay lists (kind 10002)
+    /// - `RelayType::Nip65` - General purpose relays from NIP-65 relay lists (kind 10002)
     /// - `RelayType::Inbox` - Inbox relays for private messages (kind 10050)
     /// - `RelayType::KeyPackage` - Relays storing MLS key packages (kind 10051)
     ///

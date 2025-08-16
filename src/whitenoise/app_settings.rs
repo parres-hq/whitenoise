@@ -92,8 +92,13 @@ impl Whitenoise {
     /// # Examples
     ///
     /// ```rust
+    /// use whitenoise::Whitenoise;
+    ///
+    /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// let settings = whitenoise.app_settings().await?;
     /// println!("Current theme: {}", settings.theme_mode);
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn app_settings(&self) -> Result<AppSettings> {
         AppSettings::find_or_create_default(&self.database).await
@@ -124,11 +129,16 @@ impl Whitenoise {
     /// # Examples
     ///
     /// ```rust
+    /// use whitenoise::{ThemeMode, Whitenoise};
+    ///
+    /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// // Set theme to dark mode
     /// whitenoise.update_theme_mode(ThemeMode::Dark).await?;
     ///
     /// // Set theme to follow system preference
     /// whitenoise.update_theme_mode(ThemeMode::System).await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn update_theme_mode(&self, theme_mode: ThemeMode) -> Result<()> {
         AppSettings::update_theme_mode(theme_mode, &self.database).await
