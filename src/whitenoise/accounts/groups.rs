@@ -1,6 +1,5 @@
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::User;
 use crate::whitenoise::Whitenoise;
 use crate::RelayType;
@@ -121,7 +120,7 @@ impl Whitenoise {
 
         let mut relays = HashSet::new();
         for relay in group_relays {
-            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
+            let db_relay = self.find_or_create_relay(&relay).await?;
             relays.insert(db_relay);
         }
 
@@ -252,7 +251,7 @@ impl Whitenoise {
 
         let mut relays = HashSet::new();
         for relay in group_relays.clone() {
-            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
+            let db_relay = self.find_or_create_relay(&relay).await?;
             relays.insert(db_relay);
         }
 
@@ -382,7 +381,7 @@ impl Whitenoise {
 
         let mut relays = HashSet::new();
         for relay in group_relays {
-            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
+            let db_relay = self.find_or_create_relay(&relay).await?;
             relays.insert(db_relay);
         }
 

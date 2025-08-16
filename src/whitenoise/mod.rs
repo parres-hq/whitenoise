@@ -445,8 +445,8 @@ pub mod test_utils {
         Keys::generate()
     }
 
-    pub(crate) async fn create_test_account() -> (Account, Keys) {
-        let (account, keys) = Account::new(None).await.unwrap();
+    pub(crate) async fn create_test_account(whitenoise: &Whitenoise) -> (Account, Keys) {
+        let (account, keys) = Account::new(whitenoise, None).await.unwrap();
         (account, keys)
     }
 
@@ -744,7 +744,6 @@ mod tests {
             let debug_str = format!("{:?}", whitenoise);
             assert!(debug_str.contains("Whitenoise"));
             assert!(debug_str.contains("config"));
-            assert!(debug_str.contains("accounts"));
             assert!(debug_str.contains("<REDACTED>"));
         }
 

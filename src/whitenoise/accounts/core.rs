@@ -14,10 +14,11 @@ use std::collections::HashSet;
 use std::path::Path;
 
 impl Account {
-    pub(crate) async fn new(keys: Option<Keys>) -> Result<(Account, Keys)> {
+    pub(crate) async fn new(
+        whitenoise: &Whitenoise,
+        keys: Option<Keys>,
+    ) -> Result<(Account, Keys)> {
         let keys = keys.unwrap_or_else(Keys::generate);
-        let whitenoise =
-            Whitenoise::get_instance().map_err(|_e| AccountError::WhitenoiseNotInitialized)?;
 
         let mut user = User::new(keys.public_key);
         user = user.save(&whitenoise.database).await?;
@@ -261,7 +262,7 @@ impl Whitenoise {
     }
 
     async fn create_base_account_with_private_key(&self, keys: &Keys) -> Result<Account> {
-        let (account, _keys) = Account::new(Some(keys.clone())).await?;
+        let (account, _keys) = Account::new(self, Some(keys.clone())).await?;
 
         self.secrets_store.store_private_key(keys).map_err(|e| {
             tracing::error!(target: "whitenoise::setup_account", "Failed to store private key: {}", e);
@@ -342,7 +343,7 @@ impl Whitenoise {
     ) -> Result<()> {
         let mut default_relays = Vec::new();
         for relay in Account::default_relays() {
-            default_relays.push(Relay::find_by_url(&relay, &self.database).await?);
+            default_relays.push(self.find_or_create_relay(&relay).await?);
         }
 
         let keys = self
@@ -707,8 +708,8 @@ mod tests {
         assert!(accounts.is_empty());
 
         // Create test accounts and save them to database
-        let (account1, keys1) = create_test_account().await;
-        let (account2, keys2) = create_test_account().await;
+        let (account1, keys1) = create_test_account(&whitenoise).await;
+        let (account2, keys2) = create_test_account(&whitenoise).await;
 
         // Save accounts to database
         account1.save(&whitenoise.database).await.unwrap();
@@ -733,8 +734,11 @@ mod tests {
         assert_eq!(loaded_account1.pubkey, account1.pubkey);
         assert_eq!(loaded_account1.user_id, account1.user_id);
         assert_eq!(loaded_account1.last_synced_at, account1.last_synced_at);
-        assert_eq!(loaded_account1.created_at, account1.created_at);
-        assert_eq!(loaded_account1.updated_at, account1.updated_at);
+        // Allow for small precision differences in timestamps due to database storage
+        let created_diff = (loaded_account1.created_at - account1.created_at).num_milliseconds().abs();
+        let updated_diff = (loaded_account1.updated_at - account1.updated_at).num_milliseconds().abs();
+        assert!(created_diff <= 1, "Created timestamp difference too large: {}ms", created_diff);
+        assert!(updated_diff <= 1, "Updated timestamp difference too large: {}ms", updated_diff);
     }
 
     #[tokio::test]
