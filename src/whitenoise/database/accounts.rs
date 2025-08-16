@@ -1,8 +1,8 @@
-use super::DatabaseError;
+use super::{Database, DatabaseError};
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::database::users::UserRow;
 use crate::whitenoise::users::User;
-use crate::{Whitenoise, WhitenoiseError};
+use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::PublicKey;
 use sqlx::Row;
@@ -103,9 +103,22 @@ impl AccountRow {
 }
 
 impl Account {
-    pub(crate) async fn all(whitenoise: &Whitenoise) -> Result<Vec<Account>, WhitenoiseError> {
+    /// Loads all accounts from the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Vec<Account>` containing all accounts in the database on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database query fails or no accounts are found.
+    pub(crate) async fn all(database: &Database) -> Result<Vec<Account>, WhitenoiseError> {
         let account_rows = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts")
-            .fetch_all(&whitenoise.database.pool)
+            .fetch_all(&database.pool)
             .await
             .map_err(|_| WhitenoiseError::AccountNotFound)?;
 
@@ -115,14 +128,28 @@ impl Account {
             .collect::<Result<Vec<Account>, WhitenoiseError>>()
     }
 
+    /// Finds an account by its public key.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` to search for
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the `Account` associated with the provided public key on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::AccountNotFound`] if no account with the given public key exists.
     pub(crate) async fn find_by_pubkey(
         pubkey: &PublicKey,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<Account, WhitenoiseError> {
         let account_row =
             sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts WHERE pubkey = ?")
                 .bind(pubkey.to_hex().as_str())
-                .fetch_one(&whitenoise.database.pool)
+                .fetch_one(&database.pool)
                 .await
                 .map_err(|_| WhitenoiseError::AccountNotFound)?;
 
@@ -136,18 +163,44 @@ impl Account {
         })
     }
 
-    pub(crate) async fn user(&self, whitenoise: &Whitenoise) -> Result<User, WhitenoiseError> {
+    /// Gets the user associated with this account.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the `User` associated with this account on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::AccountNotFound`] if the associated user is not found.
+    pub(crate) async fn user(&self, database: &Database) -> Result<User, WhitenoiseError> {
         let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
             .bind(self.pubkey.to_hex().as_str())
-            .fetch_one(&whitenoise.database.pool)
+            .fetch_one(&database.pool)
             .await
             .map_err(|_| WhitenoiseError::AccountNotFound)?;
         Ok(user_row.into())
     }
 
+    /// Gets all users that this account follows.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Vec<User>` containing all users followed by this account.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::AccountNotFound`] if the database query fails.
     pub(crate) async fn follows(
         &self,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<Vec<User>, WhitenoiseError> {
         let user_rows = sqlx::query_as::<_, UserRow>(
             "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at
@@ -156,7 +209,7 @@ impl Account {
              WHERE af.account_id = ?",
         )
         .bind(self.id)
-        .fetch_all(&whitenoise.database.pool)
+        .fetch_all(&database.pool)
         .await
         .map_err(|_| WhitenoiseError::AccountNotFound)?;
 
@@ -174,78 +227,161 @@ impl Account {
         Ok(users)
     }
 
+    /// Checks if this account is following a specific user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user` - A reference to the `User` to check
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if this account is following the user, `false` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database query fails.
     pub(crate) async fn is_following_user(
         &self,
         user: &User,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<bool, WhitenoiseError> {
         let result = sqlx::query(
             "SELECT COUNT(*) FROM account_follows WHERE account_id = ? AND user_id = ?",
         )
         .bind(self.id)
         .bind(user.id)
-        .fetch_one(&whitenoise.database.pool)
+        .fetch_one(&database.pool)
         .await?;
         Ok(result.get::<i64, _>(0) > 0)
     }
 
+    /// Makes this account follow a specific user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user` - A reference to the `User` to follow
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn follow_user(
         &self,
         user: &User,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(), WhitenoiseError> {
         sqlx::query("INSERT OR REPLACE INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
             .bind(self.id)
             .bind(user.id)
             .bind(self.created_at.timestamp_millis())
             .bind(self.updated_at.timestamp_millis())
-            .execute(&whitenoise.database.pool)
+            .execute(&database.pool)
             .await
             .map_err(DatabaseError::Sqlx)?;
         Ok(())
     }
 
+    /// Makes this account unfollow a specific user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user` - A reference to the `User` to unfollow
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn unfollow_user(
         &self,
         user: &User,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(), WhitenoiseError> {
         sqlx::query("DELETE FROM account_follows WHERE account_id = ? AND user_id = ?")
             .bind(self.id)
             .bind(user.id)
-            .execute(&whitenoise.database.pool)
+            .execute(&database.pool)
             .await?;
         Ok(())
     }
 
+    /// Makes this account follow multiple users.
+    ///
+    /// # Arguments
+    ///
+    /// * `users` - A slice of `User` references to follow
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if any database operation fails.
     pub(crate) async fn follow_users(
         &self,
         users: &[User],
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(), WhitenoiseError> {
         for user in users {
-            self.follow_user(user, whitenoise).await?;
+            self.follow_user(user, database).await?;
         }
         Ok(())
     }
 
-    pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    /// Saves this account to the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
+    pub(crate) async fn save(&self, database: &Database) -> Result<(), WhitenoiseError> {
         sqlx::query("INSERT OR REPLACE INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
             .bind(self.pubkey.to_hex().as_str())
             .bind(self.user_id)
             .bind(self.last_synced_at.map(|ts| ts.timestamp_millis()))
             .bind(self.created_at.timestamp_millis())
             .bind(self.updated_at.timestamp_millis())
-            .execute(&whitenoise.database.pool)
+            .execute(&database.pool)
             .await
             .map_err(DatabaseError::Sqlx)?;
         Ok(())
     }
 
-    pub(crate) async fn delete(&self, whitenoise: &Whitenoise) -> Result<(), WhitenoiseError> {
+    /// Deletes this account from the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::AccountNotFound`] if the account doesn't exist in the database.
+    /// Returns other [`WhitenoiseError`] variants if the database operation fails.
+    pub(crate) async fn delete(&self, database: &Database) -> Result<(), WhitenoiseError> {
         let result = sqlx::query("DELETE FROM accounts WHERE pubkey = ?")
             .bind(self.pubkey.to_hex())
-            .execute(&whitenoise.database.pool)
+            .execute(&database.pool)
             .await?;
 
         tracing::debug!(target: "whitenoise::delete_account", "Account removed from database for pubkey: {}", self.pubkey.to_hex());
@@ -575,11 +711,11 @@ mod tests {
         };
 
         // Test save_account
-        let result = account.save(&whitenoise).await;
+        let result = account.save(&whitenoise.database).await;
         assert!(result.is_ok());
 
         // Test that we can load it back (this verifies it was saved correctly)
-        let loaded_account = Account::find_by_pubkey(&test_pubkey, &whitenoise).await;
+        let loaded_account = Account::find_by_pubkey(&test_pubkey, &whitenoise.database).await;
         assert!(loaded_account.is_ok());
 
         let loaded = loaded_account.unwrap();
@@ -616,11 +752,11 @@ mod tests {
             updated_at: test_updated_at,
         };
 
-        let result = account.save(&whitenoise).await;
+        let result = account.save(&whitenoise.database).await;
         assert!(result.is_ok());
 
         // Verify it was saved correctly by loading it back
-        let loaded_account = Account::find_by_pubkey(&test_pubkey, &whitenoise).await;
+        let loaded_account = Account::find_by_pubkey(&test_pubkey, &whitenoise.database).await;
         assert!(loaded_account.is_ok());
 
         let loaded = loaded_account.unwrap();
@@ -643,7 +779,7 @@ mod tests {
 
         // Try to load a non-existent account
         let non_existent_pubkey = nostr_sdk::Keys::generate().public_key();
-        let result = Account::find_by_pubkey(&non_existent_pubkey, &whitenoise).await;
+        let result = Account::find_by_pubkey(&non_existent_pubkey, &whitenoise.database).await;
 
         assert!(result.is_err());
         if let Err(WhitenoiseError::AccountNotFound) = result {
@@ -676,11 +812,11 @@ mod tests {
         };
 
         // Save the account
-        let save_result = original_account.save(&whitenoise).await;
+        let save_result = original_account.save(&whitenoise.database).await;
         assert!(save_result.is_ok());
 
         // Load the account back
-        let loaded_account = Account::find_by_pubkey(&test_pubkey, &whitenoise).await;
+        let loaded_account = Account::find_by_pubkey(&test_pubkey, &whitenoise.database).await;
         assert!(loaded_account.is_ok());
 
         let account = loaded_account.unwrap();
@@ -727,7 +863,7 @@ mod tests {
         };
 
         // Save the account first
-        account.save(&whitenoise).await.unwrap();
+        account.save(&whitenoise.database).await.unwrap();
 
         // Create test users that will be followers
         let mut test_users = Vec::new();
@@ -757,19 +893,19 @@ mod tests {
             };
 
             // Save user first
-            user.save(&whitenoise).await.unwrap();
+            user.save(&whitenoise.database).await.unwrap();
 
             test_users.push((user_pubkey, metadata.clone()));
         }
 
         // Now manually insert the account_follows relationships
         // First we need to get the actual account ID and user IDs from the database
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
         for (user_pubkey, _) in &test_users {
-            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise)
+            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise.database)
                 .await
                 .unwrap();
 
@@ -788,7 +924,7 @@ mod tests {
 
         // Test follows
         let followers = saved_account
-            .follows(&whitenoise)
+            .follows(&whitenoise.database)
             .await
             .unwrap();
 
@@ -835,14 +971,14 @@ mod tests {
         };
 
         // Save the account
-        account.save(&whitenoise).await.unwrap();
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+        account.save(&whitenoise.database).await.unwrap();
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
         // Test follows with no followers
         let followers = saved_account
-            .follows(&whitenoise)
+            .follows(&whitenoise.database)
             .await
             .unwrap();
 
@@ -872,7 +1008,7 @@ mod tests {
         };
 
         // Save the account
-        account.save(&whitenoise).await.unwrap();
+        account.save(&whitenoise.database).await.unwrap();
 
         // Create a single test user
         let user_pubkey = nostr_sdk::Keys::generate().public_key();
@@ -890,13 +1026,13 @@ mod tests {
         };
 
         // Save user
-        user.save(&whitenoise).await.unwrap();
+        user.save(&whitenoise.database).await.unwrap();
 
         // Get the saved account and user with their database IDs
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise.database)
             .await
             .unwrap();
-        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise)
+        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
@@ -914,7 +1050,7 @@ mod tests {
 
         // Test follows
         let followers = saved_account
-            .follows(&whitenoise)
+            .follows(&whitenoise.database)
             .await
             .unwrap();
 
@@ -948,7 +1084,7 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        account.save(&whitenoise).await.unwrap();
+        account.save(&whitenoise.database).await.unwrap();
 
         // Create a user with complex metadata
         let user_pubkey = nostr_sdk::Keys::generate().public_key();
@@ -969,13 +1105,13 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        user.save(&whitenoise).await.unwrap();
+        user.save(&whitenoise.database).await.unwrap();
 
         // Create the follower relationship
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise.database)
             .await
             .unwrap();
-        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise)
+        let saved_user = User::find_by_pubkey(&user_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
@@ -992,7 +1128,7 @@ mod tests {
 
         // Test follows
         let followers = saved_account
-            .follows(&whitenoise)
+            .follows(&whitenoise.database)
             .await
             .unwrap();
 
@@ -1026,7 +1162,7 @@ mod tests {
         };
 
         // Test follows with non-existent account
-        let result = fake_account.follows(&whitenoise).await;
+        let result = fake_account.follows(&whitenoise.database).await;
 
         // Should return empty list rather than error since no followers exist
         assert!(result.is_ok());
@@ -1054,7 +1190,7 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        account.save(&whitenoise).await.unwrap();
+        account.save(&whitenoise.database).await.unwrap();
 
         // Create multiple users with predictable names
         let user_names = vec!["Alpha", "Beta", "Charlie", "Delta", "Echo"];
@@ -1072,16 +1208,16 @@ mod tests {
                 updated_at: test_timestamp,
             };
 
-            user.save(&whitenoise).await.unwrap();
+            user.save(&whitenoise.database).await.unwrap();
             test_users.push(user_pubkey);
         }
 
         // Create follower relationships
-        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise)
+        let saved_account = Account::find_by_pubkey(&account_pubkey, &whitenoise.database)
             .await
             .unwrap();
         for user_pubkey in &test_users {
-            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise)
+            let saved_user = User::find_by_pubkey(user_pubkey, &whitenoise.database)
                 .await
                 .unwrap();
 
@@ -1099,11 +1235,11 @@ mod tests {
 
         // Test follows multiple times to ensure consistent ordering
         let followers1 = saved_account
-            .follows(&whitenoise)
+            .follows(&whitenoise.database)
             .await
             .unwrap();
         let followers2 = saved_account
-            .follows(&whitenoise)
+            .follows(&whitenoise.database)
             .await
             .unwrap();
 

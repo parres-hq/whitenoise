@@ -9,22 +9,13 @@ impl NostrManager {
     pub async fn search_users(&self, query: String) -> Result<HashMap<String, EnrichedContact>> {
         let filter = Filter::new().kind(Kind::Metadata).search(query);
 
-        let stored_events = self
-            .client
-            .database()
-            .query(filter.clone())
-            .await
-            .map_err(NostrManagerError::from)?;
-
-        let fetched_events = self
+        let metadata_events = self
             .client
             .fetch_events(filter.clone(), self.timeout().await.unwrap())
             .await
             .map_err(NostrManagerError::from)?;
 
-        let users = stored_events.merge(fetched_events);
-
-        let pubkeys: Vec<PublicKey> = users
+        let pubkeys: Vec<PublicKey> = metadata_events
             .iter()
             .map(|user| user.pubkey)
             .collect::<Vec<PublicKey>>();
@@ -44,7 +35,7 @@ impl NostrManager {
 
         let mut enriched_contacts = HashMap::new();
 
-        for user in users {
+        for user in metadata_events {
             let enriched_contact = EnrichedContact {
                 metadata: Metadata::from_json(&user.content).unwrap_or_default(),
                 nip17: enriching_events

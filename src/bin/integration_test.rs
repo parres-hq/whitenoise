@@ -453,7 +453,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - non-admin trying to add members
     tracing::info!("Testing error handling - non-admin adding members...");
     let account7 = whitenoise.create_identity().await?;
-    let account7_user = whitenoise.user(&account7.pubkey).await?;
+    let account7_user = whitenoise.find_user_by_pubkey(&account7.pubkey).await?;
     whitenoise
         .follow_user(&account4, &account7_user.pubkey)
         .await
@@ -1066,7 +1066,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("=================================== Final Verification ===================================");
 
     // Verify final account state
-    let final_accounts = whitenoise.get_accounts().await.unwrap();
+    let final_accounts = whitenoise.all_accounts().await.unwrap();
     assert_eq!(final_accounts.len(), 6); // account1, account3, account4, account5, account6, account7 should remain
     assert!(final_accounts.contains(&account1));
     assert!(final_accounts.contains(&account3));

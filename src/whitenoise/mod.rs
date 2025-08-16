@@ -166,7 +166,7 @@ impl Whitenoise {
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
-            NostrManager::new(data_dir.join("nostr_lmdb"), event_sender.clone(), NostrManager::default_timeout())
+            NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
                 .await?;
 
         // Create SecretsStore
@@ -223,7 +223,7 @@ impl Whitenoise {
 
         // Fetch events and setup subscriptions for all accounts after event processing has started
         {
-            let accounts = Account::all(whitenoise_ref).await?;
+            let accounts = Account::all(&whitenoise_ref.database).await?;
             for account in accounts {
                 // Trigger background data fetch for each account (non-critical)
                 if let Err(e) = whitenoise_ref.background_fetch_account_data(&account).await {
@@ -484,13 +484,10 @@ pub mod test_utils {
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
-        let nostr = NostrManager::new(
-            config.data_dir.join("test_nostr"),
-            event_sender.clone(),
-            NostrManager::default_timeout(),
-        )
-        .await
-        .expect("Failed to create NostrManager");
+        let nostr =
+            NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
+                .await
+                .expect("Failed to create NostrManager");
 
         // connect to default relays
         nostr.add_relays(Account::default_relays()).await.unwrap();
@@ -730,7 +727,7 @@ mod tests {
         #[tokio::test]
         async fn test_whitenoise_initialization() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            assert!(Account::all(&whitenoise).await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise.database).await.unwrap().is_empty());
 
             // Verify directories were created
             assert!(whitenoise.config.data_dir.exists());
@@ -757,8 +754,8 @@ mod tests {
             // Both should have valid configurations (they'll be different temp dirs, which is fine)
             assert!(whitenoise1.config.data_dir.exists());
             assert!(whitenoise2.config.data_dir.exists());
-            assert!(Account::all(&whitenoise1).await.unwrap().is_empty());
-            assert!(Account::all(&whitenoise2).await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise1.database).await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise2.database).await.unwrap().is_empty());
         }
     }
 
@@ -785,7 +782,7 @@ mod tests {
             assert!(result.is_ok());
 
             // Verify cleanup
-            assert!(Account::all(&whitenoise).await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise.database).await.unwrap().is_empty());
             assert!(!test_log_file.exists());
 
             // MLS directory should be recreated as empty

@@ -49,7 +49,7 @@ impl Whitenoise {
 
         let hash_str = &subscription_id[..underscore_pos.unwrap()];
         // Get all accounts and find the one whose hash matches
-        let accounts = Account::all(self).await?;
+        let accounts = Account::all(&self.database).await?;
         for account in accounts.iter() {
             let mut hasher = Sha256::new();
             hasher.update(self.nostr.session_salt());
@@ -250,7 +250,7 @@ impl Whitenoise {
         target_pubkey.to_hex()
         );
 
-        Account::find_by_pubkey(&target_pubkey, self).await
+        Account::find_by_pubkey(&target_pubkey, &self.database).await
     }
 }
 

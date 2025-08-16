@@ -96,7 +96,7 @@ impl Whitenoise {
     /// println!("Current theme: {}", settings.theme_mode);
     /// ```
     pub async fn app_settings(&self) -> Result<AppSettings> {
-        AppSettings::load(self).await
+        AppSettings::load(&self.database).await
     }
 
     /// Updates only the theme mode in the application settings.
@@ -131,6 +131,6 @@ impl Whitenoise {
     /// whitenoise.update_theme_mode(ThemeMode::System).await?;
     /// ```
     pub async fn update_theme_mode(&self, theme_mode: ThemeMode) -> Result<()> {
-        AppSettings::update_theme_mode(theme_mode, self).await
+        AppSettings::update_theme_mode(theme_mode, &self.database).await
     }
 }

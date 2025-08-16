@@ -93,8 +93,7 @@ impl NostrManager {
             .fetch_events_from(urls, filter.clone(), self.timeout)
             .await?;
 
-        let stored_events = self.client.database().query(filter).await?;
-        Ok(events.merge(stored_events).first_owned())
+        Ok(events.first_owned())
     }
 }
 

@@ -66,8 +66,12 @@ impl Whitenoise {
     /// - The user with the specified public key doesn't exist in the database
     /// - There's a database connection or query error
     /// - The public key format is invalid (though this is typically caught at the type level)
-    pub async fn user(&self, pubkey: &PublicKey) -> Result<User> {
-        User::find_by_pubkey(pubkey, self).await
+    pub async fn find_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<User> {
+        User::find_by_pubkey(pubkey, &self.database).await
+    }
+
+    pub async fn find_or_create_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<(User, bool)> {
+        User::find_or_create_by_pubkey(pubkey, &self.database).await
     }
 
     /// Retrieves the relay list for a specific user and relay type.
@@ -137,11 +141,11 @@ impl Whitenoise {
     /// - There's a database connection or query error
     /// - The user object contains invalid data (shouldn't happen with valid User instances)
     pub async fn user_relays(&self, user: &User, relay_type: RelayType) -> Result<Vec<Relay>> {
-        user.relays(relay_type, self).await
+        user.relays(relay_type, &self.database).await
     }
 
     pub async fn user_metadata(&self, pubkey: &PublicKey) -> Result<Metadata> {
-        let user = self.user(pubkey).await?;
+        let user = self.find_user_by_pubkey(pubkey).await?;
         Ok(user.metadata.clone())
     }
 }

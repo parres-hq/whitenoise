@@ -35,12 +35,12 @@ impl Whitenoise {
     /// whitenoise.follow_user(&account, &user_pubkey).await?;
     /// ```
     pub async fn follow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
-        let (user, newly_created) = User::find_or_create_by_pubkey(pubkey, self).await?;
+        let (user, newly_created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
         if newly_created {
             // try and populate the user's data
         }
 
-        account.follow_user(&user, self).await?;
+        account.follow_user(&user, &self.database).await?;
 
         if newly_created {
             // publish account's follow list to nostr
@@ -80,8 +80,8 @@ impl Whitenoise {
     /// whitenoise.unfollow_user(&account, &user_pubkey).await?;
     /// ```
     pub async fn unfollow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
-        let user = self.user(pubkey).await?;
-        account.unfollow_user(&user, self).await
+        let user = self.find_user_by_pubkey(pubkey).await?;
+        account.unfollow_user(&user, &self.database).await
     }
 
     /// Checks if an account is following a specific user.
@@ -118,8 +118,8 @@ impl Whitenoise {
     /// }
     /// ```
     pub async fn is_following_user(&self, account: &Account, pubkey: &PublicKey) -> Result<bool> {
-        let user = self.user(pubkey).await?;
-        account.is_following_user(&user, self).await
+        let user = self.find_user_by_pubkey(pubkey).await?;
+        account.is_following_user(&user, &self.database).await
     }
 
     /// Retrieves all users that an account follows.
@@ -155,15 +155,15 @@ impl Whitenoise {
     /// }
     /// ```
     pub async fn follows(&self, account: &Account) -> Result<Vec<User>> {
-        account.follows(self).await
+        account.follows(&self.database).await
     }
 
     pub async fn follow_users(&self, account: &Account, pubkeys: &[PublicKey]) -> Result<()> {
         let mut users = Vec::new();
         for pubkey in pubkeys {
-            let user = self.user(pubkey).await?;
+            let user = self.find_user_by_pubkey(pubkey).await?;
             users.push(user);
         }
-        account.follow_users(&users, self).await
+        account.follow_users(&users, &self.database).await
     }
 }

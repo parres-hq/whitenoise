@@ -1,6 +1,6 @@
-use super::DatabaseError;
+use super::{Database, DatabaseError};
 use crate::whitenoise::relays::Relay;
-use crate::{Whitenoise, WhitenoiseError};
+use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::RelayUrl;
 
@@ -75,13 +75,27 @@ impl From<RelayRow> for Relay {
 }
 
 impl Relay {
+    /// Finds a relay by its URL.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - A reference to the `RelayUrl` to search for
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the `Relay` associated with the provided URL on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::RelayNotFound`] if no relay with the given URL exists.
     pub(crate) async fn find_by_url(
         url: &RelayUrl,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<Relay, WhitenoiseError> {
         let relay_row = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
             .bind(url.to_string().as_str())
-            .fetch_one(&whitenoise.database.pool)
+            .fetch_one(&database.pool)
             .await
             .map_err(|_| WhitenoiseError::RelayNotFound)?;
 
@@ -93,9 +107,21 @@ impl Relay {
         })
     }
 
-    pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<Relay, WhitenoiseError> {
-        let mut tx = whitenoise
-            .database
+    /// Saves this relay to the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the updated `Relay` with the database-assigned ID on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
+    pub(crate) async fn save(&self, database: &Database) -> Result<Relay, WhitenoiseError> {
+        let mut tx = database
             .pool
             .begin()
             .await
@@ -107,7 +133,7 @@ impl Relay {
         .bind(self.url.to_string().as_str())
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
-        .execute(&whitenoise.database.pool)
+        .execute(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)?;
 

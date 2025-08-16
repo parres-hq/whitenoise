@@ -1,6 +1,6 @@
+use super::Database;
 use crate::whitenoise::app_settings::{AppSettings, ThemeMode};
 use crate::whitenoise::error::WhitenoiseError;
-use crate::Whitenoise;
 use chrono::{DateTime, Utc};
 use std::str::FromStr;
 
@@ -70,11 +70,23 @@ impl AppSettingsRow {
 }
 
 impl AppSettings {
-    /// Loads the app settings from the database
-    pub(crate) async fn load(whitenoise: &Whitenoise) -> Result<AppSettings, WhitenoiseError> {
+    /// Loads the app settings from the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the `AppSettings` from the database on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::Configuration`] if the app settings are not found in the database.
+    pub(crate) async fn load(database: &Database) -> Result<AppSettings, WhitenoiseError> {
         let settings_row =
             sqlx::query_as::<_, AppSettingsRow>("SELECT * FROM app_settings WHERE id = 1")
-                .fetch_one(&whitenoise.database.pool)
+                .fetch_one(&database.pool)
                 .await
                 .map_err(|_| {
                     WhitenoiseError::Configuration("App settings not found".to_string())
@@ -83,11 +95,24 @@ impl AppSettings {
         settings_row.into_app_settings()
     }
 
-    /// Saves or updates the app settings in the database
+    /// Saves or updates the app settings in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `settings` - A reference to the `AppSettings` to save
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
     #[allow(dead_code)]
     pub(crate) async fn save(
         settings: &AppSettings,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(), WhitenoiseError> {
         sqlx::query(
             "INSERT OR REPLACE INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)"
@@ -96,22 +121,35 @@ impl AppSettings {
         .bind(settings.theme_mode.to_string())
         .bind(settings.created_at.timestamp_millis())
         .bind(settings.updated_at.timestamp_millis())
-        .execute(&whitenoise.database.pool)
+        .execute(&database.pool)
         .await
         .map_err(|e| WhitenoiseError::Database(e.into()))?;
 
         Ok(())
     }
 
-    /// Updates just the theme mode in the app settings
+    /// Updates just the theme mode in the app settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `theme_mode` - The new `ThemeMode` to set
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn update_theme_mode(
         theme_mode: ThemeMode,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(), WhitenoiseError> {
         sqlx::query("UPDATE app_settings SET theme_mode = ?, updated_at = ? WHERE id = 1")
             .bind(theme_mode.to_string())
             .bind(Utc::now().timestamp_millis())
-            .execute(&whitenoise.database.pool)
+            .execute(&database.pool)
             .await
             .map_err(|e| WhitenoiseError::Database(e.into()))?;
 

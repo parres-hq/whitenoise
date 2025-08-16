@@ -63,11 +63,11 @@ impl Relay {
 
 impl Whitenoise {
     pub async fn find_or_create_relay(&self, url: &RelayUrl) -> Result<Relay> {
-        match Relay::find_by_url(url, self).await {
+        match Relay::find_by_url(url, &self.database).await {
             Ok(relay) => Ok(relay),
             Err(_) => {
                 let relay = Relay::new(url);
-                let new_relay = relay.save(self).await?;
+                let new_relay = relay.save(&self.database).await?;
                 Ok(new_relay)
             }
         }

@@ -82,7 +82,7 @@ impl Whitenoise {
 
         let mut relays: HashSet<Relay> = HashSet::new();
         for relay in group_relays {
-            let db_relay = Relay::find_by_url(&relay, self).await?;
+            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
             relays.insert(db_relay);
         }
 
@@ -188,7 +188,7 @@ impl Whitenoise {
         group_id: &GroupId,
     ) -> Result<Vec<crate::whitenoise::message_aggregator::ChatMessage>> {
         // Get account to access nostr_mls instance
-        let account = Account::find_by_pubkey(pubkey, self).await?;
+        let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
         let raw_messages = nostr_mls.get_messages(group_id)?;

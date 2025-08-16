@@ -2,6 +2,7 @@ use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 
 impl Whitenoise {
     pub(crate) async fn encoded_key_package(
@@ -89,10 +90,16 @@ impl Whitenoise {
             .kind(Kind::MlsKeyPackage)
             .author(account.pubkey);
 
-        let key_package_events = self
+        let mut key_package_stream = self
             .nostr
-            .fetch_events_with_filter(key_package_filter)
+            .client
+            .stream_events(key_package_filter, Duration::from_secs(5))
             .await?;
+
+        let mut key_package_events = Vec::new();
+        while let Some(event) = key_package_stream.next().await {
+            key_package_events.push(event);
+        }
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;

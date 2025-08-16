@@ -45,8 +45,8 @@ impl Whitenoise {
         let mut members = Vec::new();
 
         for pk in member_pubkeys.iter() {
-            let user = User::find_by_pubkey(pk, self).await?;
-            let kp_relays = user.relays(RelayType::KeyPackage, self).await?;
+            let user = User::find_by_pubkey(pk, &self.database).await?;
+            let kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
             let some_event = self.nostr.fetch_user_key_package(*pk, &kp_relays).await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
@@ -105,7 +105,7 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-            let relays_to_use = member.relays(RelayType::Inbox, self).await?;
+            let relays_to_use = member.relays(RelayType::Inbox, &self.database).await?;
 
             self.nostr
                 .publish_gift_wrap_with_signer(
@@ -121,7 +121,7 @@ impl Whitenoise {
 
         let mut relays = HashSet::new();
         for relay in group_relays {
-            let db_relay = Relay::find_by_url(&relay, self).await?;
+            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
             relays.insert(db_relay);
         }
 
@@ -228,8 +228,8 @@ impl Whitenoise {
 
         // Fetch key packages for all members
         for pk in members.iter() {
-            let user = User::find_by_pubkey(pk, self).await?;
-            let relays_to_use = user.relays(RelayType::KeyPackage, self).await?;
+            let user = User::find_by_pubkey(pk, &self.database).await?;
+            let relays_to_use = user.relays(RelayType::KeyPackage, &self.database).await?;
             let some_event = self
                 .nostr
                 .fetch_user_key_package(*pk, &relays_to_use)
@@ -252,7 +252,7 @@ impl Whitenoise {
 
         let mut relays = HashSet::new();
         for relay in group_relays.clone() {
-            let db_relay = Relay::find_by_url(&relay, self).await?;
+            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
             relays.insert(db_relay);
         }
 
@@ -320,7 +320,7 @@ impl Whitenoise {
             let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
             // Use fallback relays if contact has no inbox relays configured
-            let relays_to_use = user.relays(RelayType::Inbox, self).await?;
+            let relays_to_use = user.relays(RelayType::Inbox, &self.database).await?;
 
             self.nostr
                 .publish_gift_wrap_with_signer(
@@ -382,7 +382,7 @@ impl Whitenoise {
 
         let mut relays = HashSet::new();
         for relay in group_relays {
-            let db_relay = Relay::find_by_url(&relay, self).await?;
+            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
             relays.insert(db_relay);
         }
 
@@ -410,11 +410,11 @@ mod tests {
         let mut member_pubkeys = Vec::new();
         for _ in 0..2 {
             let member_account = whitenoise.create_identity().await.unwrap();
-            let member_user = User::find_by_pubkey(&member_account.pubkey, &whitenoise)
+            let member_user = User::find_by_pubkey(&member_account.pubkey, &whitenoise.database)
                 .await
                 .unwrap();
             creator_account
-                .follow_user(&member_user, &whitenoise)
+                .follow_user(&member_user, &whitenoise.database)
                 .await
                 .unwrap();
             member_pubkeys.push(member_account.pubkey);

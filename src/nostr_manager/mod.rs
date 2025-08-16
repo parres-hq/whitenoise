@@ -1,11 +1,15 @@
 // use crate::media::blossom::BlossomClient;
 use crate::types::ProcessableEvent;
+use crate::whitenoise::accounts::Account;
+use crate::whitenoise::database::Database;
+use crate::whitenoise::database::DatabaseError;
 use crate::whitenoise::relays::Relay;
+use crate::whitenoise::users::User;
 
 use ::rand::RngCore;
 use nostr_sdk::prelude::*;
 use std::collections::HashSet;
-use std::path::PathBuf;
+
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -38,13 +42,13 @@ pub enum NostrManagerError {
     NostrEventBuilderError(#[from] nostr::event::builder::Error),
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+    #[error("Event processing error: {0}")]
+    EventProcessingError(String),
 }
 
 #[derive(Debug, Clone)]
 pub struct NostrManager {
     pub(crate) client: Client,
-    #[allow(dead_code)] // Allow dead code because this triggers a warning when linting on linux.
-    db_path: PathBuf,
     session_salt: [u8; 16],
     timeout: Duration,
     // blossom: BlossomClient,
@@ -71,24 +75,15 @@ impl NostrManager {
     ///
     /// # Arguments
     ///
-    /// * `db_path` - The path to the nostr cache database
     /// * `event_sender` - Channel sender for forwarding events to Whitenoise for processing
     /// * `timeout` - Timeout for client requests
     pub async fn new(
-        db_path: PathBuf,
         event_sender: Sender<crate::types::ProcessableEvent>,
         timeout: Duration,
     ) -> Result<Self> {
         let opts = ClientOptions::default();
 
-        // Initialize the client with the appropriate database based on platform
-        let client = {
-            let full_path = db_path.join("nostr_lmdb");
-            let db = NostrLMDB::builder(full_path)
-                .map_size(1024 * 1024 * 512)
-                .build()?;
-            Client::builder().database(db).opts(opts).build()
-        };
+        let client = { Client::builder().opts(opts).build() };
 
         // Generate a random session salt
         let mut session_salt = [0u8; 16];
@@ -188,21 +183,9 @@ impl NostrManager {
 
         Ok(Self {
             client,
-            db_path,
             session_salt,
             timeout,
         })
-    }
-
-    /// Fetch an event (first from database, then from relays) with a filter
-    pub(crate) async fn fetch_events_with_filter(&self, filter: Filter) -> Result<Events> {
-        let events = self.client.database().query(filter.clone()).await?;
-        if events.is_empty() {
-            let events = self.client.fetch_events(filter, self.timeout).await?;
-            Ok(events)
-        } else {
-            Ok(events)
-        }
     }
 
     /// Publishes a Nostr event (which is already signed) to the specified relays.
@@ -524,7 +507,6 @@ impl NostrManager {
         );
         self.client.unset_signer().await;
         self.client.unsubscribe_all().await;
-        self.client.database().wipe().await?;
         Ok(())
     }
 
@@ -658,13 +640,13 @@ impl NostrManager {
         Ok(())
     }
 
-    pub async fn fetch_all_user_data_to_nostr_cache(
+    pub async fn fetch_all_user_data(
         &self,
         signer: impl NostrSigner + 'static,
-        last_synced: Timestamp,
+        account: &Account,
         group_ids: Vec<String>,
+        database: &Database,
     ) -> Result<()> {
-        let pubkey = signer.get_public_key().await?;
         self.client.set_signer(signer).await;
 
         let mut contacts_and_self =
@@ -680,33 +662,75 @@ impl NostrManager {
                     return Err(NostrManagerError::Client(e));
                 }
             };
-        contacts_and_self.push(pubkey);
+        contacts_and_self.push(account.pubkey);
 
-        let metadata_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(contacts_and_self);
-        let relay_filter = Filter::new().author(pubkey).kinds(vec![
+        let metadata_filter = Filter::new().authors(contacts_and_self.clone()).kinds(vec![Kind::Metadata]);
+        let relay_filter = Filter::new().authors(contacts_and_self).kinds(vec![
             Kind::RelayList,
             Kind::InboxRelays,
             Kind::MlsKeyPackageRelays,
         ]);
-        let keypackage_filter = Filter::new().author(pubkey).kind(Kind::MlsKeyPackage);
-        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
+        let keypackage_filter = Filter::new().author(account.pubkey).kind(Kind::MlsKeyPackage);
+        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(account.pubkey);
         let group_messages_filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
             .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
-            .since(last_synced);
+            .since(Timestamp::from(account.last_synced_at.unwrap_or_default().timestamp() as u64));
 
-        // Fetch all events in parallel
-        // We don't need to handle the events, they'll be processed in the background by the event processor.
-        let (_metadata_events, _relay_events, _mls_events, _giftwrap_events, _group_messages) = tokio::join!(
-            self.client.fetch_events(metadata_filter, self.timeout),
-            self.client.fetch_events(relay_filter, self.timeout),
-            self.client.fetch_events(keypackage_filter, self.timeout),
-            self.client.fetch_events(giftwrap_filter, self.timeout),
-            self.client
-                .fetch_events(group_messages_filter, self.timeout)
-        );
+        let timeout_duration = Duration::from_secs(10);
+
+        let mut metadata_events = self
+            .client
+            .stream_events(metadata_filter, timeout_duration)
+            .await?;
+        let mut relay_events = self
+            .client
+            .stream_events(relay_filter, timeout_duration)
+            .await?;
+        let mut keypackage_events = self
+            .client
+            .stream_events(keypackage_filter, timeout_duration)
+            .await?;
+        let mut giftwrap_events = self
+            .client
+            .stream_events(giftwrap_filter, timeout_duration)
+            .await?;
+        let mut group_messages = self
+            .client
+            .stream_events(group_messages_filter, timeout_duration)
+            .await?;
+
+        while let Some(event) = metadata_events.next().await {
+            let mut user = User::find_by_pubkey(&event.pubkey, database).await
+                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+            match Metadata::from_json(&event.content) {
+                Ok(metadata) => {
+                    user.metadata = metadata;
+                    let _ = user.save(database).await
+                        .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::fetch_all_user_data",
+                        "Failed to parse metadata for user {}: {}",
+                        event.pubkey,
+                        e
+                    );
+                }
+            }
+        }
+        while let Some(_event) = relay_events.next().await {
+            // TODO: Handle relay list events - update user relays
+        }
+        while let Some(_event) = keypackage_events.next().await {
+            // TODO: Handle key package events
+        }
+        while let Some(_event) = giftwrap_events.next().await {
+            // TODO: Handle giftwrap events (would need Whitenoise instance)
+        }
+        while let Some(_event) = group_messages.next().await {
+            // TODO: Handle MLS message events (would need Whitenoise instance)
+        }
 
         self.client.unset_signer().await;
 

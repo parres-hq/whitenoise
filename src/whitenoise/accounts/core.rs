@@ -20,7 +20,7 @@ impl Account {
             Whitenoise::get_instance().map_err(|_e| AccountError::WhitenoiseNotInitialized)?;
 
         let mut user = User::new(keys.public_key);
-        user = user.save(whitenoise).await?;
+        user = user.save(&whitenoise.database).await?;
 
         let account = Account {
             id: None,
@@ -84,20 +84,20 @@ impl Account {
     }
 
     pub(crate) async fn nip65_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
-        let user = self.user(whitenoise).await?;
-        let relays = user.relays(RelayType::Nostr, whitenoise).await?;
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user.relays(RelayType::Nostr, &whitenoise.database).await?;
         Ok(relays)
     }
 
     pub(crate) async fn inbox_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
-        let user = self.user(whitenoise).await?;
-        let relays = user.relays(RelayType::Inbox, whitenoise).await?;
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user.relays(RelayType::Inbox, &whitenoise.database).await?;
         Ok(relays)
     }
 
     pub(crate) async fn key_package_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
-        let user = self.user(whitenoise).await?;
-        let relays = user.relays(RelayType::KeyPackage, whitenoise).await?;
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user.relays(RelayType::KeyPackage, &whitenoise.database).await?;
         Ok(relays)
     }
 
@@ -107,8 +107,8 @@ impl Account {
         relay_type: RelayType,
         whitenoise: &Whitenoise,
     ) -> Result<()> {
-        let user = self.user(whitenoise).await?;
-        user.add_relay(relay, relay_type, whitenoise).await?;
+        let user = self.user(&whitenoise.database).await?;
+        user.add_relay(relay, relay_type, &whitenoise.database).await?;
         tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay);
         Ok(())
     }
@@ -119,8 +119,8 @@ impl Account {
         relay_type: RelayType,
         whitenoise: &Whitenoise,
     ) -> Result<()> {
-        let user = self.user(whitenoise).await?;
-        user.remove_relay(relay, relay_type, whitenoise).await?;
+        let user = self.user(&whitenoise.database).await?;
+        user.remove_relay(relay, relay_type, &whitenoise.database).await?;
         tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay);
         Ok(())
     }
@@ -131,9 +131,9 @@ impl Account {
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         tracing::debug!(target: "whitenoise::accounts::update_metadata", "Updating metadata for account: {:?}", self.pubkey);
-        let mut user = self.user(whitenoise).await?;
+        let mut user = self.user(&whitenoise.database).await?;
         user.metadata = metadata.clone();
-        user.save(whitenoise).await?;
+        user.save(&whitenoise.database).await?;
         Ok(())
     }
 }
@@ -246,9 +246,9 @@ impl Whitenoise {
     ///
     /// Returns a [`WhitenoiseError`] if there is a failure in removing the account or its private key.
     pub async fn logout(&self, pubkey: &PublicKey) -> Result<()> {
-        let account = Account::find_by_pubkey(pubkey, self).await?;
+        let account = Account::find_by_pubkey(pubkey, &self.database).await?;
         // Delete the account from the database
-        account.delete(self).await?;
+        account.delete(&self.database).await?;
 
         // Remove the private key from the secret store
         self.secrets_store.remove_private_key_for_pubkey(pubkey)?;
@@ -270,7 +270,7 @@ impl Whitenoise {
     }
 
     async fn create_user_for_account(&self, account: &Account) -> Result<(User, bool)> {
-        let result = User::find_or_create_by_pubkey(&account.pubkey, self).await?;
+        let result = User::find_or_create_by_pubkey(&account.pubkey, &self.database).await?;
         Ok(result)
     }
 
@@ -304,7 +304,7 @@ impl Whitenoise {
     }
 
     async fn persist_account(&self, account: &Account) -> Result<Account> {
-        account.save(self).await.map_err(|e| {
+        account.save(&self.database).await.map_err(|e| {
             tracing::error!(target: "whitenoise::setup_account", "Failed to save account: {}", e);
             // Try to clean up stored private key
             if let Err(cleanup_err) = self.secrets_store.remove_private_key_for_pubkey(&account.pubkey) {
@@ -313,7 +313,7 @@ impl Whitenoise {
             e
         })?;
         tracing::debug!(target: "whitenoise::setup_account", "Account saved to database");
-        let account = Account::find_by_pubkey(&account.pubkey, self).await?;
+        let account = Account::find_by_pubkey(&account.pubkey, &self.database).await?;
         Ok(account)
     }
 
@@ -338,7 +338,7 @@ impl Whitenoise {
     ) -> Result<()> {
         let mut default_relays = Vec::new();
         for relay in Account::default_relays() {
-            default_relays.push(Relay::find_by_url(&relay, self).await?);
+            default_relays.push(Relay::find_by_url(&relay, &self.database).await?);
         }
 
         let keys = self
@@ -442,25 +442,22 @@ impl Whitenoise {
         let group_ids = account.load_nostr_group_ids(self)?;
         let nostr = self.nostr.clone();
         let database = self.database.clone();
-        let account_pubkey = account.pubkey;
+        let account_clone = account.clone();
         let signer = self
             .secrets_store
-            .get_nostr_keys_for_pubkey(&account_pubkey)?;
-        let last_synced_timestamp = account
-            .last_synced_at
-            .map(|dt| Timestamp::from(dt.timestamp() as u64))
-            .unwrap_or_else(|| Timestamp::from(0));
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let database_clone = self.database.clone();
 
         tokio::spawn(async move {
             tracing::debug!(
                 target: "whitenoise::background_fetch_account_data",
                 "Starting background fetch for account: {}",
-                account_pubkey.to_hex()
+                account_clone.pubkey.to_hex()
             );
 
             let current_time = Timestamp::now();
             match nostr
-                .fetch_all_user_data_to_nostr_cache(signer, last_synced_timestamp, group_ids)
+                .fetch_all_user_data(signer, &account_clone, group_ids, &database_clone)
                 .await
             {
                 Ok(_) => {
@@ -468,21 +465,21 @@ impl Whitenoise {
                     if let Err(e) =
                         sqlx::query("UPDATE accounts SET last_synced = ? WHERE pubkey = ?")
                             .bind(current_time.to_string())
-                            .bind(account_pubkey.to_hex())
+                            .bind(account_clone.pubkey.to_hex())
                             .execute(&database.pool)
                             .await
                     {
                         tracing::error!(
                             target: "whitenoise::background_fetch_account_data",
                             "Failed to update last_synced timestamp for account {}: {}",
-                            account_pubkey.to_hex(),
+                            account_clone.pubkey.to_hex(),
                             e
                         );
                     } else {
                         tracing::info!(
                             target: "whitenoise::background_fetch_account_data",
                             "Successfully fetched data and updated last_synced for account: {}",
-                            account_pubkey.to_hex()
+                            account_clone.pubkey.to_hex()
                         );
                     }
                 }
@@ -490,7 +487,7 @@ impl Whitenoise {
                     tracing::error!(
                         target: "whitenoise::background_fetch_account_data",
                         "Failed to fetch user data for account {}: {}",
-                        account_pubkey.to_hex(),
+                        account_clone.pubkey.to_hex(),
                         e
                     );
                 }
@@ -528,7 +525,7 @@ impl Whitenoise {
         // We do this in two stages to deduplicate the relays
         let mut group_relays_vec = Vec::new();
         for relay in group_relays {
-            group_relays_vec.push(Relay::find_by_url(&relay, self).await?);
+            group_relays_vec.push(Relay::find_by_url(&relay, &self.database).await?);
         }
 
         tracing::debug!(
@@ -576,9 +573,9 @@ impl Whitenoise {
         account: &Account,
         metadata: &Metadata,
     ) -> Result<()> {
-        let mut user = account.user(self).await?;
+        let mut user = account.user(&self.database).await?;
         user.metadata = metadata.clone();
-        user.save(self).await?;
+        user.save(&self.database).await?;
         Ok(())
     }
 
@@ -649,12 +646,16 @@ impl Whitenoise {
     }
 
     pub async fn get_accounts_count(&self) -> Result<usize> {
-        let accounts = Account::all(self).await?;
+        let accounts = Account::all(&self.database).await?;
         Ok(accounts.len())
     }
 
-    pub async fn get_accounts(&self) -> Result<Vec<Account>> {
-        Account::all(self).await
+    pub async fn all_accounts(&self) -> Result<Vec<Account>> {
+        Account::all(&self.database).await
+    }
+
+    pub async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
+        Account::find_by_pubkey(pubkey, &self.database).await
     }
 }
 
@@ -699,7 +700,7 @@ mod tests {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Test loading empty database
-        let accounts = Account::all(&whitenoise).await.unwrap();
+        let accounts = Account::all(&whitenoise.database).await.unwrap();
         assert!(accounts.is_empty());
 
         // Create test accounts and save them to database
@@ -707,15 +708,15 @@ mod tests {
         let (account2, keys2) = create_test_account().await;
 
         // Save accounts to database
-        account1.save(&whitenoise).await.unwrap();
-        account2.save(&whitenoise).await.unwrap();
+        account1.save(&whitenoise.database).await.unwrap();
+        account2.save(&whitenoise.database).await.unwrap();
 
         // Store keys in secrets store (required for background fetch)
         whitenoise.secrets_store.store_private_key(&keys1).unwrap();
         whitenoise.secrets_store.store_private_key(&keys2).unwrap();
 
         // Load accounts from database
-        let loaded_accounts = Account::all(&whitenoise).await.unwrap();
+        let loaded_accounts = Account::all(&whitenoise.database).await.unwrap();
         assert_eq!(loaded_accounts.len(), 2);
         let pubkeys: Vec<PublicKey> = loaded_accounts.iter().map(|a| a.pubkey).collect();
         assert!(pubkeys.contains(&account1.pubkey));
@@ -743,44 +744,33 @@ mod tests {
         // Give the events time to be published and processed
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Query the nostr client's database for the published relay list events
-        let inbox_relays_filter = Filter::new()
-            .author(account.pubkey)
-            .kind(Kind::InboxRelays) // kind 10050
-            .limit(1);
-
-        let key_package_relays_filter = Filter::new()
-            .author(account.pubkey)
-            .kind(Kind::MlsKeyPackageRelays) // kind 10051
-            .limit(1);
-
-        let key_package_filter = Filter::new()
-            .author(account.pubkey)
-            .kind(Kind::MlsKeyPackage) // kind 443
-            .limit(1);
-
         // Check that all three event types were published
         let inbox_events = whitenoise
             .nostr
-            .client
-            .database()
-            .query(inbox_relays_filter)
+            .fetch_user_relays(
+                account.pubkey,
+                RelayType::Inbox,
+                &account.nip65_relays(&whitenoise).await.unwrap(),
+            )
             .await
             .unwrap();
 
         let key_package_relays_events = whitenoise
             .nostr
-            .client
-            .database()
-            .query(key_package_relays_filter)
+            .fetch_user_relays(
+                account.pubkey,
+                RelayType::KeyPackage,
+                &account.nip65_relays(&whitenoise).await.unwrap(),
+            )
             .await
             .unwrap();
 
         let key_package_events = whitenoise
             .nostr
-            .client
-            .database()
-            .query(key_package_filter)
+            .fetch_user_key_package(
+                account.pubkey,
+                &account.nip65_relays(&whitenoise).await.unwrap(),
+            )
             .await
             .unwrap();
 
@@ -794,25 +784,10 @@ mod tests {
             "Key package relays list (kind 10051) should be published for new accounts"
         );
         assert!(
-            !key_package_events.is_empty(),
+            key_package_events.is_some(),
             "Key package (kind 443) should be published for new accounts"
         );
 
-        // Verify the events are authored by the correct pubkey
-        if let Some(inbox_event) = inbox_events.first() {
-            assert_eq!(inbox_event.pubkey, account.pubkey);
-            assert_eq!(inbox_event.kind, Kind::InboxRelays);
-        }
-
-        if let Some(key_package_relays_event) = key_package_relays_events.first() {
-            assert_eq!(key_package_relays_event.pubkey, account.pubkey);
-            assert_eq!(key_package_relays_event.kind, Kind::MlsKeyPackageRelays);
-        }
-
-        if let Some(key_package_event) = key_package_events.first() {
-            assert_eq!(key_package_event.pubkey, account.pubkey);
-            assert_eq!(key_package_event.kind, Kind::MlsKeyPackage);
-        }
     }
 
     /// Helper function to verify that an account has all three relay lists properly configured

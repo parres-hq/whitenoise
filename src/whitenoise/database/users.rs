@@ -1,7 +1,7 @@
-use super::{relays::RelayRow, DatabaseError};
+use super::{relays::RelayRow, Database, DatabaseError};
 use crate::whitenoise::relays::{Relay, RelayType};
 use crate::whitenoise::users::User;
-use crate::whitenoise::{Whitenoise, WhitenoiseError};
+use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
 
@@ -89,11 +89,25 @@ impl From<UserRow> for User {
 }
 
 impl User {
+    /// Finds an existing user by public key or creates a new one if not found.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` to search for
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple containing the `User` and a boolean indicating if the user was newly created (true) or found (false).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operations fail.
     pub(crate) async fn find_or_create_by_pubkey(
         pubkey: &PublicKey,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(User, bool), WhitenoiseError> {
-        match User::find_by_pubkey(pubkey, whitenoise).await {
+        match User::find_by_pubkey(pubkey, database).await {
             Ok(user) => Ok((user, false)),
             Err(WhitenoiseError::UserNotFound) => {
                 let user = User {
@@ -103,30 +117,58 @@ impl User {
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 };
-                user.save(whitenoise).await?;
+                user.save(database).await?;
                 Ok((user, true))
             }
             _ => Err(WhitenoiseError::Other(anyhow::anyhow!("Unexpected error"))),
         }
     }
 
+    /// Finds a user by their public key.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` to search for
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the `User` associated with the provided public key on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::UserNotFound`] if no user with the given public key exists.
     pub(crate) async fn find_by_pubkey(
         pubkey: &PublicKey,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<User, WhitenoiseError> {
         let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
             .bind(pubkey.to_hex().as_str())
-            .fetch_one(&whitenoise.database.pool)
+            .fetch_one(&database.pool)
             .await
             .map_err(|_| WhitenoiseError::UserNotFound)?;
 
         Ok(user_row.into())
     }
 
+    /// Gets all relays of a specific type associated with this user.
+    ///
+    /// # Arguments
+    ///
+    /// * `relay_type` - The type of relays to retrieve
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Vec<Relay>` containing all relays of the specified type for this user.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database query fails.
     pub(crate) async fn relays(
         &self,
         relay_type: RelayType,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<Vec<Relay>, WhitenoiseError> {
         let relay_type_str = String::from(relay_type);
 
@@ -138,7 +180,7 @@ impl User {
         )
         .bind(self.id)
         .bind(relay_type_str)
-        .fetch_all(&whitenoise.database.pool)
+        .fetch_all(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)
         .map_err(WhitenoiseError::Database)?;
@@ -156,9 +198,21 @@ impl User {
         Ok(relays)
     }
 
-    pub(crate) async fn save(&self, whitenoise: &Whitenoise) -> Result<User, WhitenoiseError> {
-        let mut tx = whitenoise
-            .database
+    /// Saves this user to the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the updated `User` with the database-assigned ID on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
+    pub(crate) async fn save(&self, database: &Database) -> Result<User, WhitenoiseError> {
+        let mut tx = database
             .pool
             .begin()
             .await
@@ -189,14 +243,28 @@ impl User {
         Ok(updated_user.into())
     }
 
+    /// Adds a relay association for this user.
+    ///
+    /// # Arguments
+    ///
+    /// * `relay` - A reference to the `Relay` to add
+    /// * `relay_type` - The type of relay association
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn add_relay(
         &self,
         relay: &Relay,
         relay_type: RelayType,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(), WhitenoiseError> {
-        let mut tx = whitenoise
-            .database
+        let mut tx = database
             .pool
             .begin()
             .await
@@ -237,11 +305,27 @@ impl User {
         Ok(())
     }
 
+    /// Removes a relay association for this user.
+    ///
+    /// # Arguments
+    ///
+    /// * `relay` - A reference to the `Relay` to remove
+    /// * `relay_type` - The type of relay association to remove
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::UserRelayNotFound`] if the relay association doesn't exist.
+    /// Returns other [`WhitenoiseError`] variants if the database operation fails.
     pub(crate) async fn remove_relay(
         &self,
         relay: &Relay,
         relay_type: RelayType,
-        whitenoise: &Whitenoise,
+        database: &Database,
     ) -> Result<(), WhitenoiseError> {
         let result = sqlx::query(
             "DELETE FROM user_relays WHERE user_id = ? AND relay_id = ? AND relay_type = ?",
@@ -249,7 +333,7 @@ impl User {
         .bind(self.id)
         .bind(relay.id)
         .bind(String::from(relay_type))
-        .execute(&whitenoise.database.pool)
+        .execute(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)
         .map_err(WhitenoiseError::Database)?;
@@ -558,11 +642,11 @@ mod tests {
             created_at: test_created_at,
             updated_at: test_updated_at,
         };
-        let result = user.save(&whitenoise).await;
+        let result = user.save(&whitenoise.database).await;
         assert!(result.is_ok());
 
         // Test that we can load it back (this verifies it was saved correctly)
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database).await;
         assert!(loaded_user.is_ok());
 
         let loaded = loaded_user.unwrap();
@@ -599,11 +683,11 @@ mod tests {
             updated_at: test_updated_at,
         };
 
-        let result = user.save(&whitenoise).await;
+        let result = user.save(&whitenoise.database).await;
         assert!(result.is_ok());
 
         // Verify it was saved correctly by loading it back
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database).await;
         assert!(loaded_user.is_ok());
 
         let loaded = loaded_user.unwrap();
@@ -626,7 +710,7 @@ mod tests {
 
         // Try to load a non-existent user
         let non_existent_pubkey = nostr_sdk::Keys::generate().public_key();
-        let result = User::find_by_pubkey(&non_existent_pubkey, &whitenoise).await;
+        let result = User::find_by_pubkey(&non_existent_pubkey, &whitenoise.database).await;
 
         assert!(result.is_err());
         if let Err(WhitenoiseError::UserNotFound) = result {
@@ -669,11 +753,11 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let save_result = dummy_user.save(&whitenoise).await;
+        let save_result = dummy_user.save(&whitenoise.database).await;
         assert!(save_result.is_ok());
 
         // Load the user back
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database).await;
         assert!(loaded_user.is_ok());
 
         let user = loaded_user.unwrap();
@@ -747,11 +831,11 @@ mod tests {
             };
 
             // Save the user
-            let save_result = user.save(&whitenoise).await;
+            let save_result = user.save(&whitenoise.database).await;
             assert!(save_result.is_ok(), "Failed to save {}", description);
 
             // Load the user back
-            let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise).await;
+            let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database).await;
             assert!(loaded_user.is_ok(), "Failed to load {}", description);
 
             let loaded = loaded_user.unwrap();
@@ -813,11 +897,11 @@ mod tests {
         };
 
         // Save the user first
-        let save_result = user.save(&whitenoise).await;
+        let save_result = user.save(&whitenoise.database).await;
         assert!(save_result.is_ok());
 
         // Load the user to get the actual database ID
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
@@ -846,9 +930,9 @@ mod tests {
         };
 
         // Save relays to database
-        relay1.save(&whitenoise).await.unwrap();
-        relay2.save(&whitenoise).await.unwrap();
-        relay3.save(&whitenoise).await.unwrap();
+        relay1.save(&whitenoise.database).await.unwrap();
+        relay2.save(&whitenoise.database).await.unwrap();
+        relay3.save(&whitenoise.database).await.unwrap();
 
         // Insert into user_relays table
         sqlx::query(
@@ -889,7 +973,7 @@ mod tests {
 
         // Test loading nostr relays
         let nostr_relays = loaded_user
-            .relays(RelayType::Nostr, &whitenoise)
+            .relays(RelayType::Nostr, &whitenoise.database)
             .await
             .unwrap();
 
@@ -901,7 +985,7 @@ mod tests {
 
         // Test loading inbox relays
         let inbox_relays = loaded_user
-            .relays(RelayType::Inbox, &whitenoise)
+            .relays(RelayType::Inbox, &whitenoise.database)
             .await
             .unwrap();
 
@@ -910,7 +994,7 @@ mod tests {
 
         // Test loading key package relays (should be empty)
         let key_package_relays = loaded_user
-            .relays(RelayType::KeyPackage, &whitenoise)
+            .relays(RelayType::KeyPackage, &whitenoise.database)
             .await
             .unwrap();
 
@@ -937,14 +1021,14 @@ mod tests {
         };
 
         // Save the user first
-        user.save(&whitenoise).await.unwrap();
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
         // Test loading relays when none exist
         let result = loaded_user
-            .relays(RelayType::Nostr, &whitenoise)
+            .relays(RelayType::Nostr, &whitenoise.database)
             .await
             .unwrap();
 
@@ -970,8 +1054,8 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        user.save(&whitenoise).await.unwrap();
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
@@ -983,7 +1067,7 @@ mod tests {
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
-        relay.save(&whitenoise).await.unwrap();
+        relay.save(&whitenoise.database).await.unwrap();
 
         // Add the same relay for different types
         for relay_type in ["nip65", "inbox", "key_package"] {
@@ -1002,7 +1086,7 @@ mod tests {
 
         // Test each relay type returns the same relay
         for relay_type in [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage] {
-            let relays = loaded_user.relays(relay_type, &whitenoise).await.unwrap();
+            let relays = loaded_user.relays(relay_type, &whitenoise.database).await.unwrap();
 
             assert_eq!(relays.len(), 1);
             assert_eq!(relays[0].url, relay_url);
@@ -1036,13 +1120,13 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        user1.save(&whitenoise).await.unwrap();
-        user2.save(&whitenoise).await.unwrap();
+        user1.save(&whitenoise.database).await.unwrap();
+        user2.save(&whitenoise.database).await.unwrap();
 
-        let loaded_user1 = User::find_by_pubkey(&user1_pubkey, &whitenoise)
+        let loaded_user1 = User::find_by_pubkey(&user1_pubkey, &whitenoise.database)
             .await
             .unwrap();
-        let loaded_user2 = User::find_by_pubkey(&user2_pubkey, &whitenoise)
+        let loaded_user2 = User::find_by_pubkey(&user2_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
@@ -1063,8 +1147,8 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        relay1.save(&whitenoise).await.unwrap();
-        relay2.save(&whitenoise).await.unwrap();
+        relay1.save(&whitenoise.database).await.unwrap();
+        relay2.save(&whitenoise.database).await.unwrap();
 
         // Associate relay1 with user1 and relay2 with user2
         sqlx::query(
@@ -1093,11 +1177,11 @@ mod tests {
 
         // Test that each user gets only their own relays
         let user1_relays = loaded_user1
-            .relays(RelayType::Nostr, &whitenoise)
+            .relays(RelayType::Nostr, &whitenoise.database)
             .await
             .unwrap();
         let user2_relays = loaded_user2
-            .relays(RelayType::Nostr, &whitenoise)
+            .relays(RelayType::Nostr, &whitenoise.database)
             .await
             .unwrap();
 
@@ -1127,8 +1211,8 @@ mod tests {
             updated_at: test_timestamp,
         };
 
-        user.save(&whitenoise).await.unwrap();
-        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise)
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
             .await
             .unwrap();
 
@@ -1144,7 +1228,7 @@ mod tests {
             updated_at: relay_updated_at,
         };
 
-        relay.save(&whitenoise).await.unwrap();
+        relay.save(&whitenoise.database).await.unwrap();
 
         // Associate with user
         sqlx::query(
@@ -1161,7 +1245,7 @@ mod tests {
 
         // Load relays and verify all properties
         let relays = loaded_user
-            .relays(RelayType::Nostr, &whitenoise)
+            .relays(RelayType::Nostr, &whitenoise.database)
             .await
             .unwrap();
 
