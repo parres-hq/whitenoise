@@ -37,13 +37,13 @@ impl Whitenoise {
     pub async fn follow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
         let (user, newly_created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
         if newly_created {
-            // try and populate the user's data
+            // TODO: try and populate the user's data
         }
 
         account.follow_user(&user, &self.database).await?;
 
         if newly_created {
-            // publish account's follow list to nostr
+            // TODO: publish account's follow list to nostr
         }
         Ok(())
     }
@@ -161,7 +161,7 @@ impl Whitenoise {
     pub async fn follow_users(&self, account: &Account, pubkeys: &[PublicKey]) -> Result<()> {
         let mut users = Vec::new();
         for pubkey in pubkeys {
-            let user = self.find_user_by_pubkey(pubkey).await?;
+            let (user, _) = self.find_or_create_user_by_pubkey(pubkey).await?;
             users.push(user);
         }
         account.follow_users(&users, &self.database).await
