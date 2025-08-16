@@ -22,6 +22,7 @@ use crate::nostr_manager::NostrManager;
 
 use crate::types::ProcessableEvent;
 use accounts::*;
+use app_settings::*;
 use database::*;
 use error::{Result, WhitenoiseError};
 use secrets_store::SecretsStore;
@@ -194,6 +195,9 @@ impl Whitenoise {
         for relay in Account::default_relays() {
             let _ = whitenoise.find_or_create_relay(&relay).await?;
         }
+
+        // Create default app settings in the database if they don't exist
+        AppSettings::find_or_create_default(&whitenoise.database).await?;
 
         // Add default relays to the Nostr client if they aren't already added
         if whitenoise.nostr.client.relays().await.is_empty() {
@@ -484,10 +488,9 @@ pub mod test_utils {
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
-        let nostr =
-            NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
-                .await
-                .expect("Failed to create NostrManager");
+        let nostr = NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
+            .await
+            .expect("Failed to create NostrManager");
 
         // connect to default relays
         nostr.add_relays(Account::default_relays()).await.unwrap();
@@ -754,8 +757,14 @@ mod tests {
             // Both should have valid configurations (they'll be different temp dirs, which is fine)
             assert!(whitenoise1.config.data_dir.exists());
             assert!(whitenoise2.config.data_dir.exists());
-            assert!(Account::all(&whitenoise1.database).await.unwrap().is_empty());
-            assert!(Account::all(&whitenoise2.database).await.unwrap().is_empty());
+            assert!(Account::all(&whitenoise1.database)
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(Account::all(&whitenoise2.database)
+                .await
+                .unwrap()
+                .is_empty());
         }
     }
 

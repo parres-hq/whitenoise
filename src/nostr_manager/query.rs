@@ -36,7 +36,7 @@ impl NostrManager {
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         let tags: Vec<Tag> = match relay_type {
-            RelayType::Nostr => relay_list
+            RelayType::Nip65 => relay_list
                 .iter()
                 .map(|relay| Tag::reference(relay.url.to_string()))
                 .collect(),

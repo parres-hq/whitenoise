@@ -107,6 +107,20 @@ impl Relay {
         })
     }
 
+    pub(crate) async fn find_or_create_by_url(
+        url: &RelayUrl,
+        database: &Database,
+    ) -> Result<Relay, WhitenoiseError> {
+        match Relay::find_by_url(url, database).await {
+            Ok(relay) => Ok(relay),
+            Err(_) => {
+                let relay = Relay::new(url);
+                let new_relay = relay.save(database).await?;
+                Ok(new_relay)
+            }
+        }
+    }
+
     /// Saves this relay to the database.
     ///
     /// # Arguments
@@ -121,18 +135,15 @@ impl Relay {
     ///
     /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn save(&self, database: &Database) -> Result<Relay, WhitenoiseError> {
-        let mut tx = database
-            .pool
-            .begin()
-            .await
-            .map_err(DatabaseError::Sqlx)?;
+        let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
 
         let result = sqlx::query(
-            "INSERT OR REPLACE INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)",
+            "INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET updated_at = ?",
         )
         .bind(self.url.to_string().as_str())
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
+        .bind(Utc::now().timestamp_millis())
         .execute(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)?;

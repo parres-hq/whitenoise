@@ -85,7 +85,7 @@ impl Account {
 
     pub(crate) async fn nip65_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
         let user = self.user(&whitenoise.database).await?;
-        let relays = user.relays(RelayType::Nostr, &whitenoise.database).await?;
+        let relays = user.relays(RelayType::Nip65, &whitenoise.database).await?;
         Ok(relays)
     }
 
@@ -97,7 +97,9 @@ impl Account {
 
     pub(crate) async fn key_package_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
         let user = self.user(&whitenoise.database).await?;
-        let relays = user.relays(RelayType::KeyPackage, &whitenoise.database).await?;
+        let relays = user
+            .relays(RelayType::KeyPackage, &whitenoise.database)
+            .await?;
         Ok(relays)
     }
 
@@ -108,7 +110,8 @@ impl Account {
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.add_relay(relay, relay_type, &whitenoise.database).await?;
+        user.add_relay(relay, relay_type, &whitenoise.database)
+            .await?;
         tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay);
         Ok(())
     }
@@ -120,7 +123,8 @@ impl Account {
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.remove_relay(relay, relay_type, &whitenoise.database).await?;
+        user.remove_relay(relay, relay_type, &whitenoise.database)
+            .await?;
         tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay);
         Ok(())
     }
@@ -348,7 +352,7 @@ impl Whitenoise {
         let (nip65_relays, need_to_publish_nip65_relay_list) = self
             .fetch_and_setup_relays(
                 account,
-                RelayType::Nostr,
+                RelayType::Nip65,
                 &default_relays,
                 &default_relays,
                 new_account,
@@ -377,7 +381,7 @@ impl Whitenoise {
             self.nostr
                 .publish_relay_list_with_signer(
                     &nip65_relays,
-                    RelayType::Nostr,
+                    RelayType::Nip65,
                     &nip65_relays,
                     keys.clone(),
                 )
@@ -446,7 +450,6 @@ impl Whitenoise {
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let database_clone = self.database.clone();
 
         tokio::spawn(async move {
             tracing::debug!(
@@ -457,14 +460,14 @@ impl Whitenoise {
 
             let current_time = Timestamp::now();
             match nostr
-                .fetch_all_user_data(signer, &account_clone, group_ids, &database_clone)
+                .fetch_all_user_data(signer, &account_clone, group_ids)
                 .await
             {
                 Ok(_) => {
                     // Update the last_synced timestamp in the database
                     if let Err(e) =
-                        sqlx::query("UPDATE accounts SET last_synced = ? WHERE pubkey = ?")
-                            .bind(current_time.to_string())
+                        sqlx::query("UPDATE accounts SET last_synced_at = ? WHERE pubkey = ?")
+                            .bind(current_time.as_u64() as i64)
                             .bind(account_clone.pubkey.to_hex())
                             .execute(&database.pool)
                             .await
@@ -787,7 +790,6 @@ mod tests {
             key_package_events.is_some(),
             "Key package (kind 443) should be published for new accounts"
         );
-
     }
 
     /// Helper function to verify that an account has all three relay lists properly configured

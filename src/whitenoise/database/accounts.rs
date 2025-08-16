@@ -198,10 +198,7 @@ impl Account {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError::AccountNotFound`] if the database query fails.
-    pub(crate) async fn follows(
-        &self,
-        database: &Database,
-    ) -> Result<Vec<User>, WhitenoiseError> {
+    pub(crate) async fn follows(&self, database: &Database) -> Result<Vec<User>, WhitenoiseError> {
         let user_rows = sqlx::query_as::<_, UserRow>(
             "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at
              FROM account_follows af
@@ -275,11 +272,12 @@ impl Account {
         user: &User,
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
-        sqlx::query("INSERT OR REPLACE INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id, user_id) DO UPDATE SET updated_at = ?")
             .bind(self.id)
             .bind(user.id)
             .bind(self.created_at.timestamp_millis())
             .bind(self.updated_at.timestamp_millis())
+            .bind(Utc::now().timestamp_millis())
             .execute(&database.pool)
             .await
             .map_err(DatabaseError::Sqlx)?;
@@ -352,12 +350,13 @@ impl Account {
     ///
     /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn save(&self, database: &Database) -> Result<(), WhitenoiseError> {
-        sqlx::query("INSERT OR REPLACE INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET user_id = excluded.user_id, last_synced_at = excluded.last_synced_at, updated_at = ?")
             .bind(self.pubkey.to_hex().as_str())
             .bind(self.user_id)
             .bind(self.last_synced_at.map(|ts| ts.timestamp_millis()))
             .bind(self.created_at.timestamp_millis())
             .bind(self.updated_at.timestamp_millis())
+            .bind(Utc::now().timestamp_millis())
             .execute(&database.pool)
             .await
             .map_err(DatabaseError::Sqlx)?;
@@ -923,10 +922,7 @@ mod tests {
         }
 
         // Test follows
-        let followers = saved_account
-            .follows(&whitenoise.database)
-            .await
-            .unwrap();
+        let followers = saved_account.follows(&whitenoise.database).await.unwrap();
 
         // Verify we got all followers
         assert_eq!(followers.len(), 3);
@@ -977,10 +973,7 @@ mod tests {
             .unwrap();
 
         // Test follows with no followers
-        let followers = saved_account
-            .follows(&whitenoise.database)
-            .await
-            .unwrap();
+        let followers = saved_account.follows(&whitenoise.database).await.unwrap();
 
         // Verify empty result
         assert_eq!(followers.len(), 0);
@@ -1049,10 +1042,7 @@ mod tests {
         .unwrap();
 
         // Test follows
-        let followers = saved_account
-            .follows(&whitenoise.database)
-            .await
-            .unwrap();
+        let followers = saved_account.follows(&whitenoise.database).await.unwrap();
 
         // Verify single follower
         assert_eq!(followers.len(), 1);
@@ -1127,10 +1117,7 @@ mod tests {
         .unwrap();
 
         // Test follows
-        let followers = saved_account
-            .follows(&whitenoise.database)
-            .await
-            .unwrap();
+        let followers = saved_account.follows(&whitenoise.database).await.unwrap();
 
         // Verify complex metadata is preserved
         assert_eq!(followers.len(), 1);
@@ -1234,14 +1221,8 @@ mod tests {
         }
 
         // Test follows multiple times to ensure consistent ordering
-        let followers1 = saved_account
-            .follows(&whitenoise.database)
-            .await
-            .unwrap();
-        let followers2 = saved_account
-            .follows(&whitenoise.database)
-            .await
-            .unwrap();
+        let followers1 = saved_account.follows(&whitenoise.database).await.unwrap();
+        let followers2 = saved_account.follows(&whitenoise.database).await.unwrap();
 
         assert_eq!(followers1.len(), 5);
         assert_eq!(followers2.len(), 5);

@@ -70,29 +70,20 @@ impl AppSettingsRow {
 }
 
 impl AppSettings {
-    /// Loads the app settings from the database.
-    ///
-    /// # Arguments
-    ///
-    /// * `database` - A reference to the `Database` instance for database operations
-    ///
-    /// # Returns
-    ///
-    /// Returns the `AppSettings` from the database on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError::Configuration`] if the app settings are not found in the database.
-    pub(crate) async fn load(database: &Database) -> Result<AppSettings, WhitenoiseError> {
-        let settings_row =
-            sqlx::query_as::<_, AppSettingsRow>("SELECT * FROM app_settings WHERE id = 1")
-                .fetch_one(&database.pool)
-                .await
-                .map_err(|_| {
-                    WhitenoiseError::Configuration("App settings not found".to_string())
-                })?;
-
-        settings_row.into_app_settings()
+    pub(crate) async fn find_or_create_default(
+        database: &Database,
+    ) -> Result<AppSettings, WhitenoiseError> {
+        match sqlx::query_as::<_, AppSettingsRow>("SELECT * FROM app_settings WHERE id = 1")
+            .fetch_one(&database.pool)
+            .await
+        {
+            Ok(settings_row) => Ok(settings_row.into_app_settings()?),
+            Err(_e) => {
+                let settings = AppSettings::default();
+                settings.save(database).await?;
+                Ok(settings)
+            }
+        }
     }
 
     /// Saves or updates the app settings in the database.
@@ -109,18 +100,15 @@ impl AppSettings {
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if the database operation fails.
-    #[allow(dead_code)]
-    pub(crate) async fn save(
-        settings: &AppSettings,
-        database: &Database,
-    ) -> Result<(), WhitenoiseError> {
+    pub(crate) async fn save(&self, database: &Database) -> Result<(), WhitenoiseError> {
         sqlx::query(
-            "INSERT OR REPLACE INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)"
+            "INSERT INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET theme_mode = excluded.theme_mode, updated_at = ?"
         )
-        .bind(settings.id)
-        .bind(settings.theme_mode.to_string())
-        .bind(settings.created_at.timestamp_millis())
-        .bind(settings.updated_at.timestamp_millis())
+        .bind(self.id)
+        .bind(self.theme_mode.to_string())
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .bind(Utc::now().timestamp_millis())
         .execute(&database.pool)
         .await
         .map_err(|e| WhitenoiseError::Database(e.into()))?;

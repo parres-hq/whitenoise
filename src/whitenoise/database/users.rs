@@ -212,26 +212,23 @@ impl User {
     ///
     /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn save(&self, database: &Database) -> Result<User, WhitenoiseError> {
-        let mut tx = database
-            .pool
-            .begin()
-            .await
-            .map_err(DatabaseError::Sqlx)?;
+        let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
 
-        // Use INSERT OR REPLACE to handle both insert and update cases
+        // Use INSERT ON CONFLICT to handle both insert and update cases without deleting/replacing rows
         sqlx::query(
-            "INSERT OR REPLACE INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET metadata = excluded.metadata, updated_at = ?",
         )
         .bind(self.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&self.metadata).unwrap())
         .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
         .bind(Utc::now().timestamp_millis())
         .execute(&mut *tx)
         .await
         .map_err(DatabaseError::Sqlx)
         .map_err(WhitenoiseError::Database)?;
 
-        // Get the user by pubkey since INSERT OR REPLACE might change the id
+        // Get the user by pubkey to return the updated record
         let updated_user = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
             .bind(self.pubkey.to_hex().as_str())
             .fetch_one(&mut *tx)
@@ -264,11 +261,7 @@ impl User {
         relay_type: RelayType,
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
-        let mut tx = database
-            .pool
-            .begin()
-            .await
-            .map_err(DatabaseError::Sqlx)?;
+        let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
 
         sqlx::query("INSERT OR IGNORE INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
             .bind(relay.url.to_string())
@@ -746,14 +739,7 @@ mod tests {
         };
 
         // Save the user
-        let dummy_user = User {
-            id: None,
-            pubkey: test_pubkey,
-            metadata: Metadata::new(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        let save_result = dummy_user.save(&whitenoise.database).await;
+        let save_result = original_user.save(&whitenoise.database).await;
         assert!(save_result.is_ok());
 
         // Load the user back
@@ -973,7 +959,7 @@ mod tests {
 
         // Test loading nostr relays
         let nostr_relays = loaded_user
-            .relays(RelayType::Nostr, &whitenoise.database)
+            .relays(RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 
@@ -1028,7 +1014,7 @@ mod tests {
 
         // Test loading relays when none exist
         let result = loaded_user
-            .relays(RelayType::Nostr, &whitenoise.database)
+            .relays(RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 
@@ -1085,8 +1071,11 @@ mod tests {
         }
 
         // Test each relay type returns the same relay
-        for relay_type in [RelayType::Nostr, RelayType::Inbox, RelayType::KeyPackage] {
-            let relays = loaded_user.relays(relay_type, &whitenoise.database).await.unwrap();
+        for relay_type in [RelayType::Nip65, RelayType::Inbox, RelayType::KeyPackage] {
+            let relays = loaded_user
+                .relays(relay_type, &whitenoise.database)
+                .await
+                .unwrap();
 
             assert_eq!(relays.len(), 1);
             assert_eq!(relays[0].url, relay_url);
@@ -1177,11 +1166,11 @@ mod tests {
 
         // Test that each user gets only their own relays
         let user1_relays = loaded_user1
-            .relays(RelayType::Nostr, &whitenoise.database)
+            .relays(RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
         let user2_relays = loaded_user2
-            .relays(RelayType::Nostr, &whitenoise.database)
+            .relays(RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 
@@ -1245,7 +1234,7 @@ mod tests {
 
         // Load relays and verify all properties
         let relays = loaded_user
-            .relays(RelayType::Nostr, &whitenoise.database)
+            .relays(RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 

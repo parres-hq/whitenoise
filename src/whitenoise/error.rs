@@ -98,6 +98,9 @@ pub enum WhitenoiseError {
     #[error("join error due to spawn blocking")]
     JoinError(#[from] tokio::task::JoinError),
 
+    #[error("Event handler error: {0}")]
+    EventProcessor(String),
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }

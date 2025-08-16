@@ -91,7 +91,12 @@ async fn main() -> Result<(), WhitenoiseError> {
     let relay_urls: Vec<String> = dev_relays.iter().map(|s| s.to_string()).collect();
     let nip65_relay_tags: Vec<Tag> = relay_urls
         .iter()
-        .map(|url| Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)), [url.clone()]))
+        .map(|url| {
+            Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+                [url.clone()],
+            )
+        })
         .collect();
     let relay_tags: Vec<Tag> = relay_urls
         .iter()
