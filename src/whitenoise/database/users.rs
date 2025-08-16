@@ -92,14 +92,14 @@ impl User {
         match User::find_by_pubkey(pubkey, database).await {
             Ok(user) => Ok((user, false)),
             Err(WhitenoiseError::UserNotFound) => {
-                let user = User {
+                let mut user = User {
                     id: None,
                     pubkey: *pubkey,
                     metadata: Metadata::new(),
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 };
-                user.save(database).await?;
+                user = user.save(database).await?;
                 Ok((user, true))
             }
             _ => Err(WhitenoiseError::Other(anyhow::anyhow!("Unexpected error"))),
