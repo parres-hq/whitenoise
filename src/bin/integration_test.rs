@@ -1073,13 +1073,16 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Verify final account state
     let final_accounts = whitenoise.all_accounts().await.unwrap();
     assert_eq!(final_accounts.len(), 6); // account1, account3, account4, account5, account6, account7 should remain
-    assert!(final_accounts.contains(&account1));
-    assert!(final_accounts.contains(&account3));
-    assert!(final_accounts.contains(&account4));
-    assert!(final_accounts.contains(&account5));
-    assert!(final_accounts.contains(&account6));
-    assert!(final_accounts.contains(&account7));
-    assert!(!final_accounts.contains(&account2)); // account2 was logged out
+
+    // Check pubkeys because other fields can change
+    let final_accounts_pubkeys = final_accounts.iter().map(|a| a.pubkey).collect::<Vec<_>>();
+    assert!(final_accounts_pubkeys.contains(&account1.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account3.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account4.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account5.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account6.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account7.pubkey));
+    assert!(!final_accounts_pubkeys.contains(&account2.pubkey)); // account2 was logged out
     tracing::info!("✓ Final account state is correct");
 
     tracing::info!("=================================== Integration Test Completed Successfully ===================================");
