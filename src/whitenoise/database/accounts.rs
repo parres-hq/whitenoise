@@ -1,4 +1,4 @@
-use super::{Database, DatabaseError};
+use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::database::users::UserRow;
 use crate::whitenoise::users::User;
@@ -32,13 +32,9 @@ where
     i64: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
 {
     fn from_row(row: &'r R) -> std::result::Result<Self, sqlx::Error> {
-        // Extract raw values from the database row
         let id: i64 = row.try_get("id")?;
         let pubkey_str: String = row.try_get("pubkey")?;
         let user_id: i64 = row.try_get("user_id")?;
-        let last_synced_at_i64: Option<i64> = row.try_get("last_synced_at")?;
-        let created_at_i64: i64 = row.try_get("created_at")?;
-        let updated_at_i64: i64 = row.try_get("updated_at")?;
 
         // Parse pubkey from hex string
         let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| sqlx::Error::ColumnDecode {
@@ -46,36 +42,13 @@ where
             source: Box::new(e),
         })?;
 
-        // Convert timestamps from i64 to DateTime
-        let last_synced_at = match last_synced_at_i64 {
-            Some(timestamp) => Some(
-                DateTime::from_timestamp_millis(timestamp)
-                    .ok_or_else(|| DatabaseError::InvalidTimestamp { timestamp })
-                    .map_err(|e| sqlx::Error::ColumnDecode {
-                        index: "last_synced_at".to_string(),
-                        source: Box::new(e),
-                    })?,
-            ),
+        let last_synced_at = match row.try_get::<Option<i64>, _>("last_synced_at")? {
+            Some(_) => Some(parse_timestamp(row, "last_synced_at")?),
             None => None,
         };
 
-        let created_at = DateTime::from_timestamp_millis(created_at_i64)
-            .ok_or_else(|| DatabaseError::InvalidTimestamp {
-                timestamp: created_at_i64,
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "created_at".to_string(),
-                source: Box::new(e),
-            })?;
-
-        let updated_at = DateTime::from_timestamp_millis(updated_at_i64)
-            .ok_or_else(|| DatabaseError::InvalidTimestamp {
-                timestamp: updated_at_i64,
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "updated_at".to_string(),
-                source: Box::new(e),
-            })?;
+        let created_at = parse_timestamp(row, "created_at")?;
+        let updated_at = parse_timestamp(row, "updated_at")?;
 
         Ok(AccountRow {
             id,

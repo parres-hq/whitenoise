@@ -1,4 +1,4 @@
-use super::{Database, DatabaseError};
+use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::whitenoise::relays::Relay;
 use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
@@ -24,11 +24,8 @@ where
     i64: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
 {
     fn from_row(row: &'r R) -> std::result::Result<Self, sqlx::Error> {
-        // Extract raw values from the database row
         let id: i64 = row.try_get("id")?;
         let url_str: String = row.try_get("url")?;
-        let created_at_i64: i64 = row.try_get("created_at")?;
-        let updated_at_i64: i64 = row.try_get("updated_at")?;
 
         // Parse url from string
         let url = RelayUrl::parse(&url_str).map_err(|e| sqlx::Error::ColumnDecode {
@@ -36,23 +33,8 @@ where
             source: Box::new(e),
         })?;
 
-        let created_at = DateTime::from_timestamp_millis(created_at_i64)
-            .ok_or_else(|| DatabaseError::InvalidTimestamp {
-                timestamp: created_at_i64,
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "created_at".to_string(),
-                source: Box::new(e),
-            })?;
-
-        let updated_at = DateTime::from_timestamp_millis(updated_at_i64)
-            .ok_or_else(|| DatabaseError::InvalidTimestamp {
-                timestamp: updated_at_i64,
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "updated_at".to_string(),
-                source: Box::new(e),
-            })?;
+        let created_at = parse_timestamp(row, "created_at")?;
+        let updated_at = parse_timestamp(row, "updated_at")?;
 
         Ok(RelayRow {
             id,

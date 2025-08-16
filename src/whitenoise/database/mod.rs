@@ -15,6 +15,7 @@ pub mod app_settings;
 pub mod relays;
 pub mod user_relays;
 pub mod users;
+pub mod utils;
 
 pub static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| sqlx::migrate!("./db_migrations"));
 

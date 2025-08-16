@@ -1,4 +1,4 @@
-use super::Database;
+use super::{utils::parse_timestamp, Database};
 use crate::whitenoise::app_settings::{AppSettings, ThemeMode};
 use crate::whitenoise::error::WhitenoiseError;
 use chrono::{DateTime, Utc};
@@ -20,30 +20,10 @@ where
     i64: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
 {
     fn from_row(row: &'r R) -> std::result::Result<Self, sqlx::Error> {
-        let id: i64 = row.try_get("id")?;
-        let theme_mode: String = row.try_get("theme_mode")?;
-        let created_at_i64: i64 = row.try_get("created_at")?;
-        let updated_at_i64: i64 = row.try_get("updated_at")?;
-
-        let created_at = DateTime::from_timestamp_millis(created_at_i64).ok_or_else(|| {
-            sqlx::Error::ColumnDecode {
-                index: "created_at".to_string(),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Invalid timestamp",
-                )),
-            }
-        })?;
-
-        let updated_at = DateTime::from_timestamp_millis(updated_at_i64).ok_or_else(|| {
-            sqlx::Error::ColumnDecode {
-                index: "updated_at".to_string(),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Invalid timestamp",
-                )),
-            }
-        })?;
+        let id = row.try_get("id")?;
+        let theme_mode = row.try_get("theme_mode")?;
+        let created_at = parse_timestamp(row, "created_at")?;
+        let updated_at = parse_timestamp(row, "updated_at")?;
 
         Ok(AppSettingsRow {
             id,
@@ -258,13 +238,13 @@ mod tests {
     async fn test_app_settings_row_from_row_invalid_timestamp() {
         let pool = setup_test_db().await;
 
-        // Insert invalid timestamp (negative value that can't be converted)
+        // Insert invalid timestamp (value that can't be converted to DateTime)
         sqlx::query(
             "INSERT INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(1i64)
         .bind("light")
-        .bind(-1i64) // Invalid timestamp
+        .bind(i64::MIN) // Invalid timestamp - extremely negative value
         .bind(chrono::Utc::now().timestamp_millis())
         .execute(&pool)
         .await
