@@ -102,7 +102,7 @@ impl User {
                 user = user.save(database).await?;
                 Ok((user, true))
             }
-            _ => Err(WhitenoiseError::Other(anyhow::anyhow!("Unexpected error"))),
+            Err(e) => Err(e),
         }
     }
 
@@ -201,7 +201,7 @@ impl User {
             "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET metadata = excluded.metadata, updated_at = ?",
         )
         .bind(self.pubkey.to_hex().as_str())
-        .bind(serde_json::to_string(&self.metadata).unwrap())
+        .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
         .bind(Utc::now().timestamp_millis())
@@ -303,10 +303,13 @@ impl User {
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
         let result = sqlx::query(
-            "DELETE FROM user_relays WHERE user_id = ? AND relay_id = ? AND relay_type = ?",
+            "DELETE FROM user_relays
+             WHERE user_id = ?
+             AND relay_id = (SELECT id FROM relays WHERE url = ?)
+             AND relay_type = ?",
         )
         .bind(self.id)
-        .bind(relay.id)
+        .bind(relay.url.to_string())
         .bind(String::from(relay_type))
         .execute(&database.pool)
         .await
@@ -1161,6 +1164,91 @@ mod tests {
 
         assert_eq!(user2_relays.len(), 1);
         assert_eq!(user2_relays[0].url, relay2_url);
+    }
+
+    #[tokio::test]
+    async fn test_remove_relay_with_id_and_without_id() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test user
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let test_metadata = Metadata::new().name("Test User");
+        let test_timestamp = chrono::Utc::now();
+
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: test_metadata,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Create and save a relay first
+        let relay_url = nostr_sdk::RelayUrl::parse("wss://test-remove.example.com").unwrap();
+        let relay_with_id = Relay {
+            id: Some(1),
+            url: relay_url.clone(),
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+        relay_with_id.save(&whitenoise.database).await.unwrap();
+
+        // Add relay association
+        loaded_user
+            .add_relay(&relay_with_id, RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Test 1: Remove relay using relay with ID
+        let result = loaded_user
+            .remove_relay(&relay_with_id, RelayType::Nip65, &whitenoise.database)
+            .await;
+        assert!(result.is_ok());
+
+        // Re-add the relay association for second test
+        loaded_user
+            .add_relay(&relay_with_id, RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Test 2: Remove relay using relay without ID (common when constructed from URL)
+        // With URL-only approach, this works the same as Test 1
+        let relay_without_id = Relay {
+            id: None, // This used to be problematic, now works seamlessly
+            url: relay_url.clone(),
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+
+        let result = loaded_user
+            .remove_relay(&relay_without_id, RelayType::Nip65, &whitenoise.database)
+            .await;
+        assert!(result.is_ok());
+
+        // Test 3: Try to remove non-existent relay
+        let non_existent_relay = Relay {
+            id: None,
+            url: nostr_sdk::RelayUrl::parse("wss://non-existent.example.com").unwrap(),
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+
+        let result = loaded_user
+            .remove_relay(&non_existent_relay, RelayType::Nip65, &whitenoise.database)
+            .await;
+        assert!(result.is_err());
+        if let Err(WhitenoiseError::UserRelayNotFound) = result {
+            // Expected
+        } else {
+            panic!("Expected UserRelayNotFound error");
+        }
     }
 
     #[tokio::test]
