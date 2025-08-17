@@ -58,8 +58,7 @@ impl Whitenoise {
 
         let group_relays = config.relays.clone();
 
-        let nostr_mls =
-            Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir)?;
         let create_group_result = nostr_mls.create_group(
             &creator_account.pubkey,
             key_package_events.clone(),
@@ -142,7 +141,7 @@ impl Whitenoise {
         account: &Account,
         active_filter: bool,
     ) -> Result<Vec<group_types::Group>> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         Ok(nostr_mls
             .get_groups()
             .map_err(WhitenoiseError::from)?
@@ -156,7 +155,7 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         Ok(nostr_mls
             .get_members(group_id)
             .map_err(WhitenoiseError::from)?
@@ -169,7 +168,7 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         Ok(nostr_mls
             .get_group(group_id)
             .map_err(WhitenoiseError::from)?
@@ -240,7 +239,7 @@ impl Whitenoise {
             users.push(user);
         }
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let update_result = nostr_mls.add_members(group_id, &key_package_events)?;
         // Merge the pending commit immediately after creating it
         // This ensures our local state is correct before publishing
@@ -372,7 +371,7 @@ impl Whitenoise {
         group_id: &GroupId,
         members: Vec<PublicKey>,
     ) -> Result<()> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let update_result = nostr_mls.remove_members(group_id, &members)?;
         nostr_mls.merge_pending_commit(group_id)?;
         let group_relays = nostr_mls.get_relays(group_id)?;

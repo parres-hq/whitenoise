@@ -71,7 +71,7 @@ impl Whitenoise {
         let (inner_event, event_id) =
             self.create_unsigned_nostr_event(&account.pubkey, &message, kind, tags)?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let message_event = nostr_mls.create_message(group_id, inner_event)?;
         let message = nostr_mls
             .get_message(&event_id)?
@@ -145,7 +145,7 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<MessageWithTokens>> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let messages = nostr_mls.get_messages(group_id)?;
         let messages_with_tokens = messages
             .iter()
@@ -190,7 +190,7 @@ impl Whitenoise {
         // Get account to access nostr_mls instance
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let raw_messages = nostr_mls.get_messages(group_id)?;
         // Use the aggregator to process the messages
         self.message_aggregator

@@ -9,7 +9,7 @@ impl Whitenoise {
         &self,
         account: &Account,
     ) -> Result<(String, [Tag; 4])> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let key_package_relay_urls = account
             .key_package_relays(self)
             .await?
@@ -106,8 +106,7 @@ impl Whitenoise {
 
         if let Some(event) = key_package_events.first() {
             if delete_mls_stored_keys {
-                let nostr_mls =
-                    Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+                let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
                 let key_package = nostr_mls.parse_key_package(event)?;
                 nostr_mls.delete_key_package_from_storage(&key_package)?;
             }

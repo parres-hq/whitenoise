@@ -50,7 +50,7 @@ impl Whitenoise {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let welcome = nostr_mls
             .get_welcome(&welcome_event_id)?
             .ok_or(WhitenoiseError::WelcomeNotFound)?;
@@ -94,7 +94,7 @@ impl Whitenoise {
     pub async fn fetch_welcomes(&self, pubkey: &PublicKey) -> Result<Vec<welcome_types::Welcome>> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let welcomes = nostr_mls.get_pending_welcomes()?;
         Ok(welcomes)
     }
@@ -143,7 +143,7 @@ impl Whitenoise {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
         let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
 
         let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
         let result = if let Some(welcome) = welcome {
@@ -235,7 +235,7 @@ impl Whitenoise {
         })?;
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
         if let Some(welcome) = welcome {
             nostr_mls.decline_welcome(&welcome)?;
