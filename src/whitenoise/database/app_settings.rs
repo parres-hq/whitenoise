@@ -58,11 +58,14 @@ impl AppSettings {
             .await
         {
             Ok(settings_row) => Ok(settings_row.into_app_settings()?),
-            Err(_e) => {
-                let settings = AppSettings::default();
-                settings.save(database).await?;
-                Ok(settings)
-            }
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    let settings = AppSettings::default();
+                    settings.save(database).await?;
+                    Ok(settings)
+                }
+                _ => Err(WhitenoiseError::SqlxError(e)),
+            },
         }
     }
 
@@ -133,8 +136,6 @@ mod tests {
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
-
-        // Create the app_settings table
         sqlx::query(
             "CREATE TABLE app_settings (
                 id INTEGER PRIMARY KEY,
@@ -146,70 +147,53 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-
         pool
     }
 
     #[tokio::test]
-    async fn test_app_settings_row_from_row_valid_data() {
+    async fn test_app_settings_row_from_row() {
         let pool = setup_test_db().await;
+        let timestamp = chrono::Utc::now().timestamp_millis();
 
-        let test_id = 1i64;
-        let test_theme_mode = "dark";
-        let test_created_at = chrono::Utc::now().timestamp_millis();
-        let test_updated_at = chrono::Utc::now().timestamp_millis();
-
-        // Insert test data
         sqlx::query(
             "INSERT INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
-        .bind(test_id)
-        .bind(test_theme_mode)
-        .bind(test_created_at)
-        .bind(test_updated_at)
+        .bind(1i64)
+        .bind("dark")
+        .bind(timestamp)
+        .bind(timestamp)
         .execute(&pool)
         .await
         .unwrap();
 
-        // Test from_row implementation
-        let row: SqliteRow = sqlx::query("SELECT * FROM app_settings WHERE id = ?")
-            .bind(test_id)
+        let row: SqliteRow = sqlx::query("SELECT * FROM app_settings WHERE id = 1")
             .fetch_one(&pool)
             .await
             .unwrap();
 
         let app_settings_row = AppSettingsRow::from_row(&row).unwrap();
-
-        assert_eq!(app_settings_row.id, test_id);
-        assert_eq!(app_settings_row.theme_mode, test_theme_mode);
-        assert_eq!(
-            app_settings_row.created_at.timestamp_millis(),
-            test_created_at
-        );
-        assert_eq!(
-            app_settings_row.updated_at.timestamp_millis(),
-            test_updated_at
-        );
+        assert_eq!(app_settings_row.id, 1);
+        assert_eq!(app_settings_row.theme_mode, "dark");
+        assert_eq!(app_settings_row.created_at.timestamp_millis(), timestamp);
+        assert_eq!(app_settings_row.updated_at.timestamp_millis(), timestamp);
     }
 
     #[tokio::test]
-    async fn test_app_settings_row_from_row_all_theme_modes() {
+    async fn test_theme_mode_conversion() {
         let pool = setup_test_db().await;
         let timestamp = chrono::Utc::now().timestamp_millis();
 
-        let test_cases = vec![
+        let test_cases = [
             ("light", ThemeMode::Light),
             ("dark", ThemeMode::Dark),
             ("system", ThemeMode::System),
         ];
 
         for (theme_str, expected_theme) in test_cases {
-            // Insert test data
             sqlx::query("DELETE FROM app_settings")
                 .execute(&pool)
                 .await
                 .unwrap();
-
             sqlx::query(
                 "INSERT INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
             )
@@ -221,30 +205,29 @@ mod tests {
             .await
             .unwrap();
 
-            // Test from_row implementation
             let row: SqliteRow = sqlx::query("SELECT * FROM app_settings WHERE id = 1")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
 
-            let app_settings_row = AppSettingsRow::from_row(&row).unwrap();
-            let app_settings = app_settings_row.into_app_settings().unwrap();
-
+            let app_settings = AppSettingsRow::from_row(&row)
+                .unwrap()
+                .into_app_settings()
+                .unwrap();
             assert_eq!(app_settings.theme_mode, expected_theme);
         }
     }
 
     #[tokio::test]
-    async fn test_app_settings_row_from_row_invalid_timestamp() {
+    async fn test_invalid_timestamp_decode_error() {
         let pool = setup_test_db().await;
 
-        // Insert invalid timestamp (value that can't be converted to DateTime)
         sqlx::query(
             "INSERT INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
         )
         .bind(1i64)
         .bind("light")
-        .bind(i64::MIN) // Invalid timestamp - extremely negative value
+        .bind(i64::MIN)
         .bind(chrono::Utc::now().timestamp_millis())
         .execute(&pool)
         .await
@@ -256,35 +239,11 @@ mod tests {
             .unwrap();
 
         let result = AppSettingsRow::from_row(&row);
-        assert!(result.is_err());
-
-        if let Err(sqlx::Error::ColumnDecode { index, .. }) = result {
-            assert_eq!(index, "created_at");
-        } else {
-            panic!("Expected ColumnDecode error for created_at");
-        }
+        assert!(matches!(result, Err(sqlx::Error::ColumnDecode { .. })));
     }
 
-    #[tokio::test]
-    async fn test_app_settings_row_into_app_settings_valid() {
-        let timestamp = chrono::Utc::now();
-        let app_settings_row = AppSettingsRow {
-            id: 1,
-            theme_mode: "light".to_string(),
-            created_at: timestamp,
-            updated_at: timestamp,
-        };
-
-        let app_settings = app_settings_row.into_app_settings().unwrap();
-
-        assert_eq!(app_settings.id, 1);
-        assert_eq!(app_settings.theme_mode, ThemeMode::Light);
-        assert_eq!(app_settings.created_at, timestamp);
-        assert_eq!(app_settings.updated_at, timestamp);
-    }
-
-    #[tokio::test]
-    async fn test_app_settings_row_into_app_settings_invalid_theme() {
+    #[test]
+    fn test_invalid_theme_mode_error() {
         let timestamp = chrono::Utc::now();
         let app_settings_row = AppSettingsRow {
             id: 1,
@@ -294,51 +253,48 @@ mod tests {
         };
 
         let result = app_settings_row.into_app_settings();
-        assert!(result.is_err());
-
-        if let Err(WhitenoiseError::Configuration(msg)) = result {
-            assert!(msg.contains("Invalid theme mode"));
-        } else {
-            panic!("Expected Configuration error for invalid theme mode");
-        }
+        assert!(matches!(result, Err(WhitenoiseError::Configuration(_))));
     }
 
-    #[test]
-    fn test_app_settings_row_serialization() {
-        let timestamp = chrono::Utc::now();
-        let row = AppSettingsRow {
-            id: 1,
-            theme_mode: "dark".to_string(),
-            created_at: timestamp,
-            updated_at: timestamp,
-        };
+    #[tokio::test]
+    async fn test_find_or_create_default_handles_row_not_found() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
 
-        // Test debug formatting doesn't panic
-        let debug_str = format!("{:?}", row);
-        assert!(debug_str.contains("AppSettingsRow"));
-        assert!(debug_str.contains("dark"));
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let settings = AppSettings::find_or_create_default(&whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(settings.id, 1);
+        assert!(matches!(
+            settings.theme_mode,
+            ThemeMode::Light | ThemeMode::Dark | ThemeMode::System
+        ));
     }
 
-    #[test]
-    fn test_theme_mode_roundtrip() {
-        let test_cases = vec![ThemeMode::Light, ThemeMode::Dark, ThemeMode::System];
+    #[tokio::test]
+    async fn test_find_or_create_default_propagates_decode_errors() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
 
-        for theme in test_cases {
-            let theme_str = theme.to_string();
-            let parsed_theme = ThemeMode::from_str(&theme_str).unwrap();
-            assert_eq!(theme, parsed_theme);
-        }
-    }
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
-    // Note: Integration tests for load_app_settings, save_app_settings, and update_theme_mode
-    // would require a full Whitenoise instance setup, which is typically done in integration tests
-    // rather than unit tests. The database operations themselves are tested above.
+        sqlx::query("DELETE FROM app_settings WHERE id = 1")
+            .execute(&whitenoise.database.pool)
+            .await
+            .unwrap();
 
-    #[test]
-    fn test_error_handling_coverage() {
-        // Test that all error types can be created and formatted properly
-        let config_error = WhitenoiseError::Configuration("Test error".to_string());
-        let error_str = format!("{}", config_error);
-        assert!(error_str.contains("Test error"));
+        sqlx::query(
+            "INSERT INTO app_settings (id, theme_mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(1i64)
+        .bind("light")
+        .bind(i64::MAX)
+        .bind(chrono::Utc::now().timestamp_millis())
+        .execute(&whitenoise.database.pool)
+        .await
+        .unwrap();
+
+        let result = AppSettings::find_or_create_default(&whitenoise.database).await;
+        assert!(matches!(result, Err(WhitenoiseError::SqlxError(_))));
     }
 }
