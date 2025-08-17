@@ -28,6 +28,17 @@ impl NostrManager {
         }
     }
 
+    pub(crate) async fn publish_metadata_with_signer(
+        &self,
+        metadata: &Metadata,
+        relays: &[Relay],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<Output<EventId>> {
+        let event_builder = EventBuilder::metadata(metadata);
+        self.publish_event_builder_with_signer(event_builder, relays, signer)
+            .await
+    }
+
     pub(crate) async fn publish_relay_list_with_signer(
         &self,
         relay_list: &[Relay],
@@ -94,6 +105,91 @@ impl NostrManager {
             .await?;
 
         Ok(events.first_owned())
+    }
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+    use chrono::Utc;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_publish_metadata_with_signer_no_relays() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let nostr_manager = NostrManager::new(sender, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let metadata = Metadata::new().name("test_user").display_name("Test User");
+        let relays: Vec<Relay> = vec![];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_metadata_with_signer(&metadata, &relays, keys)
+            .await;
+
+        assert!(result.is_err(), "Should fail with empty relays");
+        let error_message = format!("{:?}", result.unwrap_err());
+        assert!(
+            error_message.contains("NoRelaysSpecified"),
+            "Expected NoRelaysSpecified error, got: {}",
+            error_message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_and_fetch_metadata() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let nostr_manager = NostrManager::new(sender, std::time::Duration::from_secs(10))
+            .await
+            .unwrap();
+
+        let test_relays = vec![
+            crate::whitenoise::relays::Relay {
+                id: None,
+                url: RelayUrl::parse("ws://localhost:8080").unwrap(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+            crate::whitenoise::relays::Relay {
+                id: None,
+                url: RelayUrl::parse("ws://localhost:7777").unwrap(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+        ];
+
+        let test_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let metadata = Metadata::new()
+            .name(format!("test_user_{}", test_timestamp))
+            .display_name(format!("Test User {}", test_timestamp))
+            .about("Integration test for metadata publishing");
+
+        let keys = Keys::generate();
+
+        let publish_result = nostr_manager
+            .publish_metadata_with_signer(&metadata, &test_relays, keys.clone())
+            .await;
+
+        publish_result.expect("Failed to publish metadata. Are test relays running on localhost:8080 and localhost:7777?");
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let fetch_result = nostr_manager
+            .fetch_metadata_from(&test_relays, keys.public_key())
+            .await
+            .expect("Failed to fetch metadata from relays");
+
+        if let Some(fetched_metadata) = fetch_result {
+            assert_eq!(fetched_metadata.name, metadata.name);
+            assert_eq!(fetched_metadata.display_name, metadata.display_name);
+            assert_eq!(fetched_metadata.about, metadata.about);
+        }
     }
 }
 

@@ -20,8 +20,8 @@ impl Account {
     ) -> Result<(Account, Keys)> {
         let keys = keys.unwrap_or_else(Keys::generate);
 
-        let mut user = User::new(keys.public_key);
-        user = user.save(&whitenoise.database).await?;
+        let (user, _created) =
+            User::find_or_create_by_pubkey(&keys.public_key(), &whitenoise.database).await?;
 
         let account = Account {
             id: None,
@@ -139,6 +139,26 @@ impl Account {
         let mut user = self.user(&whitenoise.database).await?;
         user.metadata = metadata.clone();
         user.save(&whitenoise.database).await?;
+
+        self.publish_user_metadata(whitenoise, &user).await?;
+
+        Ok(())
+    }
+
+    async fn publish_user_metadata(&self, whitenoise: &Whitenoise, user: &User) -> Result<()> {
+        tracing::debug!(target: "whitenoise::accounts::publish_metadata", "Publishing metadata for account: {:?}", self.pubkey);
+
+        let relays = self.nip65_relays(whitenoise).await?;
+        let keys = whitenoise
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&self.pubkey)?;
+
+        whitenoise
+            .nostr
+            .publish_metadata_with_signer(&user.metadata, &relays, keys)
+            .await?;
+
+        tracing::debug!(target: "whitenoise::accounts::publish_metadata", "Successfully published metadata for account: {:?}", self.pubkey);
         Ok(())
     }
 }
@@ -1101,6 +1121,56 @@ mod tests {
                     "Each account should have a unique public key"
                 );
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = create_test_account(&whitenoise).await;
+        account.save(&whitenoise.database).await.unwrap();
+
+        whitenoise.secrets_store.store_private_key(&keys).unwrap();
+
+        let default_relays = whitenoise.load_default_relays().await.unwrap();
+        for relay in &default_relays {
+            account
+                .add_relay(relay, RelayType::Nip65, &whitenoise)
+                .await
+                .unwrap();
+        }
+
+        let test_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let new_metadata = Metadata::new()
+            .name(format!("updated_user_{}", test_timestamp))
+            .display_name(format!("Updated User {}", test_timestamp))
+            .about("Updated metadata for testing");
+
+        let result = account.update_metadata(&new_metadata, &whitenoise).await;
+        result.expect("Failed to update metadata. Are test relays running on localhost:8080 and localhost:7777?");
+
+        let user = account.user(&whitenoise.database).await.unwrap();
+        assert_eq!(user.metadata.name, new_metadata.name);
+        assert_eq!(user.metadata.display_name, new_metadata.display_name);
+        assert_eq!(user.metadata.about, new_metadata.about);
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let nip65_relays = account.nip65_relays(&whitenoise).await.unwrap();
+        let fetched_metadata = whitenoise
+            .nostr
+            .fetch_metadata_from(&nip65_relays, account.pubkey)
+            .await
+            .expect("Failed to fetch metadata from relays");
+
+        if let Some(published_metadata) = fetched_metadata {
+            assert_eq!(published_metadata.name, new_metadata.name);
+            assert_eq!(published_metadata.display_name, new_metadata.display_name);
+            assert_eq!(published_metadata.about, new_metadata.about);
         }
     }
 }
