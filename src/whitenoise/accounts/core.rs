@@ -533,10 +533,10 @@ impl Whitenoise {
         target_relays: &[Relay],
         keys: &Keys,
     ) -> Result<()> {
-        Ok(self
-            .nostr
+        self.nostr
             .publish_relay_list_with_signer(relays, relay_type, target_relays, keys.clone())
-            .await?)
+            .await?;
+        Ok(())
     }
 
     pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
@@ -555,7 +555,7 @@ impl Whitenoise {
                 account_clone.pubkey.to_hex()
             );
 
-            let current_time = Timestamp::now();
+            let current_time = Utc::now().timestamp_millis();
             match nostr
                 .fetch_all_user_data(signer, &account_clone, group_ids)
                 .await
@@ -564,7 +564,7 @@ impl Whitenoise {
                     // Update the last_synced timestamp in the database
                     if let Err(e) =
                         sqlx::query("UPDATE accounts SET last_synced_at = ? WHERE pubkey = ?")
-                            .bind(current_time.as_u64() as i64)
+                            .bind(current_time)
                             .bind(account_clone.pubkey.to_hex())
                             .execute(&database.pool)
                             .await
@@ -606,8 +606,7 @@ impl Whitenoise {
         let mut group_relays = HashSet::new();
         let groups: Vec<group_types::Group>;
         {
-            let nostr_mls =
-                Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
             groups = nostr_mls.get_groups()?;
             // Collect all relays from all groups into a single vector
             for group in &groups {
