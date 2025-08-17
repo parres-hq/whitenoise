@@ -28,7 +28,12 @@ where
         let relay_id: i64 = row.try_get("relay_id")?;
         let relay_type_str: String = row.try_get("relay_type")?;
 
-        let relay_type = RelayType::from(relay_type_str);
+        let relay_type = relay_type_str
+            .parse()
+            .map_err(|e| sqlx::Error::ColumnDecode {
+                index: "relay_type".to_string(),
+                source: Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            })?;
         let created_at = parse_timestamp(row, "created_at")?;
         let updated_at = parse_timestamp(row, "updated_at")?;
 
@@ -411,13 +416,52 @@ mod tests {
         assert_eq!(set.len(), 1);
     }
 
+    #[tokio::test]
+    async fn test_user_relay_row_from_row_invalid_relay_type() {
+        let pool = setup_test_db().await;
+
+        let test_user_id = 1i64;
+        let test_relay_id = 42i64;
+        let invalid_relay_type = "invalid_type";
+        let test_timestamp = chrono::Utc::now().timestamp_millis();
+
+        sqlx::query(
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(test_user_id)
+        .bind(test_relay_id)
+        .bind(invalid_relay_type)
+        .bind(test_timestamp)
+        .bind(test_timestamp)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row: SqliteRow =
+            sqlx::query("SELECT * FROM user_relays WHERE user_id = ? AND relay_id = ?")
+                .bind(test_user_id)
+                .bind(test_relay_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let result = UserRelayRow::from_row(&row);
+        assert!(result.is_err());
+
+        if let Err(sqlx::Error::ColumnDecode { index, .. }) = result {
+            assert_eq!(index, "relay_type");
+        } else {
+            panic!("Expected ColumnDecode error for invalid relay_type");
+        }
+    }
+
     #[test]
     fn test_relay_type_conversion_roundtrip() {
         let test_cases = vec![RelayType::Nip65, RelayType::Inbox, RelayType::KeyPackage];
 
         for relay_type in test_cases {
             let type_str: String = relay_type.into();
-            let parsed_type = RelayType::from(type_str);
+            let parsed_type = type_str.parse().unwrap();
             assert_eq!(relay_type, parsed_type);
         }
     }

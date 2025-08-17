@@ -3,6 +3,7 @@ use crate::whitenoise::Whitenoise;
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Relay {
@@ -19,13 +20,15 @@ pub enum RelayType {
     KeyPackage,
 }
 
-impl From<String> for RelayType {
-    fn from(s: String) -> Self {
+impl FromStr for RelayType {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "nip65" => Self::Nip65,
-            "inbox" => Self::Inbox,
-            "key_package" => Self::KeyPackage,
-            _ => panic!("Invalid relay type: {}", s),
+            "nip65" => Ok(Self::Nip65),
+            "inbox" => Ok(Self::Inbox),
+            "key_package" => Ok(Self::KeyPackage),
+            _ => Err(format!("Invalid relay type: {}", s)),
         }
     }
 }
