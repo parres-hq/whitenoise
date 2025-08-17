@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use sqlx::Row;
 
 /// Parses a timestamp column with flexible type handling for SQLite type affinity.
@@ -42,19 +42,61 @@ where
 
     // Fall back to TEXT datetime string
     if let Ok(datetime_str) = row.try_get::<String, _>(column_name) {
-        let formatted_str = format!("{}+00:00", datetime_str);
-        return formatted_str
-            .parse::<DateTime<Utc>>()
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: column_name.to_string(),
-                source: Box::new(e),
-            });
+        return parse_datetime_string(&datetime_str, column_name);
     }
 
     Err(create_column_decode_error(
         column_name,
         "Could not parse as INTEGER or DATETIME",
     ))
+}
+
+fn parse_datetime_string(
+    datetime_str: &str,
+    column_name: &str,
+) -> Result<DateTime<Utc>, sqlx::Error> {
+    // First, try RFC3339 if it looks like one (contains 'T' or timezone indicators)
+    if datetime_str.contains('T')
+        || datetime_str.contains('+')
+        || datetime_str.contains('Z')
+        || datetime_str.ends_with("UTC")
+    {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(datetime_str) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+        // Also try direct UTC parsing for strings that might already be in UTC format
+        if let Ok(dt) = datetime_str.parse::<DateTime<Utc>>() {
+            return Ok(dt);
+        }
+    }
+
+    // Fall back to parsing common SQLite TEXT formats with NaiveDateTime
+    let formats = [
+        "%Y-%m-%d %H:%M:%S%.f", // With optional fractional seconds
+        "%Y-%m-%d %H:%M:%S",    // Without fractional seconds
+        "%Y-%m-%d",             // Date only (assumes midnight)
+    ];
+
+    for format in &formats {
+        if let Ok(naive_dt) = NaiveDateTime::parse_from_str(datetime_str, format) {
+            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive_dt, Utc));
+        }
+    }
+
+    // If it's just a date, try parsing and assume midnight
+    if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(datetime_str, "%Y-%m-%d") {
+        let naive_dt = naive_date.and_hms_opt(0, 0, 0).unwrap();
+        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive_dt, Utc));
+    }
+
+    // All parsing attempts failed
+    Err(sqlx::Error::ColumnDecode {
+        index: column_name.to_string(),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Could not parse datetime string: '{}'", datetime_str),
+        )),
+    })
 }
 
 /// Helper function to create consistent ColumnDecode errors.
@@ -72,17 +114,21 @@ pub(crate) fn create_column_decode_error(column_name: &str, message: &str) -> sq
 mod tests {
     use super::*;
     use chrono::{Datelike, Timelike};
-    use sqlx::sqlite::{SqlitePool, SqliteRow};
+    use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteRow};
 
     async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
 
-        // Create test table with mixed timestamp types
         sqlx::query(
             "CREATE TABLE test_timestamps (
                 id INTEGER PRIMARY KEY,
                 int_timestamp INTEGER,
                 text_timestamp TEXT,
+                datetime_timestamp DATETIME,
                 invalid_int INTEGER,
                 invalid_text TEXT
             )",
@@ -343,7 +389,7 @@ mod tests {
                 .unwrap();
 
             let result = parse_timestamp(&row, "text_timestamp");
-            assert!(result.is_ok(), "Failed to parse: {}", timestamp_str);
+            assert!(result.is_ok(), "Failed to parse: {timestamp_str}");
 
             let parsed_time = result.unwrap();
             assert_eq!(
@@ -355,6 +401,135 @@ mod tests {
                 parsed_time.timestamp_subsec_millis()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_parse_timestamp_rfc3339_formats() {
+        let pool = setup_test_db().await;
+
+        let test_cases = [
+            "2025-08-16T11:34:29Z",
+            "2025-08-16T11:34:29+00:00",
+            "2025-08-16T11:34:29.123Z",
+            "2025-08-16T11:34:29.123+00:00",
+            "2025-08-16T11:34:29-05:00",
+        ];
+
+        for (i, timestamp_str) in test_cases.iter().enumerate() {
+            let id = i + 1;
+
+            // Clear previous data
+            sqlx::query("DELETE FROM test_timestamps")
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            sqlx::query("INSERT INTO test_timestamps (id, text_timestamp) VALUES (?, ?)")
+                .bind(id as i64)
+                .bind(timestamp_str)
+                .execute(&pool)
+                .await
+                .unwrap();
+
+            let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = ?")
+                .bind(id as i64)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+            let result = parse_timestamp(&row, "text_timestamp");
+            assert!(result.is_ok(), "Failed to parse RFC3339: {timestamp_str}");
+
+            let parsed_time = result.unwrap();
+            assert_eq!(parsed_time.year(), 2025);
+            assert_eq!(parsed_time.month(), 8);
+            assert_eq!(parsed_time.day(), 16);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_parse_timestamp_date_only_format() {
+        let pool = setup_test_db().await;
+
+        sqlx::query("INSERT INTO test_timestamps (id, text_timestamp) VALUES (1, ?)")
+            .bind("2025-08-16")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_timestamp(&row, "text_timestamp");
+        assert!(result.is_ok());
+
+        let parsed_time = result.unwrap();
+        assert_eq!(parsed_time.year(), 2025);
+        assert_eq!(parsed_time.month(), 8);
+        assert_eq!(parsed_time.day(), 16);
+        assert_eq!(parsed_time.hour(), 0);
+        assert_eq!(parsed_time.minute(), 0);
+        assert_eq!(parsed_time.second(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_parse_datetime_string_edge_cases() {
+        // Test the parse_datetime_string function directly
+
+        // RFC3339 formats
+        assert!(parse_datetime_string("2025-08-16T11:34:29Z", "test").is_ok());
+        assert!(parse_datetime_string("2025-08-16T11:34:29+00:00", "test").is_ok());
+        assert!(parse_datetime_string("2025-08-16T11:34:29.123Z", "test").is_ok());
+
+        // SQLite TEXT formats
+        assert!(parse_datetime_string("2025-08-16 11:34:29", "test").is_ok());
+        assert!(parse_datetime_string("2025-08-16 11:34:29.123", "test").is_ok());
+        assert!(parse_datetime_string("2025-08-16", "test").is_ok());
+
+        // Invalid formats
+        assert!(parse_datetime_string("not a date", "test").is_err());
+        assert!(parse_datetime_string("2025-13-50", "test").is_err());
+        assert!(parse_datetime_string("", "test").is_err());
+
+        // Verify error message contains the invalid string
+        if let Err(sqlx::Error::ColumnDecode { source, .. }) =
+            parse_datetime_string("invalid", "test")
+        {
+            let error_msg = format!("{source}");
+            assert!(error_msg.contains("invalid"));
+        } else {
+            panic!("Expected ColumnDecode error with source");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_parse_timestamp_datetime_column() {
+        let pool = setup_test_db().await;
+
+        sqlx::query("INSERT INTO test_timestamps (id, datetime_timestamp) VALUES (1, ?)")
+            .bind("2025-08-16 11:34:29.456")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_timestamp(&row, "datetime_timestamp");
+        assert!(result.is_ok());
+
+        let parsed_time = result.unwrap();
+        assert_eq!(parsed_time.year(), 2025);
+        assert_eq!(parsed_time.month(), 8);
+        assert_eq!(parsed_time.day(), 16);
+        assert_eq!(parsed_time.hour(), 11);
+        assert_eq!(parsed_time.minute(), 34);
+        assert_eq!(parsed_time.second(), 29);
+        assert_eq!(parsed_time.timestamp_subsec_millis(), 456);
     }
 
     #[tokio::test]
