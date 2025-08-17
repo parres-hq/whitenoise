@@ -50,11 +50,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqliteRow;
+    use sqlx::sqlite::{SqlitePoolOptions, SqliteRow};
     use sqlx::{FromRow, SqlitePool};
 
     async fn setup_test_db() -> SqlitePool {
-        let pool = SqlitePool::connect(":memory:").await.unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
 
         // Create the user_relays table
         sqlx::query(
