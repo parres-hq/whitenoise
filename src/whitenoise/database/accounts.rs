@@ -88,12 +88,12 @@ impl Account {
     ///
     /// # Errors
     ///
-    /// Returns a [`WhitenoiseError`] if the database query fails or no accounts are found.
+    /// Returns a [`WhitenoiseError`] if the database query fails.
     pub(crate) async fn all(database: &Database) -> Result<Vec<Account>, WhitenoiseError> {
         let account_rows = sqlx::query_as::<_, AccountRow>("SELECT * FROM accounts")
             .fetch_all(&database.pool)
             .await
-            .map_err(|_| WhitenoiseError::AccountNotFound)?;
+            .map_err(DatabaseError::Sqlx)?;
 
         account_rows
             .into_iter()
