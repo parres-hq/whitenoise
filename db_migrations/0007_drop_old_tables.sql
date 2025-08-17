@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 -- Insert default app settings row with system theme
-INSERT INTO app_settings (theme_mode) VALUES ('system');
+INSERT OR IGNORE INTO app_settings (theme_mode) VALUES ('system');
 
 -- Trigger to automatically update updated_at field on row updates
 CREATE TRIGGER update_app_settings_updated_at
@@ -23,4 +23,3 @@ DROP TABLE IF EXISTS contacts;
 ALTER TABLE accounts_new RENAME TO accounts;
 
 ALTER TABLE accounts DROP COLUMN settings;
-
