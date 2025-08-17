@@ -44,8 +44,7 @@ impl Whitenoise {
     ) -> Result<()> {
         // Process the welcome message - lock scope is minimal
         {
-            let nostr_mls =
-                Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
             nostr_mls
                 .process_welcome(&event.id, &rumor)
                 .map_err(WhitenoiseError::NostrMlsError)?;

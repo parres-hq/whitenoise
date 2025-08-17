@@ -11,7 +11,7 @@ impl Whitenoise {
           account.pubkey.to_hex()
         );
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir).unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         match nostr_mls.process_message(&event) {
             Ok(result) => {
                 tracing::debug!(
