@@ -76,7 +76,7 @@ impl Relay {
         database: &Database,
     ) -> Result<Relay, WhitenoiseError> {
         let relay_row = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
-            .bind(url.to_string().as_str())
+            .bind(url.to_string())
             .fetch_one(&database.pool)
             .await
             .map_err(|_| WhitenoiseError::RelayNotFound)?;
@@ -119,21 +119,19 @@ impl Relay {
     pub(crate) async fn save(&self, database: &Database) -> Result<Relay, WhitenoiseError> {
         let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
 
-        let result = sqlx::query(
+        sqlx::query(
             "INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET updated_at = ?",
         )
-        .bind(self.url.to_string().as_str())
+        .bind(self.url.to_string())
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
         .bind(Utc::now().timestamp_millis())
-        .execute(&database.pool)
+        .execute(&mut *tx)
         .await
         .map_err(DatabaseError::Sqlx)?;
 
-        let inserted_id = result.last_insert_rowid();
-
-        let inserted_relay = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE id = ?")
-            .bind(inserted_id)
+        let inserted_relay = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
+            .bind(self.url.to_string())
             .fetch_one(&mut *tx)
             .await
             .map_err(DatabaseError::Sqlx)?;
@@ -149,6 +147,7 @@ mod tests {
     use super::*;
     use sqlx::sqlite::SqliteRow;
     use sqlx::{FromRow, SqlitePool};
+    use std::path::PathBuf;
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
@@ -157,7 +156,7 @@ mod tests {
         sqlx::query(
             "CREATE TABLE relays (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )",
@@ -398,6 +397,30 @@ mod tests {
         let relay_row = RelayRow::from_row(&row).unwrap();
         let expected_url = RelayUrl::parse(test_url_str).unwrap();
         assert_eq!(relay_row.url, expected_url);
+    }
+
+    #[tokio::test]
+    async fn test_relay_save_insert_and_update() {
+        use crate::whitenoise::database::Database;
+        use crate::whitenoise::relays::Relay;
+
+        let pool = setup_test_db().await;
+        let database = Database {
+            pool,
+            path: PathBuf::from(":memory:"),
+            last_connected: std::time::SystemTime::now(),
+        };
+
+        let test_url = RelayUrl::parse("wss://relay.save.test").unwrap();
+
+        let saved_relay1 = Relay::new(&test_url).save(&database).await.unwrap();
+        let first_id = saved_relay1.id.unwrap();
+
+        let saved_relay2 = Relay::new(&test_url).save(&database).await.unwrap();
+        let second_id = saved_relay2.id.unwrap();
+
+        assert_eq!(first_id, second_id);
+        assert!(saved_relay2.updated_at >= saved_relay1.updated_at);
     }
 
     #[tokio::test]
