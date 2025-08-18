@@ -56,22 +56,6 @@ impl Account {
             .collect())
     }
 
-    pub(crate) fn default_relays() -> Vec<RelayUrl> {
-        let mut relays = Vec::new();
-        if cfg!(debug_assertions) {
-            relays.push("ws://localhost:8080");
-            relays.push("ws://localhost:7777");
-        } else {
-            relays.push("wss://relay.damus.io");
-            relays.push("wss://relay.primal.net");
-            relays.push("wss://nos.lol");
-        }
-        relays
-            .iter()
-            .map(|url| RelayUrl::parse(url).unwrap())
-            .collect()
-    }
-
     pub(crate) async fn connect_relays(&self, whitenoise: &Whitenoise) -> Result<()> {
         let mut relays = HashSet::new();
         relays.extend(self.nip65_relays(whitenoise).await?);
@@ -361,8 +345,8 @@ impl Whitenoise {
 
     async fn load_default_relays(&self) -> Result<Vec<Relay>> {
         let mut default_relays = Vec::new();
-        for relay_url in Account::default_relays() {
-            let relay = self.find_or_create_relay(&relay_url).await?;
+        for Relay { url, .. } in Relay::defaults() {
+            let relay = self.find_or_create_relay(&url).await?;
             default_relays.push(relay);
         }
         Ok(default_relays)
@@ -906,7 +890,7 @@ mod tests {
     /// Helper function to verify that an account has all three relay lists properly configured
     async fn verify_account_relay_lists_setup(whitenoise: &Whitenoise, account: &Account) {
         // Verify all three relay lists are set up with default relays
-        let default_relays = Account::default_relays();
+        let default_relays = Relay::defaults();
         let default_relay_count = default_relays.len();
 
         // Check relay database state
@@ -928,7 +912,8 @@ mod tests {
 
         // Verify that all relay sets contain the same default relays
         // Convert DashSet to Vec to avoid iterator type issues
-        let default_relays_vec: Vec<RelayUrl> = default_relays.into_iter().collect();
+        let default_relays_vec: Vec<RelayUrl> =
+            default_relays.iter().map(|r| r.url.clone()).collect();
         let nip65_relay_urls: Vec<RelayUrl> = account
             .nip65_relays(whitenoise)
             .await
