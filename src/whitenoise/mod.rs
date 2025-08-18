@@ -11,6 +11,7 @@ pub mod database;
 pub mod error;
 mod event_processor;
 pub mod follows;
+pub mod group_information;
 pub mod message_aggregator;
 pub mod relays;
 pub mod secrets_store;
@@ -25,6 +26,7 @@ use accounts::*;
 use app_settings::*;
 use database::*;
 use error::{Result, WhitenoiseError};
+use relays::*;
 use secrets_store::SecretsStore;
 
 #[derive(Clone, Debug)]
@@ -192,8 +194,8 @@ impl Whitenoise {
 
         // Create default relays in the database if they don't exist
         // TODO: Make this batch fetch and insert all relays at once
-        for relay in Account::default_relays() {
-            let _ = whitenoise.find_or_create_relay(&relay).await?;
+        for relay in Relay::defaults() {
+            let _ = whitenoise.find_or_create_relay(&relay.url).await?;
         }
 
         // Create default app settings in the database if they don't exist
@@ -202,8 +204,8 @@ impl Whitenoise {
         // Add default relays to the Nostr client if they aren't already added
         if whitenoise.nostr.client.relays().await.is_empty() {
             // First time starting the app
-            for relay in Account::default_relays() {
-                whitenoise.nostr.client.add_relay(relay).await?;
+            for relay in Relay::defaults() {
+                whitenoise.nostr.client.add_relay(relay.url).await?;
             }
         }
 
@@ -493,7 +495,9 @@ pub mod test_utils {
             .expect("Failed to create NostrManager");
 
         // connect to default relays
-        nostr.add_relays(Account::default_relays()).await.unwrap();
+        let default_relays_urls: Vec<RelayUrl> =
+            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+        nostr.add_relays(default_relays_urls).await.unwrap();
         tokio::spawn({
             let client = nostr.client.clone();
             async move {
