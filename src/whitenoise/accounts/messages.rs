@@ -4,7 +4,6 @@ use crate::whitenoise::relays::Relay;
 use crate::whitenoise::Whitenoise;
 use crate::Account;
 use nostr_mls::prelude::*;
-use std::collections::HashSet;
 
 impl Whitenoise {
     /// Sends a message to a specific group and returns the message with parsed tokens.
@@ -80,14 +79,14 @@ impl Whitenoise {
             ))?;
         let group_relays = nostr_mls.get_relays(group_id)?;
 
-        let mut relays: HashSet<Relay> = HashSet::new();
-        for relay in group_relays {
-            let db_relay = Relay::find_by_url(&relay, &self.database).await?;
-            relays.insert(db_relay);
+        let mut db_relays = Vec::with_capacity(group_relays.len());
+        for relay_url in group_relays {
+            let db_relay = Relay::find_or_create_by_url(&relay_url, &self.database).await?;
+            db_relays.push(db_relay);
         }
 
         self.nostr
-            .publish_event_to(message_event, &relays.into_iter().collect::<Vec<_>>())
+            .publish_event_to(message_event, &db_relays)
             .await?;
 
         let tokens = self.nostr.parse(&message.content);

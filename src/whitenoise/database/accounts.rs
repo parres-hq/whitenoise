@@ -150,8 +150,8 @@ impl Account {
     ///
     /// Returns a [`WhitenoiseError::AccountNotFound`] if the associated user is not found.
     pub(crate) async fn user(&self, database: &Database) -> Result<User, WhitenoiseError> {
-        let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
-            .bind(self.pubkey.to_hex().as_str())
+        let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE id = ?")
+            .bind(self.user_id)
             .fetch_one(&database.pool)
             .await
             .map_err(|_| WhitenoiseError::AccountNotFound)?;

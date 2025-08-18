@@ -639,7 +639,7 @@ impl NostrManager {
         Ok(())
     }
 
-    pub async fn fetch_all_user_data(
+    pub async fn sync_all_user_data(
         &self,
         signer: impl NostrSigner + 'static,
         account: &Account,

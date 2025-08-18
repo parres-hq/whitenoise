@@ -128,7 +128,10 @@ impl User {
             .bind(pubkey.to_hex().as_str())
             .fetch_one(&database.pool)
             .await
-            .map_err(|_| WhitenoiseError::UserNotFound)?;
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => WhitenoiseError::UserNotFound,
+                other => WhitenoiseError::Database(DatabaseError::Sqlx(other)),
+            })?;
 
         Ok(user_row.into())
     }
@@ -152,6 +155,7 @@ impl User {
         relay_type: RelayType,
         database: &Database,
     ) -> Result<Vec<Relay>, WhitenoiseError> {
+        let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
         let relay_type_str = String::from(relay_type);
 
         let relay_rows = sqlx::query_as::<_, RelayRow>(
@@ -160,7 +164,7 @@ impl User {
              INNER JOIN user_relays ur ON r.id = ur.relay_id
              WHERE ur.user_id = ? AND ur.relay_type = ?",
         )
-        .bind(self.id)
+        .bind(user_id)
         .bind(relay_type_str)
         .fetch_all(&database.pool)
         .await
@@ -243,39 +247,22 @@ impl User {
         relay_type: RelayType,
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
-        let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
-
-        sqlx::query("INSERT OR IGNORE INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
-            .bind(relay.url.to_string())
-            .bind(relay.created_at.timestamp_millis())
-            .bind(relay.updated_at.timestamp_millis())
-            .execute(&mut *tx)
-            .await
-            .map_err(DatabaseError::Sqlx)
-            .map_err(WhitenoiseError::Database)?;
-
-        // Get the relay ID (whether newly inserted or existing)
-        let relay_id: i64 = sqlx::query_scalar("SELECT id FROM relays WHERE url = ?")
-            .bind(relay.url.to_string())
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(DatabaseError::Sqlx)
-            .map_err(WhitenoiseError::Database)?;
+        let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
+        let saved_relay = relay.save(database).await?;
+        let relay_id = saved_relay.id.expect("Relay should have ID after save");
 
         sqlx::query(
             "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
-        .bind(self.id)
+        .bind(user_id)
         .bind(relay_id)
         .bind(String::from(relay_type))
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
-        .execute(&mut *tx)
+        .execute(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)
         .map_err(WhitenoiseError::Database)?;
-
-        tx.commit().await.map_err(DatabaseError::Sqlx)?;
 
         Ok(())
     }
@@ -302,13 +289,15 @@ impl User {
         relay_type: RelayType,
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
+        let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
+
         let result = sqlx::query(
             "DELETE FROM user_relays
              WHERE user_id = ?
              AND relay_id = (SELECT id FROM relays WHERE url = ?)
              AND relay_type = ?",
         )
-        .bind(self.id)
+        .bind(user_id)
         .bind(relay.url.to_string())
         .bind(String::from(relay_type))
         .execute(&database.pool)

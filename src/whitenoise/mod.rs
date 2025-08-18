@@ -230,7 +230,7 @@ impl Whitenoise {
             let accounts = Account::all(&whitenoise_ref.database).await?;
             for account in accounts {
                 // Trigger background data fetch for each account (non-critical)
-                if let Err(e) = whitenoise_ref.background_fetch_account_data(&account).await {
+                if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
                     tracing::warn!(
                         target: "whitenoise::load_accounts",
                         "Failed to trigger background fetch for account {}: {}",

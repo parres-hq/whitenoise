@@ -35,6 +35,9 @@ pub enum WhitenoiseError {
     #[error("User not found")]
     UserNotFound,
 
+    #[error("User not persisted - save the user before performing this operation")]
+    UserNotPersisted,
+
     #[error("Contact not found")]
     ContactNotFound,
 

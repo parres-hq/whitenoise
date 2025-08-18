@@ -243,7 +243,7 @@ impl Whitenoise {
         self.activate_account(&account).await?;
         tracing::debug!(target: "whitenoise::login", "Account persisted and activated");
 
-        self.background_fetch_account_data(&account).await?;
+        self.background_sync_account_data(&account).await?;
         tracing::debug!(target: "whitenoise::login", "Background data fetch triggered");
 
         tracing::debug!(target: "whitenoise::login", "Successfully logged in: {}", account.pubkey.to_hex());
@@ -539,7 +539,7 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn background_fetch_account_data(&self, account: &Account) -> Result<()> {
+    pub(crate) async fn background_sync_account_data(&self, account: &Account) -> Result<()> {
         let group_ids = account.load_nostr_group_ids(self)?;
         let nostr = self.nostr.clone();
         let database = self.database.clone();
@@ -557,7 +557,7 @@ impl Whitenoise {
 
             let current_time = Utc::now().timestamp_millis();
             match nostr
-                .fetch_all_user_data(signer, &account_clone, group_ids)
+                .sync_all_user_data(signer, &account_clone, group_ids)
                 .await
             {
                 Ok(_) => {
@@ -624,7 +624,7 @@ impl Whitenoise {
         // We do this in two stages to deduplicate the relays
         let mut group_relays_vec = Vec::new();
         for relay in group_relays {
-            group_relays_vec.push(Relay::find_by_url(&relay, &self.database).await?);
+            group_relays_vec.push(Relay::find_or_create_by_url(&relay, &self.database).await?);
         }
 
         tracing::debug!(

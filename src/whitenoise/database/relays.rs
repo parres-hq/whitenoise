@@ -79,7 +79,10 @@ impl Relay {
             .bind(url.to_string())
             .fetch_one(&database.pool)
             .await
-            .map_err(|_| WhitenoiseError::RelayNotFound)?;
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => WhitenoiseError::RelayNotFound,
+                other => WhitenoiseError::Database(DatabaseError::Sqlx(other)),
+            })?;
 
         Ok(Relay {
             id: Some(relay_row.id),
