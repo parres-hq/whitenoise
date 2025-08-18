@@ -3,8 +3,10 @@ use clap::Parser;
 use nostr_mls::groups::NostrGroupConfigData;
 use std::path::PathBuf;
 
+use nostr_mls::prelude::*;
 use nostr_sdk::prelude::*;
-use whitenoise::{AccountSettings, GroupId, Whitenoise, WhitenoiseConfig, WhitenoiseError};
+use whitenoise::ThemeMode;
+use whitenoise::{Whitenoise, WhitenoiseConfig, WhitenoiseError};
 
 /// Test backend for Whitenoise
 #[derive(Parser, Debug)]
@@ -31,30 +33,31 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let whitenoise = Whitenoise::get_instance()?;
 
-    tracing::info!("=== Starting Whitenoise Integration Test ===");
+    tracing::info!("=================================== Starting Whitenoise Integration Test ===================================");
 
     // Verify initial state
     tracing::info!("Verifying initial state...");
-    assert_eq!(whitenoise.get_accounts_count().await, 0);
+    assert_eq!(whitenoise.get_accounts_count().await.unwrap(), 0);
     tracing::info!("✓ Started with 0 accounts");
 
-    // ========================================
+    // ***************************************************************
     // ACCOUNT CREATION AND LOGIN TESTING
-    // ========================================
-    tracing::info!("=== Testing Account Creation and Login ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Account Creation ===================================");
 
     // Create first account
     tracing::info!("Creating first account...");
-    let account1 = whitenoise.create_identity().await?;
+    let account1 = whitenoise.create_identity().await.unwrap();
     tracing::info!("✓ First account created: {}", account1.pubkey.to_hex());
-    assert_eq!(whitenoise.get_accounts_count().await, 1);
+    assert_eq!(whitenoise.get_accounts_count().await.unwrap(), 1);
 
     // Create second account
     tracing::info!("Creating second account...");
-    let account2 = whitenoise.create_identity().await?;
+    let account2 = whitenoise.create_identity().await.unwrap();
     tracing::info!("✓ Second account created: {}", account2.pubkey.to_hex());
-    assert_eq!(whitenoise.get_accounts_count().await, 2);
+    assert_eq!(whitenoise.get_accounts_count().await.unwrap(), 2);
 
+    tracing::info!("=================================== Testing Account Login ===================================");
     // Test login with known keys
     tracing::info!("Testing login with known keys...");
     let known_keys = Keys::generate();
@@ -68,7 +71,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
     test_client.connect().await;
     test_client.set_signer(known_keys.clone()).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
     // Publish metadata
     let metadata = Metadata {
@@ -86,13 +89,22 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Publish relay lists
     let relay_urls: Vec<String> = dev_relays.iter().map(|s| s.to_string()).collect();
+    let nip65_relay_tags: Vec<Tag> = relay_urls
+        .iter()
+        .map(|url| {
+            Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+                [url.clone()],
+            )
+        })
+        .collect();
     let relay_tags: Vec<Tag> = relay_urls
         .iter()
         .map(|url| Tag::custom(TagKind::Relay, [url.clone()]))
         .collect();
 
     test_client
-        .send_event_builder(EventBuilder::new(Kind::RelayList, "").tags(relay_tags.clone()))
+        .send_event_builder(EventBuilder::new(Kind::RelayList, "").tags(nip65_relay_tags.clone()))
         .await
         .unwrap();
     test_client
@@ -106,33 +118,31 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     test_client.disconnect().await;
 
+    // Wait for event publishing
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
     // Now login with the known keys
     let account3 = whitenoise
         .login(known_keys.secret_key().to_secret_hex())
-        .await?;
+        .await
+        .unwrap();
     tracing::info!("✓ Logged in account: {}", account3.pubkey.to_hex());
-    assert_eq!(whitenoise.get_accounts_count().await, 3);
+    assert_eq!(whitenoise.get_accounts_count().await.unwrap(), 3);
     assert_eq!(account3.pubkey, known_pubkey);
 
     // Wait for background fetch
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
-    // ========================================
+    // ***************************************************************
     // METADATA AND ONBOARDING TESTING
-    // ========================================
-    tracing::info!("=== Testing Metadata and Onboarding ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Metadata and Onboarding ===================================");
 
     // Test metadata fetching
     tracing::info!("Testing metadata fetching...");
-    let loaded_metadata = whitenoise
-        .fetch_metadata_from(account3.nip65_relays.clone(), account3.pubkey)
-        .await?;
-    if let Some(metadata) = loaded_metadata {
-        assert_eq!(metadata.name, Some("Known User".to_string()));
-        tracing::info!("✓ Metadata fetched correctly");
-    } else {
-        tracing::warn!("Metadata not found - may be expected in test environment");
-    }
+    let metadata = whitenoise.user_metadata(&account3.pubkey).await.unwrap();
+    assert_eq!(metadata.name, Some("Known User".to_string()));
+    tracing::info!("✓ Metadata fetched correctly");
 
     // Test metadata update
     tracing::info!("Testing metadata update...");
@@ -149,46 +159,34 @@ async fn main() -> Result<(), WhitenoiseError> {
     };
 
     whitenoise
-        .update_metadata(&updated_metadata, &account3)
-        .await?;
+        .update_account_metadata(&account3, &updated_metadata)
+        .await
+        .unwrap();
     tracing::info!("✓ Metadata updated successfully");
 
-    // ========================================
-    // ACCOUNT SETTINGS TESTING
-    // ========================================
-    tracing::info!("=== Testing Account Settings ===");
+    // ***************************************************************
+    // APP SETTINGS TESTING
+    // ***************************************************************
+    tracing::info!("=================================== Testing App Settings ===================================");
 
     // Test fetching default settings
-    let settings = whitenoise.load_account_settings(&account1.pubkey).await?;
-    assert_eq!(settings, AccountSettings::default());
+    let settings = whitenoise.app_settings().await.unwrap();
+    assert_eq!(settings.theme_mode, ThemeMode::System);
     tracing::info!("✓ Default settings fetched correctly");
 
     // Test updating settings
-    let new_settings = AccountSettings {
-        dark_theme: false,
-        dev_mode: true,
-        lockdown_mode: true,
-    };
-    whitenoise
-        .update_account_settings(&account1.pubkey, &new_settings)
-        .await?;
+    whitenoise.update_theme_mode(ThemeMode::Dark).await.unwrap();
     tracing::info!("✓ Settings updated successfully");
 
     // Verify settings were updated
-    let updated_settings = whitenoise.load_account_settings(&account1.pubkey).await?;
-    assert_eq!(updated_settings, new_settings);
+    let updated_settings = whitenoise.app_settings().await.unwrap();
+    assert_eq!(updated_settings.theme_mode, ThemeMode::Dark);
     tracing::info!("✓ Settings verified after update");
 
-    // Test error case - non-existent account
-    let fake_pubkey = Keys::generate().public_key();
-    let result = whitenoise.load_account_settings(&fake_pubkey).await;
-    assert!(matches!(result, Err(WhitenoiseError::AccountNotFound)));
-    tracing::info!("✓ Correctly handled non-existent account error");
-
-    // ========================================
+    // ***************************************************************
     // CONTACT MANAGEMENT TESTING
-    // ========================================
-    tracing::info!("=== Testing Contact Management ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Contact Management ===================================");
 
     // Test with account1
     let test_contact1 = Keys::generate().public_key();
@@ -196,33 +194,45 @@ async fn main() -> Result<(), WhitenoiseError> {
     let test_contact3 = Keys::generate().public_key();
 
     // Test initial empty contact list
-    let initial_contacts = whitenoise.fetch_contacts(&account1.pubkey).await?;
+    let initial_contacts = whitenoise.follows(&account1).await.unwrap();
     assert_eq!(initial_contacts.len(), 0);
     tracing::info!("✓ Initial contact list is empty");
 
     // Test adding a contact
-    whitenoise.add_contact(&account1, test_contact1).await?;
+    whitenoise
+        .follow_user(&account1, &test_contact1)
+        .await
+        .unwrap();
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Added first contact");
 
     // Test adding a second contact
-    whitenoise.add_contact(&account1, test_contact2).await?;
+    whitenoise
+        .follow_user(&account1, &test_contact2)
+        .await
+        .unwrap();
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Added second contact");
 
     // Test removing a contact
-    whitenoise.remove_contact(&account1, test_contact1).await?;
+    whitenoise
+        .unfollow_user(&account1, &test_contact1)
+        .await
+        .unwrap();
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Removed first contact");
 
     // Test bulk contact update
     let bulk_contacts = vec![test_contact2, test_contact3];
-    whitenoise.update_contacts(&account1, bulk_contacts).await?;
+    whitenoise
+        .follow_users(&account1, &bulk_contacts)
+        .await
+        .unwrap();
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tracing::info!("✓ Updated contacts in bulk");
 
     // Test error handling - duplicate contact
-    let result = whitenoise.add_contact(&account1, test_contact2).await;
+    let result = whitenoise.follow_user(&account1, &test_contact2).await;
     if result.is_err() {
         tracing::info!("✓ Correctly handled duplicate contact error");
     } else {
@@ -232,7 +242,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Test error handling - removing non-existent contact
     let non_existent_contact = Keys::generate().public_key();
     let result = whitenoise
-        .remove_contact(&account1, non_existent_contact)
+        .unfollow_user(&account1, &non_existent_contact)
         .await;
     if result.is_err() {
         tracing::info!("✓ Correctly handled non-existent contact removal error");
@@ -240,10 +250,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         tracing::warn!("Expected error for non-existent contact removal, but got success");
     }
 
-    // ========================================
+    // ***************************************************************
     // GROUP CREATION TESTING
-    // ========================================
-    tracing::info!("=== Testing Group Creation ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Group Creation ===================================");
 
     // Create a test group with account1 as creator and account2 as member
     // Both were created via create_identity() so they should have published key packages
@@ -253,7 +263,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let admin_pubkeys = vec![account1.pubkey]; // account1 as admin/creator
 
     whitenoise
-        .add_contact(&account1, account2.pubkey)
+        .follow_user(&account1, &account2.pubkey)
         .await
         .unwrap();
 
@@ -270,7 +280,8 @@ async fn main() -> Result<(), WhitenoiseError> {
                 vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
             ),
         )
-        .await?;
+        .await
+        .unwrap();
 
     tracing::info!("✓ Test group created successfully: {}", test_group.name);
     tracing::info!(
@@ -279,10 +290,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     );
     tracing::info!("  Admin count: {}", test_group.admin_pubkeys.len());
 
-    // ========================================
+    // ***************************************************************
     // MESSAGE SENDING TESTING
-    // ========================================
-    tracing::info!("=== Testing Message Sending ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Message Sending ===================================");
 
     // Test sending a simple text message (account1 is the group creator)
     tracing::info!("Testing simple text message...");
@@ -295,7 +306,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             9, // Kind 9 for MLS group chat messages
             None,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(message_with_tokens.message.content, test_message);
     tracing::info!("✓ Simple text message sent successfully");
@@ -316,7 +328,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             9, // Kind 9 for MLS group chat messages
             Some(test_tags),
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(tagged_message_with_tokens.message.content, tagged_message);
     tracing::info!("✓ Tagged message sent successfully");
@@ -332,7 +345,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             7, // Kind 7 for reaction (this one stays as 7)
             None,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(reaction_with_tokens.message.content, reaction_message);
     assert_eq!(reaction_with_tokens.message.kind, Kind::Custom(7));
@@ -362,16 +376,16 @@ async fn main() -> Result<(), WhitenoiseError> {
         }
     }
 
-    // ========================================
+    // ***************************************************************
     // GROUP MEMBER MANAGEMENT TESTING
-    // ========================================
-    tracing::info!("=== Testing Group Member Management ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Group Member Management ===================================");
 
     // Test adding members to an existing group
     tracing::info!("Testing adding members to group...");
 
     // Create a fourth account to add as a new member
-    let account4 = whitenoise.create_identity().await?;
+    let account4 = whitenoise.create_identity().await.unwrap();
     tracing::info!(
         "✓ Fourth account created for adding to group: {}",
         account4.pubkey.to_hex()
@@ -383,10 +397,12 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Get initial group member count
     let initial_members = whitenoise
         .fetch_group_members(&account1, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
     let initial_admins = whitenoise
         .fetch_group_admins(&account1, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(initial_admins.len(), 1);
     assert!(initial_admins.contains(&account1.pubkey));
     let initial_member_count = initial_members.len();
@@ -396,7 +412,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     let new_members = vec![account4.pubkey];
     tracing::info!("Adding account4 as contact to account1...");
     whitenoise
-        .add_contact(&account1, account4.pubkey)
+        .follow_user(&account1, &account4.pubkey)
         .await
         .unwrap();
     tracing::info!("✓ Contact added successfully");
@@ -404,7 +420,8 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Adding account4 as member to group...");
     whitenoise
         .add_members_to_group(&account1, &test_group.mls_group_id, new_members)
-        .await?;
+        .await
+        .unwrap();
     tracing::info!("✓ Successfully added new member to group");
 
     // Wait for event processing to complete
@@ -413,7 +430,8 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Verify the member was added
     let updated_members = whitenoise
         .fetch_group_members(&account1, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(updated_members.len(), initial_member_count + 1);
     assert!(updated_members.contains(&account4.pubkey));
     tracing::info!("✓ New member verified in group member list");
@@ -423,11 +441,11 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Create two more accounts
     tracing::info!("Creating account5...");
-    let account5 = whitenoise.create_identity().await?;
+    let account5 = whitenoise.create_identity().await.unwrap();
     tracing::info!("✓ Account5 created: {}", account5.pubkey.to_hex());
 
     tracing::info!("Creating account6...");
-    let account6 = whitenoise.create_identity().await?;
+    let account6 = whitenoise.create_identity().await.unwrap();
     tracing::info!("✓ Account6 created: {}", account6.pubkey.to_hex());
 
     tracing::info!("✓ Created accounts 5 and 6 for bulk member addition");
@@ -435,16 +453,17 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Add both accounts as members
     let bulk_new_members = vec![account5.pubkey, account6.pubkey];
     whitenoise
-        .add_contact(&account1, account5.pubkey)
+        .follow_user(&account1, &account5.pubkey)
         .await
         .unwrap();
     whitenoise
-        .add_contact(&account1, account6.pubkey)
+        .follow_user(&account1, &account6.pubkey)
         .await
         .unwrap();
     whitenoise
         .add_members_to_group(&account1, &test_group.mls_group_id, bulk_new_members)
-        .await?;
+        .await
+        .unwrap();
     tracing::info!("✓ Successfully added multiple members to group");
 
     // Wait for event processing to complete and MLS epoch synchronization
@@ -453,7 +472,8 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Verify both members were added
     let final_members = whitenoise
         .fetch_group_members(&account1, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(final_members.len(), initial_member_count + 3); // +3 for account4, account5, account6
     assert!(final_members.contains(&account5.pubkey));
     assert!(final_members.contains(&account6.pubkey));
@@ -461,9 +481,13 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Test error handling - non-admin trying to add members
     tracing::info!("Testing error handling - non-admin adding members...");
-    let account7 = whitenoise.create_identity().await?;
+    let account7 = whitenoise.create_identity().await.unwrap();
+    let account7_user = whitenoise
+        .find_user_by_pubkey(&account7.pubkey)
+        .await
+        .unwrap();
     whitenoise
-        .add_contact(&account4, account7.pubkey)
+        .follow_user(&account4, &account7_user.pubkey)
         .await
         .unwrap();
     let non_admin_result = whitenoise
@@ -481,7 +505,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Test error handling - adding to non-existent group
     whitenoise
-        .add_contact(&account1, account7.pubkey)
+        .follow_user(&account1, &account7.pubkey)
         .await
         .unwrap();
     tracing::info!("Testing error handling - adding to non-existent group...");
@@ -505,7 +529,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing error handling - adding user without key package...");
     let no_keypackage_user = Keys::generate().public_key();
     whitenoise
-        .add_contact(&account1, no_keypackage_user)
+        .follow_user(&account1, &no_keypackage_user)
         .await
         .unwrap();
     let no_keypackage_result = whitenoise
@@ -538,7 +562,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             9, // Kind 9 for MLS group chat messages
             None,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(
         post_addition_message_with_tokens.message.content,
@@ -546,10 +571,10 @@ async fn main() -> Result<(), WhitenoiseError> {
     );
     tracing::info!("✓ Successfully sent message after adding members");
 
-    // ========================================
+    // ***************************************************************
     // ADVANCED MESSAGE TESTING (Reactions, Replies, Deletions)
-    // ========================================
-    tracing::info!("=== Testing Advanced Message Types ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Advanced Message Types ===================================");
 
     // Wait a bit to ensure message are stored before we reference them
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -578,7 +603,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             7, // Kind 7 for reaction
             Some(reaction_tags),
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(
         targeted_reaction_with_tokens.message.content,
@@ -602,7 +628,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             9, // Kind 9 for chat message reply
             Some(reply_tags),
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(reply_message_with_tokens.message.content, reply_content);
     tracing::info!("✓ Reply message sent successfully");
@@ -621,7 +648,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             7, // Kind 7 for reaction
             Some(second_reaction_tags),
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(
         second_reaction_with_tokens.message.content,
@@ -640,7 +668,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             9, // Kind 9 for chat message
             None,
         )
-        .await?;
+        .await
+        .unwrap();
 
     let to_be_deleted_message_id = to_be_deleted_with_tokens.message.id.to_string();
     tracing::info!(
@@ -661,7 +690,8 @@ async fn main() -> Result<(), WhitenoiseError> {
             5,              // Kind 5 for deletion
             Some(delete_tags),
         )
-        .await?;
+        .await
+        .unwrap();
 
     tracing::info!("✓ Delete message sent successfully");
 
@@ -676,12 +706,13 @@ async fn main() -> Result<(), WhitenoiseError> {
             9, // Kind 9 for chat message
             None,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(final_message_with_tokens.message.content, final_message);
     tracing::info!("✓ Final test message sent successfully");
 
-    tracing::info!("=== Advanced Message Testing Complete ===");
+    tracing::info!("=================================== Advanced Message Testing Complete ===================================");
     tracing::info!("Summary of messages sent:");
     tracing::info!("  • 5 chat messages (kind 9)");
     tracing::info!("  • 2 reactions (kind 7) with proper e-tag targeting");
@@ -691,10 +722,10 @@ async fn main() -> Result<(), WhitenoiseError> {
         "  • All advanced messages sent by account1 (group creator) for MLS timing reliability"
     );
 
-    // ========================================
+    // ***************************************************************
     // MESSAGE AGGREGATION TESTING
-    // ========================================
-    tracing::info!("=== Testing Message Aggregation ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Message Aggregation ===================================");
 
     // Wait for message events to be processed and become available
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -706,14 +737,16 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing fetch_messages_for_group (old method) for debugging...");
     let old_messages = whitenoise
         .fetch_messages_for_group(&account1, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
     tracing::info!("Old method fetched {} messages", old_messages.len());
 
     // Test fetching aggregated messages for the group
     tracing::info!("Testing fetch_aggregated_messages_for_group...");
     let aggregated_messages = whitenoise
         .fetch_aggregated_messages_for_group(&account1.pubkey, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
 
     // We should have at least the messages we sent
     tracing::info!("Fetched {} aggregated messages", aggregated_messages.len());
@@ -883,7 +916,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     }
 
     // Report aggregation statistics
-    tracing::info!("=== Aggregation Statistics ===");
+    tracing::info!("=================================== Aggregation Statistics ===================================");
     tracing::info!(
         "  Total aggregated chat messages: {}",
         aggregated_messages.len()
@@ -983,15 +1016,16 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     tracing::info!("✓ Message aggregation testing completed successfully");
 
-    // ========================================
+    // ***************************************************************
     // MEMBER REMOVAL TESTING
-    // ========================================
-    tracing::info!("=== Testing Group Member Removal ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Group Member Removal ===================================");
 
     // Get current member count before removal
     let pre_removal_members = whitenoise
         .fetch_group_members(&account1, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
     let pre_removal_count = pre_removal_members.len();
     tracing::info!("Pre-removal member count: {}", pre_removal_count);
 
@@ -999,7 +1033,8 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("Testing removing single member...");
     whitenoise
         .remove_members_from_group(&account1, &test_group.mls_group_id, vec![account4.pubkey])
-        .await?;
+        .await
+        .unwrap();
     tracing::info!("✓ Successfully removed single member from group");
 
     // Wait for event processing to complete and MLS epoch synchronization
@@ -1008,28 +1043,22 @@ async fn main() -> Result<(), WhitenoiseError> {
     // Verify the member was removed
     let post_single_removal_members = whitenoise
         .fetch_group_members(&account1, &test_group.mls_group_id)
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(post_single_removal_members.len(), pre_removal_count - 1);
     assert!(!post_single_removal_members.contains(&account4.pubkey));
     tracing::info!("✓ Single member removal verified");
 
-    // ========================================
+    // ***************************************************************
     // LOGOUT TESTING
-    // ========================================
-    tracing::info!("=== Testing Account Logout ===");
+    // ***************************************************************
+    tracing::info!("=================================== Testing Account Logout ===================================");
 
     // Logout account2 (after group creation and message testing)
     tracing::info!("Logging out account2...");
-    whitenoise.logout(&account2.clone().pubkey).await?;
+    whitenoise.logout(&account2.clone().pubkey).await.unwrap();
     // We now have more accounts due to member addition testing: account1, account3, account4, account5, account6, account7
-    assert_eq!(whitenoise.get_accounts_count().await, 6);
-    assert!(whitenoise.logged_in(&account1.pubkey).await);
-    assert!(!whitenoise.logged_in(&account2.clone().pubkey).await);
-    assert!(whitenoise.logged_in(&account3.pubkey).await);
-    assert!(whitenoise.logged_in(&account4.pubkey).await);
-    assert!(whitenoise.logged_in(&account5.pubkey).await);
-    assert!(whitenoise.logged_in(&account6.pubkey).await);
-    assert!(whitenoise.logged_in(&account7.pubkey).await);
+    assert_eq!(whitenoise.get_accounts_count().await.unwrap(), 6);
     tracing::info!("✓ Account2 logged out successfully");
 
     // Test error handling - logged out account trying to remove members
@@ -1075,33 +1104,27 @@ async fn main() -> Result<(), WhitenoiseError> {
         }
     }
 
-    // ========================================
+    // ***************************************************************
     // FINAL VERIFICATION
-    // ========================================
-    tracing::info!("=== Final Verification ===");
+    // ***************************************************************
+    tracing::info!("=================================== Final Verification ===================================");
 
     // Verify final account state
-    let final_accounts = whitenoise.fetch_accounts().await?;
+    let final_accounts = whitenoise.all_accounts().await.unwrap();
     assert_eq!(final_accounts.len(), 6); // account1, account3, account4, account5, account6, account7 should remain
-    assert!(final_accounts.contains_key(&account1.pubkey));
-    assert!(final_accounts.contains_key(&account3.pubkey));
-    assert!(final_accounts.contains_key(&account4.pubkey));
-    assert!(final_accounts.contains_key(&account5.pubkey));
-    assert!(final_accounts.contains_key(&account6.pubkey));
-    assert!(final_accounts.contains_key(&account7.pubkey));
-    assert!(!final_accounts.contains_key(&account2.clone().pubkey)); // account2 was logged out
+
+    // Check pubkeys because other fields can change
+    let final_accounts_pubkeys = final_accounts.iter().map(|a| a.pubkey).collect::<Vec<_>>();
+    assert!(final_accounts_pubkeys.contains(&account1.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account3.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account4.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account5.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account6.pubkey));
+    assert!(final_accounts_pubkeys.contains(&account7.pubkey));
+    assert!(!final_accounts_pubkeys.contains(&account2.pubkey)); // account2 was logged out
     tracing::info!("✓ Final account state is correct");
 
-    // Verify accounts are still logged in
-    assert!(whitenoise.logged_in(&account1.pubkey).await);
-    assert!(whitenoise.logged_in(&account3.pubkey).await);
-    assert!(whitenoise.logged_in(&account4.pubkey).await);
-    assert!(whitenoise.logged_in(&account5.pubkey).await);
-    assert!(whitenoise.logged_in(&account6.pubkey).await);
-    assert!(whitenoise.logged_in(&account7.pubkey).await);
-    tracing::info!("✓ Account login states are correct");
-
-    tracing::info!("=== Integration Test Completed Successfully ===");
+    tracing::info!("=================================== Integration Test Completed Successfully ===================================");
     tracing::info!("All public API functionality has been tested:");
     tracing::info!("  ✓ Account creation and login");
     tracing::info!("  ✓ Metadata fetching and updating");

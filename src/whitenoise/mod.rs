@@ -1,17 +1,16 @@
 use anyhow::Context;
 use nostr_mls::prelude::*;
-use tokio::sync::mpsc::{self, Sender};
-use tokio::sync::OnceCell;
-use tokio::sync::RwLock;
-
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::OnceCell;
 
 pub mod accounts;
+pub mod app_settings;
 pub mod database;
 pub mod error;
 mod event_processor;
+pub mod follows;
 pub mod message_aggregator;
 pub mod relays;
 pub mod secrets_store;
@@ -23,6 +22,7 @@ use crate::nostr_manager::NostrManager;
 
 use crate::types::ProcessableEvent;
 use accounts::*;
+use app_settings::*;
 use database::*;
 use error::{Result, WhitenoiseError};
 use secrets_store::SecretsStore;
@@ -80,7 +80,6 @@ impl WhitenoiseConfig {
 
 pub struct Whitenoise {
     pub config: WhitenoiseConfig,
-    pub accounts: Arc<RwLock<HashMap<PublicKey, Account>>>,
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,
@@ -95,7 +94,7 @@ impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Whitenoise")
             .field("config", &self.config)
-            .field("accounts", &self.accounts)
+            .field("nostr_mls_map", &"<REDACTED>")
             .field("database", &"<REDACTED>")
             .field("nostr", &"<REDACTED>")
             .field("secrets_store", &"<REDACTED>")
@@ -104,57 +103,6 @@ impl std::fmt::Debug for Whitenoise {
 }
 
 impl Whitenoise {
-    // ============================================================================
-    // HELPER METHODS FOR THREAD-SAFE ACCESS
-    // ============================================================================
-
-    /// Get a read lock on the accounts HashMap
-    async fn read_accounts(&self) -> tokio::sync::RwLockReadGuard<'_, HashMap<PublicKey, Account>> {
-        self.accounts.read().await
-    }
-
-    async fn read_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
-        self.read_accounts()
-            .await
-            .get(pubkey)
-            .cloned()
-            .ok_or(WhitenoiseError::AccountNotFound)
-    }
-
-    /// Get a write lock on the accounts HashMap
-    async fn write_accounts(
-        &self,
-    ) -> tokio::sync::RwLockWriteGuard<'_, HashMap<PublicKey, Account>> {
-        self.accounts.write().await
-    }
-
-    /// Test helper: Check if accounts is empty
-    #[cfg(test)]
-    pub async fn accounts_is_empty(&self) -> bool {
-        self.read_accounts().await.is_empty()
-    }
-
-    /// Test helper: Get accounts length
-    #[cfg(test)]
-    pub async fn accounts_len(&self) -> usize {
-        self.read_accounts().await.len()
-    }
-
-    /// Test helper: Check if account exists
-    #[cfg(test)]
-    pub async fn has_account(&self, pubkey: &PublicKey) -> bool {
-        self.read_accounts().await.contains_key(pubkey)
-    }
-
-    /// Integration test helper: Get accounts length (public version)
-    pub async fn get_accounts_count(&self) -> usize {
-        self.read_accounts().await.len()
-    }
-
-    pub async fn logged_in(&self, pubkey: &PublicKey) -> bool {
-        self.read_accounts().await.contains_key(pubkey)
-    }
-
     // ============================================================================
     // INITIALIZATION & LIFECYCLE
     // ============================================================================
@@ -219,7 +167,7 @@ impl Whitenoise {
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
-            NostrManager::new(data_dir.join("nostr_lmdb"), event_sender.clone(), NostrManager::default_timeout())
+            NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
                 .await?;
 
         // Create SecretsStore
@@ -238,18 +186,20 @@ impl Whitenoise {
             nostr,
             secrets_store,
             message_aggregator,
-            accounts: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
             shutdown_sender,
         };
 
-        // Load all accounts from database
-        let loaded_accounts = whitenoise.load_accounts().await?;
-        {
-            let mut accounts = whitenoise.write_accounts().await;
-            *accounts = loaded_accounts;
+        // Create default relays in the database if they don't exist
+        // TODO: Make this batch fetch and insert all relays at once
+        for relay in Account::default_relays() {
+            let _ = whitenoise.find_or_create_relay(&relay).await?;
         }
 
+        // Create default app settings in the database if they don't exist
+        AppSettings::find_or_create_default(&whitenoise.database).await?;
+
+        // Add default relays to the Nostr client if they aren't already added
         if whitenoise.nostr.client.relays().await.is_empty() {
             // First time starting the app
             for relay in Account::default_relays() {
@@ -277,10 +227,18 @@ impl Whitenoise {
 
         // Fetch events and setup subscriptions for all accounts after event processing has started
         {
-            let accounts = whitenoise_ref.read_accounts().await;
-            let account_list: Vec<Account> = accounts.values().cloned().collect();
-            drop(accounts); // Release the read lock early
-            for account in account_list {
+            let accounts = Account::all(&whitenoise_ref.database).await?;
+            for account in accounts {
+                // Trigger background data fetch for each account (non-critical)
+                if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
+                    tracing::warn!(
+                        target: "whitenoise::load_accounts",
+                        "Failed to trigger background fetch for account {}: {}",
+                        account.pubkey.to_hex(),
+                        e
+                    );
+                    // Continue - background fetch failure should not prevent account loading
+                }
                 // Setup subscriptions for this account
                 match whitenoise_ref.setup_subscriptions(&account).await {
                     Ok(()) => {
@@ -351,7 +309,7 @@ impl Whitenoise {
     ///
     /// // Then access the instance from anywhere in your application
     /// let whitenoise = Whitenoise::get_instance()?;
-    /// let account_count = whitenoise.get_accounts_count().await;
+    /// let account_count = whitenoise.get_accounts_count().await?;
     /// println!("Number of accounts: {}", account_count);
     /// # Ok(())
     /// # }
@@ -444,20 +402,10 @@ impl Whitenoise {
         // Shutdown the event processing loop
         self.shutdown_event_processing().await?;
 
-        // Clear the accounts map
-        {
-            let mut accounts = self.write_accounts().await;
-            accounts.clear();
-        }
-
         Ok(())
     }
 
     pub async fn export_account_nsec(&self, account: &Account) -> Result<String> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
         Ok(self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?
@@ -467,10 +415,6 @@ impl Whitenoise {
     }
 
     pub async fn export_account_npub(&self, account: &Account) -> Result<String> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
         Ok(account.pubkey.to_bech32().unwrap())
     }
 
@@ -488,7 +432,6 @@ impl Whitenoise {
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
-    use crate::whitenoise::accounts::test_utils::*;
     use tempfile::TempDir;
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
@@ -502,8 +445,9 @@ pub mod test_utils {
         Keys::generate()
     }
 
-    pub(crate) fn create_test_account() -> (Account, Keys) {
-        Account::new(&data_dir()).unwrap()
+    pub(crate) async fn create_test_account(whitenoise: &Whitenoise) -> (Account, Keys) {
+        let (account, keys) = Account::new(whitenoise, None).await.unwrap();
+        (account, keys)
     }
 
     /// Creates a mock Whitenoise instance for testing.
@@ -544,13 +488,9 @@ pub mod test_utils {
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
-        let nostr = NostrManager::new(
-            config.data_dir.join("test_nostr"),
-            event_sender.clone(),
-            NostrManager::default_timeout(),
-        )
-        .await
-        .expect("Failed to create NostrManager");
+        let nostr = NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
+            .await
+            .expect("Failed to create NostrManager");
 
         // connect to default relays
         nostr.add_relays(Account::default_relays()).await.unwrap();
@@ -571,16 +511,9 @@ pub mod test_utils {
             nostr,
             secrets_store,
             message_aggregator,
-            accounts: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
             shutdown_sender,
         };
-        // Load all accounts from database
-        let loaded_accounts = whitenoise.load_accounts().await.unwrap();
-        {
-            let mut accounts = whitenoise.write_accounts().await;
-            *accounts = loaded_accounts;
-        }
 
         (whitenoise, data_temp, logs_temp)
     }
@@ -692,7 +625,6 @@ pub mod test_utils {
 
     pub(crate) async fn setup_multiple_test_accounts(
         whitenoise: &Whitenoise,
-        creator_account: &Account,
         count: usize,
     ) -> Vec<(Account, Keys)> {
         let mut accounts = Vec::new();
@@ -705,14 +637,6 @@ pub mod test_utils {
                 .await
                 .unwrap();
             accounts.push((account.clone(), keys.clone()));
-            whitenoise
-                .add_contact(creator_account, account.pubkey)
-                .await
-                .unwrap();
-            whitenoise
-                .load_contact(&keys.public_key, creator_account)
-                .await
-                .unwrap();
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
             let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
@@ -721,7 +645,7 @@ pub mod test_utils {
                 .nostr
                 .publish_event_builder_with_signer(
                     key_package_event_builder,
-                    account.key_package_relays.clone(),
+                    &account.key_package_relays(whitenoise).await.unwrap(),
                     keys,
                 )
                 .await
@@ -806,7 +730,7 @@ mod tests {
         #[tokio::test]
         async fn test_whitenoise_initialization() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            assert!(whitenoise.accounts_is_empty().await);
+            assert!(Account::all(&whitenoise.database).await.unwrap().is_empty());
 
             // Verify directories were created
             assert!(whitenoise.config.data_dir.exists());
@@ -820,7 +744,6 @@ mod tests {
             let debug_str = format!("{:?}", whitenoise);
             assert!(debug_str.contains("Whitenoise"));
             assert!(debug_str.contains("config"));
-            assert!(debug_str.contains("accounts"));
             assert!(debug_str.contains("<REDACTED>"));
         }
 
@@ -833,8 +756,14 @@ mod tests {
             // Both should have valid configurations (they'll be different temp dirs, which is fine)
             assert!(whitenoise1.config.data_dir.exists());
             assert!(whitenoise2.config.data_dir.exists());
-            assert!(whitenoise1.accounts_is_empty().await);
-            assert!(whitenoise2.accounts_is_empty().await);
+            assert!(Account::all(&whitenoise1.database)
+                .await
+                .unwrap()
+                .is_empty());
+            assert!(Account::all(&whitenoise2.database)
+                .await
+                .unwrap()
+                .is_empty());
         }
     }
 
@@ -856,21 +785,12 @@ mod tests {
             assert!(test_data_file.exists());
             assert!(test_log_file.exists());
 
-            // Add test account
-            let (test_account, test_keys) = create_test_account();
-            let pubkey = test_keys.public_key();
-            {
-                let mut accounts = whitenoise.write_accounts().await;
-                accounts.insert(pubkey, test_account);
-            }
-            assert!(!whitenoise.accounts_is_empty().await);
-
             // Delete all data
             let result = whitenoise.delete_all_data().await;
             assert!(result.is_ok());
 
             // Verify cleanup
-            assert!(whitenoise.accounts_is_empty().await);
+            assert!(Account::all(&whitenoise.database).await.unwrap().is_empty());
             assert!(!test_log_file.exists());
 
             // MLS directory should be recreated as empty
@@ -885,21 +805,6 @@ mod tests {
     // For complete isolation, implement the trait-based mocking described above
     mod api_tests {
         use super::*;
-
-        #[tokio::test]
-        async fn test_fetch_methods_return_types() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let account = whitenoise.create_identity().await.unwrap();
-
-            let relays = account.nip65_relays.clone();
-
-            // Test all load methods return expected types (though they may be empty in test env)
-            let metadata = whitenoise.fetch_metadata_from(relays, account.pubkey).await;
-            assert!(metadata.is_ok());
-
-            let contacts = whitenoise.fetch_contacts(&account.pubkey).await;
-            assert!(contacts.is_ok());
-        }
 
         #[tokio::test]
         async fn test_message_aggregator_access() {

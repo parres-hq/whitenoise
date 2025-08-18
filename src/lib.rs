@@ -13,8 +13,8 @@ pub mod whitenoise;
 pub use crate::nostr_manager::parser::SerializableToken;
 pub use crate::types::ImageType;
 pub use crate::types::MessageWithTokens;
-pub use crate::whitenoise::accounts::contacts::Contact;
-pub use crate::whitenoise::accounts::{Account, AccountSettings};
+pub use crate::whitenoise::accounts::Account;
+pub use crate::whitenoise::app_settings::{AppSettings, ThemeMode};
 pub use crate::whitenoise::error::WhitenoiseError;
 pub use crate::whitenoise::message_aggregator::{
     ChatMessage, EmojiReaction, ReactionSummary, UserReaction,

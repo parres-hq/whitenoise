@@ -1,28 +1,26 @@
 //! Query functions for NostrManager
 //! This handles fetching events from the database cache.
 
+use crate::whitenoise::relays::Relay;
 use crate::{
     nostr_manager::{NostrManager, Result},
-    Account, RelayType,
+    RelayType,
 };
-use dashmap::DashSet;
 use nostr_sdk::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 impl NostrManager {
-    pub(crate) async fn query_user_metadata(&self, pubkey: PublicKey) -> Result<Option<Metadata>> {
-        Ok(self.client.database().metadata(pubkey).await?)
-    }
-
+    #[allow(dead_code)]
     pub(crate) async fn fetch_metadata_from(
         &self,
-        nip65_relays: DashSet<RelayUrl>,
+        nip65_relays: &[Relay],
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+        let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let events: Events = self
             .client
-            .fetch_events_from(nip65_relays, filter, self.timeout)
+            .fetch_events_from(urls, filter, self.timeout)
             .await?;
         match events.first() {
             Some(event) => Ok(Some(Metadata::try_from(event)?)),
@@ -30,127 +28,73 @@ impl NostrManager {
         }
     }
 
+    pub(crate) async fn publish_metadata_with_signer(
+        &self,
+        metadata: &Metadata,
+        relays: &[Relay],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<Output<EventId>> {
+        let event_builder = EventBuilder::metadata(metadata);
+        self.publish_event_builder_with_signer(event_builder, relays, signer)
+            .await
+    }
+
+    pub(crate) async fn publish_relay_list_with_signer(
+        &self,
+        relay_list: &[Relay],
+        relay_type: RelayType,
+        target_relays: &[Relay],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        let tags: Vec<Tag> = match relay_type {
+            RelayType::Nip65 => relay_list
+                .iter()
+                .map(|relay| Tag::reference(relay.url.to_string()))
+                .collect(),
+            RelayType::Inbox | RelayType::KeyPackage => relay_list
+                .iter()
+                .map(|relay| Tag::custom(TagKind::Relay, [relay.url.to_string()]))
+                .collect(),
+        };
+        tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Publishing relay list tags {:?}", tags);
+        let event = EventBuilder::new(relay_type.into(), "").tags(tags);
+        let result = self
+            .publish_event_builder_with_signer(event, target_relays, signer)
+            .await?;
+        tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Published relay list event to Nostr: {:?}", result);
+
+        Ok(())
+    }
+
     pub(crate) async fn fetch_user_relays(
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        nip65_relays: DashSet<RelayUrl>,
-    ) -> Result<DashSet<RelayUrl>> {
+        nip65_relays: &[Relay],
+    ) -> Result<HashSet<RelayUrl>> {
         let filter = Filter::new()
             .author(pubkey)
             .kind(relay_type.into())
             .limit(1);
+        let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let relay_events = self
             .client
-            .fetch_events_from(nip65_relays, filter.clone(), self.timeout)
+            .fetch_events_from(urls, filter.clone(), self.timeout)
             .await?;
         tracing::debug!("Fetched relay events {:?}", relay_events);
 
         match relay_events.first() {
-            None => Ok(DashSet::new()),
+            None => Ok(HashSet::new()),
             Some(event) => Ok(Self::relay_urls_from_event(event.clone())),
         }
-    }
-
-    pub(crate) async fn query_user_contact_list(
-        &self,
-        pubkey: PublicKey,
-    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        let filter = Filter::new()
-            .kind(Kind::ContactList)
-            .author(pubkey)
-            .limit(1);
-        let events = self.client.database().query(filter).await?;
-
-        let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
-            event
-                .tags
-                .iter()
-                .filter(|tag| tag.kind() == TagKind::p())
-                .filter_map(|tag| tag.content())
-                .filter_map(|s| PublicKey::from_hex(s).ok())
-                .collect()
-        } else {
-            HashSet::new()
-        };
-
-        if contacts_pubkeys.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let mut contacts_metadata = HashMap::new();
-        let meta_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(contacts_pubkeys.clone());
-        let meta_events = self.client.database().query(meta_filter).await?;
-
-        for event in meta_events {
-            contacts_metadata.insert(event.pubkey, Metadata::from_json(&event.content).ok());
-            contacts_pubkeys.remove(&event.pubkey);
-        }
-
-        // Adding contacts whose metadata is missing
-        for contact in contacts_pubkeys {
-            contacts_metadata.insert(contact, None);
-        }
-
-        Ok(contacts_metadata)
-    }
-
-    pub(crate) async fn fetch_user_contact_list(
-        &self,
-        account: &Account,
-    ) -> Result<HashMap<PublicKey, Option<Metadata>>> {
-        let filter = Filter::new()
-            .kind(Kind::ContactList)
-            .author(account.pubkey)
-            .limit(1);
-
-        let events = self
-            .client
-            .fetch_events_from(account.nip65_relays.clone(), filter, self.timeout)
-            .await?;
-
-        let mut contacts_pubkeys: HashSet<_> = if let Some(event) = events.first() {
-            event
-                .tags
-                .iter()
-                .filter(|tag| tag.kind() == TagKind::p())
-                .filter_map(|tag| tag.content())
-                .filter_map(|s| PublicKey::from_hex(s).ok())
-                .collect()
-        } else {
-            HashSet::new()
-        };
-
-        if contacts_pubkeys.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let mut contacts_metadata = HashMap::new();
-        let meta_filter = Filter::new()
-            .kind(Kind::Metadata)
-            .authors(contacts_pubkeys.clone());
-        let meta_events = self.client.fetch_events(meta_filter, self.timeout).await?;
-
-        for event in meta_events {
-            contacts_metadata.insert(event.pubkey, Metadata::from_json(&event.content).ok());
-            contacts_pubkeys.remove(&event.pubkey);
-        }
-
-        // Adding contacts whose metadata is missing
-        for contact in contacts_pubkeys {
-            contacts_metadata.insert(contact, None);
-        }
-
-        Ok(contacts_metadata)
     }
 
     pub(crate) async fn fetch_user_key_package(
         &self,
         pubkey: PublicKey,
-        urls: DashSet<RelayUrl>,
+        relays: &[Relay],
     ) -> Result<Option<Event>> {
+        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         let filter = Filter::new()
             .kind(Kind::MlsKeyPackage)
             .author(pubkey)
@@ -160,8 +104,92 @@ impl NostrManager {
             .fetch_events_from(urls, filter.clone(), self.timeout)
             .await?;
 
-        let stored_events = self.client.database().query(filter).await?;
-        Ok(events.merge(stored_events).first_owned())
+        Ok(events.first_owned())
+    }
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+    use chrono::Utc;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_publish_metadata_with_signer_no_relays() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let nostr_manager = NostrManager::new(sender, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let metadata = Metadata::new().name("test_user").display_name("Test User");
+        let relays: Vec<Relay> = vec![];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_metadata_with_signer(&metadata, &relays, keys)
+            .await;
+
+        assert!(result.is_err(), "Should fail with empty relays");
+        let error_message = format!("{:?}", result.unwrap_err());
+        assert!(
+            error_message.contains("NoRelaysSpecified"),
+            "Expected NoRelaysSpecified error, got: {}",
+            error_message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_and_fetch_metadata() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let nostr_manager = NostrManager::new(sender, std::time::Duration::from_secs(10))
+            .await
+            .unwrap();
+
+        let test_relays = vec![
+            crate::whitenoise::relays::Relay {
+                id: None,
+                url: RelayUrl::parse("ws://localhost:8080").unwrap(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+            crate::whitenoise::relays::Relay {
+                id: None,
+                url: RelayUrl::parse("ws://localhost:7777").unwrap(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+        ];
+
+        let test_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let metadata = Metadata::new()
+            .name(format!("test_user_{}", test_timestamp))
+            .display_name(format!("Test User {}", test_timestamp))
+            .about("Integration test for metadata publishing");
+
+        let keys = Keys::generate();
+
+        let publish_result = nostr_manager
+            .publish_metadata_with_signer(&metadata, &test_relays, keys.clone())
+            .await;
+
+        publish_result.expect("Failed to publish metadata. Are test relays running on localhost:8080 and localhost:7777?");
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let fetch_result = nostr_manager
+            .fetch_metadata_from(&test_relays, keys.public_key())
+            .await
+            .expect("Failed to fetch metadata from relays");
+
+        if let Some(fetched_metadata) = fetch_result {
+            assert_eq!(fetched_metadata.name, metadata.name);
+            assert_eq!(fetched_metadata.display_name, metadata.display_name);
+            assert_eq!(fetched_metadata.about, metadata.about);
+        }
     }
 }
 

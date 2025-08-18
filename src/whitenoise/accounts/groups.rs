@@ -1,8 +1,10 @@
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
+use crate::whitenoise::users::User;
 use crate::whitenoise::Whitenoise;
 use crate::RelayType;
 use nostr_mls::prelude::*;
+use std::collections::HashSet;
 use std::time::Duration;
 
 impl Whitenoise {
@@ -34,69 +36,52 @@ impl Whitenoise {
         admin_pubkeys: Vec<PublicKey>,
         config: NostrGroupConfigData,
     ) -> Result<group_types::Group> {
-        if !self.logged_in(&creator_account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&creator_account.pubkey)?;
 
         let mut key_package_events: Vec<Event> = Vec::new();
-        let mut contacts = Vec::new();
+        let mut members = Vec::new();
 
         for pk in member_pubkeys.iter() {
-            let contact = self.load_contact(pk, creator_account).await?;
-            let relays_to_use = contact.get_relays_of_type(RelayType::KeyPackage);
-            let some_event = self
-                .fetch_key_package_event_from(relays_to_use, *pk)
-                .await?;
+            let user = User::find_by_pubkey(pk, &self.database).await?;
+            let kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
+            let some_event = self.nostr.fetch_user_key_package(*pk, &kp_relays).await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
             key_package_events.push(event);
-            contacts.push(contact);
+            members.push(user);
         }
 
         tracing::debug!("Succefully fetched the key packages of members");
 
         let group_relays = config.relays.clone();
 
-        let (create_group_result, group_ids) = tokio::task::spawn_blocking({
-            let creator_account = creator_account.clone();
-            let key_package_events = key_package_events.clone();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-                let nostr_mls = creator_account.nostr_mls.lock().unwrap();
-                // Fetch key packages for all members
-                let create_group_result = nostr_mls.create_group(
-                    &creator_account.pubkey,
-                    key_package_events,
-                    admin_pubkeys,
-                    config,
-                )?;
+        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir)?;
+        let create_group_result = nostr_mls.create_group(
+            &creator_account.pubkey,
+            key_package_events.clone(),
+            admin_pubkeys,
+            config,
+        )?;
 
-                let group_ids = nostr_mls
-                    .get_groups()?
-                    .into_iter()
-                    .map(|g| hex::encode(g.nostr_group_id))
-                    .collect::<Vec<_>>();
-
-                Ok((create_group_result, group_ids))
-            }
-        })
-        .await
-        .map_err(WhitenoiseError::from)??;
+        let group_ids = nostr_mls
+            .get_groups()?
+            .into_iter()
+            .map(|g| hex::encode(g.nostr_group_id))
+            .collect::<Vec<_>>();
 
         let group = create_group_result.group;
         let welcome_rumors = create_group_result.welcome_rumors;
-        if welcome_rumors.len() != contacts.len() {
+        if welcome_rumors.len() != members.len() {
             return Err(WhitenoiseError::Other(anyhow::Error::msg(
                 "Welcome rumours are missing for some of the members",
             )));
         }
 
         // Fan out the welcome message to all members
-        for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts.iter()) {
+        for (welcome_rumor, member) in welcome_rumors.iter().zip(members.iter()) {
             // Get the public key of the member from the key package event
             let key_package_event_id =
                 welcome_rumor
@@ -118,25 +103,31 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-            let relays_to_use = contact.get_relays_of_type(RelayType::Inbox);
+            let relays_to_use = member.relays(RelayType::Inbox, &self.database).await?;
 
             self.nostr
                 .publish_gift_wrap_with_signer(
                     &member_pubkey,
                     welcome_rumor.clone(),
-                    vec![Tag::expiration(one_month_future)],
-                    relays_to_use,
+                    &[Tag::expiration(one_month_future)],
+                    &relays_to_use,
                     keys.clone(),
                 )
                 .await
                 .map_err(WhitenoiseError::from)?;
         }
 
+        let mut relays = HashSet::new();
+        for relay in group_relays {
+            let db_relay = self.find_or_create_relay(&relay).await?;
+            relays.insert(db_relay);
+        }
+
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 creator_account.pubkey,
-                group_relays.into_iter().collect(),
-                group_ids,
+                &relays.into_iter().collect::<Vec<_>>(),
+                &group_ids,
                 keys,
             )
             .await
@@ -150,11 +141,7 @@ impl Whitenoise {
         account: &Account,
         active_filter: bool,
     ) -> Result<Vec<group_types::Group>> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         Ok(nostr_mls
             .get_groups()
             .map_err(WhitenoiseError::from)?
@@ -168,11 +155,7 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         Ok(nostr_mls
             .get_members(group_id)
             .map_err(WhitenoiseError::from)?
@@ -185,11 +168,7 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        if !self.logged_in(&account.pubkey).await {
-            return Err(WhitenoiseError::AccountNotFound);
-        }
-
-        let nostr_mls = &*account.nostr_mls.lock().unwrap();
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         Ok(nostr_mls
             .get_group(group_id)
             .map_err(WhitenoiseError::from)?
@@ -243,40 +222,37 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let mut contacts = Vec::new();
+        let mut users = Vec::new();
 
         // Fetch key packages for all members
         for pk in members.iter() {
-            let contact = self.load_contact(pk, account).await?;
-            let relays_to_use = contact.get_relays_of_type(RelayType::KeyPackage);
+            let user = User::find_by_pubkey(pk, &self.database).await?;
+            let relays_to_use = user.relays(RelayType::KeyPackage, &self.database).await?;
             let some_event = self
-                .fetch_key_package_event_from(relays_to_use, *pk)
+                .nostr
+                .fetch_user_key_package(*pk, &relays_to_use)
                 .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
             key_package_events.push(event);
-            contacts.push(contact);
+            users.push(user);
         }
 
-        let (update_result, group_relays) = tokio::task::spawn_blocking({
-            let key_package_events = key_package_events.clone();
-            let account = account.clone();
-            let group_id = group_id.clone();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-                let nostr_mls = account.nostr_mls.lock().unwrap();
-                let update_result = nostr_mls.add_members(&group_id, &key_package_events)?;
-                // Merge the pending commit immediately after creating it
-                // This ensures our local state is correct before publishing
-                nostr_mls.merge_pending_commit(&group_id)?;
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        let update_result = nostr_mls.add_members(group_id, &key_package_events)?;
+        // Merge the pending commit immediately after creating it
+        // This ensures our local state is correct before publishing
+        nostr_mls.merge_pending_commit(group_id)?;
 
-                // Publish the evolution event to the group
-                let group_relays = nostr_mls.get_relays(&group_id)?;
+        // Publish the evolution event to the group
+        let group_relays = nostr_mls.get_relays(group_id)?;
 
-                Ok((update_result, group_relays))
-            }
-        })
-        .await??;
+        let mut relays = HashSet::new();
+        for relay in group_relays.clone() {
+            let db_relay = self.find_or_create_relay(&relay).await?;
+            relays.insert(db_relay);
+        }
 
         let evolution_event = update_result.evolution_event;
 
@@ -289,7 +265,7 @@ impl Whitenoise {
             Some(wr) => wr,
         };
 
-        if welcome_rumors.len() != contacts.len() {
+        if welcome_rumors.len() != users.len() {
             return Err(WhitenoiseError::Other(anyhow::Error::msg(
                 "Welcome rumours are missing for some of the members",
             )));
@@ -302,11 +278,7 @@ impl Whitenoise {
                 "Group has no relays configured, using account's default relays"
             );
             // Use the account's default relays as fallback
-            let fallback_relays: std::collections::BTreeSet<RelayUrl> = account
-                .nip65_relays
-                .iter()
-                .map(|relay_ref| relay_ref.clone())
-                .collect();
+            let fallback_relays = account.nip65_relays(self).await?;
             if fallback_relays.is_empty() {
                 return Err(WhitenoiseError::Other(anyhow::anyhow!(
                     "No relays available for publishing evolution event - both group relays and account relays are empty"
@@ -317,13 +289,13 @@ impl Whitenoise {
                 .await?;
         } else {
             self.nostr
-                .publish_event_to(evolution_event, &group_relays)
+                .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
                 .await?;
         }
 
         // Evolution event published successfully
         // Fan out the welcome message to all members
-        for (welcome_rumor, contact) in welcome_rumors.iter().zip(contacts) {
+        for (welcome_rumor, user) in welcome_rumors.iter().zip(users) {
             // Get the public key of the member from the key package event
             let key_package_event_id =
                 welcome_rumor
@@ -346,14 +318,14 @@ impl Whitenoise {
             let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
             // Use fallback relays if contact has no inbox relays configured
-            let relays_to_use = contact.get_relays_of_type(RelayType::Inbox);
+            let relays_to_use = user.relays(RelayType::Inbox, &self.database).await?;
 
             self.nostr
                 .publish_gift_wrap_with_signer(
                     &member_pubkey,
                     welcome_rumor.clone(),
-                    vec![Tag::expiration(one_month_future)],
-                    relays_to_use,
+                    &[Tag::expiration(one_month_future)],
+                    &relays_to_use,
                     keys.clone(),
                 )
                 .await
@@ -399,26 +371,21 @@ impl Whitenoise {
         group_id: &GroupId,
         members: Vec<PublicKey>,
     ) -> Result<()> {
-        let (update_result, group_relays) = tokio::task::spawn_blocking({
-            let account = account.clone();
-            let group_id = group_id.clone();
-            move || -> core::result::Result<_, nostr_mls::error::Error> {
-                let nostr_mls = account.nostr_mls.lock().unwrap();
-
-                let update_result = nostr_mls.remove_members(&group_id, &members)?;
-
-                nostr_mls.merge_pending_commit(&group_id)?;
-
-                let group_relays = nostr_mls.get_relays(&group_id)?;
-
-                Ok((update_result, group_relays))
-            }
-        })
-        .await??;
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        let update_result = nostr_mls.remove_members(group_id, &members)?;
+        nostr_mls.merge_pending_commit(group_id)?;
+        let group_relays = nostr_mls.get_relays(group_id)?;
 
         let evolution_event = update_result.evolution_event;
+
+        let mut relays = HashSet::new();
+        for relay in group_relays {
+            let db_relay = self.find_or_create_relay(&relay).await?;
+            relays.insert(db_relay);
+        }
+
         self.nostr
-            .publish_event_to(evolution_event, &group_relays)
+            .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
             .await?;
         Ok(())
     }
@@ -441,8 +408,11 @@ mod tests {
         let mut member_pubkeys = Vec::new();
         for _ in 0..2 {
             let member_account = whitenoise.create_identity().await.unwrap();
-            whitenoise
-                .add_contact(&creator_account, member_account.pubkey)
+            let member_user = User::find_by_pubkey(&member_account.pubkey, &whitenoise.database)
+                .await
+                .unwrap();
+            creator_account
+                .follow_user(&member_user, &whitenoise.database)
                 .await
                 .unwrap();
             member_pubkeys.push(member_account.pubkey);

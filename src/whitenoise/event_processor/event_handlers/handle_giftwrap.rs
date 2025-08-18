@@ -44,7 +44,7 @@ impl Whitenoise {
     ) -> Result<()> {
         // Process the welcome message - lock scope is minimal
         {
-            let nostr_mls = &*account.nostr_mls.lock().unwrap();
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
             nostr_mls
                 .process_welcome(&event.id, &rumor)
                 .map_err(WhitenoiseError::NostrMlsError)?;
@@ -92,38 +92,35 @@ mod tests {
     ) -> Event {
         // Fetch a real key package event for the member from relays
         let key_pkg_event = whitenoise
-            .fetch_key_package_event_from(creator_account.key_package_relays.clone(), member_pubkey)
+            .nostr
+            .fetch_user_key_package(
+                member_pubkey,
+                &creator_account
+                    .key_package_relays(whitenoise)
+                    .await
+                    .unwrap(),
+            )
             .await
             .unwrap()
             .expect("member must have a published key package");
 
         // Create the group via nostr_mls directly to obtain welcome rumor
-        let (welcome_rumor, _unused_keys) = tokio::task::spawn_blocking({
-            let creator_account = creator_account.clone();
-            let key_pkg_event = key_pkg_event.clone();
-            move || -> core::result::Result<(UnsignedEvent, Keys), nostr_mls::error::Error> {
-                let nostr_mls = creator_account.nostr_mls.lock().unwrap();
+        let nostr_mls =
+            Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let create_group_result = nostr_mls
+            .create_group(
+                &creator_account.pubkey,
+                vec![key_pkg_event],
+                vec![creator_account.pubkey],
+                create_nostr_group_config_data(),
+            )
+            .unwrap();
 
-                let create_group_result = nostr_mls.create_group(
-                    &creator_account.pubkey,
-                    vec![key_pkg_event],
-                    vec![creator_account.pubkey],
-                    create_nostr_group_config_data(),
-                )?;
-
-                let rumor = create_group_result
-                    .welcome_rumors
-                    .first()
-                    .expect("welcome rumor exists")
-                    .clone();
-
-                // Return rumor plus a dummy Keys placeholder; will not be used outside
-                Ok((rumor, Keys::generate()))
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        let welcome_rumor = create_group_result
+            .welcome_rumors
+            .first()
+            .expect("welcome rumor exists")
+            .clone();
 
         // Use the creator's real keys as signer to build the giftwrap
         let creator_signer = whitenoise
@@ -142,7 +139,7 @@ mod tests {
 
         // Create creator and one member account; setup publishes key packages and contacts
         let creator_account = whitenoise.create_identity().await.unwrap();
-        let members = setup_multiple_test_accounts(&whitenoise, &creator_account, 1).await;
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
         let member_account = members[0].0.clone();
 
         // Build a real MLS Welcome giftwrap addressed to the member

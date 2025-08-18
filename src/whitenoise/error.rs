@@ -35,11 +35,17 @@ pub enum WhitenoiseError {
     #[error("User not found")]
     UserNotFound,
 
+    #[error("User not persisted - save the user before performing this operation")]
+    UserNotPersisted,
+
     #[error("Contact not found")]
     ContactNotFound,
 
     #[error("Relay not found")]
     RelayNotFound,
+
+    #[error("User relay not found")]
+    UserRelayNotFound,
 
     #[error("Account not authorized")]
     AccountNotAuthorized,
@@ -94,6 +100,9 @@ pub enum WhitenoiseError {
 
     #[error("join error due to spawn blocking")]
     JoinError(#[from] tokio::task::JoinError),
+
+    #[error("Event handler error: {0}")]
+    EventProcessor(String),
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),

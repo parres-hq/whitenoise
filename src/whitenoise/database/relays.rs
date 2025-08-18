@@ -1,11 +1,10 @@
-use super::DatabaseError;
+use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::whitenoise::relays::Relay;
-use crate::{Whitenoise, WhitenoiseError};
+use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::RelayUrl;
 
-#[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct RelayRow {
     // id is the primary key
     pub id: i64,
@@ -25,11 +24,8 @@ where
     i64: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
 {
     fn from_row(row: &'r R) -> std::result::Result<Self, sqlx::Error> {
-        // Extract raw values from the database row
         let id: i64 = row.try_get("id")?;
         let url_str: String = row.try_get("url")?;
-        let created_at_i64: i64 = row.try_get("created_at")?;
-        let updated_at_i64: i64 = row.try_get("updated_at")?;
 
         // Parse url from string
         let url = RelayUrl::parse(&url_str).map_err(|e| sqlx::Error::ColumnDecode {
@@ -37,23 +33,8 @@ where
             source: Box::new(e),
         })?;
 
-        let created_at = DateTime::from_timestamp_millis(created_at_i64)
-            .ok_or_else(|| DatabaseError::InvalidTimestamp {
-                timestamp: created_at_i64,
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "created_at".to_string(),
-                source: Box::new(e),
-            })?;
-
-        let updated_at = DateTime::from_timestamp_millis(updated_at_i64)
-            .ok_or_else(|| DatabaseError::InvalidTimestamp {
-                timestamp: updated_at_i64,
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "updated_at".to_string(),
-                source: Box::new(e),
-            })?;
+        let created_at = parse_timestamp(row, "created_at")?;
+        let updated_at = parse_timestamp(row, "updated_at")?;
 
         Ok(RelayRow {
             id,
@@ -64,33 +45,103 @@ where
     }
 }
 
-impl Whitenoise {
-    #[allow(dead_code)]
-    pub(crate) async fn load_relay(&self, url: &RelayUrl) -> Result<Relay, WhitenoiseError> {
+impl From<RelayRow> for Relay {
+    fn from(val: RelayRow) -> Self {
+        Relay {
+            id: Some(val.id),
+            url: val.url,
+            created_at: val.created_at,
+            updated_at: val.updated_at,
+        }
+    }
+}
+
+impl Relay {
+    /// Finds a relay by its URL.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - A reference to the `RelayUrl` to search for
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the `Relay` associated with the provided URL on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::RelayNotFound`] if no relay with the given URL exists.
+    pub(crate) async fn find_by_url(
+        url: &RelayUrl,
+        database: &Database,
+    ) -> Result<Relay, WhitenoiseError> {
         let relay_row = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
-            .bind(url.to_string().as_str())
-            .fetch_one(&self.database.pool)
+            .bind(url.to_string())
+            .fetch_one(&database.pool)
             .await
-            .map_err(|_| WhitenoiseError::RelayNotFound)?;
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => WhitenoiseError::RelayNotFound,
+                other => WhitenoiseError::Database(DatabaseError::Sqlx(other)),
+            })?;
 
         Ok(Relay {
-            id: relay_row.id,
+            id: Some(relay_row.id),
             url: relay_row.url,
             created_at: relay_row.created_at,
             updated_at: relay_row.updated_at,
         })
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn save_relay(&self, relay: &Relay) -> Result<(), DatabaseError> {
-        sqlx::query("INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?)")
-            .bind(relay.url.to_string().as_str())
-            .bind(relay.created_at.timestamp_millis())
-            .bind(relay.updated_at.timestamp_millis())
-            .execute(&self.database.pool)
+    pub(crate) async fn find_or_create_by_url(
+        url: &RelayUrl,
+        database: &Database,
+    ) -> Result<Relay, WhitenoiseError> {
+        match Relay::find_by_url(url, database).await {
+            Ok(relay) => Ok(relay),
+            Err(_) => {
+                let relay = Relay::new(url);
+                let new_relay = relay.save(database).await?;
+                Ok(new_relay)
+            }
+        }
+    }
+
+    /// Saves this relay to the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the updated `Relay` with the database-assigned ID on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
+    pub(crate) async fn save(&self, database: &Database) -> Result<Relay, WhitenoiseError> {
+        let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
+
+        sqlx::query(
+            "INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET updated_at = ?",
+        )
+        .bind(self.url.to_string())
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .bind(Utc::now().timestamp_millis())
+        .execute(&mut *tx)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        let inserted_relay = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
+            .bind(self.url.to_string())
+            .fetch_one(&mut *tx)
             .await
             .map_err(DatabaseError::Sqlx)?;
-        Ok(())
+
+        tx.commit().await.map_err(DatabaseError::Sqlx)?;
+
+        Ok(inserted_relay.into())
     }
 }
 
@@ -99,6 +150,7 @@ mod tests {
     use super::*;
     use sqlx::sqlite::SqliteRow;
     use sqlx::{FromRow, SqlitePool};
+    use std::path::PathBuf;
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
@@ -107,7 +159,7 @@ mod tests {
         sqlx::query(
             "CREATE TABLE relays (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )",
@@ -348,6 +400,30 @@ mod tests {
         let relay_row = RelayRow::from_row(&row).unwrap();
         let expected_url = RelayUrl::parse(test_url_str).unwrap();
         assert_eq!(relay_row.url, expected_url);
+    }
+
+    #[tokio::test]
+    async fn test_relay_save_insert_and_update() {
+        use crate::whitenoise::database::Database;
+        use crate::whitenoise::relays::Relay;
+
+        let pool = setup_test_db().await;
+        let database = Database {
+            pool,
+            path: PathBuf::from(":memory:"),
+            last_connected: std::time::SystemTime::now(),
+        };
+
+        let test_url = RelayUrl::parse("wss://relay.save.test").unwrap();
+
+        let saved_relay1 = Relay::new(&test_url).save(&database).await.unwrap();
+        let first_id = saved_relay1.id.unwrap();
+
+        let saved_relay2 = Relay::new(&test_url).save(&database).await.unwrap();
+        let second_id = saved_relay2.id.unwrap();
+
+        assert_eq!(first_id, second_id);
+        assert!(saved_relay2.updated_at >= saved_relay1.updated_at);
     }
 
     #[tokio::test]

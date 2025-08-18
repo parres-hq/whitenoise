@@ -10,10 +10,12 @@ use std::{
 };
 use thiserror::Error;
 
-pub mod accounts_new;
+pub mod accounts;
+pub mod app_settings;
 pub mod relays;
 pub mod user_relays;
 pub mod users;
+pub mod utils;
 
 pub static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| sqlx::migrate!("./db_migrations"));
 
@@ -31,6 +33,8 @@ pub enum DatabaseError {
     FileSystem(#[from] std::io::Error),
     #[error("Invalid timestamp: {timestamp} cannot be converted to DateTime")]
     InvalidTimestamp { timestamp: i64 },
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
 }
 
 #[derive(Clone, Debug)]
@@ -128,31 +132,36 @@ impl Database {
         Ok(())
     }
 
-    /// Deletes all data from all tables while preserving schema
+    /// Deletes all data by dropping and recreating all tables
     ///
     /// This method:
     /// - Temporarily disables foreign key constraints
-    /// - Deletes data from all tables in dependency order
+    /// - Drops all user tables (including migration tracking)
     /// - Re-enables foreign key constraints
+    /// - Re-runs migrations to recreate the current schema from scratch
     /// - Uses a transaction to ensure atomicity
     pub async fn delete_all_data(&self) -> Result<(), DatabaseError> {
         let mut txn = self.pool.begin().await?;
 
-        // Disable foreign key constraints temporarily
+        // Disable foreign key constraints temporarily to allow dropping tables in any order
         sqlx::query("PRAGMA foreign_keys = OFF")
             .execute(&mut *txn)
             .await?;
 
-        // Delete data in reverse order of dependencies
-        sqlx::query("DELETE FROM media_files")
-            .execute(&mut *txn)
-            .await?;
-        sqlx::query("DELETE FROM accounts")
-            .execute(&mut *txn)
-            .await?;
-        sqlx::query("DELETE FROM contacts")
-            .execute(&mut *txn)
-            .await?;
+        // Get all user tables (excluding only SQLite system tables)
+        let tables: Vec<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master
+             WHERE type='table'
+             AND name NOT LIKE 'sqlite_%'",
+        )
+        .fetch_all(&mut *txn)
+        .await?;
+
+        // Drop all user tables (order doesn't matter with FK constraints disabled)
+        for (table_name,) in tables {
+            let drop_query = format!("DROP TABLE IF EXISTS {}", table_name);
+            sqlx::query(&drop_query).execute(&mut *txn).await?;
+        }
 
         // Re-enable foreign key constraints
         sqlx::query("PRAGMA foreign_keys = ON")
@@ -160,6 +169,10 @@ impl Database {
             .await?;
 
         txn.commit().await?;
+
+        // Re-run migrations to recreate the current schema
+        MIGRATOR.run(&self.pool).await?;
+
         Ok(())
     }
 }
@@ -260,8 +273,22 @@ mod tests {
     async fn test_delete_all_data() {
         let (db, _temp_dir) = create_test_db().await;
 
-        // Insert some test data
-        sqlx::query("INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
+        // First create a user (required for foreign key)
+        sqlx::query("INSERT INTO users (pubkey, metadata) VALUES ('test-pubkey', '{}')")
+            .execute(&db.pool)
+            .await
+            .expect("Failed to insert test user");
+
+        // Get the user ID
+        let (user_id,): (i64,) =
+            sqlx::query_as("SELECT id FROM users WHERE pubkey = 'test-pubkey'")
+                .fetch_one(&db.pool)
+                .await
+                .expect("Failed to get user ID");
+
+        // Insert account with correct schema (Note: settings column was dropped in migration 0007)
+        sqlx::query("INSERT INTO accounts (pubkey, user_id, last_synced_at) VALUES ('test-pubkey', ?, NULL)")
+            .bind(user_id)
             .execute(&db.pool)
             .await
             .expect("Failed to insert test account");
@@ -271,12 +298,13 @@ mod tests {
             .await
             .expect("Failed to insert test media file");
 
-        sqlx::query("INSERT INTO contacts (pubkey, metadata, nip65_relays, inbox_relays, key_package_relays) VALUES ('contact-pubkey', '{}', '[]', '[]', '[]')")
-            .execute(&db.pool)
-            .await
-            .expect("Failed to insert test contact");
-
         // Verify data exists
+        let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&db.pool)
+            .await
+            .expect("Failed to count users");
+        assert_eq!(user_count.0, 1);
+
         let account_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM accounts")
             .fetch_one(&db.pool)
             .await
@@ -289,17 +317,17 @@ mod tests {
             .expect("Failed to count media files");
         assert_eq!(media_count.0, 1);
 
-        let contact_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM contacts")
-            .fetch_one(&db.pool)
-            .await
-            .expect("Failed to count contacts");
-        assert_eq!(contact_count.0, 1);
-
         // Delete all data
         let result = db.delete_all_data().await;
         assert!(result.is_ok());
 
         // Verify data is deleted
+        let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&db.pool)
+            .await
+            .expect("Failed to count users after deletion");
+        assert_eq!(user_count.0, 0);
+
         let account_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM accounts")
             .fetch_one(&db.pool)
             .await
@@ -311,12 +339,6 @@ mod tests {
             .await
             .expect("Failed to count media files after deletion");
         assert_eq!(media_count.0, 0);
-
-        let contact_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM contacts")
-            .fetch_one(&db.pool)
-            .await
-            .expect("Failed to count contacts after deletion");
-        assert_eq!(contact_count.0, 0);
     }
 
     #[tokio::test]
@@ -352,11 +374,23 @@ mod tests {
             .await
             .expect("Failed to create database");
 
-        // Insert some data
-        sqlx::query("INSERT INTO accounts (pubkey, settings, nip65_relays, inbox_relays, key_package_relays, last_synced) VALUES ('test-pubkey', '{}', '[1,2]', '[]', '[1]', 0)")
+        // Insert some data with correct schema
+        sqlx::query("INSERT INTO users (pubkey, metadata) VALUES ('test-pubkey', '{}')")
             .execute(&db1.pool)
             .await
-            .expect("Failed to insert test data");
+            .expect("Failed to insert test user");
+
+        let (user_id,): (i64,) =
+            sqlx::query_as("SELECT id FROM users WHERE pubkey = 'test-pubkey'")
+                .fetch_one(&db1.pool)
+                .await
+                .expect("Failed to get user ID");
+
+        sqlx::query("INSERT INTO accounts (pubkey, user_id, last_synced_at) VALUES ('test-pubkey', ?, NULL)")
+            .bind(user_id)
+            .execute(&db1.pool)
+            .await
+            .expect("Failed to insert test account");
 
         drop(db1);
 
@@ -366,24 +400,25 @@ mod tests {
             .expect("Failed to reopen database");
 
         // Verify data persists
+        let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&db2.pool)
+            .await
+            .expect("Failed to count users");
+        assert_eq!(user_count.0, 1);
+
         let account_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM accounts")
             .fetch_one(&db2.pool)
             .await
             .expect("Failed to count accounts");
         assert_eq!(account_count.0, 1);
 
-        // Verify the account data
-        let account: (String, String, i64, String, String, String) =
-            sqlx::query_as("SELECT pubkey, settings, last_synced, nip65_relays, inbox_relays, key_package_relays FROM accounts")
-                .fetch_one(&db2.pool)
-                .await
-                .expect("Failed to fetch account");
+        // Verify the account data (current schema without settings column)
+        let account: (String, i64) = sqlx::query_as("SELECT pubkey, user_id FROM accounts")
+            .fetch_one(&db2.pool)
+            .await
+            .expect("Failed to fetch account");
         assert_eq!(account.0, "test-pubkey");
-        assert_eq!(account.1, "{}");
-        assert_eq!(account.2, 0);
-        assert_eq!(account.3, "[1,2]");
-        assert_eq!(account.4, "[]");
-        assert_eq!(account.5, "[1]");
+        assert_eq!(account.1, user_id); // Should match the user_id we created
     }
 
     #[tokio::test]
@@ -417,7 +452,7 @@ mod tests {
         let result = db.migrate_up().await;
         assert!(result.is_ok());
 
-        // Verify that all expected tables still exist
+        // Verify that all expected tables still exist (contacts table was dropped in migration 0007)
         let tables: Vec<(String,)> =
             sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
                 .fetch_all(&db.pool)
@@ -427,7 +462,7 @@ mod tests {
         let table_names: Vec<String> = tables.into_iter().map(|t| t.0).collect();
         assert!(table_names.contains(&"accounts".to_string()));
         assert!(table_names.contains(&"media_files".to_string()));
-        assert!(table_names.contains(&"contacts".to_string()));
+        assert!(table_names.contains(&"app_settings".to_string()));
     }
 
     #[tokio::test]
