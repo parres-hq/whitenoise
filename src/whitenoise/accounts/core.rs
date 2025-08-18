@@ -910,8 +910,6 @@ mod tests {
             "Account should have default key package relays configured"
         );
 
-        // Verify that all relay sets contain the same default relays
-        // Convert DashSet to Vec to avoid iterator type issues
         let default_relays_vec: Vec<RelayUrl> =
             default_relays.iter().map(|r| r.url.clone()).collect();
         let nip65_relay_urls: Vec<RelayUrl> = account
