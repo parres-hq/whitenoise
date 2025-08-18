@@ -12,6 +12,7 @@ use thiserror::Error;
 
 pub mod accounts;
 pub mod app_settings;
+pub mod group_information;
 pub mod relays;
 pub mod user_relays;
 pub mod users;
