@@ -279,6 +279,7 @@ async fn main() -> Result<(), WhitenoiseError> {
                 None,
                 vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
             ),
+            None,
         )
         .await
         .unwrap();

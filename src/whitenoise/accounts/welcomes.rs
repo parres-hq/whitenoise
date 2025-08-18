@@ -273,6 +273,7 @@ mod tests {
                 member_pubkeys.clone(),
                 admin_pubkeys.clone(),
                 config,
+                None,
             )
             .await;
         assert!(group.is_ok());

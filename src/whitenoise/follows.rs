@@ -37,6 +37,7 @@ impl Whitenoise {
     pub async fn follow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
         let (user, newly_created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
         if newly_created {
+            user.update_relay_lists(self).await?;
             // TODO: try and populate the user's data
         }
 

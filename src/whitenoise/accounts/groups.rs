@@ -1,5 +1,6 @@
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
+use crate::whitenoise::group_information::{GroupInformation, GroupType};
 use crate::whitenoise::users::User;
 use crate::whitenoise::Whitenoise;
 use crate::RelayType;
@@ -11,15 +12,15 @@ impl Whitenoise {
     /// Creates a new MLS group with the specified members and settings
     ///
     /// # Arguments
-    /// * `creator_pubkey` - Public key of the group creator (must be the active account)
+    /// * `creator_account` - Account of the group creator (must be the active account)
     /// * `member_pubkeys` - List of public keys for group members
     /// * `admin_pubkeys` - List of public keys for group admins
-    /// * `group_name` - Name of the group
-    /// * `description` - Description of the group
+    /// * `config` - Group configuration data
+    /// * `group_type` - Optional explicit group type. If None, will be inferred from participant count
     ///
     /// # Returns
     /// * `Ok(Group)` - The newly created group
-    /// * `Err(String)` - Error message if group creation fails
+    /// * `Err(WhitenoiseError)` - Error message if group creation fails
     ///
     /// # Errors
     /// Returns error if:
@@ -35,6 +36,7 @@ impl Whitenoise {
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
         config: NostrGroupConfigData,
+        group_type: Option<GroupType>,
     ) -> Result<group_types::Group> {
         let keys = self
             .secrets_store
@@ -44,7 +46,19 @@ impl Whitenoise {
         let mut members = Vec::new();
 
         for pk in member_pubkeys.iter() {
-            let user = User::find_by_pubkey(pk, &self.database).await?;
+            let (user, created) = User::find_or_create_by_pubkey(pk, &self.database).await?;
+            if created {
+                // Fetch the user's relay lists and save them to the database
+                if let Err(e) = user.update_relay_lists(self).await {
+                    tracing::warn!(
+                        target: "whitenoise::accounts::groups::create_group",
+                        "Failed to update relay lists for new user {}: {}",
+                        user.pubkey,
+                        e
+                    );
+                    // Continue with group creation even if relay list update fails
+                }
+            }
             let kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
             let some_event = self.nostr.fetch_user_key_package(*pk, &kp_relays).await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
@@ -132,6 +146,15 @@ impl Whitenoise {
             )
             .await
             .map_err(WhitenoiseError::from)?;
+
+        let participant_count = member_pubkeys.len() + 1;
+        GroupInformation::create_for_group(
+            self,
+            &group.mls_group_id,
+            group_type,
+            participant_count,
+        )
+        .await?;
 
         Ok(group)
     }
@@ -458,6 +481,15 @@ mod tests {
             vec![creator_account.pubkey, non_member_pubkey],
         )
         .await;
+
+        // Test case: DirectMessage group (2 participants total)
+        case_create_direct_message_group(
+            &whitenoise,
+            &creator_account,
+            vec![member_pubkeys[0]], // Only one member for DM
+            vec![creator_account.pubkey, member_pubkeys[0]],
+        )
+        .await;
     }
 
     async fn case_create_group_success(
@@ -474,6 +506,7 @@ mod tests {
                 member_pubkeys.clone(),
                 admin_pubkeys.clone(),
                 create_nostr_group_config_data(),
+                None,
             )
             .await;
 
@@ -484,6 +517,16 @@ mod tests {
         assert_eq!(group.description, config.description);
         assert!(group.admin_pubkeys.contains(&creator_account.pubkey));
         assert!(group.admin_pubkeys.contains(&member_pubkeys[0]));
+
+        if let Ok(group_info) =
+            GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise).await
+        {
+            assert_eq!(group_info.mls_group_id, group.mls_group_id);
+            assert_eq!(
+                group_info.group_type,
+                crate::whitenoise::group_information::GroupType::Group
+            );
+        }
     }
 
     /// Test case: Member/admin validation fails - empty admin list
@@ -499,6 +542,7 @@ mod tests {
                 member_pubkeys,
                 admin_pubkeys,
                 create_nostr_group_config_data(),
+                None,
             )
             .await;
 
@@ -528,6 +572,7 @@ mod tests {
                 member_pubkeys,
                 admin_pubkeys,
                 create_nostr_group_config_data(),
+                None,
             )
             .await;
 
@@ -548,6 +593,7 @@ mod tests {
                 member_pubkeys,
                 admin_pubkeys,
                 create_nostr_group_config_data(),
+                None,
             )
             .await;
 
@@ -556,12 +602,41 @@ mod tests {
         match result {
             Ok(_) => {
                 // Some MLS implementations might allow this
-                println!("Group created with non-member admin (implementation-specific behavior)");
             }
             Err(WhitenoiseError::NostrMlsError(_)) => {
                 // Expected if MLS validates admin membership
             }
             Err(other) => panic!("Unexpected error: {:?}", other),
+        }
+    }
+
+    async fn case_create_direct_message_group(
+        whitenoise: &Whitenoise,
+        creator_account: &Account,
+        member_pubkeys: Vec<PublicKey>,
+        admin_pubkeys: Vec<PublicKey>,
+    ) {
+        let result = whitenoise
+            .create_group(
+                creator_account,
+                member_pubkeys.clone(),
+                admin_pubkeys.clone(),
+                create_nostr_group_config_data(),
+                None,
+            )
+            .await;
+
+        assert!(result.is_ok(), "Error {:?}", result.unwrap_err());
+        let group = result.unwrap();
+
+        if let Ok(group_info) =
+            GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise).await
+        {
+            assert_eq!(group_info.mls_group_id, group.mls_group_id);
+            assert_eq!(
+                group_info.group_type,
+                crate::whitenoise::group_information::GroupType::DirectMessage
+            );
         }
     }
 }
