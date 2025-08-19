@@ -389,7 +389,6 @@ mod tests {
         assert_eq!(url1, url2);
         assert_ne!(url1, url3);
 
-        // Test HashSet behavior with RelayUrls
         let mut url_set = HashSet::new();
         url_set.insert(&url1);
         url_set.insert(&url2); // Should not increase size since url1 == url2
@@ -404,7 +403,6 @@ mod tests {
     async fn test_update_relay_lists_success() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
-        // Create a test user
         let test_pubkey = nostr_sdk::Keys::generate().public_key();
         let user = User {
             id: None,
@@ -413,11 +411,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-
-        // Save the user
         let saved_user = user.save(&whitenoise.database).await.unwrap();
-
-        // Create some initial NIP-65 relays for the user
         let initial_relay_url = RelayUrl::parse("wss://initial.example.com").unwrap();
         let initial_relay = whitenoise
             .find_or_create_relay(&initial_relay_url)
@@ -429,35 +423,19 @@ mod tests {
             .await
             .unwrap();
 
-        // The actual network calls would be mocked in a real test environment
-        // For now, this tests the structure and database operations
-        let result = saved_user.update_relay_lists(&whitenoise).await;
-
-        // The test should succeed even if network calls fail (graceful degradation)
-        match result {
-            Ok(()) => {
-                // Success case - verify the user still has relays
-                let relays = saved_user
-                    .relays(RelayType::Nip65, &whitenoise.database)
-                    .await
-                    .unwrap();
-                assert!(
-                    !relays.is_empty(),
-                    "User should still have relays after update"
-                );
-            }
-            Err(_) => {
-                // Error case is also acceptable since we don't have real network responses
-                // The important part is that the method handles errors gracefully
-            }
-        }
+        saved_user.update_relay_lists(&whitenoise).await.unwrap();
+        let relays = saved_user
+            .relays(RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(relays.len(), 1);
+        assert_eq!(relays[0].url, initial_relay_url);
     }
 
     #[tokio::test]
     async fn test_update_relay_lists_with_no_initial_relays() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
-        // Create a test user with no relays
         let test_pubkey = nostr_sdk::Keys::generate().public_key();
         let user = User {
             id: None,
@@ -469,20 +447,12 @@ mod tests {
 
         let saved_user = user.save(&whitenoise.database).await.unwrap();
 
-        // This should fall back to default relays and handle the case gracefully
-        let result = saved_user.update_relay_lists(&whitenoise).await;
-
-        // Should not panic and should handle the no-relays case gracefully
-        match result {
-            Ok(()) => {
-                // Check if any default relays were potentially added
-                println!("Update completed successfully");
-            }
-            Err(e) => {
-                // Errors are expected when there are no network responses
-                println!("Update failed as expected: {}", e);
-            }
-        }
+        saved_user.update_relay_lists(&whitenoise).await.unwrap();
+        assert!(saved_user
+            .relays(RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -518,17 +488,18 @@ mod tests {
     #[tokio::test]
     async fn test_get_query_relays_with_no_stored_relays() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
         let test_pubkey = nostr_sdk::Keys::generate().public_key();
         let user = User::new(test_pubkey);
-
         let saved_user = user.save(&whitenoise.database).await.unwrap();
-
-        // Test get_query_relays with no stored relays
         let query_relays = saved_user.get_query_relays(&whitenoise).await.unwrap();
 
-        // Should fall back to default relays
-        assert!(!query_relays.is_empty(), "Should have default relays");
+        assert_eq!(
+            query_relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
+            Relay::defaults()
+                .into_iter()
+                .map(|r| r.url)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
