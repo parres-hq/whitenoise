@@ -99,6 +99,12 @@ impl Whitenoise {
                                 Kind::MlsGroupMessage => {
                                     whitenoise.process_mls_message(event.clone(), subscription_id.clone()).await
                                 }
+                                Kind::Metadata => {
+                                    whitenoise.handle_metadata(event.clone()).await
+                                }
+                                Kind::RelayList | Kind::InboxRelays | Kind::MlsKeyPackageRelays => {
+                                    whitenoise.handle_relay_list(event.clone()).await
+                                }
                                 _ => {
                                     // TODO: Add more event types as needed
                                     tracing::debug!(
