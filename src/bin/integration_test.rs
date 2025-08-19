@@ -292,6 +292,72 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("  Admin count: {}", test_group.admin_pubkeys.len());
 
     // ***************************************************************
+    // TESTING SUBSCRIPTIONS AND LIVE-UPDATES
+    // ***************************************************************
+    tracing::info!("=================================== Testing Subscriptions and Live-Updates ===================================");
+
+    // Verify subscription-driven updates (event_processor routes)
+    tracing::info!("Testing subscription-driven updates for metadata and relay lists...");
+    let test_client2 = Client::default();
+    for relay in &dev_relays {
+        test_client2.add_relay(*relay).await.unwrap();
+    }
+    test_client2.connect().await;
+    test_client2.set_signer(known_keys.clone()).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+    // Publish a fresh metadata event to be picked up by the subscriptions
+    let sub_updated_metadata = Metadata {
+        name: Some("Known User Sub Update".to_string()),
+        ..Default::default()
+    };
+    test_client2
+        .send_event_builder(EventBuilder::metadata(&sub_updated_metadata))
+        .await
+        .unwrap();
+
+    // Publish a RelayList (10002) update with a new relay to verify relay list handler
+    let new_relay_url = "wss://sub-update.example.com".to_string();
+    let nip65_update_tags = vec![Tag::custom(
+        TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+        [new_relay_url.clone()],
+    )];
+    test_client2
+        .send_event_builder(EventBuilder::new(Kind::RelayList, "").tags(nip65_update_tags))
+        .await
+        .unwrap();
+
+    // Give subscriptions time to deliver and process
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    test_client2.disconnect().await;
+
+    // Assert metadata was updated via event processor
+    let updated_via_sub = whitenoise.user_metadata(&account3.pubkey).await.unwrap();
+    assert_eq!(
+        updated_via_sub.name,
+        Some("Known User Sub Update".to_string()),
+        "Subscription-driven metadata update did not apply"
+    );
+    tracing::info!("✓ Subscription-driven metadata update applied");
+
+    // Assert relay list was updated via event processor
+    let user3 = whitenoise
+        .find_user_by_pubkey(&account3.pubkey)
+        .await
+        .unwrap();
+    let nip65_relays_after = whitenoise
+        .user_relays(&user3, whitenoise::RelayType::Nip65)
+        .await
+        .unwrap();
+    let parsed_new = RelayUrl::parse(&new_relay_url).unwrap();
+    let has_new = nip65_relays_after.iter().any(|r| r.url == parsed_new);
+    assert!(
+        has_new,
+        "NIP-65 relays should include subscription-updated relay"
+    );
+    tracing::info!("✓ Subscription-driven relay list update applied");
+
+    // ***************************************************************
     // MESSAGE SENDING TESTING
     // ***************************************************************
     tracing::info!("=================================== Testing Message Sending ===================================");
