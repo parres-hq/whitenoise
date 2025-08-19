@@ -35,9 +35,11 @@ impl Whitenoise {
     /// whitenoise.follow_user(&account, &user_pubkey).await?;
     /// ```
     pub async fn follow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
-        let (user, newly_created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+        let (mut user, newly_created) =
+            User::find_or_create_by_pubkey(pubkey, &self.database).await?;
         if newly_created {
-            // TODO: try and populate the user's data
+            user.update_relay_lists(self).await?;
+            user.update_metadata(self).await?;
         }
 
         account.follow_user(&user, &self.database).await?;

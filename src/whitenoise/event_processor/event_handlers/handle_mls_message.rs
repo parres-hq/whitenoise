@@ -59,6 +59,7 @@ mod tests {
                 vec![member_pubkey],
                 vec![creator_account.pubkey],
                 create_nostr_group_config_data(),
+                None,
             )
             .await
             .unwrap();
@@ -108,6 +109,7 @@ mod tests {
                 vec![member_pubkey],
                 vec![creator_account.pubkey],
                 create_nostr_group_config_data(),
+                None,
             )
             .await
             .unwrap();

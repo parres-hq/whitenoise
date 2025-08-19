@@ -73,6 +73,23 @@ impl Relay {
             updated_at: Utc::now(),
         }
     }
+
+    pub(crate) fn defaults() -> Vec<Relay> {
+        let urls: &[&str] = if cfg!(debug_assertions) {
+            &["ws://localhost:8080", "ws://localhost:7777"]
+        } else {
+            &[
+                "wss://relay.damus.io",
+                "wss://relay.primal.net",
+                "wss://nos.lol",
+            ]
+        };
+
+        urls.iter()
+            .filter_map(|&url_str| RelayUrl::parse(url_str).ok())
+            .map(|url| Relay::new(&url))
+            .collect()
+    }
 }
 
 impl Whitenoise {

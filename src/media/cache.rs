@@ -228,7 +228,6 @@ mod tests {
             admin_pubkeys: BTreeSet::new(),
             last_message_id: None,
             last_message_at: None,
-            group_type: group_types::GroupType::DirectMessage,
             epoch: 0,
             state: group_types::GroupState::Active,
         };
@@ -327,7 +326,6 @@ mod tests {
             admin_pubkeys: BTreeSet::new(),
             last_message_id: None,
             last_message_at: None,
-            group_type: group_types::GroupType::DirectMessage,
             epoch: 0,
             state: group_types::GroupState::Active,
         };
