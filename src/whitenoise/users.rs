@@ -26,6 +26,21 @@ impl User {
         }
     }
 
+    pub(crate) async fn update_metadata(&mut self, whitenoise: &Whitenoise) -> Result<()> {
+        let relays_to_query = self.get_query_relays(whitenoise).await?;
+        let metadata = whitenoise
+            .nostr
+            .fetch_metadata_from(&relays_to_query, self.pubkey)
+            .await?;
+        if let Some(metadata) = metadata {
+            if self.metadata != metadata {
+                self.metadata = metadata;
+                self.save(&whitenoise.database).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Fetches the latest relay lists for this user from Nostr and updates the local database
     ///
     /// # Arguments
@@ -359,7 +374,7 @@ impl Whitenoise {
 }
 
 #[cfg(test)]
-mod relay_update_tests {
+mod tests {
     use super::*;
     use crate::whitenoise::test_utils::create_mock_whitenoise;
     use chrono::Utc;
@@ -505,13 +520,7 @@ mod relay_update_tests {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let user = User {
-            id: None,
-            pubkey: test_pubkey,
-            metadata: Metadata::new(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let user = User::new(test_pubkey);
 
         let saved_user = user.save(&whitenoise.database).await.unwrap();
 
@@ -520,5 +529,107 @@ mod relay_update_tests {
 
         // Should fall back to default relays
         assert!(!query_relays.is_empty(), "Should have default relays");
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_with_working_relays() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new().name("Original Name"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let mut saved_user = user.save(&whitenoise.database).await.unwrap();
+
+        for default_relay in &Relay::defaults() {
+            let relay = whitenoise
+                .find_or_create_relay(&default_relay.url)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+        }
+
+        let original_metadata = saved_user.metadata.clone();
+        let result = saved_user.update_metadata(&whitenoise).await;
+
+        assert!(result.is_ok());
+
+        let user_after = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(user_after.metadata.name, original_metadata.name);
+        assert_eq!(user_after.pubkey, test_pubkey);
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_with_no_nip65_relays() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new().name("Test User"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let mut saved_user = user.save(&whitenoise.database).await.unwrap();
+        let result = saved_user.update_metadata(&whitenoise).await;
+
+        assert!(result.is_ok());
+
+        let user_after = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(user_after.metadata.name, Some("Test User".to_string()));
+        assert_eq!(user_after.pubkey, test_pubkey);
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_preserves_user_state() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new().name("Test User").about("Test description"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let mut saved_user = user.save(&whitenoise.database).await.unwrap();
+
+        let relay_url = RelayUrl::parse("ws://localhost:7777").unwrap();
+        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
+        saved_user
+            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let original_id = saved_user.id;
+        let result = saved_user.update_metadata(&whitenoise).await;
+
+        assert!(result.is_ok());
+
+        let final_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(final_user.id, original_id);
+        assert_eq!(final_user.pubkey, test_pubkey);
+        assert_eq!(final_user.metadata.name, Some("Test User".to_string()));
+        assert_eq!(
+            final_user.metadata.about,
+            Some("Test description".to_string())
+        );
     }
 }

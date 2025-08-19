@@ -453,16 +453,6 @@ mod tests {
         )
         .await;
 
-        // // Test case: Key package fetch fails (invalid member)
-        // let invalid_member_pubkey = create_test_keys().public_key();
-        // case_create_group_key_package_fetch_fails(
-        //     &whitenoise,
-        //     &creator_account,
-        //     vec![invalid_member_pubkey],
-        //     admin_pubkeys.clone(),
-        // )
-        // .await;
-
         // Test case: Empty admin list
         case_create_group_empty_admin_list(
             &whitenoise,
@@ -518,15 +508,14 @@ mod tests {
         assert!(group.admin_pubkeys.contains(&creator_account.pubkey));
         assert!(group.admin_pubkeys.contains(&member_pubkeys[0]));
 
-        if let Ok(group_info) =
-            GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise).await
-        {
-            assert_eq!(group_info.mls_group_id, group.mls_group_id);
-            assert_eq!(
-                group_info.group_type,
-                crate::whitenoise::group_information::GroupType::Group
-            );
-        }
+        let group_info = GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise)
+            .await
+            .unwrap();
+        assert_eq!(group_info.mls_group_id, group.mls_group_id);
+        assert_eq!(
+            group_info.group_type,
+            crate::whitenoise::group_information::GroupType::Group
+        );
     }
 
     /// Test case: Member/admin validation fails - empty admin list
@@ -597,16 +586,17 @@ mod tests {
             )
             .await;
 
-        // Might succeed or fail depending on MLS validation rules
-        // In a real implementation, this might be validated
-        match result {
-            Ok(_) => {
-                // Some MLS implementations might allow this
+        // Should fail because admin must be a member
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(msg)) => {
+                assert!(
+                    msg.contains("Admin must be a member"),
+                    "Expected 'Admin must be a member' error, got: {}",
+                    msg
+                );
             }
-            Err(WhitenoiseError::NostrMlsError(_)) => {
-                // Expected if MLS validates admin membership
-            }
-            Err(other) => panic!("Unexpected error: {:?}", other),
+            other => panic!("Expected NostrMlsError::Group, got: {:?}", other),
         }
     }
 
@@ -629,14 +619,13 @@ mod tests {
         assert!(result.is_ok(), "Error {:?}", result.unwrap_err());
         let group = result.unwrap();
 
-        if let Ok(group_info) =
-            GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise).await
-        {
-            assert_eq!(group_info.mls_group_id, group.mls_group_id);
-            assert_eq!(
-                group_info.group_type,
-                crate::whitenoise::group_information::GroupType::DirectMessage
-            );
-        }
+        let group_info = GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise)
+            .await
+            .unwrap();
+        assert_eq!(group_info.mls_group_id, group.mls_group_id);
+        assert_eq!(
+            group_info.group_type,
+            crate::whitenoise::group_information::GroupType::DirectMessage
+        );
     }
 }
