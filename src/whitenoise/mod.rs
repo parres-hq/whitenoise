@@ -195,7 +195,7 @@ impl Whitenoise {
         // Create default relays in the database if they don't exist
         // TODO: Make this batch fetch and insert all relays at once
         for relay in Relay::defaults() {
-            let _ = whitenoise.find_or_create_relay(&relay.url).await?;
+            let _ = whitenoise.find_or_create_relay_by_url(&relay.url).await?;
         }
 
         // Create default app settings in the database if they don't exist

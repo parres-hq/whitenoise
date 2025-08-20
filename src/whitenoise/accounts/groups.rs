@@ -132,8 +132,8 @@ impl Whitenoise {
         }
 
         let mut relays = HashSet::new();
-        for relay in group_relays {
-            let db_relay = self.find_or_create_relay(&relay).await?;
+        for relay_url in group_relays {
+            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
             relays.insert(db_relay);
         }
 
@@ -272,8 +272,8 @@ impl Whitenoise {
         let group_relays = nostr_mls.get_relays(group_id)?;
 
         let mut relays = HashSet::new();
-        for relay in group_relays.clone() {
-            let db_relay = self.find_or_create_relay(&relay).await?;
+        for relay_url in group_relays.clone() {
+            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
             relays.insert(db_relay);
         }
 
@@ -402,8 +402,8 @@ impl Whitenoise {
         let evolution_event = update_result.evolution_event;
 
         let mut relays = HashSet::new();
-        for relay in group_relays {
-            let db_relay = self.find_or_create_relay(&relay).await?;
+        for relay_url in group_relays {
+            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
             relays.insert(db_relay);
         }
 
