@@ -100,30 +100,34 @@ impl Account {
 
     pub async fn add_relay(
         &self,
-        relay_url: &RelayUrl,
+        relay: &Relay,
         relay_type: RelayType,
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.add_relay(relay_url, relay_type, &whitenoise.database)
+        user.add_relay(relay, relay_type, &whitenoise.database)
             .await?;
-        whitenoise.background_publish_account_relay_list(self, relay_type).await?;
-        tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay_url);
+        whitenoise
+            .background_publish_account_relay_list(self, relay_type)
+            .await?;
+        tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay.url);
 
         Ok(())
     }
 
     pub async fn remove_relay(
         &self,
-        relay_url: &RelayUrl,
+        relay: &Relay,
         relay_type: RelayType,
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.remove_relay(relay_url, relay_type, &whitenoise.database)
+        user.remove_relay(relay, relay_type, &whitenoise.database)
             .await?;
-        whitenoise.background_publish_account_relay_list(self, relay_type).await?;
-        tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay_url);
+        whitenoise
+            .background_publish_account_relay_list(self, relay_type)
+            .await?;
+        tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay.url);
         Ok(())
     }
 
@@ -504,7 +508,7 @@ impl Whitenoise {
         relay_type: RelayType,
     ) -> Result<()> {
         for relay in relays {
-            account.add_relay(&relay.url, relay_type, self).await?;
+            account.add_relay(relay, relay_type, self).await?;
         }
         Ok(())
     }
@@ -522,7 +526,10 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn background_publish_account_metadata(&self, account: &Account) -> Result<()> {
+    pub(crate) async fn background_publish_account_metadata(
+        &self,
+        account: &Account,
+    ) -> Result<()> {
         let account_clone = account.clone();
         let nostr = self.nostr.clone();
         let signer = self
@@ -534,7 +541,8 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Background task: Publishing metadata for account: {:?}", account_clone.pubkey);
 
-            nostr.publish_metadata_with_signer(&user.metadata, &relays, signer)
+            nostr
+                .publish_metadata_with_signer(&user.metadata, &relays, signer)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Successfully published metadata for account: {:?}", account_clone.pubkey);
@@ -543,7 +551,11 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn background_publish_account_relay_list(&self, account: &Account, relay_type: RelayType) -> Result<()> {
+    pub(crate) async fn background_publish_account_relay_list(
+        &self,
+        account: &Account,
+        relay_type: RelayType,
+    ) -> Result<()> {
         let account_clone = account.clone();
         let nostr = self.nostr.clone();
         let relays = account.relays(relay_type, self).await?;
@@ -554,7 +566,8 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Background task: Publishing relay list for account: {:?}", account_clone.pubkey);
 
-            nostr.publish_relay_list_with_signer(&relays, relay_type, &relays, keys)
+            nostr
+                .publish_relay_list_with_signer(&relays, relay_type, &relays, keys)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Successfully published relay list for account: {:?}", account_clone.pubkey);
@@ -563,7 +576,10 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn background_publish_account_follow_list(&self, account: &Account) -> Result<()> {
+    pub(crate) async fn background_publish_account_follow_list(
+        &self,
+        account: &Account,
+    ) -> Result<()> {
         let account_clone = account.clone();
         let nostr = self.nostr.clone();
         let relays = account.nip65_relays(self).await?;
@@ -576,7 +592,8 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Background task: Publishing follow list for account: {:?}", account_clone.pubkey);
 
-            nostr.publish_follow_list_with_signer(&follows_pubkeys, &relays, keys)
+            nostr
+                .publish_follow_list_with_signer(&follows_pubkeys, &relays, keys)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Successfully published follow list for account: {:?}", account_clone.pubkey);
@@ -1179,7 +1196,7 @@ mod tests {
         let default_relays = whitenoise.load_default_relays().await.unwrap();
         for relay in &default_relays {
             account
-                .add_relay(&relay.url, RelayType::Nip65, &whitenoise)
+                .add_relay(relay, RelayType::Nip65, &whitenoise)
                 .await
                 .unwrap();
         }

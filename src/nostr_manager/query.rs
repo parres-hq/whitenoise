@@ -76,7 +76,9 @@ impl NostrManager {
             .map(|pubkey| Tag::custom(TagKind::p(), [pubkey.to_hex()]))
             .collect();
         let event = EventBuilder::new(Kind::ContactList, "").tags(tags);
-        let result = self.publish_event_builder_with_signer(event, target_relays, signer).await?;
+        let result = self
+            .publish_event_builder_with_signer(event, target_relays, signer)
+            .await?;
         tracing::debug!(target: "whitenoise::nostr_manager::publish_follow_list_with_signer", "Published follow list event to Nostr: {:?}", result);
         Ok(())
     }

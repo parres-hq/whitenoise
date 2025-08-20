@@ -94,7 +94,7 @@ impl Relay {
 }
 
 impl Whitenoise {
-    pub(crate) async fn find_or_create_relay(&self, url: &RelayUrl) -> Result<Relay> {
+    pub async fn find_or_create_relay(&self, url: &RelayUrl) -> Result<Relay> {
         Relay::find_or_create_by_url(url, &self.database).await
     }
 

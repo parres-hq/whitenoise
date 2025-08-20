@@ -210,7 +210,7 @@ impl User {
         for existing_relay in &stored_relays {
             if !network_urls_set.contains(&existing_relay.url) {
                 if let Err(e) = self
-                    .remove_relay(&existing_relay.url, relay_type, &whitenoise.database)
+                    .remove_relay(existing_relay, relay_type, &whitenoise.database)
                     .await
                 {
                     tracing::warn!(
@@ -228,8 +228,9 @@ impl User {
         // Add new relays
         for new_relay_url in &network_relay_urls_vec {
             if !stored_urls.contains(new_relay_url) {
+                let new_relay = whitenoise.find_or_create_relay(new_relay_url).await?;
                 if let Err(e) = self
-                    .add_relay(new_relay_url, relay_type, &whitenoise.database)
+                    .add_relay(&new_relay, relay_type, &whitenoise.database)
                     .await
                 {
                     tracing::warn!(
@@ -245,6 +246,17 @@ impl User {
         }
 
         Ok(true)
+    }
+
+    pub async fn key_package_event(&self, whitenoise: &Whitenoise) -> Result<Option<Event>> {
+        let key_package_relays = self
+            .relays(RelayType::KeyPackage, &whitenoise.database)
+            .await?;
+        let key_package_event = whitenoise
+            .nostr
+            .fetch_user_key_package(self.pubkey, &key_package_relays)
+            .await?;
+        Ok(key_package_event)
     }
 }
 
@@ -385,7 +397,11 @@ impl Whitenoise {
 
             // Log errors but don't fail
             if let Err(e) = relay_result {
-                tracing::warn!("Failed to fetch relay lists for {}: {}", user_clone.pubkey, e);
+                tracing::warn!(
+                    "Failed to fetch relay lists for {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
             }
             if let Err(e) = metadata_result {
                 tracing::warn!("Failed to fetch metadata for {}: {}", user_clone.pubkey, e);
@@ -443,7 +459,7 @@ mod tests {
             .unwrap();
 
         saved_user
-            .add_relay(&initial_relay.url, RelayType::Nip65, &whitenoise.database)
+            .add_relay(&initial_relay, RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 
@@ -496,8 +512,9 @@ mod tests {
 
         // Add a relay
         let relay_url = RelayUrl::parse("wss://test.example.com").unwrap();
+        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
         saved_user
-            .add_relay(&relay_url, RelayType::Nip65, &whitenoise.database)
+            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 
@@ -546,7 +563,7 @@ mod tests {
                 .await
                 .unwrap();
             saved_user
-                .add_relay(&relay.url, RelayType::Nip65, &whitenoise.database)
+                .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
                 .await
                 .unwrap();
         }
@@ -604,8 +621,9 @@ mod tests {
         let mut saved_user = user.save(&whitenoise.database).await.unwrap();
 
         let relay_url = RelayUrl::parse("ws://localhost:7777").unwrap();
+        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
         saved_user
-            .add_relay(&relay_url, RelayType::Nip65, &whitenoise.database)
+            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 

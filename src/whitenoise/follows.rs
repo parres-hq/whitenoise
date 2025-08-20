@@ -35,8 +35,7 @@ impl Whitenoise {
     /// whitenoise.follow_user(&account, &user_pubkey).await?;
     /// ```
     pub async fn follow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
-        let (user, newly_created) =
-            User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+        let (user, newly_created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
 
         if newly_created {
             self.background_fetch_user_data(&user).await?;

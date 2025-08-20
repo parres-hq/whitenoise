@@ -3,7 +3,7 @@ use crate::whitenoise::relays::{Relay, RelayType};
 use crate::whitenoise::users::User;
 use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
-use nostr_sdk::{Metadata, PublicKey, RelayUrl};
+use nostr_sdk::{Metadata, PublicKey};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct UserRow {
@@ -242,12 +242,11 @@ impl User {
     /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn add_relay(
         &self,
-        relay_url: &RelayUrl,
+        relay: &Relay,
         relay_type: RelayType,
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
         let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
-        let relay = Relay::find_or_create_by_url(relay_url, database).await?;
         let relay_id = relay.id.expect("Relay should have ID after save");
 
         sqlx::query(
@@ -284,12 +283,11 @@ impl User {
     /// Returns other [`WhitenoiseError`] variants if the database operation fails.
     pub(crate) async fn remove_relay(
         &self,
-        relay_url: &RelayUrl,
+        relay: &Relay,
         relay_type: RelayType,
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
         let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
-        let relay = Relay::find_by_url(relay_url, database).await?;
 
         let result = sqlx::query(
             "DELETE FROM user_relays
@@ -1184,11 +1182,11 @@ mod tests {
 
         // Pre-create the relay in the database
         let existing_relay = Relay::new(&relay_url);
-        existing_relay.save(&whitenoise.database).await.unwrap();
+        let saved_relay = existing_relay.save(&whitenoise.database).await.unwrap();
 
         // Add relay association - should work with existing relay
         let result = loaded_user
-            .add_relay(&relay_url, RelayType::Nip65, &whitenoise.database)
+            .add_relay(&saved_relay, RelayType::Nip65, &whitenoise.database)
             .await;
         assert!(result.is_ok());
 
@@ -1225,20 +1223,26 @@ mod tests {
             .await
             .unwrap();
 
-        // Test adding a relay that doesn't exist in the database
+        // Test adding a relay that doesn't exist in the database yet
         let new_relay_url = nostr_sdk::RelayUrl::parse("wss://new-relay.example.com").unwrap();
 
         // Verify relay doesn't exist yet
         let find_result = Relay::find_by_url(&new_relay_url, &whitenoise.database).await;
         assert!(find_result.is_err());
 
-        // Add relay association - should create new relay and associate it
+        // Create the relay (this is what find_or_create_relay would do)
+        let new_relay = whitenoise
+            .find_or_create_relay(&new_relay_url)
+            .await
+            .unwrap();
+
+        // Add relay association
         let result = loaded_user
-            .add_relay(&new_relay_url, RelayType::Inbox, &whitenoise.database)
+            .add_relay(&new_relay, RelayType::Inbox, &whitenoise.database)
             .await;
         assert!(result.is_ok());
 
-        // Verify the relay was created and associated
+        // Verify the relay was associated
         let user_relays = loaded_user
             .relays(RelayType::Inbox, &whitenoise.database)
             .await
@@ -1246,7 +1250,7 @@ mod tests {
         assert_eq!(user_relays.len(), 1);
         assert_eq!(user_relays[0].url, new_relay_url);
 
-        // Verify relay now exists in database
+        // Verify relay exists in database (since we created it)
         let find_result = Relay::find_by_url(&new_relay_url, &whitenoise.database).await;
         assert!(find_result.is_ok());
     }
@@ -1277,8 +1281,9 @@ mod tests {
 
         // Add a relay first
         let relay_url = nostr_sdk::RelayUrl::parse("wss://test-remove.example.com").unwrap();
+        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
         loaded_user
-            .add_relay(&relay_url, RelayType::Nip65, &whitenoise.database)
+            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await
             .unwrap();
 
@@ -1291,7 +1296,7 @@ mod tests {
 
         // Remove the relay
         let result = loaded_user
-            .remove_relay(&relay_url, RelayType::Nip65, &whitenoise.database)
+            .remove_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await;
         assert!(result.is_ok());
 
@@ -1328,16 +1333,18 @@ mod tests {
             .unwrap();
 
         // Try to remove a relay that doesn't exist in the database
-        let non_existent_url = nostr_sdk::RelayUrl::parse("wss://non-existent.example.com").unwrap();
+        let non_existent_url =
+            nostr_sdk::RelayUrl::parse("wss://non-existent.example.com").unwrap();
+        let non_existent_relay = Relay::new(&non_existent_url);
         let result = loaded_user
-            .remove_relay(&non_existent_url, RelayType::Nip65, &whitenoise.database)
+            .remove_relay(&non_existent_relay, RelayType::Nip65, &whitenoise.database)
             .await;
 
         assert!(result.is_err());
-        if let Err(WhitenoiseError::RelayNotFound) = result {
-            // Expected - relay doesn't exist in database at all
+        if let Err(WhitenoiseError::UserRelayNotFound) = result {
+            // Expected - relay doesn't exist in database, so no association can be removed
         } else {
-            panic!("Expected RelayNotFound error, got: {:?}", result);
+            panic!("Expected UserRelayNotFound error, got: {:?}", result);
         }
     }
 
@@ -1368,11 +1375,11 @@ mod tests {
         // Create a relay in the database but don't associate it with the user
         let relay_url = nostr_sdk::RelayUrl::parse("wss://unassociated.example.com").unwrap();
         let relay = Relay::new(&relay_url);
-        relay.save(&whitenoise.database).await.unwrap();
+        let saved_relay = relay.save(&whitenoise.database).await.unwrap();
 
         // Try to remove the relay - it exists in database but not associated with user
         let result = loaded_user
-            .remove_relay(&relay_url, RelayType::Nip65, &whitenoise.database)
+            .remove_relay(&saved_relay, RelayType::Nip65, &whitenoise.database)
             .await;
 
         assert!(result.is_err());
