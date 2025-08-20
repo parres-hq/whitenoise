@@ -502,12 +502,6 @@ pub mod test_utils {
             nostr.client.add_relay(relay).await.unwrap();
         }
 
-        tokio::spawn({
-            let client = nostr.client.clone();
-            async move {
-                client.connect().await;
-            }
-        });
         nostr.client.connect().await;
 
         // Create message aggregator for testing

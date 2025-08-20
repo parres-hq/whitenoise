@@ -558,7 +558,80 @@ impl NostrManager {
         Ok(())
     }
 
-    /// Syncs all user data to the Nostr client.
+    /// Syncs all user data from the Nostr network for an account and their contacts.
+    ///
+    /// This method performs a comprehensive data synchronization by fetching and processing
+    /// various types of Nostr events for the specified account and all users in their contact list.
+    /// It streams events in parallel and processes them through the appropriate handlers.
+    ///
+    /// # Data Types Synchronized
+    ///
+    /// - **Metadata events** (kind 0): User profile information for the account and contacts
+    /// - **Relay list events** (kinds 10002, 10050, 10051): NIP-65 relay lists, inbox relays, and MLS key package relays
+    /// - **Gift wrap events** (kind 1059): Private messages directed to the account
+    /// - **Group messages** (kind 444): MLS group messages for specified groups since last sync
+    ///
+    /// # Arguments
+    ///
+    /// * `signer` - A Nostr signer implementation for authenticating with relays
+    /// * `account` - The account to sync data for (includes contact list lookup)
+    /// * `group_ids` - Vector of hex-encoded group IDs to fetch group messages for
+    ///
+    /// # Process Flow
+    ///
+    /// 1. **Authentication**: Sets the signer on the Nostr client
+    /// 2. **Contact Discovery**: Fetches the account's contact list from the network
+    /// 3. **Filter Creation**: Creates targeted filters for each event type
+    /// 4. **Parallel Streaming**: Initiates concurrent event streams with 10-second timeout
+    /// 5. **Event Processing**: Processes each event type through appropriate handlers:
+    ///    - Metadata → `handle_metadata()`
+    ///    - Relay lists → `handle_relay_list()`
+    ///    - Gift wraps → `handle_giftwrap()`
+    ///    - Group messages → `handle_mls_message()`
+    /// 6. **Cleanup**: Unsets the signer when complete
+    ///
+    /// # Time-based Filtering
+    ///
+    /// Group messages are filtered using the account's `last_synced_at` timestamp to only
+    /// fetch new messages since the last synchronization, improving efficiency.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if synchronization completes successfully, even if individual
+    /// events fail to process (errors are logged but don't halt the overall sync).
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if:
+    /// - Failed to get contact list public keys from the network
+    /// - Failed to create event streams
+    /// - Critical event processing errors occur
+    /// - Whitenoise instance is not available
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use nostr_sdk::Keys;
+    /// use whitenoise::accounts::Account;
+    ///
+    /// let keys = Keys::generate();
+    /// let group_ids = vec!["abc123".to_string(), "def456".to_string()];
+    ///
+    /// nostr_manager.sync_all_user_data(keys, &account, group_ids).await?;
+    /// ```
+    ///
+    /// # Performance Considerations
+    ///
+    /// - Uses streaming to handle large result sets efficiently
+    /// - Parallel event fetching improves overall sync time
+    /// - 10-second timeout per stream prevents hanging on slow relays
+    /// - Incremental sync for group messages reduces bandwidth usage
+    ///
+    /// # Security Notes
+    ///
+    /// - The signer is automatically unset after completion to prevent key leakage
+    /// - Gift wrap events are filtered specifically for the account's public key
+    /// - Contact list access requires proper authentication via the signer
     pub(crate) async fn sync_all_user_data(
         &self,
         signer: impl NostrSigner + 'static,

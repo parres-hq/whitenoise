@@ -391,11 +391,10 @@ impl Whitenoise {
 
         tokio::spawn(async move {
             let whitenoise = Whitenoise::get_instance()?;
-            // Parallel network requests
-            let relay_task = user_clone.update_relay_lists(whitenoise);
-            let metadata_task = mut_user_clone.update_metadata(whitenoise);
-
-            let (relay_result, metadata_result) = tokio::join!(relay_task, metadata_task);
+            // Do these in series so that we fetch the user's relays before trying to fetch metadata
+            // (more likely we find metadata looking on the right relays)
+            let relay_result = user_clone.update_relay_lists(whitenoise).await;
+            let metadata_result = mut_user_clone.update_metadata(whitenoise).await;
 
             // Log errors but don't fail
             if let Err(e) = relay_result {

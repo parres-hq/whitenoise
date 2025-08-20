@@ -118,7 +118,7 @@ pub enum ImageType {
 }
 
 impl ImageType {
-    pub fn mime_type(&self) -> String {
+    pub fn mime_type(&self) -> &'static str {
         match self {
             ImageType::Jpg => "image/jpg",
             ImageType::Jpeg => "image/jpeg",
@@ -126,13 +126,12 @@ impl ImageType {
             ImageType::Gif => "image/gif",
             ImageType::Webp => "image/webp",
         }
-        .to_owned()
     }
 }
 
 impl From<ImageType> for String {
     fn from(image_type: ImageType) -> Self {
-        image_type.mime_type()
+        image_type.mime_type().to_string()
     }
 }
 

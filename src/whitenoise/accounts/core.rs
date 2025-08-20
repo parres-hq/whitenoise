@@ -800,7 +800,12 @@ impl Whitenoise {
         let data = tokio::fs::read(file_path).await?;
 
         let descriptor = client
-            .upload_blob(data, Some(image_type.mime_type()), None, Some(&keys))
+            .upload_blob(
+                data,
+                Some(image_type.mime_type().to_string()),
+                None,
+                Some(&keys),
+            )
             .await
             .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
 

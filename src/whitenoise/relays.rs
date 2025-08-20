@@ -4,6 +4,7 @@ use crate::whitenoise::Whitenoise;
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
@@ -132,24 +133,29 @@ impl Whitenoise {
         account: &Account,
     ) -> Result<Vec<(RelayUrl, RelayStatus)>> {
         // Get all relay URLs for this user across all types
-        // Combine all relay URLs into one list, removing duplicates
         let mut all_relays = Vec::new();
         all_relays.extend(account.nip65_relays(self).await?);
         all_relays.extend(account.inbox_relays(self).await?);
         all_relays.extend(account.key_package_relays(self).await?);
 
+        // Remove duplicates by collecting unique relay URLs
+        let mut unique_relay_urls = HashSet::new();
+        for relay in all_relays {
+            unique_relay_urls.insert(relay.url);
+        }
+
         // Get current relay statuses from the Nostr client
         let mut relay_statuses = Vec::new();
 
-        for relay in all_relays {
+        for relay_url in unique_relay_urls {
             // Try to get relay status from NostrManager
-            match self.nostr.get_relay_status(&relay.url).await {
+            match self.nostr.get_relay_status(&relay_url).await {
                 Ok(status) => {
-                    relay_statuses.push((relay.url, status));
+                    relay_statuses.push((relay_url, status));
                 }
                 Err(_) => {
                     // If we can't get the relay status, it's likely not connected
-                    relay_statuses.push((relay.url, RelayStatus::Disconnected));
+                    relay_statuses.push((relay_url, RelayStatus::Disconnected));
                 }
             }
         }
