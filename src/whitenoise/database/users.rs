@@ -1232,7 +1232,7 @@ mod tests {
 
         // Create the relay (this is what find_or_create_relay would do)
         let new_relay = whitenoise
-            .find_or_create_relay(&new_relay_url)
+            .find_or_create_relay_by_url(&new_relay_url)
             .await
             .unwrap();
 
@@ -1281,7 +1281,7 @@ mod tests {
 
         // Add a relay first
         let relay_url = nostr_sdk::RelayUrl::parse("wss://test-remove.example.com").unwrap();
-        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
+        let relay = whitenoise.find_or_create_relay_by_url(&relay_url).await.unwrap();
         loaded_user
             .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await

@@ -10,7 +10,7 @@ impl Whitenoise {
             User::find_or_create_by_pubkey(&event.pubkey, &self.database).await?;
         let relay_urls = NostrManager::relay_urls_from_event(event.clone());
         for url in relay_urls {
-            let relay = self.find_or_create_relay(&url).await?;
+            let relay = self.find_or_create_relay_by_url(&url).await?;
             user.add_relay(&relay, event.kind.into(), &self.database)
                 .await?;
         }

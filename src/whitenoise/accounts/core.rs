@@ -349,7 +349,7 @@ impl Whitenoise {
     async fn load_default_relays(&self) -> Result<Vec<Relay>> {
         let mut default_relays = Vec::new();
         for Relay { url, .. } in Relay::defaults() {
-            let relay = self.find_or_create_relay(&url).await?;
+            let relay = self.find_or_create_relay_by_url(&url).await?;
             default_relays.push(relay);
         }
         Ok(default_relays)
@@ -494,7 +494,7 @@ impl Whitenoise {
 
         let mut relays = Vec::new();
         for url in relay_urls {
-            let relay = self.find_or_create_relay(&url).await?;
+            let relay = self.find_or_create_relay_by_url(&url).await?;
             relays.push(relay);
         }
 

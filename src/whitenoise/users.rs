@@ -228,7 +228,7 @@ impl User {
         // Add new relays
         for new_relay_url in &network_relay_urls_vec {
             if !stored_urls.contains(new_relay_url) {
-                let new_relay = whitenoise.find_or_create_relay(new_relay_url).await?;
+                let new_relay = whitenoise.find_or_create_relay_by_url(new_relay_url).await?;
                 if let Err(e) = self
                     .add_relay(&new_relay, relay_type, &whitenoise.database)
                     .await
@@ -454,7 +454,7 @@ mod tests {
         let saved_user = user.save(&whitenoise.database).await.unwrap();
         let initial_relay_url = RelayUrl::parse("wss://initial.example.com").unwrap();
         let initial_relay = whitenoise
-            .find_or_create_relay(&initial_relay_url)
+            .find_or_create_relay_by_url(&initial_relay_url)
             .await
             .unwrap();
 
@@ -512,7 +512,7 @@ mod tests {
 
         // Add a relay
         let relay_url = RelayUrl::parse("wss://test.example.com").unwrap();
-        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
+        let relay = whitenoise.find_or_create_relay_by_url(&relay_url).await.unwrap();
         saved_user
             .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await
@@ -559,7 +559,7 @@ mod tests {
 
         for default_relay in &Relay::defaults() {
             let relay = whitenoise
-                .find_or_create_relay(&default_relay.url)
+                .find_or_create_relay_by_url(&default_relay.url)
                 .await
                 .unwrap();
             saved_user
@@ -621,7 +621,7 @@ mod tests {
         let mut saved_user = user.save(&whitenoise.database).await.unwrap();
 
         let relay_url = RelayUrl::parse("ws://localhost:7777").unwrap();
-        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
+        let relay = whitenoise.find_or_create_relay_by_url(&relay_url).await.unwrap();
         saved_user
             .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await
