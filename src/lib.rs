@@ -19,7 +19,7 @@ pub use crate::whitenoise::error::WhitenoiseError;
 pub use crate::whitenoise::message_aggregator::{
     ChatMessage, EmojiReaction, ReactionSummary, UserReaction,
 };
-pub use crate::whitenoise::relays::RelayType;
+pub use crate::whitenoise::relays::{Relay, RelayType};
 pub use nostr_mls::groups::NostrGroupConfigData;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 

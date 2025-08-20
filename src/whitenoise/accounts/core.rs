@@ -68,6 +68,12 @@ impl Account {
         Ok(())
     }
 
+    pub async fn relays(&self, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user.relays(relay_type, &whitenoise.database).await?;
+        Ok(relays)
+    }
+
     pub(crate) async fn nip65_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
         let user = self.user(&whitenoise.database).await?;
         let relays = user.relays(RelayType::Nip65, &whitenoise.database).await?;
@@ -90,31 +96,36 @@ impl Account {
 
     pub async fn add_relay(
         &self,
-        relay: &Relay,
+        relay_url: &RelayUrl,
         relay_type: RelayType,
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.add_relay(relay, relay_type, &whitenoise.database)
+        user.add_relay(relay_url, relay_type, &whitenoise.database)
             .await?;
-        tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay);
+        tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay_url);
         Ok(())
     }
 
     pub async fn remove_relay(
         &self,
-        relay: &Relay,
+        relay_url: &RelayUrl,
         relay_type: RelayType,
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.remove_relay(relay, relay_type, &whitenoise.database)
+        user.remove_relay(relay_url, relay_type, &whitenoise.database)
             .await?;
-        tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay);
+        tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay_url);
         Ok(())
     }
 
-    pub(crate) async fn update_metadata(
+    pub async fn metadata(&self, whitenoise: &Whitenoise) -> Result<Metadata> {
+        let user = self.user(&whitenoise.database).await?;
+        Ok(user.metadata.clone())
+    }
+
+    pub async fn update_metadata(
         &self,
         metadata: &Metadata,
         whitenoise: &Whitenoise,
@@ -505,7 +516,7 @@ impl Whitenoise {
         relay_type: RelayType,
     ) -> Result<()> {
         for relay in relays {
-            account.add_relay(relay, relay_type, self).await?;
+            account.add_relay(&relay.url, relay_type, self).await?;
         }
         Ok(())
     }
@@ -721,7 +732,7 @@ impl Whitenoise {
         let data = tokio::fs::read(file_path).await?;
 
         let descriptor = client
-            .upload_blob(data, Some(image_type.content_type()), None, Some(&keys))
+            .upload_blob(data, Some(image_type.mime_type()), None, Some(&keys))
             .await
             .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
 
@@ -1117,7 +1128,7 @@ mod tests {
         let default_relays = whitenoise.load_default_relays().await.unwrap();
         for relay in &default_relays {
             account
-                .add_relay(relay, RelayType::Nip65, &whitenoise)
+                .add_relay(&relay.url, RelayType::Nip65, &whitenoise)
                 .await
                 .unwrap();
         }
