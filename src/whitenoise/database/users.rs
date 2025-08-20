@@ -5,7 +5,6 @@ use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct UserRow {
     // id is the primary key

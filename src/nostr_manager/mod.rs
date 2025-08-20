@@ -56,17 +56,7 @@ pub struct NostrManager {
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
 
 impl NostrManager {
-    #[allow(dead_code)]
-    pub(crate) async fn add_relays<I>(&self, relays: I) -> Result<()>
-    where
-        I: IntoIterator<Item = RelayUrl>,
-    {
-        for relay in relays {
-            self.client.add_relay(relay).await?;
-        }
-        Ok(())
-    }
-
+    /// Default timeout for client requests
     pub(crate) fn default_timeout() -> Duration {
         Duration::from_secs(5)
     }
@@ -348,79 +338,6 @@ impl NostrManager {
         result
     }
 
-    /// Updates the metadata subscription for a user's contacts using a temporary signer.
-    ///
-    /// This method allows updating the metadata subscription for a user's contacts with a signer
-    /// that is only used for this specific operation. The signer is set before subscription setup
-    /// and unset immediately after.
-    ///
-    /// The method performs the following operations:
-    /// 1. Sets the provided signer for the client
-    /// 2. Sets up a subscription to receive metadata updates for the user's contacts
-    /// 3. Unsets the signer after the operation is complete
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - The public key of the user whose contacts' metadata should be subscribed to
-    /// * `user_relays` - The list of relay URLs to use for the subscription
-    /// * `signer` - A signer that implements `NostrSigner` and has a 'static lifetime
-    ///
-    /// # Returns
-    ///
-    /// * `Result<()>` - Success if the subscription was updated, or an error if the operation fails
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let pubkey = PublicKey::from_hex("...").unwrap();
-    /// let relays = vec![RelayUrl::parse("wss://relay.example.com").unwrap()];
-    /// let signer = MySigner::new();
-    /// nostr_manager.update_contacts_metadata_subscription_with_signer(pubkey, relays, signer).await?;
-    /// ```
-    #[allow(dead_code)]
-    pub(crate) async fn update_contacts_metadata_subscription_with_signer(
-        &self,
-        pubkey: PublicKey,
-        user_relays: &[Relay],
-        signer: impl NostrSigner + 'static,
-    ) -> Result<()> {
-        self.ensure_relays_connected(user_relays).await?;
-        self.client.set_signer(signer).await;
-        let result = self
-            .setup_contacts_metadata_subscription(pubkey, user_relays)
-            .await;
-        self.client.unset_signer().await;
-        result
-    }
-
-    /// Extracts welcome events from a list of giftwrapped events.
-    ///
-    /// This function processes a list of giftwrapped events and extracts the welcome events
-    /// (events with Kind::MlsWelcome) from them.
-    ///
-    /// # Arguments
-    ///
-    /// * `gw_events` - A vector of giftwrapped Event objects to process.
-    ///
-    /// # Returns
-    ///
-    /// A vector of tuples containing the gift-wrap event id and the inner welcome event (the gift wrap rumor event)
-    #[allow(dead_code)]
-    async fn extract_invite_events(&self, gw_events: &[Event]) -> Vec<(EventId, UnsignedEvent)> {
-        let mut invite_events: Vec<(EventId, UnsignedEvent)> = Vec::new();
-
-        for event in gw_events.iter() {
-            if let Ok(unwrapped) = extract_rumor(&self.client.signer().await.unwrap(), event).await
-            {
-                if unwrapped.rumor.kind == Kind::MlsWelcome {
-                    invite_events.push((event.id, unwrapped.rumor));
-                }
-            }
-        }
-
-        invite_events
-    }
-
     pub(crate) fn relay_urls_from_event(event: Event) -> HashSet<RelayUrl> {
         event
             .tags
@@ -453,52 +370,7 @@ impl NostrManager {
         tag.kind() == TagKind::Relay
     }
 
-    /// Permanently deletes all Nostr data managed by this NostrManager instance.
-    ///
-    /// This is a destructive operation that completely removes all stored Nostr data,
-    /// including events, messages, relay connections, and cached information. The operation
-    /// resets the client to a clean state and wipes the underlying database.
-    ///
-    /// **⚠️ WARNING: This operation is irreversible and will permanently delete all data.**
-    ///
-    /// The deletion process includes:
-    /// - Resetting the Nostr client and disconnecting from all relays
-    /// - Wiping the entire Nostr database, removing all stored events and metadata
-    /// - Clearing any cached relay information and connection state
-    /// - Removing all locally stored messages and contact data
-    ///
-    /// This method is typically used during:
-    /// - Account deletion workflows
-    /// - Application uninstall procedures
-    /// - Debug/testing scenarios requiring a clean slate
-    /// - Factory reset operations
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on successful completion of the deletion process.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if:
-    /// * The database wipe operation fails due to I/O errors
-    /// * File system permissions prevent deletion of database files
-    /// * The database is locked by another process
-    ///
-    /// Note that the client reset operation is infallible and will not cause this method to fail.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// // During account deletion
-    /// nostr_manager.delete_all_data().await?;
-    /// // All Nostr data has been permanently removed
-    /// ```
-    ///
-    /// # Safety
-    ///
-    /// This method should only be called when you are certain that all Nostr data
-    /// should be permanently removed. Consider backing up important data before
-    /// calling this method if recovery might be needed.
+    /// Ensures that the signer is unset and all subscriptions are cleared.
     pub(crate) async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::delete_all_data",
@@ -510,13 +382,60 @@ impl NostrManager {
     }
 
     /// Expose session_salt for use in subscriptions
-    pub fn session_salt(&self) -> &[u8; 16] {
+    pub(crate) fn session_salt(&self) -> &[u8; 16] {
         &self.session_salt
     }
 
-    /// Get the status of a specific relay
-    #[allow(dead_code)]
-    pub async fn get_relay_status(&self, relay_url: &RelayUrl) -> Result<RelayStatus> {
+    /// Retrieves the current connection status of a specific relay.
+    ///
+    /// This method queries the Nostr client's relay pool to get the current status
+    /// of a relay connection. The status indicates whether the relay is connected,
+    /// disconnected, connecting, or in an error state.
+    ///
+    /// # Arguments
+    ///
+    /// * `relay_url` - The `RelayUrl` of the relay to check the status for
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(RelayStatus)` with the current status of the relay connection.
+    /// The `RelayStatus` enum includes variants such as:
+    /// - `Connected` - The relay is successfully connected and operational
+    /// - `Disconnected` - The relay is not connected
+    /// - `Connecting` - A connection attempt is in progress
+    /// - Other status variants depending on the relay's state
+    ///
+    /// # Errors
+    ///
+    /// Returns a `NostrManagerError` if:
+    /// - The relay URL is not found in the client's relay pool
+    /// - There's an error retrieving the relay instance from the client
+    /// - The client is in an invalid state
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use nostr_sdk::RelayUrl;
+    ///
+    /// let relay_url = RelayUrl::parse("wss://relay.damus.io")?;
+    /// let status = nostr_manager.get_relay_status(&relay_url).await?;
+    ///
+    /// match status {
+    ///     RelayStatus::Connected => println!("Relay is connected"),
+    ///     RelayStatus::Disconnected => println!("Relay is disconnected"),
+    ///     RelayStatus::Connecting => println!("Relay is connecting"),
+    ///     _ => println!("Relay status: {:?}", status),
+    /// }
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - This method only checks the status of relays that have been previously
+    ///   added to the client's relay pool
+    /// - The status reflects the real-time connection state and may change
+    ///   frequently as network conditions vary
+    /// - Use this method for monitoring relay health and connection diagnostics
+    pub(crate) async fn get_relay_status(&self, relay_url: &RelayUrl) -> Result<RelayStatus> {
         let relay = self.client.relay(relay_url).await?;
         Ok(relay.status())
     }
@@ -639,7 +558,8 @@ impl NostrManager {
         Ok(())
     }
 
-    pub async fn sync_all_user_data(
+    /// Syncs all user data to the Nostr client.
+    pub(crate) async fn sync_all_user_data(
         &self,
         signer: impl NostrSigner + 'static,
         account: &Account,

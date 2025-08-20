@@ -497,7 +497,11 @@ pub mod test_utils {
         // connect to default relays
         let default_relays_urls: Vec<RelayUrl> =
             Relay::defaults().iter().map(|r| r.url.clone()).collect();
-        nostr.add_relays(default_relays_urls).await.unwrap();
+
+        for relay in default_relays_urls {
+            nostr.client.add_relay(relay).await.unwrap();
+        }
+
         tokio::spawn({
             let client = nostr.client.clone();
             async move {

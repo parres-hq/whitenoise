@@ -10,7 +10,6 @@ use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 
 impl NostrManager {
-    #[allow(dead_code)]
     pub(crate) async fn fetch_metadata_from(
         &self,
         nip65_relays: &[Relay],

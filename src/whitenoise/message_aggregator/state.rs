@@ -32,7 +32,6 @@ pub(crate) struct GroupState {
 
 impl GroupState {
     /// Create a new empty group state
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             messages: HashMap::new(),
@@ -50,7 +49,6 @@ impl GroupState {
     }
 
     /// Update statistics based on current state
-    #[allow(dead_code)]
     pub fn update_statistics(&mut self) {
         self.stats.message_count = self.messages.len();
         self.stats.deleted_message_count = self.messages.values()
@@ -70,7 +68,6 @@ impl GroupState {
     }
 
     /// Mark this state as needing persistence
-    #[allow(dead_code)]
     pub fn mark_dirty(&mut self) {
         self.needs_persistence = true;
     }
@@ -96,7 +93,6 @@ pub(crate) struct AggregatorState {
 
 impl AggregatorState {
     /// Create a new aggregator state with given configuration
-    #[allow(dead_code)]
     pub fn new(config: AggregatorConfig) -> Self {
         Self {
             groups: HashMap::new(),
@@ -106,19 +102,16 @@ impl AggregatorState {
     }
 
     /// Get or create state for a specific group
-    #[allow(dead_code)]
     pub fn get_or_create_group(&mut self, group_id: &GroupId) -> &mut GroupState {
         self.groups.entry(group_id.clone()).or_insert_with(GroupState::new)
     }
 
     /// Remove state for a specific group
-    #[allow(dead_code)]
     pub fn remove_group(&mut self, group_id: &GroupId) -> Option<GroupState> {
         self.groups.remove(group_id)
     }
 
     /// Get statistics for all groups
-    #[allow(dead_code)]
     pub fn get_all_statistics(&self) -> HashMap<GroupId, GroupStatistics> {
         self.groups.iter()
             .map(|(group_id, state)| (group_id.clone(), state.stats.clone()))
@@ -126,7 +119,6 @@ impl AggregatorState {
     }
 
     /// Find groups that need persistence
-    #[allow(dead_code)]
     pub fn groups_needing_persistence(&self) -> Vec<GroupId> {
         self.groups.iter()
             .filter(|(_, state)| state.needs_persistence)
@@ -135,7 +127,6 @@ impl AggregatorState {
     }
 
     /// Mark all groups as persisted
-    #[allow(dead_code)]
     pub fn mark_all_persisted(&mut self) {
         for state in self.groups.values_mut() {
             state.needs_persistence = false;
@@ -143,7 +134,6 @@ impl AggregatorState {
     }
 
     /// Clean up old or unused state
-    #[allow(dead_code)]
     pub fn cleanup_old_state(&mut self, max_age_days: u64) {
         let cutoff = SystemTime::now() - std::time::Duration::from_secs(max_age_days * 24 * 60 * 60);
 
@@ -166,7 +156,6 @@ impl AggregatorState {
 const STATE_VERSION: u32 = 1;
 
 /// Estimate the memory usage of a ChatMessage
-#[allow(dead_code)]
 fn estimate_message_size(message: &ChatMessage) -> usize {
     let base_size = std::mem::size_of::<ChatMessage>();
     let content_size = message.content.len();
@@ -206,7 +195,6 @@ pub enum StateError {
 
 impl AggregatorState {
     /// Persist state for a specific group to disk
-    #[allow(dead_code)]
     pub async fn persist_group_state(&mut self, group_id: &GroupId, path: &std::path::Path) -> Result<(), StateError> {
         if let Some(state) = self.groups.get_mut(group_id) {
             // TODO: Add bincode dependency for serialization
@@ -225,7 +213,6 @@ impl AggregatorState {
     }
 
     /// Load persisted state for a specific group from disk
-    #[allow(dead_code)]
     pub async fn load_group_state(&mut self, group_id: &GroupId, path: &std::path::Path) -> Result<(), StateError> {
         let group_path = path.join(format!("group_{}.state", hex::encode(group_id.as_slice())));
 
@@ -258,7 +245,6 @@ impl AggregatorState {
     }
 
     /// Clear all cached/persisted state for a specific group
-    #[allow(dead_code)]
     pub async fn clear_group_state(&mut self, group_id: &GroupId, path: &std::path::Path) -> Result<(), StateError> {
         // Remove from memory
         self.groups.remove(group_id);
@@ -273,7 +259,6 @@ impl AggregatorState {
     }
 
     /// Clear all state for all groups
-    #[allow(dead_code)]
     pub async fn clear_all_state(&mut self, path: &std::path::Path) -> Result<(), StateError> {
         // Clear memory
         self.groups.clear();

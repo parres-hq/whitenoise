@@ -7,7 +7,6 @@ use chrono::{DateTime, Utc};
 use nostr_sdk::PublicKey;
 use sqlx::Row;
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct AccountRow {
     // id is the primary key
