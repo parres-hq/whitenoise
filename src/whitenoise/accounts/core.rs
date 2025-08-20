@@ -68,7 +68,11 @@ impl Account {
         Ok(())
     }
 
-    pub async fn relays(&self, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+    pub async fn relays(
+        &self,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<Vec<Relay>> {
         let user = self.user(&whitenoise.database).await?;
         let relays = user.relays(relay_type, &whitenoise.database).await?;
         Ok(relays)
@@ -104,6 +108,8 @@ impl Account {
         user.add_relay(relay_url, relay_type, &whitenoise.database)
             .await?;
         tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay_url);
+
+        // Spawn a background task to update the relay list on nostr relays
         Ok(())
     }
 
@@ -134,26 +140,7 @@ impl Account {
         let mut user = self.user(&whitenoise.database).await?;
         user.metadata = metadata.clone();
         user.save(&whitenoise.database).await?;
-
-        self.publish_user_metadata(whitenoise, &user).await?;
-
-        Ok(())
-    }
-
-    async fn publish_user_metadata(&self, whitenoise: &Whitenoise, user: &User) -> Result<()> {
-        tracing::debug!(target: "whitenoise::accounts::publish_metadata", "Publishing metadata for account: {:?}", self.pubkey);
-
-        let relays = self.nip65_relays(whitenoise).await?;
-        let keys = whitenoise
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&self.pubkey)?;
-
-        whitenoise
-            .nostr
-            .publish_metadata_with_signer(&user.metadata, &relays, keys)
-            .await?;
-
-        tracing::debug!(target: "whitenoise::accounts::publish_metadata", "Successfully published metadata for account: {:?}", self.pubkey);
+        whitenoise.background_publish_account_metadata(self).await?;
         Ok(())
     }
 }
@@ -531,6 +518,27 @@ impl Whitenoise {
         self.nostr
             .publish_relay_list_with_signer(relays, relay_type, target_relays, keys.clone())
             .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn background_publish_account_metadata(&self, account: &Account) -> Result<()> {
+        let account_clone = account.clone();
+        let nostr = self.nostr.clone();
+        let signer = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let user = account.user(&self.database).await?;
+        let relays = account.nip65_relays(self).await?;
+
+        tokio::spawn(async move {
+            tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Background task: Publishing metadata for account: {:?}", account_clone.pubkey);
+
+            nostr.publish_metadata_with_signer(&user.metadata, &relays, signer)
+                .await?;
+
+            tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Successfully published metadata for account: {:?}", account_clone.pubkey);
+            Ok::<(), WhitenoiseError>(())
+        });
         Ok(())
     }
 
