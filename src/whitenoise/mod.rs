@@ -195,7 +195,7 @@ impl Whitenoise {
         // Create default relays in the database if they don't exist
         // TODO: Make this batch fetch and insert all relays at once
         for relay in Relay::defaults() {
-            let _ = whitenoise.find_or_create_relay(&relay.url).await?;
+            let _ = whitenoise.find_or_create_relay_by_url(&relay.url).await?;
         }
 
         // Create default app settings in the database if they don't exist
@@ -497,13 +497,11 @@ pub mod test_utils {
         // connect to default relays
         let default_relays_urls: Vec<RelayUrl> =
             Relay::defaults().iter().map(|r| r.url.clone()).collect();
-        nostr.add_relays(default_relays_urls).await.unwrap();
-        tokio::spawn({
-            let client = nostr.client.clone();
-            async move {
-                client.connect().await;
-            }
-        });
+
+        for relay in default_relays_urls {
+            nostr.client.add_relay(relay).await.unwrap();
+        }
+
         nostr.client.connect().await;
 
         // Create message aggregator for testing

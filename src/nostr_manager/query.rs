@@ -10,7 +10,6 @@ use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 
 impl NostrManager {
-    #[allow(dead_code)]
     pub(crate) async fn fetch_metadata_from(
         &self,
         nip65_relays: &[Relay],
@@ -63,6 +62,35 @@ impl NostrManager {
             .await?;
         tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Published relay list event to Nostr: {:?}", result);
 
+        Ok(())
+    }
+
+    pub(crate) async fn publish_follow_list_with_signer(
+        &self,
+        follow_list: &[PublicKey],
+        target_relays: &[Relay],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        if follow_list.is_empty() {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::publish_follow_list_with_signer",
+                "Skipping publish: empty follow list"
+            );
+            return Ok(());
+        }
+        let tags: Vec<Tag> = follow_list
+            .iter()
+            .map(|pubkey| Tag::custom(TagKind::p(), [pubkey.to_hex()]))
+            .collect();
+        let event = EventBuilder::new(Kind::ContactList, "").tags(tags);
+        let result = self
+            .publish_event_builder_with_signer(event, target_relays, signer)
+            .await?;
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::publish_follow_list_with_signer",
+            "Published follow list event to Nostr: {:?}",
+            result
+        );
         Ok(())
     }
 
@@ -122,7 +150,7 @@ mod query_tests {
             .unwrap();
 
         let metadata = Metadata::new().name("test_user").display_name("Test User");
-        let relays: Vec<Relay> = vec![];
+        let relays: Vec<crate::whitenoise::relays::Relay> = vec![];
         let keys = Keys::generate();
 
         let result = nostr_manager
@@ -190,6 +218,78 @@ mod query_tests {
             assert_eq!(fetched_metadata.display_name, metadata.display_name);
             assert_eq!(fetched_metadata.about, metadata.about);
         }
+    }
+
+    #[tokio::test]
+    async fn test_publish_follow_list_with_signer_empty_follow_list_non_empty_relays() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let nostr_manager = NostrManager::new(sender, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let follow_list: Vec<PublicKey> = vec![];
+        let test_relay_url = RelayUrl::parse("wss://relay.example.com").unwrap();
+        let relays = vec![crate::whitenoise::relays::Relay {
+            id: None,
+            url: test_relay_url,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_follow_list_with_signer(&follow_list, &relays, keys)
+            .await;
+
+        assert!(result.is_ok(), "Should succeed without sending an event when follow_list is empty but relays are provided");
+    }
+
+    #[tokio::test]
+    async fn test_publish_follow_list_with_signer_empty_follow_list_empty_relays() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let nostr_manager = NostrManager::new(sender, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let follow_list: Vec<PublicKey> = vec![];
+        let relays: Vec<crate::whitenoise::relays::Relay> = vec![];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_follow_list_with_signer(&follow_list, &relays, keys)
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Should succeed when follow_list is empty, regardless of relays"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_follow_list_with_signer_non_empty_follow_list_empty_relays() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let nostr_manager = NostrManager::new(sender, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+
+        let follow_list = vec![Keys::generate().public_key()];
+        let relays: Vec<crate::whitenoise::relays::Relay> = vec![];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_follow_list_with_signer(&follow_list, &relays, keys)
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Should fail with empty relays when follow_list is not empty"
+        );
+        let error_message = format!("{:?}", result.unwrap_err());
+        assert!(
+            error_message.contains("NoRelaysSpecified"),
+            "Expected NoRelaysSpecified error, got: {}",
+            error_message
+        );
     }
 }
 

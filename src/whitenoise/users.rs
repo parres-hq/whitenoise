@@ -1,4 +1,4 @@
-use crate::whitenoise::error::Result;
+use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::relays::{Relay, RelayType};
 use crate::whitenoise::Whitenoise;
 use chrono::{DateTime, Utc};
@@ -228,9 +228,11 @@ impl User {
         // Add new relays
         for new_relay_url in &network_relay_urls_vec {
             if !stored_urls.contains(new_relay_url) {
-                let relay = whitenoise.find_or_create_relay(new_relay_url).await?;
+                let new_relay = whitenoise
+                    .find_or_create_relay_by_url(new_relay_url)
+                    .await?;
                 if let Err(e) = self
-                    .add_relay(&relay, relay_type, &whitenoise.database)
+                    .add_relay(&new_relay, relay_type, &whitenoise.database)
                     .await
                 {
                     tracing::warn!(
@@ -246,6 +248,17 @@ impl User {
         }
 
         Ok(true)
+    }
+
+    pub async fn key_package_event(&self, whitenoise: &Whitenoise) -> Result<Option<Event>> {
+        let key_package_relays = self
+            .relays(RelayType::KeyPackage, &whitenoise.database)
+            .await?;
+        let key_package_event = whitenoise
+            .nostr
+            .fetch_user_key_package(self.pubkey, &key_package_relays)
+            .await?;
+        Ok(key_package_event)
     }
 }
 
@@ -371,6 +384,34 @@ impl Whitenoise {
         let user = self.find_user_by_pubkey(pubkey).await?;
         Ok(user.metadata.clone())
     }
+
+    pub(crate) async fn background_fetch_user_data(&self, user: &User) -> Result<()> {
+        let user_clone = user.clone();
+        let mut mut_user_clone = user.clone();
+
+        tokio::spawn(async move {
+            let whitenoise = Whitenoise::get_instance()?;
+            // Do these in series so that we fetch the user's relays before trying to fetch metadata
+            // (more likely we find metadata looking on the right relays)
+            let relay_result = user_clone.update_relay_lists(whitenoise).await;
+            let metadata_result = mut_user_clone.update_metadata(whitenoise).await;
+
+            // Log errors but don't fail
+            if let Err(e) = relay_result {
+                tracing::warn!(
+                    "Failed to fetch relay lists for {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
+            }
+            if let Err(e) = metadata_result {
+                tracing::warn!("Failed to fetch metadata for {}: {}", user_clone.pubkey, e);
+            }
+
+            Ok::<(), WhitenoiseError>(())
+        });
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -414,7 +455,7 @@ mod tests {
         let saved_user = user.save(&whitenoise.database).await.unwrap();
         let initial_relay_url = RelayUrl::parse("wss://initial.example.com").unwrap();
         let initial_relay = whitenoise
-            .find_or_create_relay(&initial_relay_url)
+            .find_or_create_relay_by_url(&initial_relay_url)
             .await
             .unwrap();
 
@@ -472,7 +513,10 @@ mod tests {
 
         // Add a relay
         let relay_url = RelayUrl::parse("wss://test.example.com").unwrap();
-        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
+        let relay = whitenoise
+            .find_or_create_relay_by_url(&relay_url)
+            .await
+            .unwrap();
         saved_user
             .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await
@@ -519,7 +563,7 @@ mod tests {
 
         for default_relay in &Relay::defaults() {
             let relay = whitenoise
-                .find_or_create_relay(&default_relay.url)
+                .find_or_create_relay_by_url(&default_relay.url)
                 .await
                 .unwrap();
             saved_user
@@ -581,7 +625,10 @@ mod tests {
         let mut saved_user = user.save(&whitenoise.database).await.unwrap();
 
         let relay_url = RelayUrl::parse("ws://localhost:7777").unwrap();
-        let relay = whitenoise.find_or_create_relay(&relay_url).await.unwrap();
+        let relay = whitenoise
+            .find_or_create_relay_by_url(&relay_url)
+            .await
+            .unwrap();
         saved_user
             .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
             .await

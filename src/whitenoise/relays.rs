@@ -1,8 +1,10 @@
+use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::Whitenoise;
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
@@ -93,7 +95,71 @@ impl Relay {
 }
 
 impl Whitenoise {
-    pub(crate) async fn find_or_create_relay(&self, url: &RelayUrl) -> Result<Relay> {
+    pub async fn find_or_create_relay_by_url(&self, url: &RelayUrl) -> Result<Relay> {
         Relay::find_or_create_by_url(url, &self.database).await
+    }
+
+    /// Fetches the status of relays associated with a user's public key.
+    ///
+    /// This method returns a list of relay statuses for relays that are configured
+    /// for the given account. It gets the relay URLs from the user's relay lists
+    /// and then returns the current connection status from the Nostr client.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The `PublicKey` of the user whose relay statuses should be fetched.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Vec<(RelayUrl, RelayStatus)>)` containing relay URLs and their current
+    /// status from the nostr-sdk, or an error if the query fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `WhitenoiseError` if the relay query fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let pubkey = PublicKey::from_hex("...").unwrap();
+    /// let relay_statuses = whitenoise.fetch_relay_status(pubkey).await?;
+    ///
+    /// for (url, status) in relay_statuses {
+    ///     println!("Relay {} status: {:?}", url, status);
+    /// }
+    /// ```
+    pub async fn fetch_relay_status(
+        &self,
+        account: &Account,
+    ) -> Result<Vec<(RelayUrl, RelayStatus)>> {
+        // Get all relay URLs for this user across all types
+        let mut all_relays = Vec::new();
+        all_relays.extend(account.nip65_relays(self).await?);
+        all_relays.extend(account.inbox_relays(self).await?);
+        all_relays.extend(account.key_package_relays(self).await?);
+
+        // Remove duplicates by collecting unique relay URLs
+        let mut unique_relay_urls = HashSet::new();
+        for relay in all_relays {
+            unique_relay_urls.insert(relay.url);
+        }
+
+        // Get current relay statuses from the Nostr client
+        let mut relay_statuses = Vec::new();
+
+        for relay_url in unique_relay_urls {
+            // Try to get relay status from NostrManager
+            match self.nostr.get_relay_status(&relay_url).await {
+                Ok(status) => {
+                    relay_statuses.push((relay_url, status));
+                }
+                Err(_) => {
+                    // If we can't get the relay status, it's likely not connected
+                    relay_statuses.push((relay_url, RelayStatus::Disconnected));
+                }
+            }
+        }
+
+        Ok(relay_statuses)
     }
 }

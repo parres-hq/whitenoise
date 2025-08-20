@@ -1,6 +1,5 @@
 use crate::nostr_manager::NostrManager;
 use crate::whitenoise::error::Result;
-use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::User;
 use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
@@ -11,7 +10,7 @@ impl Whitenoise {
             User::find_or_create_by_pubkey(&event.pubkey, &self.database).await?;
         let relay_urls = NostrManager::relay_urls_from_event(event.clone());
         for url in relay_urls {
-            let relay = Relay::find_or_create_by_url(&url, &self.database).await?;
+            let relay = self.find_or_create_relay_by_url(&url).await?;
             user.add_relay(&relay, event.kind.into(), &self.database)
                 .await?;
         }

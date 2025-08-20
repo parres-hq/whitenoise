@@ -35,18 +35,14 @@ impl Whitenoise {
     /// whitenoise.follow_user(&account, &user_pubkey).await?;
     /// ```
     pub async fn follow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
-        let (mut user, newly_created) =
-            User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+        let (user, newly_created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+
         if newly_created {
-            user.update_relay_lists(self).await?;
-            user.update_metadata(self).await?;
+            self.background_fetch_user_data(&user).await?;
         }
 
         account.follow_user(&user, &self.database).await?;
-
-        if newly_created {
-            // TODO: publish account's follow list to nostr
-        }
+        self.background_publish_account_follow_list(account).await?;
         Ok(())
     }
 
@@ -83,7 +79,9 @@ impl Whitenoise {
     /// ```
     pub async fn unfollow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
         let user = self.find_user_by_pubkey(pubkey).await?;
-        account.unfollow_user(&user, &self.database).await
+        account.unfollow_user(&user, &self.database).await?;
+        self.background_publish_account_follow_list(account).await?;
+        Ok(())
     }
 
     /// Checks if an account is following a specific user.
@@ -166,6 +164,8 @@ impl Whitenoise {
             let (user, _) = self.find_or_create_user_by_pubkey(pubkey).await?;
             users.push(user);
         }
-        account.follow_users(&users, &self.database).await
+        account.follow_users(&users, &self.database).await?;
+        self.background_publish_account_follow_list(account).await?;
+        Ok(())
     }
 }

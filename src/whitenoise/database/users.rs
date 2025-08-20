@@ -5,7 +5,6 @@ use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct UserRow {
     // id is the primary key
@@ -248,8 +247,7 @@ impl User {
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
         let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
-        let saved_relay = relay.save(database).await?;
-        let relay_id = saved_relay.id.expect("Relay should have ID after save");
+        let relay_id = relay.id.expect("Relay should have ID after save");
 
         sqlx::query(
             "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -1156,7 +1154,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_relay_with_id_and_without_id() {
+    async fn test_add_relay_success() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -1179,64 +1177,219 @@ mod tests {
             .await
             .unwrap();
 
-        // Create and save a relay first
-        let relay_url = nostr_sdk::RelayUrl::parse("wss://test-remove.example.com").unwrap();
-        let relay_with_id = Relay {
-            id: Some(1),
-            url: relay_url.clone(),
+        // Test adding a relay when it already exists in the database
+        let relay_url = nostr_sdk::RelayUrl::parse("wss://test-add.example.com").unwrap();
+
+        // Pre-create the relay in the database
+        let existing_relay = Relay::new(&relay_url);
+        let saved_relay = existing_relay.save(&whitenoise.database).await.unwrap();
+
+        // Add relay association - should work with existing relay
+        let result = loaded_user
+            .add_relay(&saved_relay, RelayType::Nip65, &whitenoise.database)
+            .await;
+        assert!(result.is_ok());
+
+        // Verify the relay was associated
+        let user_relays = loaded_user
+            .relays(RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(user_relays.len(), 1);
+        assert_eq!(user_relays[0].url, relay_url);
+    }
+
+    #[tokio::test]
+    async fn test_add_relay_creates_new_relay() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test user
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let test_metadata = Metadata::new().name("Test User");
+        let test_timestamp = chrono::Utc::now();
+
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: test_metadata,
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
-        relay_with_id.save(&whitenoise.database).await.unwrap();
+
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Test adding a relay that doesn't exist in the database yet
+        let new_relay_url = nostr_sdk::RelayUrl::parse("wss://new-relay.example.com").unwrap();
+
+        // Verify relay doesn't exist yet
+        let find_result = Relay::find_by_url(&new_relay_url, &whitenoise.database).await;
+        assert!(find_result.is_err());
+
+        // Create the relay (this is what find_or_create_relay would do)
+        let new_relay = whitenoise
+            .find_or_create_relay_by_url(&new_relay_url)
+            .await
+            .unwrap();
 
         // Add relay association
-        loaded_user
-            .add_relay(&relay_with_id, RelayType::Nip65, &whitenoise.database)
-            .await
-            .unwrap();
-
-        // Test 1: Remove relay using relay with ID
         let result = loaded_user
-            .remove_relay(&relay_with_id, RelayType::Nip65, &whitenoise.database)
+            .add_relay(&new_relay, RelayType::Inbox, &whitenoise.database)
             .await;
         assert!(result.is_ok());
 
-        // Re-add the relay association for second test
-        loaded_user
-            .add_relay(&relay_with_id, RelayType::Nip65, &whitenoise.database)
+        // Verify the relay was associated
+        let user_relays = loaded_user
+            .relays(RelayType::Inbox, &whitenoise.database)
             .await
             .unwrap();
+        assert_eq!(user_relays.len(), 1);
+        assert_eq!(user_relays[0].url, new_relay_url);
 
-        // Test 2: Remove relay using relay without ID (common when constructed from URL)
-        // With URL-only approach, this works the same as Test 1
-        let relay_without_id = Relay {
-            id: None, // This used to be problematic, now works seamlessly
-            url: relay_url.clone(),
-            created_at: test_timestamp,
-            updated_at: test_timestamp,
-        };
+        // Verify relay exists in database (since we created it)
+        let find_result = Relay::find_by_url(&new_relay_url, &whitenoise.database).await;
+        assert!(find_result.is_ok());
+    }
 
-        let result = loaded_user
-            .remove_relay(&relay_without_id, RelayType::Nip65, &whitenoise.database)
-            .await;
-        assert!(result.is_ok());
+    #[tokio::test]
+    async fn test_remove_relay_success() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
 
-        // Test 3: Try to remove non-existent relay
-        let non_existent_relay = Relay {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test user
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let test_metadata = Metadata::new().name("Test User");
+        let test_timestamp = chrono::Utc::now();
+
+        let user = User {
             id: None,
-            url: nostr_sdk::RelayUrl::parse("wss://non-existent.example.com").unwrap(),
+            pubkey: test_pubkey,
+            metadata: test_metadata,
             created_at: test_timestamp,
             updated_at: test_timestamp,
         };
 
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Add a relay first
+        let relay_url = nostr_sdk::RelayUrl::parse("wss://test-remove.example.com").unwrap();
+        let relay = whitenoise
+            .find_or_create_relay_by_url(&relay_url)
+            .await
+            .unwrap();
+        loaded_user
+            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Verify relay was added
+        let user_relays = loaded_user
+            .relays(RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(user_relays.len(), 1);
+
+        // Remove the relay
+        let result = loaded_user
+            .remove_relay(&relay, RelayType::Nip65, &whitenoise.database)
+            .await;
+        assert!(result.is_ok());
+
+        // Verify relay was removed
+        let user_relays = loaded_user
+            .relays(RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+        assert_eq!(user_relays.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_remove_relay_not_in_database() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test user
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let test_metadata = Metadata::new().name("Test User");
+        let test_timestamp = chrono::Utc::now();
+
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: test_metadata,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Try to remove a relay that doesn't exist in the database
+        let non_existent_url =
+            nostr_sdk::RelayUrl::parse("wss://non-existent.example.com").unwrap();
+        let non_existent_relay = Relay::new(&non_existent_url);
         let result = loaded_user
             .remove_relay(&non_existent_relay, RelayType::Nip65, &whitenoise.database)
             .await;
+
         assert!(result.is_err());
         if let Err(WhitenoiseError::UserRelayNotFound) = result {
-            // Expected
+            // Expected - relay doesn't exist in database, so no association can be removed
         } else {
-            panic!("Expected UserRelayNotFound error");
+            panic!("Expected UserRelayNotFound error, got: {:?}", result);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_remove_relay_not_associated() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create test user
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let test_metadata = Metadata::new().name("Test User");
+        let test_timestamp = chrono::Utc::now();
+
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: test_metadata,
+            created_at: test_timestamp,
+            updated_at: test_timestamp,
+        };
+
+        user.save(&whitenoise.database).await.unwrap();
+        let loaded_user = User::find_by_pubkey(&test_pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Create a relay in the database but don't associate it with the user
+        let relay_url = nostr_sdk::RelayUrl::parse("wss://unassociated.example.com").unwrap();
+        let relay = Relay::new(&relay_url);
+        let saved_relay = relay.save(&whitenoise.database).await.unwrap();
+
+        // Try to remove the relay - it exists in database but not associated with user
+        let result = loaded_user
+            .remove_relay(&saved_relay, RelayType::Nip65, &whitenoise.database)
+            .await;
+
+        assert!(result.is_err());
+        if let Err(WhitenoiseError::UserRelayNotFound) = result {
+            // Expected - relay exists but no association with user
+        } else {
+            panic!("Expected UserRelayNotFound error, got: {:?}", result);
         }
     }
 

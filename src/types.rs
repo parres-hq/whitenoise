@@ -118,7 +118,7 @@ pub enum ImageType {
 }
 
 impl ImageType {
-    pub fn content_type(&self) -> String {
+    pub fn mime_type(&self) -> &'static str {
         match self {
             ImageType::Jpg => "image/jpg",
             ImageType::Jpeg => "image/jpeg",
@@ -126,6 +126,26 @@ impl ImageType {
             ImageType::Gif => "image/gif",
             ImageType::Webp => "image/webp",
         }
-        .to_owned()
+    }
+}
+
+impl From<ImageType> for String {
+    fn from(image_type: ImageType) -> Self {
+        image_type.mime_type().to_string()
+    }
+}
+
+impl TryFrom<String> for ImageType {
+    type Error = anyhow::Error;
+
+    fn try_from(mime_type: String) -> Result<Self, Self::Error> {
+        match mime_type.as_str() {
+            "image/jpg" => Ok(ImageType::Jpg),
+            "image/jpeg" => Ok(ImageType::Jpeg),
+            "image/png" => Ok(ImageType::Png),
+            "image/gif" => Ok(ImageType::Gif),
+            "image/webp" => Ok(ImageType::Webp),
+            _ => Err(anyhow::anyhow!("Invalid image type: {}", mime_type)),
+        }
     }
 }
