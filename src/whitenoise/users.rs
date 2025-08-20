@@ -1,4 +1,4 @@
-use crate::whitenoise::error::Result;
+use crate::whitenoise::error::{Result, WhitenoiseError};
 use crate::whitenoise::relays::{Relay, RelayType};
 use crate::whitenoise::Whitenoise;
 use chrono::{DateTime, Utc};
@@ -369,6 +369,31 @@ impl Whitenoise {
     pub async fn user_metadata(&self, pubkey: &PublicKey) -> Result<Metadata> {
         let user = self.find_user_by_pubkey(pubkey).await?;
         Ok(user.metadata.clone())
+    }
+
+    pub(crate) async fn background_fetch_user_data(&self, user: &User) -> Result<()> {
+        let user_clone = user.clone();
+        let mut mut_user_clone = user.clone();
+
+        tokio::spawn(async move {
+            let whitenoise = Whitenoise::get_instance()?;
+            // Parallel network requests
+            let relay_task = user_clone.update_relay_lists(whitenoise);
+            let metadata_task = mut_user_clone.update_metadata(whitenoise);
+
+            let (relay_result, metadata_result) = tokio::join!(relay_task, metadata_task);
+
+            // Log errors but don't fail
+            if let Err(e) = relay_result {
+                tracing::warn!("Failed to fetch relay lists for {}: {}", user_clone.pubkey, e);
+            }
+            if let Err(e) = metadata_result {
+                tracing::warn!("Failed to fetch metadata for {}: {}", user_clone.pubkey, e);
+            }
+
+            Ok::<(), WhitenoiseError>(())
+        });
+        Ok(())
     }
 }
 

@@ -563,6 +563,28 @@ impl Whitenoise {
         Ok(())
     }
 
+    pub(crate) async fn background_publish_account_follow_list(&self, account: &Account) -> Result<()> {
+        let account_clone = account.clone();
+        let nostr = self.nostr.clone();
+        let relays = account.nip65_relays(self).await?;
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let follows = account.follows(&self.database).await?;
+        let follows_pubkeys = follows.iter().map(|f| f.pubkey).collect::<Vec<_>>();
+
+        tokio::spawn(async move {
+            tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Background task: Publishing follow list for account: {:?}", account_clone.pubkey);
+
+            nostr.publish_follow_list_with_signer(&follows_pubkeys, &relays, keys)
+                .await?;
+
+            tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Successfully published follow list for account: {:?}", account_clone.pubkey);
+            Ok::<(), WhitenoiseError>(())
+        });
+        Ok(())
+    }
+
     pub(crate) async fn background_sync_account_data(&self, account: &Account) -> Result<()> {
         let group_ids = account.load_nostr_group_ids(self)?;
         let nostr = self.nostr.clone();

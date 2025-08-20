@@ -65,6 +65,22 @@ impl NostrManager {
         Ok(())
     }
 
+    pub(crate) async fn publish_follow_list_with_signer(
+        &self,
+        follow_list: &[PublicKey],
+        target_relays: &[Relay],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        let tags: Vec<Tag> = follow_list
+            .iter()
+            .map(|pubkey| Tag::custom(TagKind::p(), [pubkey.to_hex()]))
+            .collect();
+        let event = EventBuilder::new(Kind::ContactList, "").tags(tags);
+        let result = self.publish_event_builder_with_signer(event, target_relays, signer).await?;
+        tracing::debug!(target: "whitenoise::nostr_manager::publish_follow_list_with_signer", "Published follow list event to Nostr: {:?}", result);
+        Ok(())
+    }
+
     pub(crate) async fn fetch_user_relays(
         &self,
         pubkey: PublicKey,
