@@ -107,9 +107,9 @@ impl Account {
         let user = self.user(&whitenoise.database).await?;
         user.add_relay(relay_url, relay_type, &whitenoise.database)
             .await?;
+        whitenoise.background_publish_account_relay_list(self, relay_type).await?;
         tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay_url);
 
-        // Spawn a background task to update the relay list on nostr relays
         Ok(())
     }
 
@@ -122,6 +122,7 @@ impl Account {
         let user = self.user(&whitenoise.database).await?;
         user.remove_relay(relay_url, relay_type, &whitenoise.database)
             .await?;
+        whitenoise.background_publish_account_relay_list(self, relay_type).await?;
         tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay_url);
         Ok(())
     }
@@ -537,6 +538,26 @@ impl Whitenoise {
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Successfully published metadata for account: {:?}", account_clone.pubkey);
+            Ok::<(), WhitenoiseError>(())
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn background_publish_account_relay_list(&self, account: &Account, relay_type: RelayType) -> Result<()> {
+        let account_clone = account.clone();
+        let nostr = self.nostr.clone();
+        let relays = account.relays(relay_type, self).await?;
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        tokio::spawn(async move {
+            tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Background task: Publishing relay list for account: {:?}", account_clone.pubkey);
+
+            nostr.publish_relay_list_with_signer(&relays, relay_type, &relays, keys)
+                .await?;
+
+            tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Successfully published relay list for account: {:?}", account_clone.pubkey);
             Ok::<(), WhitenoiseError>(())
         });
         Ok(())
