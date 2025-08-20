@@ -259,7 +259,10 @@ mod query_tests {
             .publish_follow_list_with_signer(&follow_list, &relays, keys)
             .await;
 
-        assert!(result.is_ok(), "Should succeed when follow_list is empty, regardless of relays");
+        assert!(
+            result.is_ok(),
+            "Should succeed when follow_list is empty, regardless of relays"
+        );
     }
 
     #[tokio::test]
@@ -277,7 +280,10 @@ mod query_tests {
             .publish_follow_list_with_signer(&follow_list, &relays, keys)
             .await;
 
-        assert!(result.is_err(), "Should fail with empty relays when follow_list is not empty");
+        assert!(
+            result.is_err(),
+            "Should fail with empty relays when follow_list is not empty"
+        );
         let error_message = format!("{:?}", result.unwrap_err());
         assert!(
             error_message.contains("NoRelaysSpecified"),
