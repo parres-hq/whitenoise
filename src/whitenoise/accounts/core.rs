@@ -562,12 +562,17 @@ impl Whitenoise {
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let target_relays = if relay_type == RelayType::Nip65 {
+            relays.clone()
+        } else {
+            account.nip65_relays(self).await?
+        };
 
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Background task: Publishing relay list for account: {:?}", account_clone.pubkey);
 
             nostr
-                .publish_relay_list_with_signer(&relays, relay_type, &relays, keys)
+                .publish_relay_list_with_signer(&relays, relay_type, &target_relays, keys)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Successfully published relay list for account: {:?}", account_clone.pubkey);
