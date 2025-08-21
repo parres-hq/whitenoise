@@ -10,17 +10,18 @@ mod types;
 pub mod whitenoise;
 
 // Re-export main types for library users
-pub use crate::nostr_manager::parser::SerializableToken;
-pub use crate::types::ImageType;
-pub use crate::types::MessageWithTokens;
-pub use crate::whitenoise::accounts::Account;
-pub use crate::whitenoise::app_settings::{AppSettings, ThemeMode};
-pub use crate::whitenoise::error::WhitenoiseError;
-pub use crate::whitenoise::message_aggregator::{
+pub use nostr_manager::parser::SerializableToken;
+pub use nostr_mls::groups::NostrGroupConfigData;
+pub use types::ImageType;
+pub use types::MessageWithTokens;
+pub use whitenoise::accounts::Account;
+pub use whitenoise::app_settings::{AppSettings, ThemeMode};
+pub use whitenoise::error::WhitenoiseError;
+pub use whitenoise::message_aggregator::{
     ChatMessage, EmojiReaction, ReactionSummary, UserReaction,
 };
-pub use crate::whitenoise::relays::{Relay, RelayType};
-pub use nostr_mls::groups::NostrGroupConfigData;
+pub use whitenoise::relays::{Relay, RelayType};
+pub use whitenoise::users::User;
 pub use whitenoise::{Whitenoise, WhitenoiseConfig};
 
 // Re-export nostr types with documentation

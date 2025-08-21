@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use nostr_mls::prelude::*;
 use nostr_sdk::prelude::*;
+use whitenoise::RelayType;
 use whitenoise::ThemeMode;
 use whitenoise::{Whitenoise, WhitenoiseConfig, WhitenoiseError};
 
@@ -140,7 +141,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Test metadata fetching
     tracing::info!("Testing metadata fetching...");
-    let metadata = whitenoise.user_metadata(&account3.pubkey).await.unwrap();
+    let metadata = account3.metadata(whitenoise).await.unwrap();
     assert_eq!(metadata.name, Some("Known User".to_string()));
     tracing::info!("✓ Metadata fetched correctly");
 
@@ -158,8 +159,8 @@ async fn main() -> Result<(), WhitenoiseError> {
         ..Default::default()
     };
 
-    whitenoise
-        .update_account_metadata(&account3, &updated_metadata)
+    account3
+        .update_metadata(&updated_metadata, whitenoise)
         .await
         .unwrap();
     tracing::info!("✓ Metadata updated successfully");
@@ -332,7 +333,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     test_client2.disconnect().await;
 
     // Assert metadata was updated via event processor
-    let updated_via_sub = whitenoise.user_metadata(&account3.pubkey).await.unwrap();
+    let updated_via_sub = account3.metadata(whitenoise).await.unwrap();
     assert_eq!(
         updated_via_sub.name,
         Some("Known User Sub Update".to_string()),
@@ -341,14 +342,7 @@ async fn main() -> Result<(), WhitenoiseError> {
     tracing::info!("✓ Subscription-driven metadata update applied");
 
     // Assert relay list was updated via event processor
-    let user3 = whitenoise
-        .find_user_by_pubkey(&account3.pubkey)
-        .await
-        .unwrap();
-    let nip65_relays_after = whitenoise
-        .user_relays(&user3, whitenoise::RelayType::Nip65)
-        .await
-        .unwrap();
+    let nip65_relays_after = account3.relays(RelayType::Nip65, whitenoise).await.unwrap();
     let parsed_new = RelayUrl::parse(&new_relay_url).unwrap();
     let has_new = nip65_relays_after.iter().any(|r| r.url == parsed_new);
     assert!(
