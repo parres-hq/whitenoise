@@ -151,7 +151,7 @@ impl Whitenoise {
         Ok(group)
     }
 
-    pub async fn fetch_groups(
+    pub async fn groups(
         &self,
         account: &Account,
         active_filter: bool,
@@ -165,7 +165,7 @@ impl Whitenoise {
             .collect())
     }
 
-    pub async fn fetch_group_members(
+    pub async fn group_members(
         &self,
         account: &Account,
         group_id: &GroupId,
@@ -178,7 +178,7 @@ impl Whitenoise {
             .collect())
     }
 
-    pub async fn fetch_group_admins(
+    pub async fn group_admins(
         &self,
         account: &Account,
         group_id: &GroupId,
