@@ -1,13 +1,11 @@
-use anyhow::Result;
-use clap::Parser;
-use nostr_mls::groups::NostrGroupConfigData;
 use std::path::PathBuf;
 
-use nostr_mls::prelude::*;
+use anyhow::Result;
+use clap::Parser;
+use nostr_mls::{groups::NostrGroupConfigData, prelude::*};
 use nostr_sdk::prelude::*;
-use whitenoise::RelayType;
-use whitenoise::ThemeMode;
-use whitenoise::{Whitenoise, WhitenoiseConfig, WhitenoiseError};
+
+use whitenoise::{RelayType, ThemeMode, Whitenoise, WhitenoiseConfig, WhitenoiseError};
 
 /// Test backend for Whitenoise
 #[derive(Parser, Debug)]

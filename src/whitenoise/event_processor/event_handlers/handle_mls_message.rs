@@ -1,7 +1,10 @@
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
+
+use crate::whitenoise::{
+    accounts::Account,
+    error::{Result, WhitenoiseError},
+    Whitenoise,
+};
 
 impl Whitenoise {
     pub async fn handle_mls_message(&self, account: &Account, event: Event) -> Result<()> {

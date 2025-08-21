@@ -1,11 +1,10 @@
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::error::Result;
-use crate::whitenoise::Whitenoise;
+use std::{collections::HashSet, str::FromStr};
+
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::str::FromStr;
+
+use crate::whitenoise::{accounts::Account, error::Result, Whitenoise};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Relay {

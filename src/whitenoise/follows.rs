@@ -52,7 +52,6 @@ impl Whitenoise {
     ///
     /// * `account` - The account to check (must exist in database with valid ID)
     /// * `pubkey` - The public key of the user to check if followed
-
     pub async fn is_following_user(&self, account: &Account, pubkey: &PublicKey) -> Result<bool> {
         let user = self.find_user_by_pubkey(pubkey).await?;
         account.is_following_user(&user, &self.database).await

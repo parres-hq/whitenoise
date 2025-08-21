@@ -1,9 +1,14 @@
-use crate::types::MessageWithTokens;
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::Relay;
-use crate::whitenoise::Whitenoise;
-use crate::Account;
 use nostr_mls::prelude::*;
+
+use crate::{
+    types::MessageWithTokens,
+    whitenoise::{
+        accounts::Account,
+        error::{Result, WhitenoiseError},
+        relays::Relay,
+        Whitenoise,
+    },
+};
 
 impl Whitenoise {
     /// Sends a message to a specific group and returns the message with parsed tokens.

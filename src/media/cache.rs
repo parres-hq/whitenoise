@@ -1,16 +1,22 @@
 //! This module contains functions for managing cached media files.
 
-use std::fs;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fs,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use nostr_mls::prelude::*;
 use sha2::{Digest, Sha256};
 
 use super::sanitizer::SafeMediaMetadata;
-use crate::database::Database;
-use crate::media::errors::MediaError;
-use crate::media::types::{CachedMediaFile, MediaFile};
+use crate::{
+    database::Database,
+    media::{
+        errors::MediaError,
+        types::{CachedMediaFile, MediaFile},
+    },
+};
 
 const MEDIA_CACHE_DIR: &str = "media_cache";
 

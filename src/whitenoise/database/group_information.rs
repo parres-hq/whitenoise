@@ -1,9 +1,13 @@
-use super::{utils::parse_timestamp, Database};
-use crate::whitenoise::error::WhitenoiseError;
-use crate::whitenoise::group_information::{GroupInformation, GroupType};
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 use nostr_mls::prelude::GroupId;
-use std::str::FromStr;
+
+use super::{utils::parse_timestamp, Database};
+use crate::whitenoise::{
+    error::WhitenoiseError,
+    group_information::{GroupInformation, GroupType},
+};
 
 /// Internal database row representation for group_information table
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

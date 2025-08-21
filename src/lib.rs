@@ -1,8 +1,7 @@
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
-
-use std::sync::Mutex;
 
 // mod media;
 mod nostr_manager;

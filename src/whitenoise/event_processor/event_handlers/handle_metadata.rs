@@ -1,7 +1,10 @@
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::users::User;
-use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
+
+use crate::whitenoise::{
+    error::{Result, WhitenoiseError},
+    users::User,
+    Whitenoise,
+};
 
 impl Whitenoise {
     pub async fn handle_metadata(&self, event: Event) -> Result<()> {

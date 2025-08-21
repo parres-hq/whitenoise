@@ -1,12 +1,17 @@
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::group_information::{GroupInformation, GroupType};
-use crate::whitenoise::users::User;
-use crate::whitenoise::Whitenoise;
-use crate::RelayType;
+use std::{collections::HashSet, time::Duration};
+
 use nostr_mls::prelude::*;
-use std::collections::HashSet;
-use std::time::Duration;
+
+use crate::{
+    whitenoise::{
+        accounts::Account,
+        error::{Result, WhitenoiseError},
+        group_information::{GroupInformation, GroupType},
+        users::User,
+        Whitenoise,
+    },
+    RelayType,
+};
 
 impl Whitenoise {
     /// Creates a new MLS group with the specified members and settings

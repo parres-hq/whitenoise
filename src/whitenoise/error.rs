@@ -1,8 +1,13 @@
-use crate::nostr_manager::NostrManagerError;
-use crate::whitenoise::accounts::AccountError;
-use crate::whitenoise::database::DatabaseError;
-use crate::whitenoise::secrets_store::SecretsStoreError;
 use thiserror::Error;
+
+use crate::{
+    nostr_manager::NostrManagerError,
+    whitenoise::{
+        accounts::AccountError,
+        database::DatabaseError,
+        secrets_store::SecretsStoreError,
+    },
+};
 
 pub type Result<T> = core::result::Result<T, WhitenoiseError>;
 

@@ -1,10 +1,10 @@
 //! Subscription functions for NostrManager
 //! This mostly handles subscribing and processing events as they come in while the user is active.
 
-use crate::nostr_manager::{NostrManager, Result};
-use crate::whitenoise::relays::Relay;
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
+
+use crate::{nostr_manager::{NostrManager, Result}, whitenoise::relays::Relay};
 
 impl NostrManager {
     /// Create a short hash from a pubkey for use in subscription IDs

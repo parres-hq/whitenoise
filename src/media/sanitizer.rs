@@ -16,12 +16,13 @@
 //! - Software used to create/edit the file
 //! - Thumbnails and previews
 
-use crate::media::errors::MediaError;
-use crate::media::types::FileUpload;
+use std::io::Cursor;
+
 use image::{GenericImageView, ImageFormat, ImageOutputFormat};
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Encode, Type};
-use std::io::Cursor;
+
+use crate::media::{errors::MediaError, types::FileUpload};
 
 #[derive(Debug, Serialize, Deserialize, Type, Encode, Decode)]
 #[sqlx(type_name = "jsonb")]

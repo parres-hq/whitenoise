@@ -1,7 +1,6 @@
-use crate::whitenoise::error::WhitenoiseError;
 use nostr::{types::RelayUrl, PublicKey, ToBech32};
 
-use super::Whitenoise;
+use crate::whitenoise::{error::WhitenoiseError, Whitenoise};
 
 impl Whitenoise {
     /// Converts a Nostr public key to its bech32-encoded npub representation.

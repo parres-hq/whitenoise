@@ -1,8 +1,12 @@
-use super::{utils::parse_timestamp, Database};
-use crate::whitenoise::app_settings::{AppSettings, ThemeMode};
-use crate::whitenoise::error::WhitenoiseError;
-use chrono::{DateTime, Utc};
 use std::str::FromStr;
+
+use chrono::{DateTime, Utc};
+
+use super::{utils::parse_timestamp, Database};
+use crate::whitenoise::{
+    app_settings::{AppSettings, ThemeMode},
+    error::WhitenoiseError,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct AppSettingsRow {

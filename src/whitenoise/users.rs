@@ -1,10 +1,14 @@
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::{Relay, RelayType};
-use crate::whitenoise::Whitenoise;
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+
+use crate::whitenoise::{
+    error::{Result, WhitenoiseError},
+    relays::{Relay, RelayType},
+    Whitenoise,
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct User {
@@ -16,7 +20,7 @@ pub struct User {
 }
 
 impl User {
-    /// Updates the user's metadata by fetching the latest version from Nostr relays.
+    /// Syncs the user's metadata by fetching the latest version from Nostr relays.
     ///
     /// This method queries the user's configured relays (or default relays if none are configured)
     /// to fetch the most recent metadata event (kind 0) published by the user. If newer metadata
@@ -26,10 +30,13 @@ impl User {
     /// The method implements smart fetching by using the user's NIP-65 relay list when available,
     /// or falling back to default relays if the user hasn't published a relay list yet.
     ///
+    /// NOTE: This method is not used for updating an accounts's metadata with new metadata created in
+    /// the app. Use the `update_account_metadata` method instead.
+    ///
     /// # Arguments
     ///
     /// * `whitenoise` - The Whitenoise instance used to access the Nostr client and database
-    pub async fn update_metadata(&mut self, whitenoise: &Whitenoise) -> Result<()> {
+    pub async fn sync_metadata(&mut self, whitenoise: &Whitenoise) -> Result<()> {
         let relays_to_query = self.get_query_relays(whitenoise).await?;
         let metadata = whitenoise
             .nostr
@@ -67,7 +74,11 @@ impl User {
         Ok(key_package_event)
     }
 
-    pub async fn relays_by_type(&self, relay_type: RelayType, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+    pub async fn relays_by_type(
+        &self,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<Vec<Relay>> {
         self.relays(relay_type, &whitenoise.database).await
     }
 
@@ -325,7 +336,7 @@ impl Whitenoise {
             // Do these in series so that we fetch the user's relays before trying to fetch metadata
             // (more likely we find metadata looking on the right relays)
             let relay_result = user_clone.update_relay_lists(whitenoise).await;
-            let metadata_result = mut_user_clone.update_metadata(whitenoise).await;
+            let metadata_result = mut_user_clone.sync_metadata(whitenoise).await;
 
             // Log errors but don't fail
             if let Err(e) = relay_result {
@@ -510,7 +521,7 @@ mod tests {
         }
 
         let original_metadata = saved_user.metadata.clone();
-        let result = saved_user.update_metadata(&whitenoise).await;
+        let result = saved_user.sync_metadata(&whitenoise).await;
 
         assert!(result.is_ok());
 
@@ -535,7 +546,7 @@ mod tests {
         };
 
         let mut saved_user = user.save(&whitenoise.database).await.unwrap();
-        let result = saved_user.update_metadata(&whitenoise).await;
+        let result = saved_user.sync_metadata(&whitenoise).await;
 
         assert!(result.is_ok());
 
@@ -572,7 +583,7 @@ mod tests {
             .unwrap();
 
         let original_id = saved_user.id;
-        let result = saved_user.update_metadata(&whitenoise).await;
+        let result = saved_user.sync_metadata(&whitenoise).await;
 
         assert!(result.is_ok());
 

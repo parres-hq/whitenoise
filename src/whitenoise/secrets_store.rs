@@ -1,9 +1,12 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use base64::{engine::general_purpose, Engine as _};
 use keyring::Entry;
 use nostr_sdk::{Keys, PublicKey};
 use serde_json::{json, Value};
-use std::fs;
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 

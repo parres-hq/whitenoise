@@ -1,9 +1,13 @@
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::Relay;
-use crate::whitenoise::Whitenoise;
-use nostr_mls::prelude::*;
 use std::collections::HashSet;
+
+use nostr_mls::prelude::*;
+
+use crate::whitenoise::{
+    accounts::Account,
+    error::{Result, WhitenoiseError},
+    relays::Relay,
+    Whitenoise,
+};
 
 impl Whitenoise {
     /// Finds a specific welcome message by its event ID for a given public key.

@@ -1,6 +1,7 @@
+use chrono::{DateTime, Utc};
+
 use super::utils::parse_timestamp;
 use crate::whitenoise::relays::RelayType;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct UserRelayRow {

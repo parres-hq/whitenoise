@@ -1,8 +1,9 @@
 //! This module contains the logic for parsing Nostr events into tokens.
 
-use crate::nostr_manager::NostrManager;
 use nostr::parser::{NostrParser, Token};
 use serde::{Deserialize, Serialize};
+
+use crate::nostr_manager::NostrManager;
 
 /// Parser trait for parsing content into tokens
 /// This trait is designed to be thread-safe for use with Flutter Rust Bridge (FRB)

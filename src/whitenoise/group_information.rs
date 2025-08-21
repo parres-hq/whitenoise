@@ -1,8 +1,8 @@
+use std::{fmt, str::FromStr};
+
 use chrono::{DateTime, Utc};
 use nostr_mls::prelude::GroupId;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 
 use crate::whitenoise::{Whitenoise, WhitenoiseError};
 

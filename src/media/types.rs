@@ -1,8 +1,8 @@
-use crate::media::blossom::BlobDescriptor;
-use crate::media::sanitizer::SafeMediaMetadata;
 use nostr_mls::prelude::*;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row};
+
+use crate::media::{blossom::BlobDescriptor, sanitizer::SafeMediaMetadata};
 
 /// Represents a file upload received from the frontend application.
 #[derive(Debug, Deserialize, Serialize, Clone)]

@@ -1,9 +1,9 @@
-use crate::whitenoise::Result;
-use crate::Whitenoise;
+use std::{fmt, str::FromStr};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
+
+use crate::{whitenoise::Result, Whitenoise};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum ThemeMode {

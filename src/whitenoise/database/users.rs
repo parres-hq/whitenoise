@@ -1,9 +1,14 @@
-use super::{relays::RelayRow, utils::parse_timestamp, Database, DatabaseError};
-use crate::whitenoise::relays::{Relay, RelayType};
-use crate::whitenoise::users::User;
-use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
+
+use super::{relays::RelayRow, utils::parse_timestamp, Database, DatabaseError};
+use crate::{
+    whitenoise::{
+        relays::{Relay, RelayType},
+        users::User,
+    },
+    WhitenoiseError,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct UserRow {

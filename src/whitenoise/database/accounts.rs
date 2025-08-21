@@ -1,11 +1,16 @@
-use super::{utils::parse_timestamp, Database, DatabaseError};
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::database::users::UserRow;
-use crate::whitenoise::users::User;
-use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::PublicKey;
 use sqlx::Row;
+
+use super::{utils::parse_timestamp, Database, DatabaseError};
+use crate::{
+    whitenoise::{
+        accounts::Account,
+        database::users::UserRow,
+        users::User,
+    },
+    WhitenoiseError,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct AccountRow {

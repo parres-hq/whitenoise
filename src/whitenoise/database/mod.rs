@@ -1,12 +1,13 @@
-use sqlx::{
-    migrate::{MigrateDatabase, Migrator},
-    sqlite::SqlitePoolOptions,
-    Sqlite, SqlitePool,
-};
 use std::{
     path::PathBuf,
     sync::LazyLock,
     time::{Duration, SystemTime},
+};
+
+use sqlx::{
+    migrate::{MigrateDatabase, Migrator},
+    sqlite::SqlitePoolOptions,
+    Sqlite, SqlitePool,
 };
 use thiserror::Error;
 

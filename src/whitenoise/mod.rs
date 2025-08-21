@@ -1,9 +1,12 @@
-use anyhow::Context;
-use nostr_mls::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::mpsc::{self, Sender};
-use tokio::sync::OnceCell;
+
+use anyhow::Context;
+use nostr_mls::prelude::*;
+use tokio::sync::{
+    mpsc::{self, Sender},
+    OnceCell,
+};
 
 pub mod accounts;
 pub mod app_settings;
@@ -12,11 +15,15 @@ pub mod error;
 mod event_processor;
 pub mod follows;
 pub mod group_information;
+pub mod groups;
+pub mod key_packages;
 pub mod message_aggregator;
+pub mod messages;
 pub mod relays;
 pub mod secrets_store;
 pub mod users;
 pub mod utils;
+pub mod welcomes;
 
 use crate::init_tracing;
 use crate::nostr_manager::NostrManager;
@@ -245,7 +252,7 @@ impl Whitenoise {
     /// Returns a reference to the global Whitenoise singleton instance.
     ///
     /// This method provides access to the globally initialized Whitenoise instance that was
-    /// created by [`initialize_whitenoise`]. The instance is stored as a static singleton
+    /// created by [`Whitenoise::initialize_whitenoise`]. The instance is stored as a static singleton
     /// using [`tokio::sync::OnceCell`] to ensure async-safe thread-safe access and single initialization.
     ///
     /// This method is particularly useful for accessing the Whitenoise instance from different
