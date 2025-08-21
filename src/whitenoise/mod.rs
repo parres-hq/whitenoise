@@ -105,10 +105,6 @@ impl std::fmt::Debug for Whitenoise {
 }
 
 impl Whitenoise {
-    // ============================================================================
-    // INITIALIZATION & LIFECYCLE
-    // ============================================================================
-
     /// Initializes the Whitenoise application with the provided configuration.
     ///
     /// This method sets up the necessary data and log directories, configures logging,
@@ -118,31 +114,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `config` - A [`WhitenoiseConfig`] struct specifying the data and log directories.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing a fully initialized [`Whitenoise`] instance on success,
-    /// or a [`WhitenoiseError`] if initialization fails at any step.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The data or log directories cannot be created.
-    /// - The database cannot be initialized.
-    /// - The NostrManager cannot be created.
-    /// - Accounts cannot be loaded from the database.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
-    /// # use std::path::Path;
-    /// # async fn example() -> Result<(), whitenoise::WhitenoiseError> {
-    /// let config = WhitenoiseConfig::new(Path::new("./data"), Path::new("./logs"));
-    /// let whitenoise = Whitenoise::initialize_whitenoise(config).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<()> {
         // Create event processing channels
         let (event_sender, event_receiver) = mpsc::channel(500);
@@ -280,56 +251,6 @@ impl Whitenoise {
     /// This method is particularly useful for accessing the Whitenoise instance from different
     /// parts of the application without passing references around, such as in event handlers,
     /// background tasks, or API endpoints.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing:
-    /// - `Ok(&'static Whitenoise)` - A static reference to the initialized Whitenoise instance
-    /// - `Err(WhitenoiseError::Initialization)` - If [`initialize_whitenoise`] has not been called yet
-    ///
-    /// # Errors
-    ///
-    /// This function will return [`WhitenoiseError::Initialization`] if:
-    /// - [`initialize_whitenoise`] has not been successfully called prior to this method
-    /// - The global instance failed to initialize during the [`initialize_whitenoise`] call
-    ///
-    /// # Thread Safety
-    ///
-    /// This method is thread-safe and async-safe, and can be called concurrently from multiple
-    /// threads or async contexts. The underlying [`tokio::sync::OnceCell`] ensures that access
-    /// to the global instance is properly synchronized for async environments.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
-    /// # use std::path::Path;
-    /// # async fn example() -> Result<(), whitenoise::WhitenoiseError> {
-    /// // First, initialize Whitenoise
-    /// let config = WhitenoiseConfig::new(Path::new("./data"), Path::new("./logs"));
-    /// Whitenoise::initialize_whitenoise(config).await?;
-    ///
-    /// // Then access the instance from anywhere in your application
-    /// let whitenoise = Whitenoise::get_instance()?;
-    /// let account_count = whitenoise.get_accounts_count().await?;
-    /// println!("Number of accounts: {}", account_count);
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Usage in Event Handlers
-    ///
-    /// ```rust
-    /// # use whitenoise::Whitenoise;
-    /// # async fn handle_some_event() -> Result<(), whitenoise::WhitenoiseError> {
-    /// // Access Whitenoise from an event handler without dependency injection
-    /// let whitenoise = Whitenoise::get_instance()?;
-    /// // ... use whitenoise methods
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// [`initialize_whitenoise`]: Self::initialize_whitenoise
     pub fn get_instance() -> Result<&'static Self> {
         GLOBAL_WHITENOISE
             .get()
@@ -342,30 +263,6 @@ impl Whitenoise {
     /// It deletes the nostr cache, database, MLS-related directories, and all log files. If the MLS directory exists,
     /// it is removed and then recreated as an empty directory. This is useful for resetting the application
     /// to a clean state.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` which is `Ok(())` if all data is successfully deleted, or a
-    /// [`WhitenoiseError`] if any step fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - The Nostr cache cannot be deleted.
-    /// - The database data cannot be deleted.
-    /// - The MLS directory cannot be removed or recreated.
-    /// - Log files or directories cannot be deleted.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use whitenoise::{Whitenoise, WhitenoiseConfig};
-    /// # use std::path::Path;
-    /// # async fn example(mut whitenoise: Whitenoise) -> Result<(), whitenoise::WhitenoiseError> {
-    /// whitenoise.delete_all_data().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
@@ -419,10 +316,6 @@ impl Whitenoise {
     pub async fn export_account_npub(&self, account: &Account) -> Result<String> {
         Ok(account.pubkey.to_bech32().unwrap())
     }
-
-    // ============================================================================
-    // MESSAGE AGGREGATION ACCESS
-    // ============================================================================
 
     /// Get a reference to the message aggregator for advanced usage
     /// This allows consumers to access the message aggregator directly for custom processing

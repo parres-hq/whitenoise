@@ -62,10 +62,6 @@ impl GroupInformation {
     /// * `group_type` - Optional explicit group type. If None, will be inferred from participant count
     /// * `participant_count` - Total number of participants including the creator (used for inference if group_type is None)
     /// * `whitenoise` - Reference to the Whitenoise instance for database operations
-    ///
-    /// # Returns
-    /// * `Ok(GroupInformation)` - The created or existing group information
-    /// * `Err(WhitenoiseError)` - If database operations fail
     pub async fn create_for_group(
         whitenoise: &Whitenoise,
         mls_group_id: &GroupId,

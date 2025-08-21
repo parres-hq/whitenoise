@@ -48,60 +48,6 @@ impl Account {
     ///   - `RelayType::Inbox` - Specialized relays for receiving private messages (kind 10050)
     ///   - `RelayType::KeyPackage` - Relays that store MLS key packages (kind 10051)
     /// * `whitenoise` - The Whitenoise instance for database operations
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Vec<Relay>` containing all relays configured for the account
-    /// and the specified relay type. Returns an empty vector if no relays are
-    /// configured for that type.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The account's user record cannot be found in the database
-    /// - There's a database connection or query error during the lookup
-    ///
-    /// # Relay Types Explained
-    ///
-    /// ## NIP-65 Relays (General Purpose)
-    /// - Used for publishing and reading most types of Nostr events
-    /// - Includes metadata, notes, reactions, and other standard events
-    /// - Published as kind 10002 relay list events
-    /// - Typically the most comprehensive relay list
-    ///
-    /// ## Inbox Relays (Private Messages)
-    /// - Specialized for receiving private messages and gift wrap events
-    /// - Other users send private messages to these relays
-    /// - Published as kind 10050 relay list events
-    /// - Often a subset of NIP-65 relays optimized for message delivery
-    ///
-    /// ## Key Package Relays (MLS Groups)
-    /// - Store MLS key packages needed for encrypted group messaging
-    /// - Other users fetch key packages from these relays to add the account to groups
-    /// - Published as kind 10051 relay list events
-    /// - May be specialized relays that handle MLS-specific events
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use whitenoise::RelayType;
-    ///
-    /// // Get general purpose relays
-    /// let nip65_relays = account.relays(RelayType::Nip65, &whitenoise).await?;
-    /// println!("Account has {} general relays", nip65_relays.len());
-    ///
-    /// // Get inbox relays for private messaging
-    /// let inbox_relays = account.relays(RelayType::Inbox, &whitenoise).await?;
-    /// for relay in inbox_relays {
-    ///     println!("Inbox relay: {}", relay.url);
-    /// }
-    ///
-    /// // Get key package relays for MLS groups
-    /// let kp_relays = account.relays(RelayType::KeyPackage, &whitenoise).await?;
-    /// if kp_relays.is_empty() {
-    ///     println!("No key package relays configured - account cannot join MLS groups");
-    /// }
-    /// ```
     pub async fn relays(
         &self,
         relay_type: RelayType,
@@ -150,54 +96,6 @@ impl Account {
     ///   - `RelayType::Inbox` - Inbox relays for private messages (kind 10050)
     ///   - `RelayType::KeyPackage` - Key package relays for MLS (kind 10051)
     /// * `whitenoise` - The Whitenoise instance for database and network operations
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the relay is successfully added to the local database and
-    /// the updated relay list is published to the network.
-    ///
-    /// # Process Flow
-    ///
-    /// 1. **Local Update**: Adds the relay to the account's user record in the database
-    /// 2. **Network Publishing**: Publishes the updated relay list to the account's relays
-    /// 3. **Logging**: Records the successful addition for debugging
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The account's user record cannot be found in the database
-    /// - Database operations fail when adding the relay
-    /// - Network publishing of the updated relay list fails
-    /// - The relay URL is malformed or invalid
-    ///
-    /// # Relay Types
-    ///
-    /// Different relay types serve different purposes:
-    /// - **NIP-65 relays**: General purpose relays for reading/writing most event types
-    /// - **Inbox relays**: Specialized relays for receiving private messages and gift wraps
-    /// - **Key package relays**: Relays that store MLS key packages for group messaging
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use nostr_sdk::RelayUrl;
-    /// use whitenoise::{Relay, RelayType};
-    ///
-    /// // Add a general purpose relay
-    /// let relay = Relay::new(RelayUrl::parse("wss://relay.example.com")?);
-    /// account.add_relay(&relay, RelayType::Nip65, &whitenoise).await?;
-    ///
-    /// // Add an inbox relay for private messages
-    /// let inbox_relay = Relay::new(RelayUrl::parse("wss://inbox.example.com")?);
-    /// account.add_relay(&inbox_relay, RelayType::Inbox, &whitenoise).await?;
-    /// ```
-    ///
-    /// # Network Effects
-    ///
-    /// This method triggers network activity:
-    /// - Publishes the updated relay list event to the account's current relays
-    /// - Other clients will see the updated relay configuration
-    /// - The account will start using the new relay for the specified purpose
     pub async fn add_relay(
         &self,
         relay: &Relay,
@@ -229,55 +127,6 @@ impl Account {
     ///   - `RelayType::Inbox` - Inbox relays for private messages (kind 10050)
     ///   - `RelayType::KeyPackage` - Key package relays for MLS (kind 10051)
     /// * `whitenoise` - The Whitenoise instance for database and network operations
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the relay is successfully removed from the local database and
-    /// the updated relay list is published to the network.
-    ///
-    /// # Process Flow
-    ///
-    /// 1. **Local Update**: Removes the relay from the account's user record in the database
-    /// 2. **Network Publishing**: Publishes the updated relay list to the account's remaining relays
-    /// 3. **Logging**: Records the successful removal for debugging
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The account's user record cannot be found in the database
-    /// - Database operations fail when removing the relay
-    /// - Network publishing of the updated relay list fails
-    /// - The relay is not found in the account's relay list for the specified type
-    ///
-    /// # Safety Considerations
-    ///
-    /// - **Last Relay Warning**: Be cautious when removing the last relay of a type, as this
-    ///   may leave the account unable to perform certain operations
-    /// - **Network Isolation**: Removing all NIP-65 relays may isolate the account from the network
-    /// - **Message Delivery**: Removing inbox relays may prevent receipt of private messages
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use nostr_sdk::RelayUrl;
-    /// use whitenoise::{Relay, RelayType};
-    ///
-    /// // Remove a general purpose relay
-    /// let relay = Relay::new(RelayUrl::parse("wss://old-relay.example.com")?);
-    /// account.remove_relay(&relay, RelayType::Nip65, &whitenoise).await?;
-    ///
-    /// // Remove an inbox relay
-    /// let inbox_relay = Relay::new(RelayUrl::parse("wss://old-inbox.example.com")?);
-    /// account.remove_relay(&inbox_relay, RelayType::Inbox, &whitenoise).await?;
-    /// ```
-    ///
-    /// # Network Effects
-    ///
-    /// This method triggers network activity:
-    /// - Publishes the updated relay list event to the account's remaining relays
-    /// - Other clients will see the updated relay configuration
-    /// - The account will stop using the removed relay for the specified purpose
-    /// - May disconnect from the relay if it's not used for other purposes
     pub async fn remove_relay(
         &self,
         relay: &Relay,
@@ -303,57 +152,6 @@ impl Account {
     /// # Arguments
     ///
     /// * `whitenoise` - The Whitenoise instance used to access the database
-    ///
-    /// # Returns
-    ///
-    /// Returns the account's `Metadata` object containing profile information.
-    /// The metadata is cloned from the cached record, so modifications to the
-    /// returned value will not affect the stored data.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The account's user record cannot be found in the database
-    /// - There's a database connection or query error during the lookup
-    ///
-    /// # Metadata Fields
-    ///
-    /// The returned metadata may contain any of these standard NIP-01 fields:
-    /// - `name` - The account holder's name/username
-    /// - `display_name` - The account holder's display name
-    /// - `about` - Bio/description text
-    /// - `picture` - URL to profile picture
-    /// - `banner` - URL to banner image
-    /// - `website` - Personal website URL
-    /// - `nip05` - NIP-05 identifier for verification
-    /// - And other custom fields that may have been set
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// // Get account metadata
-    /// let metadata = account.metadata(&whitenoise).await?;
-    ///
-    /// // Access specific fields
-    /// if let Some(name) = &metadata.name {
-    ///     println!("Account name: {}", name);
-    /// }
-    ///
-    /// if let Some(about) = &metadata.about {
-    ///     println!("About: {}", about);
-    /// }
-    ///
-    /// if let Some(picture) = &metadata.picture {
-    ///     println!("Profile picture: {}", picture);
-    /// }
-    /// ```
-    ///
-    /// # Performance Notes
-    ///
-    /// - This method only reads from the local database and is fast
-    /// - No network requests are performed
-    /// - The metadata is cached from previous sync operations
-    /// - For up-to-date metadata, ensure recent synchronization has occurred
     pub async fn metadata(&self, whitenoise: &Whitenoise) -> Result<Metadata> {
         let user = self.user(&whitenoise.database).await?;
         Ok(user.metadata.clone())
@@ -369,66 +167,6 @@ impl Account {
     ///
     /// * `metadata` - The new metadata to set for this account
     /// * `whitenoise` - The Whitenoise instance for database and network operations
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the metadata is successfully updated in the local database
-    /// and published to the network.
-    ///
-    /// # Process Flow
-    ///
-    /// 1. **Validation**: Logs the update operation for debugging
-    /// 2. **Local Update**: Updates the account's user record in the database
-    /// 3. **Database Save**: Commits the metadata changes to the database
-    /// 4. **Network Publishing**: Publishes the new metadata event to the account's relays
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The account's user record cannot be found in the database
-    /// - Database operations fail when saving the updated metadata
-    /// - Network publishing of the metadata event fails
-    /// - The account has no configured relays to publish to
-    ///
-    /// # Metadata Fields
-    ///
-    /// The metadata object can contain any of these standard NIP-01 fields:
-    /// - `name` - Username or handle
-    /// - `display_name` - Display name for UI
-    /// - `about` - Bio or description text
-    /// - `picture` - URL to profile picture
-    /// - `banner` - URL to banner image
-    /// - `website` - Personal website URL
-    /// - `nip05` - NIP-05 identifier for verification
-    /// - `lud06` or `lud16` - Lightning addresses for payments
-    /// - Any custom fields specific to your application
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use nostr_sdk::Metadata;
-    ///
-    /// // Create new metadata
-    /// let metadata = Metadata::new()
-    ///     .name("alice")
-    ///     .display_name("Alice Smith")
-    ///     .about("Enthusiastic Nostr user")
-    ///     .picture("https://example.com/alice.jpg")
-    ///     .website("https://alice-blog.example.com");
-    ///
-    /// // Update account metadata
-    /// account.update_metadata(&metadata, &whitenoise).await?;
-    ///
-    /// // The metadata is now updated locally and published to the network
-    /// ```
-    ///
-    /// # Network Effects
-    ///
-    /// This method triggers network activity:
-    /// - Publishes a kind 0 (metadata) event to the account's configured relays
-    /// - Other clients subscribed to the account will receive the updated metadata
-    /// - The changes become part of the account's public profile on Nostr
-    /// - Relay operators may cache the new metadata for efficient retrieval
     pub async fn update_metadata(
         &self,
         metadata: &Metadata,
@@ -454,18 +192,6 @@ impl Account {
     /// * `image_type` - The type of image being uploaded (e.g., JPEG, PNG)
     /// * `server` - The URL of the Blossom server to use for uploading
     /// * `whitenoise` - The Whitenoise instance for database and network operations
-    ///
-    /// # Returns
-    ///
-    /// Returns the URL of the uploaded profile picture as a `String`.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The image file cannot be read from the specified path
-    /// - The image upload fails to the Blossom server
-    /// - The account's Nostr keys cannot be retrieved from the secret store
-    /// - There's a database connection or query error during the lookup
     pub async fn upload_profile_picture(
         &self,
         file_path: &str,
@@ -532,14 +258,6 @@ impl Whitenoise {
     /// This method generates a new keypair, sets up the account with default relay lists,
     /// creates a metadata event with a generated petname, and fully configures the account
     /// for use in Whitenoise.
-    ///
-    /// # Returns
-    ///
-    /// Returns the newly created and fully configured `Account` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if any step fails. The operation is atomic with cleanup on failure.
     pub async fn create_identity(&self) -> Result<Account> {
         let keys = Keys::generate();
         tracing::debug!(target: "whitenoise::create_identity", "Generated new keypair: {}", keys.public_key().to_hex());
@@ -575,14 +293,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `nsec_or_hex_privkey` - The user's private key as a nsec string or hex-encoded string.
-    ///
-    /// # Returns
-    ///
-    /// Returns the fully configured `Account` associated with the provided private key on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if the private key is invalid or account setup fails.
     pub async fn login(&self, nsec_or_hex_privkey: String) -> Result<Account> {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
@@ -626,14 +336,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `account` - The account to log out.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if there is a failure in removing the account or its private key.
     pub async fn logout(&self, pubkey: &PublicKey) -> Result<()> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
         // Delete the account from the database
@@ -654,24 +356,6 @@ impl Whitenoise {
     /// # Returns
     ///
     /// Returns the count of accounts as a `usize`. Returns 0 if no accounts exist.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - There's a database connection or query error
-    /// - The database is corrupted or inaccessible
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// // Check if any accounts exist
-    /// let count = whitenoise.get_accounts_count().await?;
-    /// if count == 0 {
-    ///     println!("No accounts found, create a new one");
-    /// } else {
-    ///     println!("Found {} accounts", count);
-    /// }
-    /// ```
     pub async fn get_accounts_count(&self) -> Result<usize> {
         let accounts = Account::all(&self.database).await?;
         Ok(accounts.len())
@@ -682,48 +366,6 @@ impl Whitenoise {
     /// This method returns all accounts that have been created or imported into
     /// the Whitenoise instance. Each account represents a distinct identity with
     /// its own keypair, relay configurations, and associated data.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Vec<Account>` containing all accounts in the database.
-    /// Returns an empty vector if no accounts exist.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - There's a database connection or query error
-    /// - Account data is corrupted or cannot be deserialized
-    /// - The database is inaccessible
-    ///
-    /// # Account Information
-    ///
-    /// Each returned `Account` contains:
-    /// - `id` - Database primary key (if saved)
-    /// - `pubkey` - The account's Nostr public key
-    /// - `user_id` - Reference to associated user record
-    /// - `last_synced_at` - Timestamp of last data synchronization
-    /// - `created_at` - Account creation timestamp
-    /// - `updated_at` - Last update timestamp
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// // List all accounts
-    /// let accounts = whitenoise.all_accounts().await?;
-    /// for account in accounts {
-    ///     println!("Account: {} (created: {})",
-    ///         account.pubkey,
-    ///         account.created_at
-    ///     );
-    /// }
-    ///
-    /// // Find the most recently created account
-    /// let mut accounts = whitenoise.all_accounts().await?;
-    /// accounts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    /// if let Some(latest) = accounts.first() {
-    ///     println!("Latest account: {}", latest.pubkey);
-    /// }
-    /// ```
     pub async fn all_accounts(&self) -> Result<Vec<Account>> {
         Account::all(&self.database).await
     }
@@ -736,41 +378,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `pubkey` - The public key of the account to find
-    ///
-    /// # Returns
-    ///
-    /// Returns the `Account` with the matching public key.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - No account exists with the specified public key
-    /// - There's a database connection or query error
-    /// - Account data is corrupted or cannot be deserialized
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use nostr_sdk::PublicKey;
-    ///
-    /// // Find an account by public key
-    /// let pubkey = PublicKey::from_hex("npub1...")?;
-    ///
-    /// match whitenoise.find_account_by_pubkey(&pubkey).await {
-    ///     Ok(account) => {
-    ///         println!("Found account created at: {}", account.created_at);
-    ///         // Use the account for operations
-    ///     }
-    ///     Err(_) => {
-    ///         println!("Account not found for pubkey: {}", pubkey);
-    ///         // Maybe create a new account or show error
-    ///     }
-    /// }
-    ///
-    /// // Use with error propagation
-    /// let account = whitenoise.find_account_by_pubkey(&pubkey).await?;
-    /// let metadata = account.metadata(&whitenoise).await?;
-    /// ```
     pub async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
         Account::find_by_pubkey(pubkey, &self.database).await
     }

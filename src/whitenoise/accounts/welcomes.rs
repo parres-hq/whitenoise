@@ -16,17 +16,6 @@ impl Whitenoise {
     ///
     /// * `pubkey` - The public key of the account to search welcomes for
     /// * `welcome_event_id` - The event ID of the welcome message to find (as a hex string)
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result<welcome_types::Welcome>` containing the welcome message if found.
-    ///
-    /// # Errors
-    ///
-    /// * `WhitenoiseError::InvalidEvent` - If the welcome event ID cannot be parsed
-    /// * `WhitenoiseError::AccountNotFound` - If the account with the given pubkey doesn't exist
-    /// * `WhitenoiseError::WelcomeNotFound` - If no welcome message exists with the given event ID
-    /// * Other MLS-related errors if the nostr-mls system encounters issues
     pub async fn find_welcome_by_event_id(
         &self,
         pubkey: &PublicKey,
@@ -52,16 +41,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `pubkey` - The public key of the account to get pending welcomes for
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result<Vec<welcome_types::Welcome>>` containing all pending welcome messages.
-    /// An empty vector is returned if there are no pending welcomes.
-    ///
-    /// # Errors
-    ///
-    /// * `WhitenoiseError::AccountNotFound` - If the account with the given pubkey doesn't exist
-    /// * Other MLS-related errors if the nostr-mls system encounters issues
     pub async fn pending_welcomes(
         &self,
         pubkey: &PublicKey,
@@ -85,20 +64,6 @@ impl Whitenoise {
     ///
     /// * `pubkey` - The public key of the account accepting the welcome
     /// * `welcome_event_id` - The event ID of the welcome message to accept (as a hex string)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Result<()>` indicating success or failure of the operation.
-    ///
-    /// # Errors
-    ///
-    /// * `WhitenoiseError::InvalidEvent` - If the welcome event ID cannot be parsed
-    /// * `WhitenoiseError::AccountNotFound` - If the account with the given pubkey doesn't exist
-    /// * `WhitenoiseError::WelcomeNotFound` - If no welcome message exists with the given event ID
-    /// * `WhitenoiseError::SecretsStore` - If the account's Nostr keys cannot be retrieved
-    /// * Database errors when creating/finding relay records
-    /// * Network errors when setting up Nostr subscriptions
-    /// * Other MLS-related errors during the acceptance process
     pub async fn accept_welcome(&self, pubkey: &PublicKey, welcome_event_id: String) -> Result<()> {
         let welcome_event_id = EventId::parse(&welcome_event_id).map_err(|_e| {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
@@ -164,17 +129,6 @@ impl Whitenoise {
     ///
     /// * `pubkey` - The public key of the account declining the welcome
     /// * `welcome_event_id` - The event ID of the welcome message to decline (as a hex string)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Result<()>` indicating success or failure of the operation.
-    ///
-    /// # Errors
-    ///
-    /// * `WhitenoiseError::InvalidEvent` - If the welcome event ID cannot be parsed
-    /// * `WhitenoiseError::AccountNotFound` - If the account with the given pubkey doesn't exist
-    /// * `WhitenoiseError::WelcomeNotFound` - If no welcome message exists with the given event ID
-    /// * Other MLS-related errors if the nostr-mls system encounters issues during decline
     pub async fn decline_welcome(
         &self,
         pubkey: &PublicKey,

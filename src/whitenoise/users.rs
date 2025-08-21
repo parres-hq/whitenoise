@@ -29,60 +29,6 @@ impl User {
     /// # Arguments
     ///
     /// * `whitenoise` - The Whitenoise instance used to access the Nostr client and database
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the operation completes successfully, regardless of whether
-    /// new metadata was found or updated. The method is idempotent and safe to call repeatedly.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - There's a database error when fetching the user's relay list
-    /// - Network errors occur while connecting to or querying the relays
-    /// - The fetched metadata event is malformed or invalid
-    /// - Database operations fail when saving the updated metadata
-    /// - The relay URLs are malformed or unreachable
-    ///
-    /// # Behavior Details
-    ///
-    /// - **Smart Relay Selection**: Uses the user's NIP-65 relay list if available, otherwise defaults to built-in relays
-    /// - **Change Detection**: Only updates the database if the fetched metadata differs from the cached version
-    /// - **Atomic Updates**: Database operations are wrapped in a transaction for consistency
-    /// - **Metadata Validation**: Validates fetched metadata before applying updates
-    /// - **Timeout Handling**: Uses a 10-second timeout for relay queries to prevent hanging
-    ///
-    /// # Metadata Fields
-    ///
-    /// The method updates all standard NIP-01 metadata fields:
-    /// - `name` - The user's name/username
-    /// - `display_name` - The user's display name
-    /// - `about` - User's bio/description
-    /// - `picture` - URL to user's profile picture
-    /// - `banner` - URL to user's banner image
-    /// - `website` - User's website URL
-    /// - `nip05` - NIP-05 identifier for verification
-    /// - And other custom fields present in the metadata event
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let mut user = whitenoise.find_user_by_pubkey(&some_pubkey).await?;
-    ///
-    /// // Update user's metadata from their relays
-    /// user.update_metadata(&whitenoise).await?;
-    ///
-    /// // The user object now contains the latest metadata
-    /// println!("Updated name: {:?}", user.metadata.name);
-    /// println!("Updated about: {:?}", user.metadata.about);
-    /// ```
-    ///
-    /// # Performance Considerations
-    ///
-    /// - **Network I/O**: This method performs network requests and may be slow
-    /// - **Caching**: Consider the frequency of calls as metadata doesn't change often
-    /// - **Batch Updates**: For multiple users, consider implementing batch update logic
-    /// - **Relay Health**: Performance depends on the responsiveness of the user's configured relays
     pub async fn update_metadata(&mut self, whitenoise: &Whitenoise) -> Result<()> {
         let relays_to_query = self.get_query_relays(whitenoise).await?;
         let metadata = whitenoise
@@ -110,51 +56,6 @@ impl User {
     /// # Arguments
     ///
     /// * `whitenoise` - The Whitenoise instance used to access the Nostr client and database
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(Event)` containing the user's key package event if found, or `None` if:
-    /// - The user hasn't published a key package yet
-    /// - The key package isn't available on any of their configured relays
-    /// - The user has no key package relays configured
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - There's a database error when fetching the user's key package relay list
-    /// - Network errors occur while connecting to or querying the relays
-    /// - The relay URLs are malformed or unreachable
-    ///
-    /// # MLS Context
-    ///
-    /// Key packages are essential for MLS group messaging:
-    /// - They contain the user's public keys and MLS credentials
-    /// - Other users need this key package to add the user to MLS groups
-    /// - Key packages should be refreshed periodically for forward secrecy
-    /// - They are published as Nostr events of kind 443 (MlsKeyPackage)
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let user = whitenoise.find_user_by_pubkey(&some_pubkey).await?;
-    ///
-    /// match user.key_package_event(&whitenoise).await? {
-    ///     Some(event) => {
-    ///         println!("Found key package for user: {}", user.pubkey);
-    ///         // Use the key package to add user to MLS group
-    ///     }
-    ///     None => {
-    ///         println!("No key package found for user: {}", user.pubkey);
-    ///         // User cannot be added to MLS groups yet
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// # Performance Notes
-    ///
-    /// - This method performs network requests and may be slow
-    /// - Consider caching the result if calling frequently
-    /// - The method uses a 10-second timeout for relay queries
     pub async fn key_package_event(&self, whitenoise: &Whitenoise) -> Result<Option<Event>> {
         let key_package_relays = self
             .relays(RelayType::KeyPackage, &whitenoise.database)

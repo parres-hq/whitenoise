@@ -108,26 +108,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `pubkey` - The `PublicKey` of the user whose relay statuses should be fetched.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(Vec<(RelayUrl, RelayStatus)>)` containing relay URLs and their current
-    /// status from the nostr-sdk, or an error if the query fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if the relay query fails.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let pubkey = PublicKey::from_hex("...").unwrap();
-    /// let relay_statuses = whitenoise.fetch_relay_status(pubkey).await?;
-    ///
-    /// for (url, status) in relay_statuses {
-    ///     println!("Relay {} status: {:?}", url, status);
-    /// }
-    /// ```
     pub async fn fetch_relay_status(
         &self,
         account: &Account,

@@ -77,29 +77,6 @@ impl Whitenoise {
     /// This method retrieves the global application settings, which includes
     /// theme preferences and other UI configuration. If no settings exist
     /// in the database, default settings will be created and saved.
-    ///
-    /// # Returns
-    ///
-    /// Returns the current [`AppSettings`] on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
-    /// * Database query fails
-    /// * Settings deserialization fails
-    /// * Default settings cannot be created or saved
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use whitenoise::Whitenoise;
-    ///
-    /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
-    /// let settings = whitenoise.app_settings().await?;
-    /// println!("Current theme: {}", settings.theme_mode);
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn app_settings(&self) -> Result<AppSettings> {
         AppSettings::find_or_create_default(&self.database).await
     }
@@ -114,32 +91,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `theme_mode` - The new [`ThemeMode`] to set (Light, Dark, or System)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on successful update.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`crate::whitenoise::WhitenoiseError`] if:
-    /// * Loading current settings fails
-    /// * Saving updated settings fails
-    /// * Database operations fail
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use whitenoise::{ThemeMode, Whitenoise};
-    ///
-    /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
-    /// // Set theme to dark mode
-    /// whitenoise.update_theme_mode(ThemeMode::Dark).await?;
-    ///
-    /// // Set theme to follow system preference
-    /// whitenoise.update_theme_mode(ThemeMode::System).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn update_theme_mode(&self, theme_mode: ThemeMode) -> Result<()> {
         AppSettings::update_theme_mode(theme_mode, &self.database).await
     }
