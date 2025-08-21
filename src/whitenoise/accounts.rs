@@ -214,18 +214,13 @@ impl Account {
         Ok(())
     }
 
-    /// Uploads a profile picture to a Blossom server and updates the account's metadata.
-    ///
-    /// This method reads an image file from the specified path, uploads it to a Blossom server,
-    /// and updates the account's metadata with the new profile picture URL. The image is
-    /// uploaded using the Blossom API, and the resulting URL is stored in the account's metadata.
+    /// Uploads an image file to a Blossom server and returns the URL.
     ///
     /// # Arguments
-    ///
-    /// * `file_path` - The path to the image file to upload
-    /// * `image_type` - The type of image being uploaded (e.g., JPEG, PNG)
-    /// * `server` - The URL of the Blossom server to use for uploading
-    /// * `whitenoise` - The Whitenoise instance for database and network operations
+    /// * `file_path` - Path to the image file to upload
+    /// * `image_type` - Image type (JPEG, PNG, etc.)
+    /// * `server` - Blossom server URL
+    /// * `whitenoise` - Whitenoise instance for accessing account keys
     pub async fn upload_profile_picture(
         &self,
         file_path: &str,

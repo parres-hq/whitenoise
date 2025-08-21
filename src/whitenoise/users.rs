@@ -30,9 +30,6 @@ impl User {
     /// The method implements smart fetching by using the user's NIP-65 relay list when available,
     /// or falling back to default relays if the user hasn't published a relay list yet.
     ///
-    /// NOTE: This method is not used for updating an accounts's metadata with new metadata created in
-    /// the app. Use the `update_account_metadata` method instead.
-    ///
     /// # Arguments
     ///
     /// * `whitenoise` - The Whitenoise instance used to access the Nostr client and database
