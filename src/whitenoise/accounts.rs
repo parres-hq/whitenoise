@@ -1,17 +1,51 @@
+use std::collections::HashSet;
+use std::path::Path;
+
+use chrono::{DateTime, Utc};
+use nostr_blossom::client::BlossomClient;
+use nostr_mls::prelude::*;
+use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::nostr_manager::NostrManagerError;
 use crate::types::ImageType;
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::accounts::AccountError;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::User;
 use crate::whitenoise::{Whitenoise, WhitenoiseError};
 use crate::RelayType;
-use chrono::Utc;
-use nostr_blossom::client::BlossomClient;
-use nostr_mls::prelude::*;
-use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
-use std::collections::HashSet;
-use std::path::Path;
+
+#[derive(Error, Debug)]
+pub enum AccountError {
+    #[error("Failed to parse public key: {0}")]
+    PublicKeyError(#[from] nostr_sdk::key::Error),
+
+    #[error("Failed to initialize Nostr manager: {0}")]
+    NostrManagerError(#[from] NostrManagerError),
+
+    #[error("Nostr MLS error: {0}")]
+    NostrMlsError(#[from] nostr_mls::Error),
+
+    #[error("Nostr MLS SQLite storage error: {0}")]
+    NostrMlsSqliteStorageError(#[from] nostr_mls_sqlite_storage::error::Error),
+
+    #[error("Nostr MLS not initialized")]
+    NostrMlsNotInitialized,
+
+    #[error("Whitenoise not initialized")]
+    WhitenoiseNotInitialized,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub struct Account {
+    pub id: Option<i64>,
+    pub pubkey: PublicKey,
+    pub user_id: i64,
+    pub last_synced_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
 
 impl Account {
     pub(crate) async fn new(
@@ -33,6 +67,184 @@ impl Account {
         };
 
         Ok((account, keys))
+    }
+
+    /// Retrieves the account's configured relays for a specific relay type.
+    ///
+    /// This method fetches the locally cached relays associated with this account
+    /// for the specified relay type. Different relay types serve different purposes
+    /// in the Nostr ecosystem and are published as separate relay list events.
+    ///
+    /// # Arguments
+    ///
+    /// * `relay_type` - The type of relays to retrieve:
+    ///   - `RelayType::Nip65` - General purpose relays for reading/writing events (kind 10002)
+    ///   - `RelayType::Inbox` - Specialized relays for receiving private messages (kind 10050)
+    ///   - `RelayType::KeyPackage` - Relays that store MLS key packages (kind 10051)
+    /// * `whitenoise` - The Whitenoise instance for database operations
+    pub async fn relays(
+        &self,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<Vec<Relay>> {
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user.relays(relay_type, &whitenoise.database).await?;
+        Ok(relays)
+    }
+
+    /// Helper method to retrieve the NIP-65 relays for this account.
+    pub(crate) async fn nip65_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user.relays(RelayType::Nip65, &whitenoise.database).await?;
+        Ok(relays)
+    }
+
+    /// Helper method to retrieve the inbox relays for this account.
+    pub(crate) async fn inbox_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user.relays(RelayType::Inbox, &whitenoise.database).await?;
+        Ok(relays)
+    }
+
+    /// Helper method to retrieve the key package relays for this account.
+    pub(crate) async fn key_package_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
+        let user = self.user(&whitenoise.database).await?;
+        let relays = user
+            .relays(RelayType::KeyPackage, &whitenoise.database)
+            .await?;
+        Ok(relays)
+    }
+
+    /// Adds a relay to the account's relay list for the specified relay type.
+    ///
+    /// This method adds a relay to the account's local relay configuration and automatically
+    /// publishes the updated relay list to the Nostr network. The relay will be associated
+    /// with the specified type (NIP-65, Inbox, or Key Package relays) and become part of
+    /// the account's relay configuration for that purpose.
+    ///
+    /// # Arguments
+    ///
+    /// * `relay` - The relay to add to the account's relay list
+    /// * `relay_type` - The type of relay list to add this relay to:
+    ///   - `RelayType::Nip65` - General purpose relays (kind 10002)
+    ///   - `RelayType::Inbox` - Inbox relays for private messages (kind 10050)
+    ///   - `RelayType::KeyPackage` - Key package relays for MLS (kind 10051)
+    /// * `whitenoise` - The Whitenoise instance for database and network operations
+    pub async fn add_relay(
+        &self,
+        relay: &Relay,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<()> {
+        let user = self.user(&whitenoise.database).await?;
+        user.add_relay(relay, relay_type, &whitenoise.database)
+            .await?;
+        whitenoise
+            .background_publish_account_relay_list(self, relay_type)
+            .await?;
+        tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay.url);
+
+        Ok(())
+    }
+
+    /// Removes a relay from the account's relay list for the specified relay type.
+    ///
+    /// This method removes a relay from the account's local relay configuration and automatically
+    /// publishes the updated relay list to the Nostr network. The relay will be disassociated
+    /// from the specified type and the account will stop using it for that purpose.
+    ///
+    /// # Arguments
+    ///
+    /// * `relay` - The relay to remove from the account's relay list
+    /// * `relay_type` - The type of relay list to remove this relay from:
+    ///   - `RelayType::Nip65` - General purpose relays (kind 10002)
+    ///   - `RelayType::Inbox` - Inbox relays for private messages (kind 10050)
+    ///   - `RelayType::KeyPackage` - Key package relays for MLS (kind 10051)
+    /// * `whitenoise` - The Whitenoise instance for database and network operations
+    pub async fn remove_relay(
+        &self,
+        relay: &Relay,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<()> {
+        let user = self.user(&whitenoise.database).await?;
+        user.remove_relay(relay, relay_type, &whitenoise.database)
+            .await?;
+        whitenoise
+            .background_publish_account_relay_list(self, relay_type)
+            .await?;
+        tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay.url);
+        Ok(())
+    }
+
+    /// Retrieves the cached metadata for this account.
+    ///
+    /// This method returns the account's stored metadata from the local database without
+    /// performing any network requests. The metadata contains profile information such as
+    /// display name, about text, picture URL, and other profile fields as defined by NIP-01.
+    ///
+    /// # Arguments
+    ///
+    /// * `whitenoise` - The Whitenoise instance used to access the database
+    pub async fn metadata(&self, whitenoise: &Whitenoise) -> Result<Metadata> {
+        let user = self.user(&whitenoise.database).await?;
+        Ok(user.metadata.clone())
+    }
+
+    /// Updates the account's metadata with new values and publishes to the network.
+    ///
+    /// This method updates the account's metadata in the local database with the provided
+    /// values and automatically publishes a metadata event (kind 0) to the account's relays.
+    /// This allows other users and clients to see the updated profile information.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - The new metadata to set for this account
+    /// * `whitenoise` - The Whitenoise instance for database and network operations
+    pub async fn update_metadata(
+        &self,
+        metadata: &Metadata,
+        whitenoise: &Whitenoise,
+    ) -> Result<()> {
+        tracing::debug!(target: "whitenoise::accounts::update_metadata", "Updating metadata for account: {:?}", self.pubkey);
+        let mut user = self.user(&whitenoise.database).await?;
+        user.metadata = metadata.clone();
+        user.save(&whitenoise.database).await?;
+        whitenoise.background_publish_account_metadata(self).await?;
+        Ok(())
+    }
+
+    /// Uploads an image file to a Blossom server and returns the URL.
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to the image file to upload
+    /// * `image_type` - Image type (JPEG, PNG, etc.)
+    /// * `server` - Blossom server URL
+    /// * `whitenoise` - Whitenoise instance for accessing account keys
+    pub async fn upload_profile_picture(
+        &self,
+        file_path: &str,
+        image_type: ImageType,
+        server: Url,
+        whitenoise: &Whitenoise,
+    ) -> Result<String> {
+        let client = BlossomClient::new(server);
+        let keys = whitenoise
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&self.pubkey)?;
+        let data = tokio::fs::read(file_path).await?;
+
+        let descriptor = client
+            .upload_blob(
+                data,
+                Some(image_type.mime_type().to_string()),
+                None,
+                Some(&keys),
+            )
+            .await
+            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
+
+        Ok(descriptor.url.to_string())
     }
 
     pub(crate) fn create_nostr_mls(
@@ -67,87 +279,6 @@ impl Account {
         whitenoise.nostr.client.connect().await;
         Ok(())
     }
-
-    pub async fn relays(
-        &self,
-        relay_type: RelayType,
-        whitenoise: &Whitenoise,
-    ) -> Result<Vec<Relay>> {
-        let user = self.user(&whitenoise.database).await?;
-        let relays = user.relays(relay_type, &whitenoise.database).await?;
-        Ok(relays)
-    }
-
-    pub(crate) async fn nip65_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
-        let user = self.user(&whitenoise.database).await?;
-        let relays = user.relays(RelayType::Nip65, &whitenoise.database).await?;
-        Ok(relays)
-    }
-
-    pub(crate) async fn inbox_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
-        let user = self.user(&whitenoise.database).await?;
-        let relays = user.relays(RelayType::Inbox, &whitenoise.database).await?;
-        Ok(relays)
-    }
-
-    pub(crate) async fn key_package_relays(&self, whitenoise: &Whitenoise) -> Result<Vec<Relay>> {
-        let user = self.user(&whitenoise.database).await?;
-        let relays = user
-            .relays(RelayType::KeyPackage, &whitenoise.database)
-            .await?;
-        Ok(relays)
-    }
-
-    pub async fn add_relay(
-        &self,
-        relay: &Relay,
-        relay_type: RelayType,
-        whitenoise: &Whitenoise,
-    ) -> Result<()> {
-        let user = self.user(&whitenoise.database).await?;
-        user.add_relay(relay, relay_type, &whitenoise.database)
-            .await?;
-        whitenoise
-            .background_publish_account_relay_list(self, relay_type)
-            .await?;
-        tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay.url);
-
-        Ok(())
-    }
-
-    pub async fn remove_relay(
-        &self,
-        relay: &Relay,
-        relay_type: RelayType,
-        whitenoise: &Whitenoise,
-    ) -> Result<()> {
-        let user = self.user(&whitenoise.database).await?;
-        user.remove_relay(relay, relay_type, &whitenoise.database)
-            .await?;
-        whitenoise
-            .background_publish_account_relay_list(self, relay_type)
-            .await?;
-        tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay.url);
-        Ok(())
-    }
-
-    pub async fn metadata(&self, whitenoise: &Whitenoise) -> Result<Metadata> {
-        let user = self.user(&whitenoise.database).await?;
-        Ok(user.metadata.clone())
-    }
-
-    pub async fn update_metadata(
-        &self,
-        metadata: &Metadata,
-        whitenoise: &Whitenoise,
-    ) -> Result<()> {
-        tracing::debug!(target: "whitenoise::accounts::update_metadata", "Updating metadata for account: {:?}", self.pubkey);
-        let mut user = self.user(&whitenoise.database).await?;
-        user.metadata = metadata.clone();
-        user.save(&whitenoise.database).await?;
-        whitenoise.background_publish_account_metadata(self).await?;
-        Ok(())
-    }
 }
 
 impl Whitenoise {
@@ -156,14 +287,6 @@ impl Whitenoise {
     /// This method generates a new keypair, sets up the account with default relay lists,
     /// creates a metadata event with a generated petname, and fully configures the account
     /// for use in Whitenoise.
-    ///
-    /// # Returns
-    ///
-    /// Returns the newly created and fully configured `Account` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if any step fails. The operation is atomic with cleanup on failure.
     pub async fn create_identity(&self) -> Result<Account> {
         let keys = Keys::generate();
         tracing::debug!(target: "whitenoise::create_identity", "Generated new keypair: {}", keys.public_key().to_hex());
@@ -199,14 +322,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `nsec_or_hex_privkey` - The user's private key as a nsec string or hex-encoded string.
-    ///
-    /// # Returns
-    ///
-    /// Returns the fully configured `Account` associated with the provided private key on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if the private key is invalid or account setup fails.
     pub async fn login(&self, nsec_or_hex_privkey: String) -> Result<Account> {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();
@@ -250,14 +365,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `account` - The account to log out.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if there is a failure in removing the account or its private key.
     pub async fn logout(&self, pubkey: &PublicKey) -> Result<()> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
         // Delete the account from the database
@@ -267,6 +374,41 @@ impl Whitenoise {
         self.secrets_store.remove_private_key_for_pubkey(pubkey)?;
 
         Ok(())
+    }
+
+    /// Returns the total number of accounts stored in the database.
+    ///
+    /// This method queries the database to count all accounts that have been created
+    /// or imported into the Whitenoise instance. This includes both active accounts
+    /// and any accounts that may have been created but are not currently in use.
+    ///
+    /// # Returns
+    ///
+    /// Returns the count of accounts as a `usize`. Returns 0 if no accounts exist.
+    pub async fn get_accounts_count(&self) -> Result<usize> {
+        let accounts = Account::all(&self.database).await?;
+        Ok(accounts.len())
+    }
+
+    /// Retrieves all accounts stored in the database.
+    ///
+    /// This method returns all accounts that have been created or imported into
+    /// the Whitenoise instance. Each account represents a distinct identity with
+    /// its own keypair, relay configurations, and associated data.
+    pub async fn all_accounts(&self) -> Result<Vec<Account>> {
+        Account::all(&self.database).await
+    }
+
+    /// Finds and returns an account by its public key.
+    ///
+    /// This method searches the database for an account with the specified public key.
+    /// Public keys are unique identifiers in Nostr, so this will return at most one account.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The public key of the account to find
+    pub async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
+        Account::find_by_pubkey(pubkey, &self.database).await
     }
 
     async fn create_base_account_with_private_key(&self, keys: &Keys) -> Result<Account> {
@@ -343,8 +485,6 @@ impl Whitenoise {
         }
         Ok(())
     }
-
-    // === Helper Methods ===
 
     async fn load_default_relays(&self) -> Result<Vec<Relay>> {
         let mut default_relays = Vec::new();
@@ -733,101 +873,6 @@ impl Whitenoise {
             "Subscriptions setup"
         );
         Ok(())
-    }
-
-    pub async fn update_account_metadata(
-        &self,
-        account: &Account,
-        metadata: &Metadata,
-    ) -> Result<()> {
-        let mut user = account.user(&self.database).await?;
-        user.metadata = metadata.clone();
-        user.save(&self.database).await?;
-        Ok(())
-    }
-
-    /// Uploads a profile picture to a Blossom server.
-    ///
-    /// This method performs the following steps:
-    /// 1. Creates a Blossom client for the specified server
-    /// 2. Retrieves the user's Nostr keys for authentication
-    /// 3. Reads the image file from the filesystem
-    /// 4. Uploads the image blob to the Blossom server with the appropriate content type
-    ///
-    /// The Blossom protocol provides content-addressable storage, ensuring the image
-    /// can be retrieved by its hash. This method only handles the upload process and
-    /// does not automatically update the user's metadata.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey` - A reference to the `PublicKey` of the account uploading the profile picture
-    /// * `server` - The `Url` of the Blossom server to upload to
-    /// * `file_path` - `&str` pointing to the image file to be uploaded
-    /// * `image_type` - The `ImageType` enum specifying the image format (JPG, JPEG, PNG, GIF, or WebP)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(String)` containing the full URL of the uploaded image
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if:
-    /// * The account is not found or not logged in
-    /// * The user's Nostr keys cannot be retrieved from the secrets store
-    /// * The image file cannot be read from the filesystem
-    /// * The upload to the Blossom server fails (network error, authentication failure, etc.)
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use url::Url;
-    /// use crate::types::ImageType;
-    ///
-    /// let server_url = Url::parse("http://localhost:3000").unwrap();
-    /// let image_path = "./profile.png";
-    ///
-    /// let image_url = whitenoise.upload_profile_picture(
-    ///     &user_pubkey,
-    ///     server_url,
-    ///     image_path,
-    ///     ImageType::Png
-    /// ).await?;
-    /// ```
-    pub async fn upload_profile_picture(
-        &self,
-        pubkey: PublicKey,
-        server: Url,
-        file_path: &str,
-        image_type: ImageType,
-    ) -> Result<String> {
-        let client = BlossomClient::new(server);
-        let keys = self.secrets_store.get_nostr_keys_for_pubkey(&pubkey)?;
-        let data = tokio::fs::read(file_path).await?;
-
-        let descriptor = client
-            .upload_blob(
-                data,
-                Some(image_type.mime_type().to_string()),
-                None,
-                Some(&keys),
-            )
-            .await
-            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
-
-        Ok(descriptor.url.to_string())
-    }
-
-    pub async fn get_accounts_count(&self) -> Result<usize> {
-        let accounts = Account::all(&self.database).await?;
-        Ok(accounts.len())
-    }
-
-    pub async fn all_accounts(&self) -> Result<Vec<Account>> {
-        Account::all(&self.database).await
-    }
-
-    pub async fn find_account_by_pubkey(&self, pubkey: &PublicKey) -> Result<Account> {
-        Account::find_by_pubkey(pubkey, &self.database).await
     }
 }
 

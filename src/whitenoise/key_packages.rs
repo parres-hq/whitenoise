@@ -5,6 +5,7 @@ use nostr_sdk::prelude::*;
 use std::time::Duration;
 
 impl Whitenoise {
+    /// Helper method to create and encode a key package for the given account.
     pub(crate) async fn encoded_key_package(
         &self,
         account: &Account,
@@ -24,23 +25,6 @@ impl Whitenoise {
     }
 
     /// Publishes the MLS key package for the given account to its key package relays.
-    ///
-    /// This method attempts to acquire the `nostr_mls` lock, generate a key package event,
-    /// and publish it to the account's key package relays. If successful, the key package
-    /// is published to Nostr; otherwise, onboarding status is updated accordingly.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` whose key package will be published.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if the lock cannot be acquired, if the key package cannot be generated,
-    /// or if publishing to Nostr fails.
     pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
         // Extract key package data while holding the lock
         let (encoded_key_package, tags) = self.encoded_key_package(account).await?;
@@ -66,19 +50,6 @@ impl Whitenoise {
     }
 
     /// Deletes the key package from the relays for the given account.
-    ///
-    /// This method deletes the key package from the relays for the given account.
-    ///
-    /// # Arguments
-    ///
-    /// * `account` - A reference to the `Account` whose key package will be deleted.
-    /// * `event_id` - The `EventId` of the key package to delete.
-    /// * `key_package_relays` - A vector of `RelayUrl` specifying the relays to delete the key package from.
-    /// * `delete_mls_stored_keys` - A boolean indicating whether to delete the key package from MLS storage.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success.
     pub(crate) async fn delete_key_package_from_relays_for_account(
         &self,
         account: &Account,

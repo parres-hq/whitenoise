@@ -1,8 +1,8 @@
-use super::{utils::parse_timestamp, Database, DatabaseError};
-use crate::whitenoise::relays::Relay;
-use crate::WhitenoiseError;
 use chrono::{DateTime, Utc};
 use nostr_sdk::RelayUrl;
+
+use super::{utils::parse_timestamp, Database, DatabaseError};
+use crate::{whitenoise::relays::Relay, WhitenoiseError};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct RelayRow {

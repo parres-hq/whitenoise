@@ -2,10 +2,14 @@ use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::Receiver;
 
-use crate::types::ProcessableEvent;
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::Whitenoise;
+use crate::{
+    types::ProcessableEvent,
+    whitenoise::{
+        accounts::Account,
+        error::{Result, WhitenoiseError},
+        Whitenoise,
+    },
+};
 mod event_handlers;
 
 impl Whitenoise {

@@ -1,10 +1,14 @@
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::relays::{Relay, RelayType};
-use crate::whitenoise::Whitenoise;
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+
+use crate::whitenoise::{
+    error::{Result, WhitenoiseError},
+    relays::{Relay, RelayType},
+    Whitenoise,
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct User {
@@ -16,17 +20,20 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(pubkey: PublicKey) -> Self {
-        User {
-            id: None,
-            pubkey,
-            metadata: Metadata::default(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        }
-    }
-
-    pub(crate) async fn update_metadata(&mut self, whitenoise: &Whitenoise) -> Result<()> {
+    /// Syncs the user's metadata by fetching the latest version from Nostr relays.
+    ///
+    /// This method queries the user's configured relays (or default relays if none are configured)
+    /// to fetch the most recent metadata event (kind 0) published by the user. If newer metadata
+    /// is found that differs from the locally cached version, it updates the local record and
+    /// saves the changes to the database.
+    ///
+    /// The method implements smart fetching by using the user's NIP-65 relay list when available,
+    /// or falling back to default relays if the user hasn't published a relay list yet.
+    ///
+    /// # Arguments
+    ///
+    /// * `whitenoise` - The Whitenoise instance used to access the Nostr client and database
+    pub async fn sync_metadata(&mut self, whitenoise: &Whitenoise) -> Result<()> {
         let relays_to_query = self.get_query_relays(whitenoise).await?;
         let metadata = whitenoise
             .nostr
@@ -41,16 +48,38 @@ impl User {
         Ok(())
     }
 
-    /// Fetches the latest relay lists for this user from Nostr and updates the local database
+    /// Fetches the user's MLS key package event from their configured key package relays.
+    ///
+    /// This method retrieves the user's published MLS (Message Layer Security) key package
+    /// from the Nostr network. Key packages are cryptographic objects that contain the user's
+    /// public keys and credentials needed to add them to MLS group conversations.
+    ///
+    /// The method first retrieves the user's key package relay list (NIP-65 kind 10051 events),
+    /// then fetches the most recent MLS key package event (kind 443) from those relays.
     ///
     /// # Arguments
-    /// * `whitenoise` - The Whitenoise instance for network and database operations
     ///
-    /// # Returns
-    /// `Ok(())` if successful, or `Err(WhitenoiseError)` if critical operations fail
-    ///
-    /// # Error Handling
-    /// Errors in updating individual relay types are logged but don't prevent other updates
+    /// * `whitenoise` - The Whitenoise instance used to access the Nostr client and database
+    pub async fn key_package_event(&self, whitenoise: &Whitenoise) -> Result<Option<Event>> {
+        let key_package_relays = self
+            .relays(RelayType::KeyPackage, &whitenoise.database)
+            .await?;
+        let key_package_event = whitenoise
+            .nostr
+            .fetch_user_key_package(self.pubkey, &key_package_relays)
+            .await?;
+        Ok(key_package_event)
+    }
+
+    pub async fn relays_by_type(
+        &self,
+        relay_type: RelayType,
+        whitenoise: &Whitenoise,
+    ) -> Result<Vec<Relay>> {
+        self.relays(relay_type, &whitenoise.database).await
+    }
+
+    /// Fetches the latest relay lists for this user from Nostr and updates the local database
     pub(crate) async fn update_relay_lists(&self, whitenoise: &Whitenoise) -> Result<()> {
         let initial_query_relays = self.get_query_relays(whitenoise).await?;
 
@@ -249,17 +278,6 @@ impl User {
 
         Ok(true)
     }
-
-    pub async fn key_package_event(&self, whitenoise: &Whitenoise) -> Result<Option<Event>> {
-        let key_package_relays = self
-            .relays(RelayType::KeyPackage, &whitenoise.database)
-            .await?;
-        let key_package_event = whitenoise
-            .nostr
-            .fetch_user_key_package(self.pubkey, &key_package_relays)
-            .await?;
-        Ok(key_package_event)
-    }
 }
 
 impl Whitenoise {
@@ -306,85 +324,6 @@ impl Whitenoise {
         User::find_by_pubkey(pubkey, &self.database).await
     }
 
-    pub async fn find_or_create_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<(User, bool)> {
-        User::find_or_create_by_pubkey(pubkey, &self.database).await
-    }
-
-    /// Retrieves the relay list for a specific user and relay type.
-    ///
-    /// This method fetches the configured relays for a user based on the specified relay type.
-    /// Different relay types serve different purposes in the Nostr ecosystem:
-    /// - **Nostr relays** (NIP-65): General purpose relays for reading/writing events
-    /// - **Inbox relays** (NIP-65): Specialized relays for receiving private messages
-    /// - **Key package relays**: Relays that store MLS key packages for encrypted group messaging
-    ///
-    /// The relay lists are typically published by users as relay list events (kinds 10002, 10050, 10051)
-    /// and cached locally in the database for efficient access.
-    ///
-    /// # Arguments
-    ///
-    /// * `user` - The user whose relay list to retrieve
-    /// * `relay_type` - The type of relays to fetch (Nostr, Inbox, or KeyPackage)
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result<Vec<Relay>>` containing:
-    /// - `Ok(Vec<Relay>)` - A vector of relays configured for the user and relay type
-    /// - `Err(WhitenoiseError)` - If there's a database error or user lookup fails
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use nostr_sdk::PublicKey;
-    /// use whitenoise::{RelayType, Whitenoise};
-    ///
-    /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
-    /// let pubkey = PublicKey::parse("npub1...")?;
-    /// let user = whitenoise.find_user_by_pubkey(&pubkey).await?;
-    ///
-    /// // Get user's inbox relays for private messaging
-    /// let inbox_relays = whitenoise.user_relays(&user, RelayType::Inbox).await?;
-    /// println!("User has {} inbox relays", inbox_relays.len());
-    ///
-    /// // Get user's key package relays for MLS group messaging
-    /// let kp_relays = whitenoise.user_relays(&user, RelayType::KeyPackage).await?;
-    /// for relay in kp_relays {
-    ///     println!("Key package relay: {}", relay.url);
-    /// }
-    ///
-    /// // Get user's general Nostr relays
-    /// let nip65_relays = whitenoise.user_relays(&user, RelayType::Nip65).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Relay Types
-    ///
-    /// - `RelayType::Nip65` - General purpose relays from NIP-65 relay lists (kind 10002)
-    /// - `RelayType::Inbox` - Inbox relays for private messages (kind 10050)
-    /// - `RelayType::KeyPackage` - Relays storing MLS key packages (kind 10051)
-    ///
-    /// # Notes
-    ///
-    /// - If a user hasn't published relay lists, the returned vector may be empty
-    /// - Relay lists are cached locally and updated when new relay list events are received
-    /// - The method returns database records that include additional metadata like read/write permissions
-    /// - For users that haven't configured specific relay types, consider falling back to default relays
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - There's a database connection or query error
-    /// - The user object contains invalid data (shouldn't happen with valid User instances)
-    pub async fn user_relays(&self, user: &User, relay_type: RelayType) -> Result<Vec<Relay>> {
-        user.relays(relay_type, &self.database).await
-    }
-
-    pub async fn user_metadata(&self, pubkey: &PublicKey) -> Result<Metadata> {
-        let user = self.find_user_by_pubkey(pubkey).await?;
-        Ok(user.metadata.clone())
-    }
-
     pub(crate) async fn background_fetch_user_data(&self, user: &User) -> Result<()> {
         let user_clone = user.clone();
         let mut mut_user_clone = user.clone();
@@ -394,7 +333,7 @@ impl Whitenoise {
             // Do these in series so that we fetch the user's relays before trying to fetch metadata
             // (more likely we find metadata looking on the right relays)
             let relay_result = user_clone.update_relay_lists(whitenoise).await;
-            let metadata_result = mut_user_clone.update_metadata(whitenoise).await;
+            let metadata_result = mut_user_clone.sync_metadata(whitenoise).await;
 
             // Log errors but don't fail
             if let Err(e) = relay_result {
@@ -533,7 +472,13 @@ mod tests {
     async fn test_get_query_relays_with_no_stored_relays() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
         let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let user = User::new(test_pubkey);
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
         let saved_user = user.save(&whitenoise.database).await.unwrap();
         let query_relays = saved_user.get_query_relays(&whitenoise).await.unwrap();
 
@@ -573,7 +518,7 @@ mod tests {
         }
 
         let original_metadata = saved_user.metadata.clone();
-        let result = saved_user.update_metadata(&whitenoise).await;
+        let result = saved_user.sync_metadata(&whitenoise).await;
 
         assert!(result.is_ok());
 
@@ -598,7 +543,7 @@ mod tests {
         };
 
         let mut saved_user = user.save(&whitenoise.database).await.unwrap();
-        let result = saved_user.update_metadata(&whitenoise).await;
+        let result = saved_user.sync_metadata(&whitenoise).await;
 
         assert!(result.is_ok());
 
@@ -635,7 +580,7 @@ mod tests {
             .unwrap();
 
         let original_id = saved_user.id;
-        let result = saved_user.update_metadata(&whitenoise).await;
+        let result = saved_user.sync_metadata(&whitenoise).await;
 
         assert!(result.is_ok());
 

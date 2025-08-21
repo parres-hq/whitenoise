@@ -1,11 +1,10 @@
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::error::Result;
-use crate::whitenoise::Whitenoise;
+use std::{collections::HashSet, str::FromStr};
+
 use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::str::FromStr;
+
+use crate::whitenoise::{accounts::Account, error::Result, Whitenoise};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Relay {
@@ -108,26 +107,6 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `pubkey` - The `PublicKey` of the user whose relay statuses should be fetched.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(Vec<(RelayUrl, RelayStatus)>)` containing relay URLs and their current
-    /// status from the nostr-sdk, or an error if the query fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `WhitenoiseError` if the relay query fails.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let pubkey = PublicKey::from_hex("...").unwrap();
-    /// let relay_statuses = whitenoise.fetch_relay_status(pubkey).await?;
-    ///
-    /// for (url, status) in relay_statuses {
-    ///     println!("Relay {} status: {:?}", url, status);
-    /// }
-    /// ```
     pub async fn fetch_relay_status(
         &self,
         account: &Account,

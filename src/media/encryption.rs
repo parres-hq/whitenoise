@@ -2,12 +2,13 @@
 //! It uses ChaCha20-Poly1305 encryption, which provides authenticated encryption
 //! with better cross-platform performance characteristics compared to AES-GCM.
 
-use crate::media::errors::MediaError;
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
 use rand::RngCore;
+
+use crate::media::errors::MediaError;
 /// Encrypts file data using ChaCha20-Poly1305 encryption.
 ///
 /// # Arguments

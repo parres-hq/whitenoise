@@ -1,17 +1,15 @@
-// use crate::media::blossom::BlossomClient;
-use crate::types::ProcessableEvent;
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::database::DatabaseError;
-use crate::whitenoise::relays::Relay;
-use crate::whitenoise::Whitenoise;
+use std::{collections::HashSet, time::Duration};
 
 use ::rand::RngCore;
 use nostr_sdk::prelude::*;
-use std::collections::HashSet;
-
-use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
+
+// use crate::media::blossom::BlossomClient;
+use crate::{
+    types::ProcessableEvent,
+    whitenoise::{accounts::Account, database::DatabaseError, relays::Relay, Whitenoise},
+};
 
 pub mod parser;
 pub mod query;

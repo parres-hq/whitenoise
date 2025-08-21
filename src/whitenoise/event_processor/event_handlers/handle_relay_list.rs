@@ -1,8 +1,9 @@
-use crate::nostr_manager::NostrManager;
-use crate::whitenoise::error::Result;
-use crate::whitenoise::users::User;
-use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
+
+use crate::{
+    nostr_manager::NostrManager,
+    whitenoise::{error::Result, users::User, Whitenoise},
+};
 
 impl Whitenoise {
     pub async fn handle_relay_list(&self, event: Event) -> Result<()> {

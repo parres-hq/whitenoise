@@ -1,13 +1,15 @@
 //! Query functions for NostrManager
 //! This handles fetching events from the database cache.
 
-use crate::whitenoise::relays::Relay;
+use std::collections::HashSet;
+
+use nostr_sdk::prelude::*;
+
 use crate::{
     nostr_manager::{NostrManager, Result},
+    whitenoise::relays::Relay,
     RelayType,
 };
-use nostr_sdk::prelude::*;
-use std::collections::HashSet;
 
 impl NostrManager {
     pub(crate) async fn fetch_metadata_from(

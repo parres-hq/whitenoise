@@ -1,12 +1,17 @@
-use crate::whitenoise::accounts::Account;
-use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::group_information::{GroupInformation, GroupType};
-use crate::whitenoise::users::User;
-use crate::whitenoise::Whitenoise;
-use crate::RelayType;
+use std::{collections::HashSet, time::Duration};
+
 use nostr_mls::prelude::*;
-use std::collections::HashSet;
-use std::time::Duration;
+
+use crate::{
+    whitenoise::{
+        accounts::Account,
+        error::{Result, WhitenoiseError},
+        group_information::{GroupInformation, GroupType},
+        users::User,
+        Whitenoise,
+    },
+    RelayType,
+};
 
 impl Whitenoise {
     /// Creates a new MLS group with the specified members and settings
@@ -17,19 +22,6 @@ impl Whitenoise {
     /// * `admin_pubkeys` - List of public keys for group admins
     /// * `config` - Group configuration data
     /// * `group_type` - Optional explicit group type. If None, will be inferred from participant count
-    ///
-    /// # Returns
-    /// * `Ok(Group)` - The newly created group
-    /// * `Err(WhitenoiseError)` - Error message if group creation fails
-    ///
-    /// # Errors
-    /// Returns error if:
-    /// - Active account is not the creator
-    /// - Member/admin validation fails
-    /// - Key package fetching fails
-    /// - MLS group creation fails
-    /// - Welcome message sending fails
-    /// - Database operations fail
     pub async fn create_group(
         &self,
         creator_account: &Account,
@@ -214,27 +206,6 @@ impl Whitenoise {
     /// * `account` - The account performing the member addition (must be group admin)
     /// * `group_id` - The ID of the group to add members to
     /// * `members` - Vector of public keys for the new members to add
-    ///
-    /// # Returns
-    /// * `Ok(())` - If all members were successfully added and welcomed
-    /// * `Err(WhitenoiseError)` - If any step of the process fails
-    ///
-    /// # Errors
-    /// Returns error if:
-    /// - Account is not logged in or lacks admin permissions
-    /// - NostrMLS is not initialized for the account
-    /// - Key packages cannot be fetched for any member
-    /// - MLS add members operation fails
-    /// - Evolution event publishing fails
-    /// - Welcome message sending fails
-    /// - Group relays are not accessible
-    ///
-    /// # Notes
-    /// - Each new member's key package is fetched from their configured key package relays
-    /// - Welcome messages are sent to each member's inbox relays (with fallback to defaults)
-    /// - Welcome messages expire after 1 month
-    /// - If evolution event publishing fails, the operation is rolled back
-    /// - All new members receive the same group state and can immediately participate
     pub async fn add_members_to_group(
         &self,
         account: &Account,
@@ -369,25 +340,6 @@ impl Whitenoise {
     /// * `account` - The account performing the member removal (must be group admin)
     /// * `group_id` - The ID of the group to remove members from
     /// * `members` - Vector of public keys for the members to remove
-    ///
-    /// # Returns
-    /// * `Ok(())` - If all members were successfully removed
-    /// * `Err(WhitenoiseError)` - If any step of the process fails
-    ///
-    /// # Errors
-    /// Returns error if:
-    /// - Account is not logged in or lacks admin permissions
-    /// - NostrMLS is not initialized for the account
-    /// - MLS remove members operation fails
-    /// - Evolution event publishing fails
-    /// - Group relays are not accessible
-    /// - Any of the specified members are not in the group
-    ///
-    /// # Notes
-    /// - The pending commit is merged immediately after creation to ensure local state consistency
-    /// - The evolution event is published to all group relays
-    /// - Removed members will no longer be able to read new messages in the group
-    /// - Admin permissions are required to remove members from a group
     pub async fn remove_members_from_group(
         &self,
         account: &Account,
