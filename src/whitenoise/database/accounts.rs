@@ -4,11 +4,7 @@ use sqlx::Row;
 
 use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::{
-    whitenoise::{
-        accounts::Account,
-        database::users::UserRow,
-        users::User,
-    },
+    whitenoise::{accounts::Account, database::users::UserRow, users::User},
     WhitenoiseError,
 };
 

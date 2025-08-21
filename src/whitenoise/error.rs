@@ -3,9 +3,7 @@ use thiserror::Error;
 use crate::{
     nostr_manager::NostrManagerError,
     whitenoise::{
-        accounts::AccountError,
-        database::DatabaseError,
-        secrets_store::SecretsStoreError,
+        accounts::AccountError, database::DatabaseError, secrets_store::SecretsStoreError,
     },
 };
 

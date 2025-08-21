@@ -2,11 +2,7 @@ use nostr_sdk::prelude::*;
 
 use crate::{
     nostr_manager::NostrManager,
-    whitenoise::{
-        error::Result,
-        users::User,
-        Whitenoise,
-    },
+    whitenoise::{error::Result, users::User, Whitenoise},
 };
 
 impl Whitenoise {
