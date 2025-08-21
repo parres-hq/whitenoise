@@ -25,6 +25,7 @@ impl ScenarioRegistry {
         run_scenario!(AppSettingsScenario);
         run_scenario!(MetadataManagementScenario);
         run_scenario!(MessagingScenario);
+        run_scenario!(FollowManagementScenario);
 
         Self::print_summary(&results, overall_start.elapsed()).await;
 
