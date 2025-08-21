@@ -21,7 +21,7 @@ int-test:
     nostr_mls_sqlite_storage=error,\
     tungstenite=error,\
     integration_test=debug \
-    cargo run --bin integration_test -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+    cargo run --bin integration_test --features integration-tests -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
 # Run all tests (unit tests, integration tests, and doc tests)
 test:

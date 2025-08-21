@@ -8,6 +8,11 @@ mod nostr_manager;
 mod types;
 pub mod whitenoise;
 
+// Include integration tests module only when the integration-tests feature is enabled
+// This provides IDE support without including tests in production builds
+#[cfg(feature = "integration-tests")]
+pub mod integration_tests;
+
 // Re-export main types for library users
 pub use nostr_manager::parser::SerializableToken;
 pub use nostr_mls::groups::NostrGroupConfigData;
