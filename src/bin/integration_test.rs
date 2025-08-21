@@ -455,11 +455,11 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Get initial group member count
     let initial_members = whitenoise
-        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .group_members(&account1, &test_group.mls_group_id)
         .await
         .unwrap();
     let initial_admins = whitenoise
-        .fetch_group_admins(&account1, &test_group.mls_group_id)
+        .group_admins(&account1, &test_group.mls_group_id)
         .await
         .unwrap();
     assert_eq!(initial_admins.len(), 1);
@@ -488,7 +488,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Verify the member was added
     let updated_members = whitenoise
-        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .group_members(&account1, &test_group.mls_group_id)
         .await
         .unwrap();
     assert_eq!(updated_members.len(), initial_member_count + 1);
@@ -530,7 +530,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Verify both members were added
     let final_members = whitenoise
-        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .group_members(&account1, &test_group.mls_group_id)
         .await
         .unwrap();
     assert_eq!(final_members.len(), initial_member_count + 3); // +3 for account4, account5, account6
@@ -1082,7 +1082,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Get current member count before removal
     let pre_removal_members = whitenoise
-        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .group_members(&account1, &test_group.mls_group_id)
         .await
         .unwrap();
     let pre_removal_count = pre_removal_members.len();
@@ -1101,7 +1101,7 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     // Verify the member was removed
     let post_single_removal_members = whitenoise
-        .fetch_group_members(&account1, &test_group.mls_group_id)
+        .group_members(&account1, &test_group.mls_group_id)
         .await
         .unwrap();
     assert_eq!(post_single_removal_members.len(), pre_removal_count - 1);
