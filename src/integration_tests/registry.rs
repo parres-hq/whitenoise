@@ -24,7 +24,7 @@ impl ScenarioRegistry {
         run_scenario!(AccountManagementScenario);
         run_scenario!(AppSettingsScenario);
         run_scenario!(MetadataManagementScenario);
-        run_scenario!(MessagingScenario);
+        run_scenario!(BasicMessagingScenario);
         run_scenario!(FollowManagementScenario);
         run_scenario!(GroupMembershipScenario);
 

@@ -5,11 +5,11 @@ use crate::integration_tests::{
 use crate::{Whitenoise, WhitenoiseError};
 use async_trait::async_trait;
 
-pub struct MessagingScenario {
+pub struct BasicMessagingScenario {
     context: ScenarioContext,
 }
 
-impl MessagingScenario {
+impl BasicMessagingScenario {
     pub fn new(whitenoise: &'static Whitenoise) -> Self {
         Self {
             context: ScenarioContext::new(whitenoise),
@@ -18,7 +18,7 @@ impl MessagingScenario {
 }
 
 #[async_trait]
-impl Scenario for MessagingScenario {
+impl Scenario for BasicMessagingScenario {
     fn context(&self) -> &ScenarioContext {
         &self.context
     }
