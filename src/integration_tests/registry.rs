@@ -26,6 +26,7 @@ impl ScenarioRegistry {
         run_scenario!(MetadataManagementScenario);
         run_scenario!(MessagingScenario);
         run_scenario!(FollowManagementScenario);
+        run_scenario!(GroupMembershipScenario);
 
         Self::print_summary(&results, overall_start.elapsed()).await;
 
@@ -58,7 +59,7 @@ impl ScenarioRegistry {
             total_failed
         );
 
-        tracing::info!("\nDetailed Results:");
+        tracing::info!("Detailed Results:");
         for result in results {
             let status = if result.success { "✓" } else { "✗" };
             tracing::info!(

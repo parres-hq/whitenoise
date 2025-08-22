@@ -19,6 +19,9 @@ pub trait Scenario {
     /// Get the name of this scenario for logging and reporting
     fn scenario_name(&self) -> &'static str {
         std::any::type_name::<Self>()
+            .rsplit("::")
+            .next()
+            .unwrap_or(std::any::type_name::<Self>())
     }
 
     /// Get immutable access to the scenario's context
