@@ -35,8 +35,5 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     tracing::info!("=== All Integration Test Scenarios Completed Successfully ===");
 
-    // Give async logging time to flush before program exits
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
     Ok(())
 }

@@ -58,6 +58,15 @@ pub trait Scenario {
                     duration
                 );
 
+                let cleanup_result = self.cleanup().await;
+                if cleanup_result.is_err() {
+                    tracing::error!(
+                        "✗ {} Scenario cleanup failed: {}",
+                        scenario_name,
+                        cleanup_result.err().unwrap()
+                    );
+                }
+
                 (
                     ScenarioResult::new(scenario_name, tests_run, tests_passed, duration),
                     None,
@@ -78,5 +87,21 @@ pub trait Scenario {
                 )
             }
         }
+    }
+
+    async fn cleanup(&mut self) -> Result<(), WhitenoiseError> {
+        let context = self.context();
+        for account in context.accounts.values() {
+            context.whitenoise.logout(&account.pubkey).await?;
+        }
+
+        context
+            .whitenoise
+            .database
+            .delete_all_data()
+            .await
+            .map_err(|e| WhitenoiseError::Database(e))?;
+
+        Ok(())
     }
 }

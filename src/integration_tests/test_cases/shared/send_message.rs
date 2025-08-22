@@ -39,6 +39,27 @@ impl SendMessageTestCase {
         self.tags = Some(vec![Tag::parse(vec!["e", target_message_id]).unwrap()]);
         self
     }
+
+
+    pub fn with_content(mut self, content: &str) -> Self {
+        self.message_content = content.to_string();
+        self
+    }
+
+    pub fn with_message_id_key(mut self, key: &str) -> Self {
+        self.message_id_key = key.to_string();
+        self
+    }
+
+    pub fn with_sender(mut self, sender: &str) -> Self {
+        self.sender_account = sender.to_string();
+        self
+    }
+
+    pub fn with_group(mut self, group: &str) -> Self {
+        self.target_group = group.to_string();
+        self
+    }
 }
 
 #[async_trait]

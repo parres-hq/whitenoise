@@ -1,7 +1,7 @@
 pub mod account_management;
+pub mod advanced_messaging;
 pub mod app_settings;
 pub mod follow_management;
 pub mod group_membership;
-pub mod messaging;
 pub mod metadata_management;
 pub mod shared;

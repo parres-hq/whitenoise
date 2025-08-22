@@ -26,7 +26,7 @@ impl Scenario for FollowManagementScenario {
 
     async fn run_scenario(&mut self) -> Result<(), WhitenoiseError> {
         // Create accounts for the test
-        CreateAccountsTestCase::with_names(vec!["follower_user", "account2"])
+        CreateAccountsTestCase::with_names(vec!["follow_mgmt_follower", "follow_mgmt_target"])
             .execute(&mut self.context)
             .await?;
 
@@ -36,40 +36,40 @@ impl Scenario for FollowManagementScenario {
         let test_contact3 = Keys::generate().public_key();
 
         // Test following a single user
-        FollowUserTestCase::new("follower_user", test_contact1)
+        FollowUserTestCase::new("follow_mgmt_follower", test_contact1)
             .execute(&mut self.context)
             .await?;
 
         // Test following a second user
-        FollowUserTestCase::new("follower_user", test_contact2)
+        FollowUserTestCase::new("follow_mgmt_follower", test_contact2)
             .execute(&mut self.context)
             .await?;
 
         // Test unfollowing the first user
-        UnfollowUserTestCase::new("follower_user", test_contact1)
+        UnfollowUserTestCase::new("follow_mgmt_follower", test_contact1)
             .execute(&mut self.context)
             .await?;
 
         // Test bulk following multiple users
         let bulk_contacts = vec![test_contact2, test_contact3];
-        BulkFollowUsersTestCase::new("follower_user", bulk_contacts)
+        BulkFollowUsersTestCase::new("follow_mgmt_follower", bulk_contacts)
             .execute(&mut self.context)
             .await?;
 
         // Test error handling: try to follow the same user again (should succeed without error)
-        FollowUserTestCase::new("follower_user", test_contact2)
+        FollowUserTestCase::new("follow_mgmt_follower", test_contact2)
             .execute(&mut self.context)
             .await?;
 
         // Test error handling: try to unfollow a non-existent follow relationship
         let non_existent_contact = Keys::generate().public_key();
-        UnfollowUserTestCase::new("follower_user", non_existent_contact)
+        UnfollowUserTestCase::new("follow_mgmt_follower", non_existent_contact)
             .execute(&mut self.context)
             .await?;
 
         // Test following an existing account (cross-account following)
-        let account2 = self.context.get_account("account2")?;
-        FollowUserTestCase::new("follower_user", account2.pubkey)
+        let target_account = self.context.get_account("follow_mgmt_target")?;
+        FollowUserTestCase::new("follow_mgmt_follower", target_account.pubkey)
             .execute(&mut self.context)
             .await?;
 

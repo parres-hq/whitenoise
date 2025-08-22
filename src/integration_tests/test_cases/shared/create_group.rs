@@ -13,7 +13,7 @@ pub struct CreateGroupTestCase {
 impl CreateGroupTestCase {
     pub fn basic() -> Self {
         Self {
-            group_name: "Integration Test Group".to_string(),
+            group_name: "test_group".to_string(),
             group_description: "A group for integration testing".to_string(),
             creator_account: "creator".to_string(),
             member_accounts: vec!["member1".to_string(), "member2".to_string()],
@@ -62,7 +62,7 @@ impl TestCase for CreateGroupTestCase {
             .await?;
 
         tracing::info!("✓ Group '{}' created successfully", test_group.name);
-        context.add_group("test_group", test_group);
+        context.add_group(&self.group_name, test_group);
         Ok(())
     }
 }

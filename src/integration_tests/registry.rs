@@ -26,6 +26,7 @@ impl ScenarioRegistry {
         run_scenario!(MetadataManagementScenario);
         run_scenario!(BasicMessagingScenario);
         run_scenario!(FollowManagementScenario);
+        run_scenario!(AdvancedMessagingScenario);
         run_scenario!(GroupMembershipScenario);
 
         Self::print_summary(&results, overall_start.elapsed()).await;
@@ -71,5 +72,8 @@ impl ScenarioRegistry {
                 result.duration
             );
         }
+
+        // Give async logging time to flush before program exits
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 }

@@ -24,7 +24,7 @@ impl Scenario for AccountManagementScenario {
     }
 
     async fn run_scenario(&mut self) -> Result<(), WhitenoiseError> {
-        CreateAccountsTestCase::with_names(vec!["account1", "account2", "account3"])
+        CreateAccountsTestCase::with_names(vec!["acct_mgmt_account1", "acct_mgmt_account2", "acct_mgmt_account3"])
             .execute(&mut self.context)
             .await?;
 
@@ -33,8 +33,8 @@ impl Scenario for AccountManagementScenario {
             .await?;
 
         // Test logout functionality with verification
-        LogoutAccountTestCase::for_account("account2")
-            .expect_remaining_accounts(vec!["account1", "account3"])
+        LogoutAccountTestCase::for_account("acct_mgmt_account2")
+            .expect_remaining_accounts(vec!["acct_mgmt_account1", "acct_mgmt_account3"])
             .execute(&mut self.context)
             .await?;
 

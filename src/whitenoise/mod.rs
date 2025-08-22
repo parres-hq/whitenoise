@@ -89,6 +89,9 @@ impl WhitenoiseConfig {
 
 pub struct Whitenoise {
     pub config: WhitenoiseConfig,
+    #[cfg(feature = "integration-tests")]
+    pub database: Arc<Database>,
+    #[cfg(not(feature = "integration-tests"))]
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,

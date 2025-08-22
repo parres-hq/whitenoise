@@ -1,7 +1,4 @@
-use crate::integration_tests::{
-    core::*,
-    test_cases::{messaging::*, shared::*},
-};
+use crate::integration_tests::{core::*, test_cases::shared::*};
 use crate::{Whitenoise, WhitenoiseError};
 use async_trait::async_trait;
 
@@ -24,32 +21,47 @@ impl Scenario for BasicMessagingScenario {
     }
 
     async fn run_scenario(&mut self) -> Result<(), WhitenoiseError> {
-        CreateAccountsTestCase::with_names(vec!["creator", "account2"])
+        CreateAccountsTestCase::with_names(vec!["basic_msg_creator", "basic_msg_member"])
             .execute(&mut self.context)
             .await?;
 
         CreateGroupTestCase::basic()
-            .with_name("Messaging Test Group")
-            .with_members("creator", vec!["account2"])
+            .with_name("basic_messaging_test_group")
+            .with_members("basic_msg_creator", vec!["basic_msg_member"])
+            .execute(&mut self.context)
+            .await?;
+
+        // Wait for MLS group synchronization
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        // Accept group invitations for the member account
+        AcceptGroupInviteTestCase::new("basic_msg_member")
             .execute(&mut self.context)
             .await?;
 
         SendMessageTestCase::basic()
+            .with_sender("basic_msg_creator")
+            .with_group("basic_messaging_test_group")
+            .with_message_id_key("basic_msg_initial")
             .execute(&mut self.context)
             .await?;
 
         let basic_message_id = self
             .context
-            .get_message_id("basic_message")? // This is the default message id for the test case
+            .get_message_id("basic_msg_initial")?
             .clone();
 
         SendMessageTestCase::basic()
+            .with_sender("basic_msg_creator")
             .into_reaction("👍", &basic_message_id)
+            .with_group("basic_messaging_test_group")
             .execute(&mut self.context)
             .await?;
 
         SendMessageTestCase::basic()
+            .with_sender("basic_msg_member")
             .into_reply("Great message!", &basic_message_id)
+            .with_group("basic_messaging_test_group")
             .execute(&mut self.context)
             .await?;
 
