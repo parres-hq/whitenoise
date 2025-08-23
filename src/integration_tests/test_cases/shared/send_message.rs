@@ -40,7 +40,6 @@ impl SendMessageTestCase {
         self
     }
 
-
     pub fn with_content(mut self, content: &str) -> Self {
         self.message_content = content.to_string();
         self

@@ -43,10 +43,7 @@ impl Scenario for BasicMessagingScenario {
             .execute(&mut self.context)
             .await?;
 
-        let basic_message_id = self
-            .context
-            .get_message_id("basic_msg_initial")?
-            .clone();
+        let basic_message_id = self.context.get_message_id("basic_msg_initial")?.clone();
 
         SendMessageTestCase::basic()
             .with_sender("basic_msg_creator")

@@ -26,9 +26,13 @@ impl Scenario for GroupMembershipScenario {
 
     async fn run_scenario(&mut self) -> Result<(), WhitenoiseError> {
         // Create accounts for testing group membership
-        CreateAccountsTestCase::with_names(vec!["grp_mbr_admin", "grp_mbr_member1", "grp_mbr_member2"])
-            .execute(&mut self.context)
-            .await?;
+        CreateAccountsTestCase::with_names(vec![
+            "grp_mbr_admin",
+            "grp_mbr_member1",
+            "grp_mbr_member2",
+        ])
+        .execute(&mut self.context)
+        .await?;
 
         // Create a test group with admin and initial member
         CreateGroupTestCase::basic()

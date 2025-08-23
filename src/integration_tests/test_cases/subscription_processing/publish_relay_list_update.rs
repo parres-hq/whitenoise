@@ -75,7 +75,7 @@ impl TestCase for PublishRelayListUpdateTestCase {
             .await?;
 
         let nip65_relays = user
-            .relays_by_type(RelayType::Nip65, &context.whitenoise)
+            .relays_by_type(RelayType::Nip65, context.whitenoise)
             .await?;
 
         let expected_relay = RelayUrl::parse(&self.new_relay_url).unwrap();

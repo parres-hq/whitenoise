@@ -65,7 +65,7 @@ impl TestCase for PublishMetadataUpdateTestCase {
 
         // Verify metadata was updated via event processor
         let account = context.get_account(&self.account_name)?;
-        let updated_metadata = account.metadata(&context.whitenoise).await?;
+        let updated_metadata = account.metadata(context.whitenoise).await?;
 
         let expected_name = self.updated_metadata.name.clone().unwrap_or_default();
         assert_eq!(
