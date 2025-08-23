@@ -7,8 +7,8 @@ This directory contains the modular integration test framework for Whitenoise, d
 ### 🎯 **Scenarios** - High-Level Test Workflows
 
 Scenarios orchestrate multiple TestCases to test complete user workflows or system behaviors.
-Each scenario is designed to be completely independent, with fresh context and cleanup between runs.
-That said, given the nature of the singleton Whitenoise instance, there might be some leakage between scenarios.
+Each scenario targets best-effort isolation with fresh context and cleanup between runs.
+Note: Because Whitenoise is a singleton, some state leakage may occur across scenarios.
 
 **Responsibilities:**
 

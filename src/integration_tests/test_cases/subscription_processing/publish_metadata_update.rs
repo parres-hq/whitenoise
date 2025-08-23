@@ -61,16 +61,14 @@ impl TestCase for PublishMetadataUpdateTestCase {
         test_client.disconnect().await;
 
         // Give events time to deliver and process
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
 
         // Verify metadata was updated via event processor
         let account = context.get_account(&self.account_name)?;
         let updated_metadata = account.metadata(context.whitenoise).await?;
 
-        let expected_name = self.updated_metadata.name.clone().unwrap_or_default();
         assert_eq!(
-            updated_metadata.name,
-            Some(expected_name.clone()),
+            updated_metadata.name, self.updated_metadata.name,
             "Subscription-driven metadata update did not apply"
         );
 

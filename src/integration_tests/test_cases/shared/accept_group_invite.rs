@@ -39,6 +39,8 @@ impl TestCase for AcceptGroupInviteTestCase {
                 .whitenoise
                 .accept_welcome(&account.pubkey, welcome_id)
                 .await?;
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
         // Verify that the account now has access to groups
