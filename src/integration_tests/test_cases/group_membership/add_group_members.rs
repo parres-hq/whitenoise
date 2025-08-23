@@ -44,7 +44,7 @@ impl TestCase for AddGroupMembersTestCase {
         // Get initial member count for verification
         let initial_members = context
             .whitenoise
-            .fetch_group_members(admin_account, &self.group_id)
+            .group_members(admin_account, &self.group_id)
             .await?;
 
         // Add members to the group
@@ -84,7 +84,7 @@ impl TestCase for AddGroupMembersTestCase {
 
         let updated_members = context
             .whitenoise
-            .fetch_group_members(admin_account, &self.group_id)
+            .group_members(admin_account, &self.group_id)
             .await?;
         let expected_count = initial_members.len() + self.new_member_pubkeys.len();
 

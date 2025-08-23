@@ -74,9 +74,8 @@ impl TestCase for PublishRelayListUpdateTestCase {
             .find_user_by_pubkey(&account.pubkey)
             .await?;
 
-        let nip65_relays = context
-            .whitenoise
-            .user_relays(&user, RelayType::Nip65)
+        let nip65_relays = user
+            .relays_by_type(RelayType::Nip65, &context.whitenoise)
             .await?;
 
         let expected_relay = RelayUrl::parse(&self.new_relay_url).unwrap();

@@ -48,13 +48,12 @@ impl TestCase for UpdateMetadataTestCase {
         tracing::info!("Updating metadata for account: {}", self.account_name);
 
         let account = context.get_account(&self.account_name)?;
-        context
-            .whitenoise
-            .update_account_metadata(account, &self.metadata)
+        account
+            .update_metadata(&self.metadata, &context.whitenoise)
             .await?;
 
         // Verify the update worked
-        let updated_metadata = context.whitenoise.user_metadata(&account.pubkey).await?;
+        let updated_metadata = account.metadata(&context.whitenoise).await?;
         assert_eq!(
             updated_metadata.name, self.metadata.name,
             "Name was not updated correctly"

@@ -44,7 +44,7 @@ impl TestCase for RemoveGroupMembersTestCase {
         // Get initial member count for verification
         let initial_members = context
             .whitenoise
-            .fetch_group_members(admin_account, &self.group_id)
+            .group_members(admin_account, &self.group_id)
             .await?;
 
         // Remove members from the group
@@ -86,7 +86,7 @@ impl TestCase for RemoveGroupMembersTestCase {
         // Verify members were removed
         let updated_members = context
             .whitenoise
-            .fetch_group_members(admin_account, &self.group_id)
+            .group_members(admin_account, &self.group_id)
             .await?;
         let expected_count = initial_members.len() - self.member_pubkeys_to_remove.len();
 

@@ -25,7 +25,7 @@ impl TestCase for AcceptGroupInviteTestCase {
         let account = context.get_account(&self.account_name)?;
 
         // Fetch pending welcome invitations
-        let welcomes = context.whitenoise.fetch_welcomes(&account.pubkey).await?;
+        let welcomes = context.whitenoise.pending_welcomes(&account.pubkey).await?;
         let welcome_count = welcomes.len();
 
         tracing::info!("Found {} pending welcome invitations", welcome_count);
@@ -42,7 +42,7 @@ impl TestCase for AcceptGroupInviteTestCase {
         }
 
         // Verify that the account now has access to groups
-        let groups = context.whitenoise.fetch_groups(account, true).await?;
+        let groups = context.whitenoise.groups(account, true).await?;
         tracing::info!(
             "Account '{}' now has access to {} groups",
             self.account_name,
