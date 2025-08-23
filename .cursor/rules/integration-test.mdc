@@ -5,4 +5,4 @@ alwaysApply: true
 ---
 # Integration Test
 
-We have an a file at [integration_test.rs](mdc:src/bin/integration_test.rs) that is a full integration test of different functionality. This integration test should ALWAYS be run with the `just int-test` command and not run on it's own with different log and data directories.
+There is a file at [integration_test.rs](mdc:src/bin/integration_test.rs) that performs a full integration test across multiple features. This integration test should ALWAYS be run with the `just int-test` command and should not be run on its own with different log and data directories. The `int-test` recipe also enables the `integration-tests` Cargo feature.
