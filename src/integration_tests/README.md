@@ -7,6 +7,8 @@ This directory contains the modular integration test framework for Whitenoise, d
 ### 🎯 **Scenarios** - High-Level Test Workflows
 
 Scenarios orchestrate multiple TestCases to test complete user workflows or system behaviors.
+Each scenario is designed to be completely independent, with fresh context and cleanup between runs.
+That said, given the nature of the singleton Whitenoise instance, there might be some leakage between scenarios.
 
 **Responsibilities:**
 
@@ -71,19 +73,22 @@ src/integration_tests/
 ├── scenarios/                # High-level test workflows
 │   ├── mod.rs
 │   ├── account_management.rs # Account creation, login, logout
-│   └── messaging.rs          # Messaging workflows
+│   ├── basic_messaging.rs   # Simple messaging workflows
+│   └── ...                  # Additional scenario files
 └── test_cases/              # Reusable atomic test operations
     ├── mod.rs
     ├── account_management/   # Account-specific operations
     │   ├── mod.rs
-    │   └── login_with_keys.rs
+    │   ├── login.rs
+    │   └── logout_account.rs
     ├── messaging/            # Message-specific operations
     │   ├── mod.rs
     │   └── send_message.rs
-    └── shared/              # Cross-scenario reusable operations
-        ├── mod.rs
-        ├── create_accounts.rs
-        └── create_group.rs
+    ├── shared/              # Cross-scenario reusable operations
+    │   ├── mod.rs
+    │   ├── create_accounts.rs
+    │   └── create_group.rs
+    └── ...                  # Additional test case directories
 ```
 
 ## Adding New Tests
@@ -98,6 +103,10 @@ src/integration_tests/
 2. **Follow the TestCase Pattern:**
 
    ```rust
+   use crate::integration_tests::core::*;
+   use crate::WhitenoiseError;
+   use async_trait::async_trait;
+
    // 1. Define struct with configuration
    pub struct YourTestCase {
        // Configuration fields
@@ -141,6 +150,10 @@ src/integration_tests/
 2. **Follow the Scenario Pattern:**
 
    ```rust
+   use crate::integration_tests::core::*;
+   use crate::{Whitenoise, WhitenoiseError};
+   use async_trait::async_trait;
+
    pub struct YourScenario {
        context: ScenarioContext,
    }
@@ -162,6 +175,11 @@ src/integration_tests/
        async fn run_scenario(&mut self) -> Result<(), WhitenoiseError> {
            // Compose TestCases to create your workflow
            // Note: Use .execute instead of .run inside a scenario.
+
+           YourTestCase::new(/* params */)
+               .execute(&mut self.context)
+               .await?;
+
            Ok(())
        }
    }
@@ -178,15 +196,14 @@ src/integration_tests/
 4. **Add to ScenarioRegistry:**
 
    ```rust
-   // In scenarios/registry.rs
+   // In registry.rs
    impl ScenarioRegistry {
        pub async fn run_all_scenarios(whitenoise: &'static Whitenoise) -> Result<(), WhitenoiseError> {
            // ... existing scenarios ...
-            run_scenario!(YourScenario);
+           run_scenario!(YourScenario);
 
-            Self::print_summary(&results, overall_start.elapsed()).await;
-            ...
-
+           Self::print_summary(&results, overall_start.elapsed()).await;
+           // ...
        }
    }
    ```
