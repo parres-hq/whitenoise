@@ -48,7 +48,7 @@ ScenarioContext enables TestCases within the same scenario to share data.
 **Allowed Usage:**
 
 - Store accounts, groups, and message IDs created during the scenario
-  - We can add more things but let's be mindful on avoiding too much bloat
+  - We can add more items, but be mindful to avoid unnecessary bloat
 - Pass data between TestCases in the same scenario
 - Track test execution statistics
 
