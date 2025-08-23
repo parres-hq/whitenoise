@@ -44,6 +44,20 @@ impl ScenarioRegistry {
     async fn print_summary(results: &[ScenarioResult], overall_duration: Duration) {
         tokio::time::sleep(Duration::from_secs(1)).await; // Wait for the logs to be flushed
         tracing::info!("=== Integration Test Summary ===");
+
+        tracing::info!("Detailed Results:");
+        for result in results {
+            let status = if result.success { "✓" } else { "✗" };
+            tracing::info!(
+                "  {} {} - {}/{} tests passed in {:?}",
+                status,
+                result.scenario_name,
+                result.tests_passed,
+                result.tests_run,
+                result.duration
+            );
+        }
+
         tracing::info!("Total duration: {:?}", overall_duration);
 
         let total_passed = results.iter().map(|r| r.tests_passed).sum::<u32>();
@@ -62,19 +76,6 @@ impl ScenarioRegistry {
             total_passed,
             total_failed
         );
-
-        tracing::info!("Detailed Results:");
-        for result in results {
-            let status = if result.success { "✓" } else { "✗" };
-            tracing::info!(
-                "  {} {} - {}/{} tests passed in {:?}",
-                status,
-                result.scenario_name,
-                result.tests_passed,
-                result.tests_run,
-                result.duration
-            );
-        }
 
         // Give async logging time to flush before program exits
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
