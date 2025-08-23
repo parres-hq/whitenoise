@@ -34,7 +34,7 @@ impl TestCase for BulkFollowUsersTestCase {
             .await?;
 
         // Add small delay for async operations
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         for pubkey in &self.target_pubkeys {
             let is_following = context

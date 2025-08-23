@@ -61,6 +61,9 @@ impl TestCase for CreateGroupTestCase {
             )
             .await?;
 
+        // Give some time for MLS group synchronization
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
         tracing::info!("✓ Group '{}' created successfully", test_group.name);
         context.add_group(&self.group_name, test_group);
         Ok(())

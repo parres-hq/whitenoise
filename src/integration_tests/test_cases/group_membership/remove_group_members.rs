@@ -81,7 +81,7 @@ impl TestCase for RemoveGroupMembersTestCase {
         }
 
         // Wait for MLS processing and event propagation
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Verify members were removed
         let updated_members = context

@@ -80,7 +80,7 @@ impl TestCase for AddGroupMembersTestCase {
         }
 
         // Wait for MLS processing and event propagation
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         let updated_members = context
             .whitenoise

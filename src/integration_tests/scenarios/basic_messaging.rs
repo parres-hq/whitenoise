@@ -31,9 +31,6 @@ impl Scenario for BasicMessagingScenario {
             .execute(&mut self.context)
             .await?;
 
-        // Wait for MLS group synchronization
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-
         // Accept group invitations for the member account
         AcceptGroupInviteTestCase::new("basic_msg_member")
             .execute(&mut self.context)

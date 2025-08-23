@@ -5,6 +5,7 @@ pub mod follow_management;
 pub mod group_membership;
 pub mod basic_messaging;
 pub mod metadata_management;
+pub mod subscription_processing;
 
 pub use account_management::*;
 pub use advanced_messaging::*;
@@ -13,3 +14,4 @@ pub use follow_management::*;
 pub use group_membership::*;
 pub use basic_messaging::*;
 pub use metadata_management::*;
+pub use subscription_processing::*;

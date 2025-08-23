@@ -18,6 +18,8 @@ impl ScenarioRegistry {
                 if error.is_some() && first_error.is_none() {
                     first_error = error;
                 }
+                // Give some breathing room between scenarios
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             };
         }
 
@@ -26,6 +28,7 @@ impl ScenarioRegistry {
         run_scenario!(MetadataManagementScenario);
         run_scenario!(BasicMessagingScenario);
         run_scenario!(FollowManagementScenario);
+        run_scenario!(SubscriptionProcessingScenario);
         run_scenario!(AdvancedMessagingScenario);
         run_scenario!(GroupMembershipScenario);
 

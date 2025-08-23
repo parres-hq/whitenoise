@@ -92,7 +92,12 @@ pub trait Scenario {
     async fn cleanup(&mut self) -> Result<(), WhitenoiseError> {
         let context = self.context();
         for account in context.accounts.values() {
-            context.whitenoise.logout(&account.pubkey).await?;
+            if let Err(e) = context.whitenoise.logout(&account.pubkey).await {
+                match e {
+                    WhitenoiseError::AccountNotFound => {} // Account already logged out
+                    _ => return Err(e),
+                }
+            }
         }
 
         context
@@ -100,7 +105,7 @@ pub trait Scenario {
             .database
             .delete_all_data()
             .await
-            .map_err(|e| WhitenoiseError::Database(e))?;
+            .map_err(WhitenoiseError::Database)?;
 
         Ok(())
     }

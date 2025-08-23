@@ -36,23 +36,10 @@ impl Scenario for AdvancedMessagingScenario {
             .execute(&mut self.context)
             .await?;
 
-        // Wait for MLS group synchronization
-        tokio::time::sleep(tokio::time::Duration::from_millis(10000)).await;
-
         // Accept group invitations for the reactor account
         AcceptGroupInviteTestCase::new("adv_msg_reactor")
             .execute(&mut self.context)
             .await?;
-
-        let reactor = self.context.get_account("adv_msg_reactor")?;
-
-        let groups = self.context.whitenoise.fetch_groups(reactor, true).await?;
-
-        tracing::info!("Reactor has {} groups", groups.len());
-
-        for g in &groups {
-            tracing::info!("Group: {:?}", g.mls_group_id);
-        }
 
         // Send initial message that will receive reactions
         SendMessageTestCase::basic()
@@ -84,19 +71,6 @@ impl Scenario for AdvancedMessagingScenario {
             .execute(&mut self.context)
             .await?;
 
-        // Wait for message processing & group synchronization
-        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-
-        let reactor = self.context.get_account("adv_msg_reactor")?;
-
-        let groups = self.context.whitenoise.fetch_groups(reactor, true).await?;
-
-        tracing::info!("Reactor has {} groups", groups.len());
-
-        for g in &groups {
-            tracing::info!("Group: {:?}", g.mls_group_id);
-        }
-
         // First, let reactor send a simple message to ensure group access
         tracing::info!("Testing reactor's group access with a simple message...");
         SendMessageTestCase::basic()
@@ -108,7 +82,7 @@ impl Scenario for AdvancedMessagingScenario {
             .await?;
 
         // Wait a bit more after successful message
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Now send reactions to different messages
         SendMessageTestCase::basic()
