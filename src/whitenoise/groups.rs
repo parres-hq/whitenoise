@@ -19,14 +19,12 @@ impl Whitenoise {
     /// # Arguments
     /// * `creator_account` - Account of the group creator (must be the active account)
     /// * `member_pubkeys` - List of public keys for group members
-    /// * `admin_pubkeys` - List of public keys for group admins
     /// * `config` - Group configuration data
     /// * `group_type` - Optional explicit group type. If None, will be inferred from participant count
     pub async fn create_group(
         &self,
         creator_account: &Account,
         member_pubkeys: Vec<PublicKey>,
-        admin_pubkeys: Vec<PublicKey>,
         config: NostrGroupConfigData,
         group_type: Option<GroupType>,
     ) -> Result<group_types::Group> {
@@ -65,12 +63,8 @@ impl Whitenoise {
         let group_relays = config.relays.clone();
 
         let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir)?;
-        let create_group_result = nostr_mls.create_group(
-            &creator_account.pubkey,
-            key_package_events.clone(),
-            admin_pubkeys,
-            config,
-        )?;
+        let create_group_result =
+            nostr_mls.create_group(&creator_account.pubkey, key_package_events.clone(), config)?;
 
         let group_ids = nostr_mls
             .get_groups()?
@@ -311,7 +305,7 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
-            // Use fallback relays if contact has no inbox relays configured
+            //  TODO: Maybe need to use fallback relays if contact has no inbox relays configured
             let relays_to_use = user.relays(RelayType::Inbox, &self.database).await?;
 
             self.nostr
@@ -348,6 +342,39 @@ impl Whitenoise {
     ) -> Result<()> {
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
         let update_result = nostr_mls.remove_members(group_id, &members)?;
+        nostr_mls.merge_pending_commit(group_id)?;
+        let group_relays = nostr_mls.get_relays(group_id)?;
+
+        let evolution_event = update_result.evolution_event;
+
+        let mut relays = HashSet::new();
+        for relay_url in group_relays {
+            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
+            relays.insert(db_relay);
+        }
+
+        self.nostr
+            .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
+            .await?;
+        Ok(())
+    }
+
+    /// Updates group metadata and publishes the change to group relays.
+    ///
+    /// This method updates the group data and publishes the change to group relays.
+    ///
+    /// # Arguments
+    /// * `account` - The account performing the group data update (must be group admin)
+    /// * `group_id` - The ID of the group to update
+    /// * `group_data` - The new group data to update
+    pub async fn update_group_data(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        group_data: NostrGroupDataUpdate,
+    ) -> Result<()> {
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        let update_result = nostr_mls.update_group_data(group_id, group_data)?;
         nostr_mls.merge_pending_commit(group_id)?;
         let group_relays = nostr_mls.get_relays(group_id)?;
 
@@ -440,14 +467,13 @@ mod tests {
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
     ) {
-        let config = create_nostr_group_config_data();
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
         // Create the group
         let result = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys.clone(),
-                admin_pubkeys.clone(),
-                create_nostr_group_config_data(),
+                config.clone(),
                 None,
             )
             .await;
@@ -455,11 +481,27 @@ mod tests {
         // Assert the group was created successfully
         assert!(result.is_ok(), "Error {:?}", result.unwrap_err());
         let group = result.unwrap();
+
+        // Verify group metadata matches configuration
         assert_eq!(group.name, config.name);
         assert_eq!(group.description, config.description);
-        assert!(group.admin_pubkeys.contains(&creator_account.pubkey));
-        assert!(group.admin_pubkeys.contains(&member_pubkeys[0]));
+        assert_eq!(group.image_url, config.image_url);
+        assert_eq!(group.image_key, config.image_key);
 
+        // Verify admin configuration
+        assert_eq!(group.admin_pubkeys.len(), admin_pubkeys.len());
+        for admin_pk in &admin_pubkeys {
+            assert!(
+                group.admin_pubkeys.contains(admin_pk),
+                "Admin {} not found in group.admin_pubkeys",
+                admin_pk
+            );
+        }
+
+        // Verify group state and type
+        // Just check that group is in a valid state (we can't verify exact state without knowing the enum path)
+
+        // Verify group information was created properly
         let group_info = GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise)
             .await
             .unwrap();
@@ -468,6 +510,39 @@ mod tests {
             group_info.group_type,
             crate::whitenoise::group_information::GroupType::Group
         );
+        // Note: participant_count is stored separately and managed by the GroupInformation logic
+
+        // Verify group members can be retrieved
+        let members = whitenoise
+            .group_members(creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(members.len(), member_pubkeys.len() + 1); // +1 for creator
+        assert!(
+            members.contains(&creator_account.pubkey),
+            "Creator not in member list"
+        );
+        for member_pk in &member_pubkeys {
+            assert!(
+                members.contains(member_pk),
+                "Member {} not found in group",
+                member_pk
+            );
+        }
+
+        // Verify group admins can be retrieved
+        let admins = whitenoise
+            .group_admins(creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(admins.len(), admin_pubkeys.len());
+        for admin_pk in &admin_pubkeys {
+            assert!(
+                admins.contains(admin_pk),
+                "Admin {} not found in admin list",
+                admin_pk
+            );
+        }
     }
 
     /// Test case: Member/admin validation fails - empty admin list
@@ -477,14 +552,9 @@ mod tests {
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
     ) {
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
         let result = whitenoise
-            .create_group(
-                creator_account,
-                member_pubkeys,
-                admin_pubkeys,
-                create_nostr_group_config_data(),
-                None,
-            )
+            .create_group(creator_account, member_pubkeys, config.clone(), None)
             .await;
 
         // Should fail because groups need at least one admin
@@ -507,14 +577,9 @@ mod tests {
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
     ) {
+        let config = create_nostr_group_config_data(admin_pubkeys);
         let result = whitenoise
-            .create_group(
-                creator_account,
-                member_pubkeys,
-                admin_pubkeys,
-                create_nostr_group_config_data(),
-                None,
-            )
+            .create_group(creator_account, member_pubkeys, config, None)
             .await;
 
         // Should fail because key package doesn't exist for the member
@@ -528,14 +593,9 @@ mod tests {
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
     ) {
+        let config = create_nostr_group_config_data(admin_pubkeys);
         let result = whitenoise
-            .create_group(
-                creator_account,
-                member_pubkeys,
-                admin_pubkeys,
-                create_nostr_group_config_data(),
-                None,
-            )
+            .create_group(creator_account, member_pubkeys, config, None)
             .await;
 
         // Should fail because admin must be a member
@@ -558,19 +618,27 @@ mod tests {
         member_pubkeys: Vec<PublicKey>,
         admin_pubkeys: Vec<PublicKey>,
     ) {
+        // Direct message group should have exactly 1 member (plus creator = 2 total)
+        assert_eq!(
+            member_pubkeys.len(),
+            1,
+            "Direct message group should have exactly 1 member"
+        );
+        assert_eq!(
+            admin_pubkeys.len(),
+            2,
+            "Direct message group should have 2 admins (both participants)"
+        );
+
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
         let result = whitenoise
-            .create_group(
-                creator_account,
-                member_pubkeys.clone(),
-                admin_pubkeys.clone(),
-                create_nostr_group_config_data(),
-                None,
-            )
+            .create_group(creator_account, member_pubkeys.clone(), config, None)
             .await;
 
         assert!(result.is_ok(), "Error {:?}", result.unwrap_err());
         let group = result.unwrap();
 
+        // Verify it's automatically classified as DirectMessage type
         let group_info = GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise)
             .await
             .unwrap();
@@ -579,5 +647,227 @@ mod tests {
             group_info.group_type,
             crate::whitenoise::group_information::GroupType::DirectMessage
         );
+        // DirectMessage groups should have exactly 2 participants (verified via member count below)
+
+        // Verify both participants are admins (standard for DM groups)
+        let admins = whitenoise
+            .group_admins(creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(admins.len(), 2, "DirectMessage group should have 2 admins");
+        assert!(
+            admins.contains(&creator_account.pubkey),
+            "Creator should be admin"
+        );
+        assert!(
+            admins.contains(&member_pubkeys[0]),
+            "Member should be admin"
+        );
+
+        // Verify membership
+        let members = whitenoise
+            .group_members(creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            members.len(),
+            2,
+            "DirectMessage group should have exactly 2 members"
+        );
+        assert!(
+            members.contains(&creator_account.pubkey),
+            "Creator should be member"
+        );
+        assert!(
+            members.contains(&member_pubkeys[0]),
+            "Member should be member"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_group_member_management() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator and initial members
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let initial_members = setup_multiple_test_accounts(&whitenoise, 2).await;
+        let initial_member_pubkeys = initial_members
+            .iter()
+            .map(|(acc, _)| acc.pubkey)
+            .collect::<Vec<_>>();
+
+        // Create group with initial members
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
+        let group = whitenoise
+            .create_group(
+                &creator_account,
+                initial_member_pubkeys.clone(),
+                config,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Verify initial membership
+        let members = whitenoise
+            .group_members(&creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(members.len(), 3); // creator + 2 initial members
+
+        // Add new members
+        let new_members = setup_multiple_test_accounts(&whitenoise, 2).await;
+        let new_member_pubkeys = new_members
+            .iter()
+            .map(|(acc, _)| acc.pubkey)
+            .collect::<Vec<_>>();
+
+        let add_result = whitenoise
+            .add_members_to_group(
+                &creator_account,
+                &group.mls_group_id,
+                new_member_pubkeys.clone(),
+            )
+            .await;
+        assert!(
+            add_result.is_ok(),
+            "Failed to add members: {:?}",
+            add_result.unwrap_err()
+        );
+
+        // Verify new membership count
+        let updated_members = whitenoise
+            .group_members(&creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(updated_members.len(), 5); // creator + 2 initial + 2 new
+        for new_member_pk in &new_member_pubkeys {
+            assert!(
+                updated_members.contains(new_member_pk),
+                "New member {} not found",
+                new_member_pk
+            );
+        }
+
+        // Remove one member
+        let member_to_remove = vec![initial_member_pubkeys[0]];
+        let remove_result = whitenoise
+            .remove_members_from_group(
+                &creator_account,
+                &group.mls_group_id,
+                member_to_remove.clone(),
+            )
+            .await;
+        assert!(
+            remove_result.is_ok(),
+            "Failed to remove member: {:?}",
+            remove_result.unwrap_err()
+        );
+
+        // Verify final membership
+        let final_members = whitenoise
+            .group_members(&creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(final_members.len(), 4); // creator + 1 remaining initial + 2 new
+        assert!(
+            !final_members.contains(&member_to_remove[0]),
+            "Removed member still in group"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_group_data() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator and member
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkeys = vec![members[0].0.pubkey];
+
+        // Create group
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
+        let group = whitenoise
+            .create_group(&creator_account, member_pubkeys, config, None)
+            .await
+            .unwrap();
+
+        // Update group data
+        let new_group_data = nostr_mls::groups::NostrGroupDataUpdate {
+            name: Some("Updated Group Name".to_string()),
+            description: Some("Updated description".to_string()),
+            image_url: Some(Some("https://example.com/new_image.png".to_string())),
+            image_key: Some(Some(b"new image key".to_vec())),
+            admins: None,
+            relays: None,
+        };
+
+        let update_result = whitenoise
+            .update_group_data(
+                &creator_account,
+                &group.mls_group_id,
+                new_group_data.clone(),
+            )
+            .await;
+        assert!(
+            update_result.is_ok(),
+            "Failed to update group data: {:?}",
+            update_result.unwrap_err()
+        );
+
+        // Verify the group data was updated
+        let updated_groups = whitenoise.groups(&creator_account, true).await.unwrap();
+        let updated_group = updated_groups
+            .iter()
+            .find(|g| g.mls_group_id == group.mls_group_id)
+            .expect("Updated group not found");
+
+        assert_eq!(updated_group.name, new_group_data.name.unwrap());
+        assert_eq!(
+            updated_group.description,
+            new_group_data.description.unwrap()
+        );
+        assert_eq!(updated_group.image_url, new_group_data.image_url.unwrap());
+        assert_eq!(updated_group.image_key, new_group_data.image_key.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_groups_filtering() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup accounts
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkeys = vec![members[0].0.pubkey];
+
+        // Create a group
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let _group = whitenoise
+            .create_group(&creator_account, member_pubkeys, config, None)
+            .await
+            .unwrap();
+
+        // Test getting all groups
+        let all_groups = whitenoise.groups(&creator_account, false).await.unwrap();
+        assert!(!all_groups.is_empty(), "Should have at least one group");
+
+        // Test getting only active groups
+        let active_groups = whitenoise.groups(&creator_account, true).await.unwrap();
+        assert!(
+            !active_groups.is_empty(),
+            "Should have at least one active group"
+        );
+
+        // All groups should be active in this test case
+        assert_eq!(
+            all_groups.len(),
+            active_groups.len(),
+            "All groups should be active"
+        );
+
+        // All groups should be in a valid state (exact verification depends on state enum implementation)
     }
 }

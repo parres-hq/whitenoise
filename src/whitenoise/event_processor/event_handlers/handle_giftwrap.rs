@@ -114,8 +114,7 @@ mod tests {
             .create_group(
                 &creator_account.pubkey,
                 vec![key_pkg_event],
-                vec![creator_account.pubkey],
-                create_nostr_group_config_data(),
+                create_nostr_group_config_data(vec![creator_account.pubkey]),
             )
             .unwrap();
 

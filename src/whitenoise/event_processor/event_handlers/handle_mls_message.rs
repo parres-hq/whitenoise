@@ -60,8 +60,7 @@ mod tests {
             .create_group(
                 &creator_account,
                 vec![member_pubkey],
-                vec![creator_account.pubkey],
-                create_nostr_group_config_data(),
+                create_nostr_group_config_data(vec![creator_account.pubkey]),
                 None,
             )
             .await
@@ -110,8 +109,7 @@ mod tests {
             .create_group(
                 &creator_account,
                 vec![member_pubkey],
-                vec![creator_account.pubkey],
-                create_nostr_group_config_data(),
+                create_nostr_group_config_data(vec![creator_account.pubkey]),
                 None,
             )
             .await
