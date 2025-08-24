@@ -43,19 +43,20 @@ impl TestCase for CreateGroupTestCase {
             .iter()
             .map(|name| context.get_account(name).map(|acc| acc.pubkey))
             .collect::<Result<Vec<_>, _>>()?;
+        let admin_pubkeys = vec![creator.pubkey];
 
         let test_group = context
             .whitenoise
             .create_group(
                 creator,
                 member_pubkeys,
-                vec![creator.pubkey],
                 NostrGroupConfigData::new(
                     self.group_name.clone(),
                     self.group_description.clone(),
-                    None,
-                    None,
+                    None, // image_url
+                    None, // image_key
                     vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
+                    admin_pubkeys,
                 ),
                 None,
             )

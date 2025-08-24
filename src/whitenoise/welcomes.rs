@@ -176,12 +176,7 @@ mod tests {
         let config = create_nostr_group_config_data(admin_pubkeys.clone());
 
         let group = whitenoise
-            .create_group(
-                &creator_account,
-                member_pubkeys.clone(),
-                config,
-                None,
-            )
+            .create_group(&creator_account, member_pubkeys.clone(), config, None)
             .await;
         assert!(group.is_ok());
         let result1 = whitenoise
