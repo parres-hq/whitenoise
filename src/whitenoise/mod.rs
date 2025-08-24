@@ -518,13 +518,14 @@ pub mod test_utils {
         (account, keys)
     }
 
-    pub(crate) fn create_nostr_group_config_data() -> NostrGroupConfigData {
+    pub(crate) fn create_nostr_group_config_data(admins: Vec<PublicKey>) -> NostrGroupConfigData {
         NostrGroupConfigData {
             name: "Test group".to_owned(),
             description: "test description".to_owned(),
             image_url: Some("http://test_blossom:53232/fake_img.png".to_owned()),
             image_key: Some(b"fake key to encrypt image".to_vec()),
             relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+            admins,
         }
     }
 

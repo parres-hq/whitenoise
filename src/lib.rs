@@ -21,6 +21,7 @@ pub use types::MessageWithTokens;
 pub use whitenoise::accounts::Account;
 pub use whitenoise::app_settings::{AppSettings, ThemeMode};
 pub use whitenoise::error::WhitenoiseError;
+pub use whitenoise::group_information::{GroupInformation, GroupType};
 pub use whitenoise::message_aggregator::{
     ChatMessage, EmojiReaction, ReactionSummary, UserReaction,
 };
@@ -61,7 +62,7 @@ pub use nostr::Tags;
 
 // Nostr MLS Types
 /// Nostr MLS Group. Re-exported from [`nostr_mls::group_types::Group`](https://docs.rs/nostr-mls/latest/nostr_mls/group_types/struct.Group.html)
-pub use nostr_mls::prelude::group_types::{Group, GroupState, GroupType};
+pub use nostr_mls::prelude::group_types::{Group, GroupState};
 
 /// Nostr MLS Group ID. Re-exported from [`open_mls::group::GroupId`](https://latest.openmls.tech/doc/openmls/group/struct.GroupId.html)
 pub use nostr_mls::prelude::GroupId;

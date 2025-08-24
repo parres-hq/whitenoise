@@ -173,13 +173,12 @@ mod tests {
 
         // Setup admin accounts (creator + one member as admin)
         let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
-        let config = create_nostr_group_config_data();
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
 
         let group = whitenoise
             .create_group(
                 &creator_account,
                 member_pubkeys.clone(),
-                admin_pubkeys.clone(),
                 config,
                 None,
             )
