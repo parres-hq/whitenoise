@@ -4851,7 +4851,6 @@ dependencies = [
  "keyring",
  "lightning-invoice",
  "mockito",
- "nostr",
  "nostr-blossom",
  "nostr-mls",
  "nostr-mls-sqlite-storage",

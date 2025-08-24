@@ -8,7 +8,7 @@
 mod integration_tests {
     use super::super::*;
     use crate::nostr_manager::parser::MockParser;
-    use nostr::prelude::*;
+    use nostr_sdk::prelude::*;
 
     #[tokio::test]
     async fn test_empty_messages_integration() {

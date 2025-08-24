@@ -1,6 +1,6 @@
 //! This module contains the logic for parsing Nostr events into tokens.
 
-use nostr::parser::{NostrParser, Token};
+use nostr_sdk::parser::{NostrParser, Token};
 use serde::{Deserialize, Serialize};
 
 use crate::nostr_manager::NostrManager;

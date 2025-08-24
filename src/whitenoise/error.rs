@@ -72,10 +72,10 @@ pub enum WhitenoiseError {
     NostrKey(#[from] nostr_sdk::key::Error),
 
     #[error("Nostr url error: {0}")]
-    NostrUrl(#[from] nostr::types::url::Error),
+    NostrUrl(#[from] nostr_sdk::types::url::Error),
 
     #[error("Nostr tag error: {0}")]
-    NostrTag(#[from] nostr::event::tag::Error),
+    NostrTag(#[from] nostr_sdk::event::tag::Error),
 
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
@@ -99,7 +99,7 @@ pub enum WhitenoiseError {
     WelcomeNotFound,
 
     #[error("nip04 direcet message error")]
-    Nip04Error(#[from] nostr::nips::nip04::Error),
+    Nip04Error(#[from] nostr_sdk::nips::nip04::Error),
 
     #[error("join error due to spawn blocking")]
     JoinError(#[from] tokio::task::JoinError),

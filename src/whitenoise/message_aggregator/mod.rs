@@ -18,10 +18,10 @@ pub use types::{
     ReactionSummary, UserReaction,
 };
 
+use nostr_mls::prelude::message_types::Message;
 use nostr_mls::prelude::*;
 
 use crate::nostr_manager::parser::Parser;
-use crate::Message;
 
 /// Main message aggregator - designed to be a singleton per Whitenoise instance
 /// Group-aware to ensure proper isolation between different group conversations

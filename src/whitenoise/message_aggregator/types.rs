@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::nostr_manager::parser::SerializableToken;
-use crate::Message;
+use nostr_mls::prelude::message_types::Message;
 
 /// Represents an aggregated chat message ready for frontend display
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

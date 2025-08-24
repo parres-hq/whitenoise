@@ -36,7 +36,7 @@ pub enum NostrManagerError {
     #[error("Failed to connect to any relays")]
     NoRelayConnections,
     #[error("Nostr Event error: {0}")]
-    NostrEventBuilderError(#[from] nostr::event::builder::Error),
+    NostrEventBuilderError(#[from] nostr_sdk::event::builder::Error),
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
     #[error("Event processing error: {0}")]

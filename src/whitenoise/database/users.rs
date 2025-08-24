@@ -760,8 +760,8 @@ mod tests {
                 Metadata::new()
                     .name("Full User")
                     .display_name("Full Display")
-                    .picture(nostr::types::url::Url::parse("https://example.com/avatar.jpg").unwrap())
-                    .banner(nostr::types::url::Url::parse("https://example.com/banner.jpg").unwrap())
+                    .picture(nostr_sdk::types::url::Url::parse("https://example.com/avatar.jpg").unwrap())
+                    .banner(nostr_sdk::types::url::Url::parse("https://example.com/banner.jpg").unwrap())
                     .about("Full about")
                     .nip05("full@example.com")
                     .lud06("lnurl1dp68gurn8ghj7urp0v4kxvern9eehqurfdcsk6arpdd5kuemmduhxcmmrdaehgu3wd3skuep0dejhctnwda3kxvd09eszuekd0v8rqnrpwcxk7trj0ae8gmmwv9unx2txvg6xqmwpwejkcmmfd9c"),
