@@ -2378,6 +2378,7 @@ checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
 [[package]]
 name = "nostr"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2400,6 +2401,7 @@ dependencies = [
 [[package]]
 name = "nostr-blossom"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "base64 0.22.1",
  "nostr",
@@ -2410,6 +2412,7 @@ dependencies = [
 [[package]]
 name = "nostr-database"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "flatbuffers",
  "lru",
@@ -2420,6 +2423,7 @@ dependencies = [
 [[package]]
 name = "nostr-lmdb"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "async-utility",
  "flume",
@@ -2433,6 +2437,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "aes-gcm",
  "nostr",
@@ -2448,6 +2453,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls-sqlite-storage"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "nostr",
  "nostr-mls-storage",
@@ -2463,6 +2469,7 @@ dependencies = [
 [[package]]
 name = "nostr-mls-storage"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "nostr",
  "openmls",
@@ -2474,6 +2481,7 @@ dependencies = [
 [[package]]
 name = "nostr-relay-pool"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "async-utility",
  "async-wsocket",
@@ -2489,6 +2497,7 @@ dependencies = [
 [[package]]
 name = "nostr-sdk"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "async-utility",
  "nostr",
@@ -2574,6 +2583,7 @@ dependencies = [
 [[package]]
 name = "nwc"
 version = "0.43.0"
+source = "git+https://github.com/erskingardner/rust-nostr?rev=03934fc8e1e1e6c831f282cde9e13589be15c21e#03934fc8e1e1e6c831f282cde9e13589be15c21e"
 dependencies = [
  "async-utility",
  "nostr",
