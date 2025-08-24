@@ -76,6 +76,16 @@ dotenvy = "0.15"
 mockito = "1.2"
 tempfile = "3.19.1"
 
+[features]
+default = []
+# Feature flag for integration tests - enables IDE support without including in production
+integration-tests = []
+
+[[bin]]
+name = "integration_test"
+path = "src/bin/integration_test.rs"
+required-features = ["integration-tests"]
+
 [profile.release]
 debug = false
 opt-level = "z"

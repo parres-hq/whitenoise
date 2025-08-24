@@ -36,7 +36,7 @@ impl Whitenoise {
     /// * `account` - The account that will unfollow the user (must exist in database with valid ID)
     /// * `pubkey` - The public key of the user to be unfollowed
     pub async fn unfollow_user(&self, account: &Account, pubkey: &PublicKey) -> Result<()> {
-        let user = self.find_user_by_pubkey(pubkey).await?;
+        let (user, _) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
         account.unfollow_user(&user, &self.database).await?;
         self.background_publish_account_follow_list(account).await?;
         Ok(())
