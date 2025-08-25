@@ -1,4 +1,4 @@
-use nostr_sdk::{types::RelayUrl, PublicKey, ToBech32};
+use nostr_sdk::{PublicKey, ToBech32};
 
 use crate::whitenoise::{error::WhitenoiseError, Whitenoise};
 
