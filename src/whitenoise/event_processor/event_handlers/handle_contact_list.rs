@@ -18,7 +18,7 @@ impl Whitenoise {
             .or_insert_with(|| Arc::new(Semaphore::new(1)))
             .clone();
 
-        let _permit = semaphore.acquire().await.map_err(|_| {
+        let _permit = semaphore.acquire_owned().await.map_err(|_| {
             crate::whitenoise::error::WhitenoiseError::ContactList(
                 "Failed to acquire semaphore permit for contact list processing".to_string(),
             )
