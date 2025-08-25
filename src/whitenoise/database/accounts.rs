@@ -181,7 +181,7 @@ impl Account {
         .bind(self.id)
         .fetch_all(&database.pool)
         .await
-        .map_err(|_| WhitenoiseError::AccountNotFound)?;
+        .map_err(DatabaseError::Sqlx)?;
 
         let users = user_rows
             .into_iter()
@@ -222,7 +222,8 @@ impl Account {
         .bind(self.id)
         .bind(user.id)
         .fetch_one(&database.pool)
-        .await?;
+        .await
+        .map_err(DatabaseError::Sqlx)?;
         Ok(result.get::<i64, _>(0) > 0)
     }
 
@@ -280,7 +281,8 @@ impl Account {
             .bind(self.id)
             .bind(user.id)
             .execute(&database.pool)
-            .await?;
+            .await
+            .map_err(DatabaseError::Sqlx)?;
         Ok(())
     }
 
@@ -1030,6 +1032,7 @@ mod tests {
     async fn test_follows_with_complex_user_metadata() {
         use crate::whitenoise::test_utils::create_mock_whitenoise;
         use crate::whitenoise::users::User;
+        use nostr_sdk::prelude::Url;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
@@ -1055,8 +1058,8 @@ mod tests {
             .name("ComplexUser")
             .display_name("Complex User Display")
             .about("A user with comprehensive metadata including special characters: 🚀 and emojis")
-            .picture(nostr::types::url::Url::parse("https://example.com/avatar.jpg").unwrap())
-            .banner(nostr::types::url::Url::parse("https://example.com/banner.jpg").unwrap())
+            .picture(Url::parse("https://example.com/avatar.jpg").unwrap())
+            .banner(Url::parse("https://example.com/banner.jpg").unwrap())
             .nip05("complex@example.com")
             .lud06("lnurl1dp68gurn8ghj7urp0v4kxvern9eehqurfdcsk6arpdd5kuemmduhxcmmrdaehgu3wd3skuep0dejhctnwda3kxvd09eszuekd0v8rqnrpwcxk7trj0ae8gmmwv9unx2txvg6xqmwpwejkcmmfd9c");
 

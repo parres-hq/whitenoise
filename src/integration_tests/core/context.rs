@@ -1,4 +1,5 @@
-use crate::{Account, Group, Whitenoise, WhitenoiseError};
+use crate::{Account, Whitenoise, WhitenoiseError};
+use nostr_mls::prelude::group_types::Group;
 use std::collections::HashMap;
 
 #[derive(Clone)]

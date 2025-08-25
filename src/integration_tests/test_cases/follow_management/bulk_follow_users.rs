@@ -1,6 +1,7 @@
 use crate::integration_tests::core::*;
-use crate::{PublicKey, WhitenoiseError};
+use crate::WhitenoiseError;
 use async_trait::async_trait;
+use nostr_sdk::PublicKey;
 
 pub struct BulkFollowUsersTestCase {
     follower_account_name: String,

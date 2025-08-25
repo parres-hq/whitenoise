@@ -3,7 +3,7 @@
 //! This module handles the processing of reaction messages (kind 7) and manages
 //! the aggregation of reactions on target messages.
 
-use nostr::prelude::*;
+use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 use super::emoji_utils;
@@ -11,7 +11,7 @@ use super::types::{
     AggregatorConfig, ChatMessage, EmojiReaction, ProcessingError, UnresolvedMessage,
     UnresolvedReason, UserReaction,
 };
-use crate::Message;
+use nostr_mls::prelude::message_types::Message;
 
 /// Process a reaction message and update the target message's reaction summary
 pub fn process_reaction(
@@ -98,8 +98,15 @@ fn extract_target_message_id(tags: &Tags) -> Result<String, ProcessingError> {
                 return Ok(event_id.to_string());
             }
         }
+        // Fallback: parameterized replaceable event ("a" tag)
+        for tag in tags.iter() {
+            if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)) {
+                if let Some(addr) = tag.content() {
+                    return Ok(addr.to_string());
+                }
+            }
+        }
     }
-
     Err(ProcessingError::MissingETag)
 }
 

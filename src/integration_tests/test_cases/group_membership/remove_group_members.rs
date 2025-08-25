@@ -1,7 +1,8 @@
 use crate::integration_tests::core::*;
-use crate::{PublicKey, WhitenoiseError};
+use crate::WhitenoiseError;
 use async_trait::async_trait;
 use nostr_mls::prelude::GroupId;
+use nostr_sdk::PublicKey;
 
 pub struct RemoveGroupMembersTestCase {
     admin_account_name: String,

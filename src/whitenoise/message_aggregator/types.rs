@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::nostr_manager::parser::SerializableToken;
-use crate::Message;
+pub type MlsMessage = nostr_mls::prelude::message_types::Message;
 
 /// Represents an aggregated chat message ready for frontend display
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,7 +81,7 @@ pub struct UserReaction {
 /// Internal type for tracking unresolved references
 #[derive(Debug, Clone)]
 pub(crate) struct UnresolvedMessage {
-    pub message: Message,
+    pub message: MlsMessage,
     pub retry_count: u8,
     pub reason: UnresolvedReason,
 }

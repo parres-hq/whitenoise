@@ -1,6 +1,7 @@
 use crate::integration_tests::core::*;
-use crate::{Metadata, WhitenoiseError};
+use crate::WhitenoiseError;
 use async_trait::async_trait;
+use nostr_sdk::Metadata;
 
 pub struct UpdateMetadataTestCase {
     account_name: String,
@@ -51,6 +52,9 @@ impl TestCase for UpdateMetadataTestCase {
         account
             .update_metadata(&self.metadata, context.whitenoise)
             .await?;
+
+        // Give events time to deliver and process
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Verify the update worked
         let updated_metadata = account.metadata(context.whitenoise).await?;

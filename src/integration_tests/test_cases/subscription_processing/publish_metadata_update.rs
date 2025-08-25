@@ -49,6 +49,9 @@ impl TestCase for PublishMetadataUpdateTestCase {
         // Wait for client to connect
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
+        // Wait an additional second to ensure external event has newer timestamp than initial account metadata
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
         // Publish metadata update
         test_client
             .send_event_builder(EventBuilder::metadata(&self.updated_metadata))

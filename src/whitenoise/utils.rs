@@ -1,4 +1,4 @@
-use nostr::{types::RelayUrl, PublicKey, ToBech32};
+use nostr_sdk::{PublicKey, ToBech32};
 
 use crate::whitenoise::{error::WhitenoiseError, Whitenoise};
 
@@ -41,21 +41,6 @@ impl Whitenoise {
         Ok(public_key.to_hex())
     }
 
-    pub fn parse_relays_from_sql(
-        relays: String,
-    ) -> core::result::Result<Vec<RelayUrl>, sqlx::Error> {
-        serde_json::from_str(&relays)
-            .map(|urls: Vec<String>| {
-                urls.iter()
-                    .filter_map(|url| RelayUrl::parse(url).ok())
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|e| sqlx::Error::ColumnDecode {
-                index: "nip65_relays".to_owned(),
-                source: Box::new(e),
-            })
-    }
-
     /// Capitalizes the first letter of a word, leaving the rest unchanged
     pub(crate) fn capitalize_first_letter(word: &str) -> String {
         let mut chars = word.chars();
@@ -76,34 +61,6 @@ mod tests {
         assert_eq!(Whitenoise::capitalize_first_letter("5atoshi"), "5atoshi");
         assert_eq!(Whitenoise::capitalize_first_letter(""), "");
         assert_eq!(Whitenoise::capitalize_first_letter("ßtraße"), "SStraße");
-    }
-
-    #[test]
-    fn test_parse_relays_from_sql() {
-        let json_relays = r#"["wss://relay1.example.com", "wss://relay2.example.com"]"#;
-        let result = Whitenoise::parse_relays_from_sql(json_relays.to_string());
-
-        assert!(result.is_ok());
-        let relays = result.unwrap();
-        assert_eq!(relays.len(), 2);
-        assert!(relays.contains(&RelayUrl::parse("wss://relay1.example.com").unwrap()));
-        assert!(relays.contains(&RelayUrl::parse("wss://relay2.example.com").unwrap()));
-
-        let empty_json = "[]";
-        let empty_result = Whitenoise::parse_relays_from_sql(empty_json.to_string());
-        assert!(empty_result.is_ok());
-        assert_eq!(empty_result.unwrap().len(), 0);
-
-        let mixed_json = r#"["wss://relay1.example.com","not a url"]"#;
-        let mixed_result = Whitenoise::parse_relays_from_sql(mixed_json.to_string());
-        assert!(mixed_result.is_ok());
-        let relays = mixed_result.unwrap();
-        assert_eq!(relays.len(), 1);
-        assert!(relays.contains(&RelayUrl::parse("wss://relay1.example.com").unwrap()));
-
-        let invalid_json = "invalid json";
-        let invalid_result = Whitenoise::parse_relays_from_sql(invalid_json.to_string());
-        assert!(invalid_result.is_err());
     }
 
     #[test]

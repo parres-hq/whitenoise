@@ -36,7 +36,7 @@ pub enum NostrManagerError {
     #[error("Failed to connect to any relays")]
     NoRelayConnections,
     #[error("Nostr Event error: {0}")]
-    NostrEventBuilderError(#[from] nostr::event::builder::Error),
+    NostrEventBuilderError(#[from] nostr_sdk::event::builder::Error),
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
     #[error("Event processing error: {0}")]
@@ -537,16 +537,9 @@ impl NostrManager {
                 "Connecting to {} newly added relays",
                 newly_added_relays.len()
             );
-
-            // The connect() method is async but we don't wait for full connection
-            // as subscription setup should work even with partially connected relays
-            tokio::spawn({
-                let client = self.client.clone();
-                async move {
-                    client.connect().await;
-                }
-            });
         }
+
+        self.client.connect().await;
 
         tracing::debug!(
             target: "whitenoise::nostr_manager::ensure_relays_connected",

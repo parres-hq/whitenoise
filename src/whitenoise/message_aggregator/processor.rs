@@ -3,7 +3,7 @@
 //! This module implements the stateless message aggregation algorithm that transforms
 //! raw Nostr MLS messages into structured ChatMessage objects.
 
-use nostr::prelude::*;
+use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 use super::reaction_handler;
@@ -11,7 +11,7 @@ use super::types::{
     AggregatorConfig, ChatMessage, ProcessingError, UnresolvedMessage, UnresolvedReason,
 };
 use crate::nostr_manager::parser::Parser;
-use crate::Message;
+use nostr_mls::prelude::message_types::Message;
 
 /// Process raw messages into aggregated chat messages
 /// This implements the Phase 1 stateless algorithm from the plan
@@ -30,7 +30,7 @@ pub async fn process_messages(
 
     // Step 2: Sort messages by timestamp for chronological processing
     let mut sorted_messages = messages;
-    sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    sorted_messages.sort_unstable_by(|a, b| a.created_at.cmp(&b.created_at));
 
     if config.enable_debug_logging {
         tracing::debug!("Sorted {} messages chronologically", sorted_messages.len());
