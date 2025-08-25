@@ -44,18 +44,31 @@ impl TestCase for AggregateMessagesTestCase {
                 .await?;
 
             if messages.len() >= self.expected_min_messages {
-                tracing::info!("Found expected {} messages after {} retries", messages.len(), retry_count);
+                tracing::info!(
+                    "Found expected {} messages after {} retries",
+                    messages.len(),
+                    retry_count
+                );
                 break;
             }
 
             retry_count += 1;
             if retry_count >= MAX_RETRIES {
-                tracing::warn!("Only found {} messages after {} retries, continuing with test", messages.len(), retry_count);
+                tracing::warn!(
+                    "Only found {} messages after {} retries, continuing with test",
+                    messages.len(),
+                    retry_count
+                );
                 break;
             }
 
-            tracing::debug!("Retry {}/{}: Found {} messages, waiting for {}",
-                retry_count, MAX_RETRIES, messages.len(), self.expected_min_messages);
+            tracing::debug!(
+                "Retry {}/{}: Found {} messages, waiting for {}",
+                retry_count,
+                MAX_RETRIES,
+                messages.len(),
+                self.expected_min_messages
+            );
         }
 
         // Fetch aggregated messages
@@ -77,12 +90,21 @@ impl TestCase for AggregateMessagesTestCase {
             tracing::error!("  Actually got: {}", aggregated_messages.len());
             tracing::error!("  Messages found:");
             for (i, msg) in aggregated_messages.iter().enumerate() {
-                tracing::error!("    {}: {} from {} (deleted: {}, kind: {})",
-                    i, msg.content, &msg.author.to_hex()[..8], msg.is_deleted, msg.kind);
+                tracing::error!(
+                    "    {}: {} from {} (deleted: {}, kind: {})",
+                    i,
+                    msg.content,
+                    &msg.author.to_hex()[..8],
+                    msg.is_deleted,
+                    msg.kind
+                );
             }
 
-            panic!("Expected at least {} messages, but got {} after retries. Check logs for details.",
-                self.expected_min_messages, aggregated_messages.len());
+            panic!(
+                "Expected at least {} messages, but got {} after retries. Check logs for details.",
+                self.expected_min_messages,
+                aggregated_messages.len()
+            );
         }
 
         // Analyze message statistics
