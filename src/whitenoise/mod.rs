@@ -2,10 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
+use dashmap::DashMap;
 use nostr_mls::prelude::*;
 use tokio::sync::{
     mpsc::{self, Sender},
-    OnceCell,
+    OnceCell, Semaphore,
 };
 
 pub mod accounts;
@@ -99,6 +100,8 @@ pub struct Whitenoise {
     message_aggregator: message_aggregator::MessageAggregator,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
+    /// Per-account concurrency guards to prevent race conditions in contact list processing
+    contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
 }
 
 static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
@@ -172,6 +175,7 @@ impl Whitenoise {
             message_aggregator,
             event_sender,
             shutdown_sender,
+            contact_list_guards: DashMap::new(),
         };
 
         // Create default relays in the database if they don't exist
@@ -419,6 +423,7 @@ pub mod test_utils {
             message_aggregator,
             event_sender,
             shutdown_sender,
+            contact_list_guards: DashMap::new(),
         };
 
         (whitenoise, data_temp, logs_temp)

@@ -93,7 +93,7 @@ impl PublishedEvent {
         event_kind: Kind,
     ) -> Result<(), DatabaseError> {
         sqlx::query(
-            "INSERT INTO published_events (event_id, account_id, event_kind) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO published_events (event_id, account_id, event_kind) VALUES (?, ?, ?)",
         )
         .bind(event_id.to_hex())
         .bind(account_id)
@@ -375,5 +375,37 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(events.iter().any(|e| e.event_id == event_id1));
         assert!(events.iter().any(|e| e.event_id == event_id2));
+    }
+
+    #[tokio::test]
+    async fn test_idempotent_published_event_insert() {
+        let (db, _temp_dir) = create_test_db().await;
+        let (account_id, _user_id) = create_test_account(&db).await;
+
+        let event_id =
+            EventId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .unwrap();
+        let event_kind = Kind::ContactList;
+
+        // Record the same event twice - should not error due to INSERT OR IGNORE
+        PublishedEvent::create(&db, &event_id, account_id, event_kind)
+            .await
+            .unwrap();
+        PublishedEvent::create(&db, &event_id, account_id, event_kind)
+            .await
+            .unwrap();
+
+        // Should still exist only once
+        let exists = PublishedEvent::exists(&db, &event_id, account_id)
+            .await
+            .unwrap();
+        assert!(exists);
+
+        // Verify there's only one record in the database
+        let events = PublishedEvent::find_by_account_and_kind(&db, account_id, event_kind)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_id, event_id);
     }
 }

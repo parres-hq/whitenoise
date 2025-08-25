@@ -237,20 +237,44 @@ impl NostrManager {
             .await?;
         self.client.unset_signer().await;
 
-        // Track the published event if we have a successful result
+        // Track the published event if we have a successful result (best-effort)
         if !result.success.is_empty() {
             let event_id = result.id();
-            let whitenoise = Whitenoise::get_instance()
-                .map_err(|e| NostrManagerError::WhitenoiseInstance(e.to_string()))?;
-
-            // Look up the account by public key
-            let account = Account::find_by_pubkey(&pubkey, &whitenoise.database)
-                .await
-                .map_err(|e| NostrManagerError::WhitenoiseInstance(e.to_string()))?;
-            whitenoise
-                .record_published_event(event_id, &account, event_kind)
-                .await
-                .map_err(|e| NostrManagerError::WhitenoiseInstance(e.to_string()))?;
+            match Whitenoise::get_instance() {
+                Ok(whitenoise) => {
+                    match Account::find_by_pubkey(&pubkey, &whitenoise.database).await {
+                        Ok(account) => {
+                            if let Err(e) = whitenoise
+                                .record_published_event(event_id, &account, event_kind)
+                                .await
+                            {
+                                tracing::warn!(
+                                    target: "whitenoise::nostr_manager::publish_event_builder_with_signer",
+                                    "Published event {} but failed to record tracking: {}",
+                                    event_id.to_hex(),
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "whitenoise::nostr_manager::publish_event_builder_with_signer",
+                                "Published event {} but failed account lookup for tracking: {}",
+                                event_id.to_hex(),
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::nostr_manager::publish_event_builder_with_signer",
+                        "Published event {} but Whitenoise instance unavailable for tracking: {}",
+                        event_id.to_hex(),
+                        e
+                    );
+                }
+            }
         }
 
         Ok(result)
@@ -778,16 +802,6 @@ mod tests {
         serde_json::from_str(json).unwrap()
     }
 
-    // Helper function to simulate contact list extraction from NostrManager implementation
-    fn extract_contacts_from_event(event: &Event) -> Vec<PublicKey> {
-        event
-            .tags
-            .iter()
-            .filter(|tag| tag.kind() == TagKind::p())
-            .filter_map(|tag| tag.content().map(|c| PublicKey::from_hex(c).unwrap()))
-            .collect()
-    }
-
     #[test]
     fn test_contact_list_with_mixed_tags() {
         let event = get_test_contact_list_event();
@@ -815,7 +829,7 @@ mod tests {
         assert_eq!(alt_tags, 1);
 
         // Now extract contacts
-        let contacts = extract_contacts_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
 
         // Verify we only get the p tags as contacts
         assert_eq!(contacts.len(), 8);
@@ -831,7 +845,7 @@ mod tests {
         assert!(event.content.contains("write"));
 
         // Extract contacts - should work despite complex content
-        let contacts = extract_contacts_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts.len(), 8);
 
         // Check specific contacts
@@ -854,7 +868,7 @@ mod tests {
 
         // Check that we can parse and process events with timestamps from the far future
         // Regardless of whether that time has now passed
-        let contacts = extract_contacts_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts.len(), 8);
 
         // Verify we extracted the correct timestamp from the event
@@ -864,7 +878,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_contact_list_hashmap() {
         let event = get_test_contact_list_event();
-        let contacts_pubkeys = extract_contacts_from_event(&event);
+        let contacts_pubkeys = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts_pubkeys.len(), 8);
 
         // Create the HashMap as done in fetch_user_contact_list
@@ -954,7 +968,7 @@ mod tests {
         let event: Event = serde_json::from_str(&event_json).unwrap();
 
         // Extract contacts
-        let contacts = extract_contacts_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
 
         // Check for duplicate contacts
         let unique_contacts: std::collections::HashSet<_> = contacts.iter().cloned().collect();
@@ -1016,7 +1030,7 @@ mod tests {
         assert_eq!(event.tags.len(), 5);
 
         // Extract contacts
-        let contacts = extract_contacts_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts.len(), 2);
     }
 
