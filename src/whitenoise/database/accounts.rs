@@ -181,7 +181,7 @@ impl Account {
         .bind(self.id)
         .fetch_all(&database.pool)
         .await
-        .map_err(|_| WhitenoiseError::AccountNotFound)?;
+        .map_err(DatabaseError::Sqlx)?;
 
         let users = user_rows
             .into_iter()
@@ -222,7 +222,8 @@ impl Account {
         .bind(self.id)
         .bind(user.id)
         .fetch_one(&database.pool)
-        .await?;
+        .await
+        .map_err(DatabaseError::Sqlx)?;
         Ok(result.get::<i64, _>(0) > 0)
     }
 
@@ -280,7 +281,8 @@ impl Account {
             .bind(self.id)
             .bind(user.id)
             .execute(&database.pool)
-            .await?;
+            .await
+            .map_err(DatabaseError::Sqlx)?;
         Ok(())
     }
 

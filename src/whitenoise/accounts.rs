@@ -880,7 +880,7 @@ impl Whitenoise {
 pub mod test_utils {
     use nostr_mls::NostrMls;
     use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
-    use nostr_sdk::key::PublicKey;
+    use nostr_sdk::PublicKey;
     use std::path::PathBuf;
     use tempfile::TempDir;
 

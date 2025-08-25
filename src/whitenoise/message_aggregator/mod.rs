@@ -20,6 +20,7 @@ pub use types::{
 
 use nostr_mls::prelude::message_types::Message;
 use nostr_mls::prelude::*;
+use nostr_sdk::PublicKey;
 
 use crate::nostr_manager::parser::Parser;
 

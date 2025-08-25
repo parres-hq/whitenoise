@@ -537,16 +537,9 @@ impl NostrManager {
                 "Connecting to {} newly added relays",
                 newly_added_relays.len()
             );
-
-            // The connect() method is async but we don't wait for full connection
-            // as subscription setup should work even with partially connected relays
-            tokio::spawn({
-                let client = self.client.clone();
-                async move {
-                    client.connect().await;
-                }
-            });
         }
+
+        self.client.connect().await;
 
         tracing::debug!(
             target: "whitenoise::nostr_manager::ensure_relays_connected",

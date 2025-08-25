@@ -30,7 +30,7 @@ pub async fn process_messages(
 
     // Step 2: Sort messages by timestamp for chronological processing
     let mut sorted_messages = messages;
-    sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    sorted_messages.sort_unstable_by(|a, b| a.created_at.cmp(&b.created_at));
 
     if config.enable_debug_logging {
         tracing::debug!("Sorted {} messages chronologically", sorted_messages.len());

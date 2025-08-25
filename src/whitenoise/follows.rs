@@ -1,4 +1,4 @@
-use nostr_sdk::key::PublicKey;
+use nostr_sdk::PublicKey;
 
 use crate::whitenoise::{accounts::Account, error::Result, users::User, Whitenoise};
 

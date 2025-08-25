@@ -53,7 +53,7 @@ pub enum WhitenoiseError {
     #[error("Account not authorized")]
     AccountNotAuthorized,
 
-    #[error("Nostr Mls error: {0}")]
+    #[error("Nostr MLS error: {0}")]
     NostrMlsError(#[from] nostr_mls::Error),
 
     #[error("Invalid event: {0}")]
@@ -98,7 +98,7 @@ pub enum WhitenoiseError {
     #[error("Welcome not found")]
     WelcomeNotFound,
 
-    #[error("nip04 direcet message error")]
+    #[error("nip04 direct message error")]
     Nip04Error(#[from] nostr_sdk::nips::nip04::Error),
 
     #[error("join error due to spawn blocking")]
