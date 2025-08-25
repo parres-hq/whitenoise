@@ -7,7 +7,7 @@ INSERT INTO users (pubkey, metadata)
 SELECT
     pubkey,
     CASE
-        WHEN metadata IS NOT NULL AND metadata != '' THEN json(metadata)
+        WHEN metadata IS NOT NULL AND metadata != '' AND json_valid(metadata) THEN metadata
         ELSE NULL
     END as metadata
 FROM contacts
