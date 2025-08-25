@@ -13,6 +13,7 @@ pub mod app_settings;
 pub mod database;
 pub mod error;
 mod event_processor;
+pub mod event_tracking;
 pub mod follows;
 pub mod group_information;
 pub mod groups;
@@ -551,6 +552,7 @@ pub mod test_utils {
                 .nostr
                 .publish_event_builder_with_signer(
                     key_package_event_builder,
+                    Kind::MlsKeyPackage,
                     &account.key_package_relays(whitenoise).await.unwrap(),
                     keys,
                 )

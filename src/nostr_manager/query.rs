@@ -36,7 +36,7 @@ impl NostrManager {
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let event_builder = EventBuilder::metadata(metadata);
-        self.publish_event_builder_with_signer(event_builder, relays, signer)
+        self.publish_event_builder_with_signer(event_builder, Kind::Metadata, relays, signer)
             .await
     }
 
@@ -60,7 +60,7 @@ impl NostrManager {
         tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Publishing relay list tags {:?}", tags);
         let event = EventBuilder::new(relay_type.into(), "").tags(tags);
         let result = self
-            .publish_event_builder_with_signer(event, target_relays, signer)
+            .publish_event_builder_with_signer(event, relay_type.into(), target_relays, signer)
             .await?;
         tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Published relay list event to Nostr: {:?}", result);
 
@@ -86,7 +86,7 @@ impl NostrManager {
             .collect();
         let event = EventBuilder::new(Kind::ContactList, "").tags(tags);
         let result = self
-            .publish_event_builder_with_signer(event, target_relays, signer)
+            .publish_event_builder_with_signer(event, Kind::ContactList, target_relays, signer)
             .await?;
         tracing::debug!(
             target: "whitenoise::nostr_manager::publish_follow_list_with_signer",

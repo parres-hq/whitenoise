@@ -214,8 +214,21 @@ impl Whitenoise {
 
         // Fetch key packages for all members
         for pk in members.iter() {
-            let user = User::find_by_pubkey(pk, &self.database).await?;
-            let relays_to_use = user.relays(RelayType::KeyPackage, &self.database).await?;
+            let (user, newly_created) = User::find_or_create_by_pubkey(pk, &self.database).await?;
+
+            if newly_created {
+                self.background_fetch_user_data(&user).await?;
+            }
+            // Try and get user's key package relays, if they don't have any, use account's default relays
+            let mut relays_to_use = user.relays(RelayType::KeyPackage, &self.database).await?;
+            if relays_to_use.is_empty() {
+                tracing::warn!(
+                    target: "whitenoise::accounts::groups::add_members_to_group",
+                    "User {} has no relays configured, using account's default relays",
+                    user.pubkey
+                );
+                relays_to_use = account.nip65_relays(self).await?;
+            }
             let some_event = self
                 .nostr
                 .fetch_user_key_package(*pk, &relays_to_use)

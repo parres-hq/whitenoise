@@ -13,10 +13,6 @@ use crate::{
 mod event_handlers;
 
 impl Whitenoise {
-    // ============================================================================
-    // EVENT PROCESSING
-    // ============================================================================
-
     /// Start the event processing loop in a background task
     pub(crate) async fn start_event_processing_loop(
         whitenoise: &'static Whitenoise,
@@ -95,19 +91,75 @@ impl Whitenoise {
                     // Process the event
                     match event {
                         ProcessableEvent::NostrEvent { event, subscription_id, retry_info } => {
+                            // Check if we already processed this event - skip if so
+                            let already_processed = whitenoise.already_processed_event(&event.id).await.unwrap_or(false);
+                            if already_processed {
+                                tracing::debug!(
+                                    target: "whitenoise::event_processor::process_events",
+                                    "Already processed event: {} (kind {})",
+                                    event.id.to_hex(),
+                                    event.kind.as_u16()
+                                );
+                                continue; // Skip to next event
+                            }
+
+                            // For account-specific events, check if WE published this event
+                            // We don't skip giftwraps and MLS messages because we need them to process in nostr-mls
+                            let should_skip = match event.kind {
+                                Kind::ContactList => {
+                                    if let Some(sub_id) = &subscription_id {
+                                        if let Ok(account) = whitenoise.account_from_subscription_id(Some(sub_id.clone())).await {
+                                            whitenoise.did_we_publish_event(&event.id, &account).await.unwrap_or(false)
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                }
+                                _ => false,
+                            };
+
+                            if should_skip {
+                                tracing::debug!(
+                                    target: "whitenoise::event_processor::process_events",
+                                    "Skipping processing of our own event: {} (kind {})",
+                                    event.id.to_hex(),
+                                    event.kind.as_u16()
+                                );
+                                continue; // Skip to next event
+                            }
+
                             // Filter and route nostr events based on kind
                             let result = match event.kind {
                                 Kind::GiftWrap => {
-                                    whitenoise.process_giftwrap(event.clone(), subscription_id.clone()).await
+                                    match whitenoise.account_from_subscription_id(subscription_id.clone()).await {
+                                        Ok(target_account) => {
+                                            match validate_giftwrap_target(&target_account, &event) {
+                                                Ok(()) => whitenoise.handle_giftwrap(&target_account, event.clone()).await,
+                                                Err(e) => Err(e),
+                                            }
+                                        }
+                                        Err(e) => Err(e),
+                                    }
                                 }
                                 Kind::MlsGroupMessage => {
-                                    whitenoise.process_mls_message(event.clone(), subscription_id.clone()).await
+                                    match whitenoise.account_from_subscription_id(subscription_id.clone()).await {
+                                        Ok(target_account) => whitenoise.handle_mls_message(&target_account, event.clone()).await,
+                                        Err(e) => Err(e),
+                                    }
                                 }
                                 Kind::Metadata => {
                                     whitenoise.handle_metadata(event.clone()).await
                                 }
                                 Kind::RelayList | Kind::InboxRelays | Kind::MlsKeyPackageRelays => {
                                     whitenoise.handle_relay_list(event.clone()).await
+                                }
+                                Kind::ContactList => {
+                                    match whitenoise.account_from_subscription_id(subscription_id.clone()).await {
+                                        Ok(target_account) => whitenoise.handle_contact_list(&target_account, event.clone()).await,
+                                        Err(e) => Err(e),
+                                    }
                                 }
                                 _ => {
                                     // TODO: Add more event types as needed
@@ -119,6 +171,18 @@ impl Whitenoise {
                                     Ok(()) // Unhandled events are not errors
                                 }
                             };
+
+                            // If processing was successful, record that we processed this event
+                            if result.is_ok() {
+                                if let Err(e) = whitenoise.record_processed_event(&event.id, event.kind).await {
+                                    tracing::warn!(
+                                        target: "whitenoise::event_processor::process_events",
+                                        "Failed to record processed event {}: {}",
+                                        event.id.to_hex(),
+                                        e
+                                    );
+                                }
+                            }
 
                             // Handle retry logic
                             if let Err(e) = result {
@@ -191,37 +255,6 @@ impl Whitenoise {
                 }
             }
         }
-    }
-
-    /// Process giftwrap events with account awareness
-    async fn process_giftwrap(&self, event: Event, subscription_id: Option<String>) -> Result<()> {
-        tracing::debug!(
-            target: "whitenoise::event_processor::process_giftwrap",
-            "Processing giftwrap: {:?}",
-            event
-        );
-
-        let target_account = self.account_from_subscription_id(subscription_id).await?;
-        validate_giftwrap_target(&target_account, &event)?;
-
-        self.handle_giftwrap(&target_account, event).await
-    }
-
-    /// Process MLS group messages with account awareness
-    async fn process_mls_message(
-        &self,
-        event: Event,
-        subscription_id: Option<String>,
-    ) -> Result<()> {
-        tracing::debug!(
-            target: "whitenoise::event_processor::process_mls_message",
-            "Processing MLS message: {:?}",
-            event
-        );
-
-        let target_account = self.account_from_subscription_id(subscription_id).await?;
-
-        self.handle_mls_message(&target_account, event).await
     }
 
     /// Process relay messages for logging/monitoring

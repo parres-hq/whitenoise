@@ -39,6 +39,7 @@ impl Whitenoise {
             .nostr
             .publish_event_builder_with_signer(
                 key_package_event_builder,
+                Kind::MlsKeyPackage,
                 &account.key_package_relays(self).await?,
                 signer,
             )
@@ -87,6 +88,7 @@ impl Whitenoise {
             self.nostr
                 .publish_event_builder_with_signer(
                     builder,
+                    Kind::EventDeletion,
                     &account.key_package_relays(self).await?,
                     signer,
                 )

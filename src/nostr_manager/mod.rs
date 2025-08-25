@@ -13,12 +13,13 @@ use crate::{
 
 pub mod parser;
 pub mod query;
-// pub mod search;
 pub mod subscriptions;
-// pub mod sync;
+pub mod utils;
 
 #[derive(Error, Debug)]
 pub enum NostrManagerError {
+    #[error("Whitenoise Instance Error: {0}")]
+    WhitenoiseInstance(String),
     #[error("Client Error: {0}")]
     Client(#[from] nostr_sdk::client::Error),
     #[error("Database Error: {0}")]
@@ -205,6 +206,8 @@ impl NostrManager {
     /// The signer is set before publishing and unset immediately after. This method also ensures that
     /// the client is connected to all specified relays before attempting to publish.
     ///
+    /// Automatically tracks published events in the database by looking up the account from the signer's public key.
+    ///
     /// # Arguments
     ///
     /// * `event_builder` - The event builder containing the event to publish
@@ -217,9 +220,13 @@ impl NostrManager {
     pub(crate) async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
+        event_kind: Kind,
         relays: &[Relay],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
+        // Get the public key from the signer for account lookup
+        let pubkey = signer.get_public_key().await?;
+
         // Ensure we're connected to all target relays before publishing
         self.ensure_relays_connected(relays).await?;
         let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
@@ -229,6 +236,23 @@ impl NostrManager {
             .send_event_builder_to(urls, event_builder.clone())
             .await?;
         self.client.unset_signer().await;
+
+        // Track the published event if we have a successful result
+        if !result.success.is_empty() {
+            let event_id = result.id();
+            let whitenoise = Whitenoise::get_instance()
+                .map_err(|e| NostrManagerError::WhitenoiseInstance(e.to_string()))?;
+
+            // Look up the account by public key
+            let account = Account::find_by_pubkey(&pubkey, &whitenoise.database)
+                .await
+                .map_err(|e| NostrManagerError::WhitenoiseInstance(e.to_string()))?;
+            whitenoise
+                .record_published_event(event_id, &account, event_kind)
+                .await
+                .map_err(|e| NostrManagerError::WhitenoiseInstance(e.to_string()))?;
+        }
+
         Ok(result)
     }
 
