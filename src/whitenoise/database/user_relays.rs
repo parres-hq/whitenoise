@@ -4,7 +4,7 @@ use super::utils::parse_timestamp;
 use crate::whitenoise::relays::RelayType;
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub(crate) struct UserRelayRow {
+pub struct UserRelayRow {
     // user_id is the ID of the user
     pub user_id: i64,
     // relay_id is the ID of the relay
