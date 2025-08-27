@@ -3,16 +3,16 @@ use nostr_sdk::EventId;
 
 use super::{utils::parse_timestamp, Database, DatabaseError};
 
-/// Row structure for published_events table
+/// Row structure for processed_events table
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct PublishedEvent {
+pub struct ProcessedEvent {
     pub id: i64,
     pub event_id: EventId,
     pub account_id: i64,
     pub created_at: DateTime<Utc>,
 }
 
-impl<'r, R> sqlx::FromRow<'r, R> for PublishedEvent
+impl<'r, R> sqlx::FromRow<'r, R> for ProcessedEvent
 where
     R: sqlx::Row,
     &'r str: sqlx::ColumnIndex<R>,
@@ -29,7 +29,7 @@ where
 
         let created_at = parse_timestamp(row, "created_at")?;
 
-        Ok(PublishedEvent {
+        Ok(ProcessedEvent {
             id,
             event_id,
             account_id,
@@ -38,37 +38,31 @@ where
     }
 }
 
-impl PublishedEvent {
-    /// Records that we published a specific event to prevent processing our own events
+impl ProcessedEvent {
+    /// Records that we processed a specific event to ensure idempotency
     pub(crate) async fn create(
         event_id: &EventId,
         account_id: i64,
         database: &Database,
     ) -> Result<(), DatabaseError> {
-        sqlx::query("INSERT OR IGNORE INTO published_events (event_id, account_id) VALUES (?, ?)")
+        // Use INSERT OR IGNORE to handle potential race conditions
+        sqlx::query("INSERT OR IGNORE INTO processed_events (event_id, account_id) VALUES (?, ?)")
             .bind(event_id.to_hex())
             .bind(account_id)
             .execute(&database.pool)
             .await?;
 
-        tracing::debug!(
-            target: "whitenoise::database::published_events::create",
-            "Recorded published event: {} by account ID {}",
-            event_id.to_hex(),
-            account_id
-        );
-
         Ok(())
     }
 
-    /// Checks if we published a specific event
+    /// Checks if we already processed a specific event
     pub(crate) async fn exists(
         event_id: &EventId,
         account_id: i64,
         database: &Database,
     ) -> Result<bool, DatabaseError> {
         let result: Option<(bool,)> = sqlx::query_as(
-            "SELECT EXISTS(SELECT 1 FROM published_events WHERE event_id = ? AND account_id = ?)",
+            "SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = ? AND account_id = ?)",
         )
         .bind(event_id.to_hex())
         .bind(account_id)
@@ -110,9 +104,9 @@ mod tests {
         .await
         .unwrap();
 
-        // Create published_events table
+        // Create processed_events table
         sqlx::query(
-            "CREATE TABLE published_events (
+            "CREATE TABLE processed_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id TEXT NOT NULL
                     CHECK (length(event_id) = 64 AND event_id GLOB '[0-9a-fA-F]*'),
@@ -161,7 +155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_published_event_from_row_valid_data() {
+    async fn test_processed_event_from_row_valid_data() {
         let pool = setup_test_db().await;
         let event_id = create_test_event_id();
         let account_id = 1i64;
@@ -169,7 +163,7 @@ mod tests {
 
         // Insert a test record
         sqlx::query(
-            "INSERT INTO published_events (event_id, account_id, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO processed_events (event_id, account_id, created_at) VALUES (?, ?, ?)",
         )
         .bind(event_id.to_hex())
         .bind(account_id)
@@ -179,8 +173,8 @@ mod tests {
         .unwrap();
 
         // Fetch and verify
-        let row: PublishedEvent = sqlx::query_as(
-            "SELECT id, event_id, account_id, created_at FROM published_events WHERE account_id = ?",
+        let row: ProcessedEvent = sqlx::query_as(
+            "SELECT id, event_id, account_id, created_at FROM processed_events WHERE account_id = ?",
         )
         .bind(account_id)
         .fetch_one(&pool)
@@ -193,38 +187,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_published_event_from_row_invalid_event_id() {
-        let pool = setup_test_db().await;
-        let account_id = 1i64;
-        let timestamp = Utc::now().timestamp();
-
-        // Insert a record with invalid event_id (should fail due to database constraints)
-        let result = sqlx::query(
-            "INSERT INTO published_events (event_id, account_id, created_at) VALUES (?, ?, ?)",
-        )
-        .bind("invalid_hex")
-        .bind(account_id)
-        .bind(timestamp)
-        .execute(&pool)
-        .await;
-
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_published_event_create() {
+    async fn test_processed_event_create() {
         let pool = setup_test_db().await;
         let database = wrap_pool_in_database(pool);
         let event_id = create_test_event_id();
         let account_id = 1i64;
 
-        // Create a published event
-        let result = PublishedEvent::create(&event_id, account_id, &database).await;
+        // Create a processed event
+        let result = ProcessedEvent::create(&event_id, account_id, &database).await;
         assert!(result.is_ok());
 
         // Verify it was inserted
         let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM published_events WHERE event_id = ? AND account_id = ?",
+            "SELECT COUNT(*) FROM processed_events WHERE event_id = ? AND account_id = ?",
         )
         .bind(event_id.to_hex())
         .bind(account_id)
@@ -236,22 +211,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_published_event_create_duplicate_ignored() {
+    async fn test_processed_event_create_duplicate_ignored() {
         let pool = setup_test_db().await;
         let database = wrap_pool_in_database(pool);
         let event_id = create_test_event_id();
         let account_id = 1i64;
 
-        // Create the same published event twice
-        let result1 = PublishedEvent::create(&event_id, account_id, &database).await;
-        let result2 = PublishedEvent::create(&event_id, account_id, &database).await;
+        // Create the same processed event twice
+        let result1 = ProcessedEvent::create(&event_id, account_id, &database).await;
+        let result2 = ProcessedEvent::create(&event_id, account_id, &database).await;
 
         assert!(result1.is_ok());
         assert!(result2.is_ok());
 
         // Verify only one record exists (INSERT OR IGNORE behavior)
         let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM published_events WHERE event_id = ? AND account_id = ?",
+            "SELECT COUNT(*) FROM processed_events WHERE event_id = ? AND account_id = ?",
         )
         .bind(event_id.to_hex())
         .bind(account_id)
@@ -263,19 +238,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_published_event_exists_true() {
+    async fn test_processed_event_exists_true() {
         let pool = setup_test_db().await;
         let database = wrap_pool_in_database(pool);
         let event_id = create_test_event_id();
         let account_id = 1i64;
 
-        // Create a published event
-        PublishedEvent::create(&event_id, account_id, &database)
+        // Create a processed event
+        ProcessedEvent::create(&event_id, account_id, &database)
             .await
             .unwrap();
 
         // Check if it exists
-        let exists = PublishedEvent::exists(&event_id, account_id, &database)
+        let exists = ProcessedEvent::exists(&event_id, account_id, &database)
             .await
             .unwrap();
 
@@ -283,14 +258,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_published_event_exists_false() {
+    async fn test_processed_event_exists_false() {
         let pool = setup_test_db().await;
         let database = wrap_pool_in_database(pool);
         let event_id = create_test_event_id();
         let account_id = 1i64;
 
         // Check if non-existent event exists
-        let exists = PublishedEvent::exists(&event_id, account_id, &database)
+        let exists = ProcessedEvent::exists(&event_id, account_id, &database)
             .await
             .unwrap();
 
@@ -298,20 +273,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_published_event_exists_different_account() {
+    async fn test_processed_event_exists_different_account() {
         let pool = setup_test_db().await;
         let database = wrap_pool_in_database(pool);
         let event_id = create_test_event_id();
         let account_id1 = 1i64;
         let account_id2 = 999i64; // Non-existent account
 
-        // Create a published event for account 1
-        PublishedEvent::create(&event_id, account_id1, &database)
+        // Create a processed event for account 1
+        ProcessedEvent::create(&event_id, account_id1, &database)
             .await
             .unwrap();
 
         // Check if it exists for account 2 (should be false)
-        let exists = PublishedEvent::exists(&event_id, account_id2, &database)
+        let exists = ProcessedEvent::exists(&event_id, account_id2, &database)
             .await
             .unwrap();
 
@@ -339,29 +314,28 @@ mod tests {
         let account_id1 = 1i64;
         let account_id2 = 2i64;
 
-        // Both accounts can have records for the same event
-        PublishedEvent::create(&event_id, account_id1, &database)
+        ProcessedEvent::create(&event_id, account_id1, &database)
             .await
             .unwrap();
-        PublishedEvent::create(&event_id, account_id2, &database)
+        ProcessedEvent::create(&event_id, account_id2, &database)
             .await
             .unwrap();
 
         // Verify both accounts have their records
-        assert!(PublishedEvent::exists(&event_id, account_id1, &database)
+        assert!(ProcessedEvent::exists(&event_id, account_id1, &database)
             .await
             .unwrap());
-        assert!(PublishedEvent::exists(&event_id, account_id2, &database)
+        assert!(ProcessedEvent::exists(&event_id, account_id2, &database)
             .await
             .unwrap());
     }
 
     #[tokio::test]
-    async fn test_published_event_struct_clone_debug_eq() {
+    async fn test_processed_event_struct_clone_debug_eq() {
         let event_id = create_test_event_id();
         let now = Utc::now();
 
-        let event1 = PublishedEvent {
+        let event1 = ProcessedEvent {
             id: 1,
             event_id,
             account_id: 123,
@@ -373,7 +347,7 @@ mod tests {
 
         // Test Debug trait
         let debug_str = format!("{:?}", event1);
-        assert!(debug_str.contains("PublishedEvent"));
+        assert!(debug_str.contains("ProcessedEvent"));
         assert!(debug_str.contains(&event_id.to_hex()));
     }
 }

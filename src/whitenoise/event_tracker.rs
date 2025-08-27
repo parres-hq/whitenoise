@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::whitenoise::{
     accounts::Account,
-    database::published_events::{ProcessedEvent, PublishedEvent},
+    database::{processed_events::ProcessedEvent, published_events::PublishedEvent},
     Whitenoise,
 };
 
