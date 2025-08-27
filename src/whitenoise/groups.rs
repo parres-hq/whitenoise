@@ -324,8 +324,13 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
-            //  TODO: Maybe need to use fallback relays if contact has no inbox relays configured
-            let relays_to_use = user.relays(RelayType::Inbox, &self.database).await?;
+            // If the user has no inbox relays configured, use their nip65 relays
+            let user_inbox_relays = user.relays(RelayType::Inbox, &self.database).await?;
+            let relays_to_use = if user_inbox_relays.is_empty() {
+                user.relays(RelayType::Nip65, &self.database).await?
+            } else {
+                user_inbox_relays
+            };
 
             self.nostr
                 .publish_gift_wrap_to(
