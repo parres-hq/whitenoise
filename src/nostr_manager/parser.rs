@@ -107,14 +107,16 @@ impl Parser for MockParser {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
 
     use super::*;
+    use crate::whitenoise::event_tracker::WhitenoiseEventTracker;
     use tokio::sync::mpsc;
 
     async fn setup_nostr_manager() -> NostrManager {
         let (event_sender, _event_receiver) = mpsc::channel(500);
-        NostrManager::new(event_sender, Duration::from_secs(3))
+        let event_tracker = Arc::new(WhitenoiseEventTracker::new());
+        NostrManager::new(event_sender, event_tracker, Duration::from_secs(3))
             .await
             .unwrap()
     }

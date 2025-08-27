@@ -1,3 +1,4 @@
+mod handle_contact_list;
 mod handle_giftwrap;
 mod handle_metadata;
 mod handle_mls_message;

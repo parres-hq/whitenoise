@@ -294,7 +294,8 @@ impl Whitenoise {
         let mut account = self.create_base_account_with_private_key(&keys).await?;
         tracing::debug!(target: "whitenoise::create_identity", "Keys stored in secret store and account saved to database");
 
-        let (_user, _newly_created) = self.create_user_for_account(&account).await?;
+        let (_user, _newly_created) =
+            User::find_or_create_by_pubkey(&account.pubkey, &self.database).await?;
         tracing::debug!(target: "whitenoise::create_identity", "User created for account: {:?}", account.pubkey);
 
         self.setup_relays_for_new_account(&mut account).await?;
@@ -330,7 +331,8 @@ impl Whitenoise {
         let mut account = self.create_base_account_with_private_key(&keys).await?;
         tracing::debug!(target: "whitenoise::login", "Keys stored in secret store and account saved to database");
 
-        let (_user, _newly_created) = self.create_user_for_account(&account).await?;
+        let (_user, _newly_created) =
+            User::find_or_create_by_pubkey(&account.pubkey, &self.database).await?;
         tracing::debug!(target: "whitenoise::login", "User created for account: {:?}", account.pubkey);
 
         // Always check for existing relay lists when logging in, even if the user is
@@ -422,11 +424,6 @@ impl Whitenoise {
         let account = self.persist_account(&account).await?;
 
         Ok(account)
-    }
-
-    async fn create_user_for_account(&self, account: &Account) -> Result<(User, bool)> {
-        let result = User::find_or_create_by_pubkey(&account.pubkey, &self.database).await?;
-        Ok(result)
     }
 
     async fn activate_account(&self, account: &Account) -> Result<()> {

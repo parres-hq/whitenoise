@@ -36,7 +36,7 @@ impl Whitenoise {
         let mut members = Vec::new();
 
         for pk in member_pubkeys.iter() {
-            let (user, created) = User::find_or_create_by_pubkey(pk, &self.database).await?;
+            let (mut user, created) = User::find_or_create_by_pubkey(pk, &self.database).await?;
             if created {
                 // Fetch the user's relay lists and save them to the database
                 if let Err(e) = user.update_relay_lists(self).await {
@@ -47,6 +47,15 @@ impl Whitenoise {
                         e
                     );
                     // Continue with group creation even if relay list update fails
+                }
+                if let Err(e) = user.sync_metadata(self).await {
+                    tracing::warn!(
+                        target: "whitenoise::accounts::groups::create_group",
+                        "Failed to sync metadata for new user {}: {}",
+                        user.pubkey,
+                        e
+                    );
+                    // Continue with group creation even if metadata sync fails
                 }
             }
             let kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
@@ -103,13 +112,20 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-            let relays_to_use = member.relays(RelayType::Inbox, &self.database).await?;
+            // If the member has no inbox relays configured, use their nip65 relays
+            let member_inbox_relays = member.relays(RelayType::Inbox, &self.database).await?;
+            let relays_to_use = if member_inbox_relays.is_empty() {
+                member.relays(RelayType::Nip65, &self.database).await?
+            } else {
+                member_inbox_relays
+            };
 
             self.nostr
-                .publish_gift_wrap_with_signer(
+                .publish_gift_wrap_to(
                     &member_pubkey,
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
+                    creator_account,
                     &relays_to_use,
                     keys.clone(),
                 )
@@ -214,8 +230,21 @@ impl Whitenoise {
 
         // Fetch key packages for all members
         for pk in members.iter() {
-            let user = User::find_by_pubkey(pk, &self.database).await?;
-            let relays_to_use = user.relays(RelayType::KeyPackage, &self.database).await?;
+            let (user, newly_created) = User::find_or_create_by_pubkey(pk, &self.database).await?;
+
+            if newly_created {
+                self.background_fetch_user_data(&user).await?;
+            }
+            // Try and get user's key package relays, if they don't have any, use account's default relays
+            let mut relays_to_use = user.relays(RelayType::KeyPackage, &self.database).await?;
+            if relays_to_use.is_empty() {
+                tracing::warn!(
+                    target: "whitenoise::accounts::groups::add_members_to_group",
+                    "User {} has no relays configured, using account's default relays",
+                    user.pubkey
+                );
+                relays_to_use = account.nip65_relays(self).await?;
+            }
             let some_event = self
                 .nostr
                 .fetch_user_key_package(*pk, &relays_to_use)
@@ -235,6 +264,10 @@ impl Whitenoise {
 
         // Publish the evolution event to the group
         let group_relays = nostr_mls.get_relays(group_id)?;
+
+        if group_relays.is_empty() {
+            return Err(WhitenoiseError::GroupMissingRelays);
+        }
 
         let mut relays = HashSet::new();
         for relay_url in group_relays.clone() {
@@ -259,27 +292,13 @@ impl Whitenoise {
             )));
         }
 
-        // Check if we have any relays to publish to and publish the evolution event
-        if group_relays.is_empty() {
-            tracing::warn!(
-                target: "whitenoise::add_members_to_group",
-                "Group has no relays configured, using account's default relays"
-            );
-            // Use the account's default relays as fallback
-            let fallback_relays = account.nip65_relays(self).await?;
-            if fallback_relays.is_empty() {
-                return Err(WhitenoiseError::Other(anyhow::anyhow!(
-                    "No relays available for publishing evolution event - both group relays and account relays are empty"
-                )));
-            }
-            self.nostr
-                .publish_event_to(evolution_event, &fallback_relays)
-                .await?;
-        } else {
-            self.nostr
-                .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
-                .await?;
-        }
+        self.nostr
+            .publish_mls_commit_to(
+                evolution_event,
+                account,
+                &relays.into_iter().collect::<Vec<_>>(),
+            )
+            .await?;
 
         // Evolution event published successfully
         // Fan out the welcome message to all members
@@ -305,14 +324,20 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
-            //  TODO: Maybe need to use fallback relays if contact has no inbox relays configured
-            let relays_to_use = user.relays(RelayType::Inbox, &self.database).await?;
+            // If the user has no inbox relays configured, use their nip65 relays
+            let user_inbox_relays = user.relays(RelayType::Inbox, &self.database).await?;
+            let relays_to_use = if user_inbox_relays.is_empty() {
+                user.relays(RelayType::Nip65, &self.database).await?
+            } else {
+                user_inbox_relays
+            };
 
             self.nostr
-                .publish_gift_wrap_with_signer(
+                .publish_gift_wrap_to(
                     &member_pubkey,
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
+                    account,
                     &relays_to_use,
                     keys.clone(),
                 )
@@ -345,6 +370,10 @@ impl Whitenoise {
         nostr_mls.merge_pending_commit(group_id)?;
         let group_relays = nostr_mls.get_relays(group_id)?;
 
+        if group_relays.is_empty() {
+            return Err(WhitenoiseError::GroupMissingRelays);
+        }
+
         let evolution_event = update_result.evolution_event;
 
         let mut relays = HashSet::new();
@@ -354,7 +383,11 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
+            .publish_mls_commit_to(
+                evolution_event,
+                account,
+                &relays.into_iter().collect::<Vec<_>>(),
+            )
             .await?;
         Ok(())
     }
@@ -378,6 +411,10 @@ impl Whitenoise {
         nostr_mls.merge_pending_commit(group_id)?;
         let group_relays = nostr_mls.get_relays(group_id)?;
 
+        if group_relays.is_empty() {
+            return Err(WhitenoiseError::GroupMissingRelays);
+        }
+
         let evolution_event = update_result.evolution_event;
 
         let mut relays = HashSet::new();
@@ -387,7 +424,11 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
+            .publish_mls_commit_to(
+                evolution_event,
+                account,
+                &relays.into_iter().collect::<Vec<_>>(),
+            )
             .await?;
         Ok(())
     }

@@ -186,6 +186,88 @@ impl User {
         Ok(())
     }
 
+    /// Synchronizes stored relays with a new set of relay URLs
+    ///
+    /// This method compares the currently stored relays with a new set of relay URLs,
+    /// removing relays that are no longer present and adding new ones. This is the
+    /// core synchronization logic used by both network-fetched updates and direct
+    /// event processing.
+    ///
+    /// Returns `true` if changes were made, `false` if no changes needed
+    pub(crate) async fn sync_relay_urls(
+        &self,
+        whitenoise: &Whitenoise,
+        relay_type: RelayType,
+        new_relay_urls: &HashSet<RelayUrl>,
+    ) -> Result<bool> {
+        let stored_relays = self.relays(relay_type, &whitenoise.database).await?;
+        let stored_urls: HashSet<&RelayUrl> = stored_relays.iter().map(|r| &r.url).collect();
+        let new_urls_set: HashSet<&RelayUrl> = new_relay_urls.iter().collect();
+
+        if stored_urls == new_urls_set {
+            tracing::debug!(
+                target: "whitenoise::users::sync_relay_urls",
+                "No changes needed for {:?} relays for user {}",
+                relay_type,
+                self.pubkey
+            );
+            return Ok(false);
+        }
+
+        // Apply changes
+        tracing::info!(
+            target: "whitenoise::users::sync_relay_urls",
+            "Updating {:?} relays for user {}: {} existing -> {} new",
+            relay_type,
+            self.pubkey,
+            stored_urls.len(),
+            new_urls_set.len()
+        );
+
+        // Remove relays that are no longer needed
+        for existing_relay in &stored_relays {
+            if !new_urls_set.contains(&existing_relay.url) {
+                if let Err(e) = self
+                    .remove_relay(existing_relay, relay_type, &whitenoise.database)
+                    .await
+                {
+                    tracing::warn!(
+                        target: "whitenoise::users::sync_relay_urls",
+                        "Failed to remove {:?} relay {} for user {}: {}",
+                        relay_type,
+                        existing_relay.url,
+                        self.pubkey,
+                        e
+                    );
+                }
+            }
+        }
+
+        // Add new relays
+        for new_relay_url in new_relay_urls {
+            if !stored_urls.contains(new_relay_url) {
+                let new_relay = whitenoise
+                    .find_or_create_relay_by_url(new_relay_url)
+                    .await?;
+                if let Err(e) = self
+                    .add_relay(&new_relay, relay_type, &whitenoise.database)
+                    .await
+                {
+                    tracing::warn!(
+                        target: "whitenoise::users::sync_relay_urls",
+                        "Failed to add {:?} relay {} for user {}: {}",
+                        relay_type,
+                        new_relay_url,
+                        self.pubkey,
+                        e
+                    );
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
     /// Synchronizes relays for a specific type with the network state
     ///
     /// Returns `true` if changes were made, `false` if no changes needed
@@ -208,75 +290,8 @@ impl User {
                 e
             })?;
 
-        let stored_relays = self.relays(relay_type, &whitenoise.database).await?;
-        let network_relay_urls_vec: Vec<_> = network_relay_urls.into_iter().collect();
-
-        // Check if there are any changes needed
-        let stored_urls: HashSet<&RelayUrl> = stored_relays.iter().map(|r| &r.url).collect();
-        let network_urls_set = network_relay_urls_vec.iter().collect();
-
-        if stored_urls == network_urls_set {
-            tracing::debug!(
-                target: "whitenoise::users::sync_relays_for_type",
-                "No changes needed for {:?} relays for user {}",
-                relay_type,
-                self.pubkey
-            );
-            return Ok(false);
-        }
-
-        // Apply changes
-        tracing::info!(
-            target: "whitenoise::users::sync_relays_for_type",
-            "Updating {:?} relays for user {}: {} existing -> {} new",
-            relay_type,
-            self.pubkey,
-            stored_urls.len(),
-            network_urls_set.len()
-        );
-
-        // Remove relays that are no longer needed
-        for existing_relay in &stored_relays {
-            if !network_urls_set.contains(&existing_relay.url) {
-                if let Err(e) = self
-                    .remove_relay(existing_relay, relay_type, &whitenoise.database)
-                    .await
-                {
-                    tracing::warn!(
-                        target: "whitenoise::users::sync_relays_for_type",
-                        "Failed to remove {:?} relay {} for user {}: {}",
-                        relay_type,
-                        existing_relay.url,
-                        self.pubkey,
-                        e
-                    );
-                }
-            }
-        }
-
-        // Add new relays
-        for new_relay_url in &network_relay_urls_vec {
-            if !stored_urls.contains(new_relay_url) {
-                let new_relay = whitenoise
-                    .find_or_create_relay_by_url(new_relay_url)
-                    .await?;
-                if let Err(e) = self
-                    .add_relay(&new_relay, relay_type, &whitenoise.database)
-                    .await
-                {
-                    tracing::warn!(
-                        target: "whitenoise::users::sync_relays_for_type",
-                        "Failed to add {:?} relay {} for user {}: {}",
-                        relay_type,
-                        new_relay_url,
-                        self.pubkey,
-                        e
-                    );
-                }
-            }
-        }
-
-        Ok(true)
+        self.sync_relay_urls(whitenoise, relay_type, &network_relay_urls)
+            .await
     }
 }
 

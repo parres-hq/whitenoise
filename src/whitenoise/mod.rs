@@ -2,10 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
+use dashmap::DashMap;
 use nostr_mls::prelude::*;
 use tokio::sync::{
     mpsc::{self, Sender},
-    OnceCell,
+    OnceCell, Semaphore,
 };
 
 pub mod accounts;
@@ -13,6 +14,7 @@ pub mod app_settings;
 pub mod database;
 pub mod error;
 mod event_processor;
+pub mod event_tracker;
 pub mod follows;
 pub mod group_information;
 pub mod groups;
@@ -33,6 +35,7 @@ use accounts::*;
 use app_settings::*;
 use database::*;
 use error::{Result, WhitenoiseError};
+use event_tracker::WhitenoiseEventTracker;
 use relays::*;
 use secrets_store::SecretsStore;
 
@@ -98,6 +101,8 @@ pub struct Whitenoise {
     message_aggregator: message_aggregator::MessageAggregator,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
+    /// Per-account concurrency guards to prevent race conditions in contact list processing
+    contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
 }
 
 static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
@@ -150,7 +155,7 @@ impl Whitenoise {
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
-            NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
+            NostrManager::new(event_sender.clone(), Arc::new(WhitenoiseEventTracker::new()), NostrManager::default_timeout())
                 .await?;
 
         // Create SecretsStore
@@ -171,6 +176,7 @@ impl Whitenoise {
             message_aggregator,
             event_sender,
             shutdown_sender,
+            contact_list_guards: DashMap::new(),
         };
 
         // Create default relays in the database if they don't exist
@@ -393,9 +399,13 @@ pub mod test_utils {
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
-        let nostr = NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
-            .await
-            .expect("Failed to create NostrManager");
+        let nostr = NostrManager::new(
+            event_sender.clone(),
+            Arc::new(event_tracker::TestEventTracker::new(database.clone())),
+            NostrManager::default_timeout(),
+        )
+        .await
+        .expect("Failed to create NostrManager");
 
         // connect to default relays
         let default_relays_urls: Vec<RelayUrl> =
@@ -418,6 +428,7 @@ pub mod test_utils {
             message_aggregator,
             event_sender,
             shutdown_sender,
+            contact_list_guards: DashMap::new(),
         };
 
         (whitenoise, data_temp, logs_temp)
@@ -545,13 +556,13 @@ pub mod test_utils {
             accounts.push((account.clone(), keys.clone()));
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
-            let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
 
             let _ = whitenoise
                 .nostr
-                .publish_event_builder_with_signer(
-                    key_package_event_builder,
+                .publish_key_package_with_signer(
+                    &ekp,
                     &account.key_package_relays(whitenoise).await.unwrap(),
+                    &tags,
                     keys,
                 )
                 .await

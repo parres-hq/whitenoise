@@ -28,20 +28,13 @@ impl Whitenoise {
     pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
         // Extract key package data while holding the lock
         let (encoded_key_package, tags) = self.encoded_key_package(account).await?;
-
+        let relays = account.key_package_relays(self).await?;
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
-        let key_package_event_builder =
-            EventBuilder::new(Kind::MlsKeyPackage, encoded_key_package).tags(tags);
-
         let result = self
             .nostr
-            .publish_event_builder_with_signer(
-                key_package_event_builder,
-                &account.key_package_relays(self).await?,
-                signer,
-            )
+            .publish_key_package_with_signer(&encoded_key_package, &relays, &tags, signer)
             .await?;
 
         tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
@@ -82,11 +75,9 @@ impl Whitenoise {
                 nostr_mls.delete_key_package_from_storage(&key_package)?;
             }
 
-            let builder = EventBuilder::delete(EventDeletionRequest::new().id(event.id));
-
             self.nostr
-                .publish_event_builder_with_signer(
-                    builder,
+                .publish_event_deletion_with_signer(
+                    &event.id,
                     &account.key_package_relays(self).await?,
                     signer,
                 )
