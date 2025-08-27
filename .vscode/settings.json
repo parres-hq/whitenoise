@@ -3,9 +3,10 @@
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
     "rust-analyzer.cargo.features": "all",
+    "search.useIgnoreFiles": true,
     "search.exclude": {
-        "**/Cargo.lock": true,
-        "**/target": true,
-        "**/.git": true
-    }
+    "**/Cargo.lock": true,
+    "**/target": true,
+    "**/.git": true
+  }
 }
