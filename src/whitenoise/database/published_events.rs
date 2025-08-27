@@ -46,7 +46,7 @@ pub struct ProcessedEvent {
     pub id: i64,
     pub event_id: EventId,
     pub account_id: i64,
-    pub processed_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for ProcessedEvent
@@ -60,19 +60,19 @@ where
         let id: i64 = row.try_get("id")?;
         let event_id_hex: String = row.try_get("event_id")?;
         let account_id: i64 = row.try_get("account_id")?;
-        let processed_at_timestamp: i64 = row.try_get("processed_at")?;
+        let created_at_timestamp: i64 = row.try_get("created_at")?;
 
         let event_id =
             EventId::from_hex(&event_id_hex).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
 
-        let processed_at = DateTime::from_timestamp(processed_at_timestamp, 0)
+        let created_at = DateTime::from_timestamp(created_at_timestamp, 0)
             .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp".into()))?;
 
         Ok(ProcessedEvent {
             id,
             event_id,
             account_id,
-            processed_at,
+            created_at,
         })
     }
 }
@@ -207,7 +207,7 @@ mod tests {
                 event_id TEXT NOT NULL
                     CHECK (length(event_id) = 64 AND event_id GLOB '[0-9a-fA-F]*'),
                 account_id INTEGER NOT NULL,
-                processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
                 UNIQUE(event_id, account_id)
             )",
@@ -310,7 +310,7 @@ mod tests {
 
         // Insert a test record
         sqlx::query(
-            "INSERT INTO processed_events (event_id, account_id, processed_at) VALUES (?, ?, ?)",
+            "INSERT INTO processed_events (event_id, account_id, created_at) VALUES (?, ?, ?)",
         )
         .bind(event_id.to_hex())
         .bind(account_id)
@@ -321,7 +321,7 @@ mod tests {
 
         // Fetch and verify
         let row: ProcessedEvent = sqlx::query_as(
-            "SELECT id, event_id, account_id, processed_at FROM processed_events WHERE account_id = ?",
+            "SELECT id, event_id, account_id, created_at FROM processed_events WHERE account_id = ?",
         )
         .bind(account_id)
         .fetch_one(&pool)
@@ -330,7 +330,7 @@ mod tests {
 
         assert_eq!(row.event_id, event_id);
         assert_eq!(row.account_id, account_id);
-        assert_eq!(row.processed_at.timestamp(), timestamp);
+        assert_eq!(row.created_at.timestamp(), timestamp);
     }
 
     #[tokio::test]
@@ -668,7 +668,7 @@ mod tests {
             id: 1,
             event_id,
             account_id: 123,
-            processed_at: now,
+            created_at: now,
         };
 
         let event2 = event1.clone();

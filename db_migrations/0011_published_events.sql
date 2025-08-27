@@ -20,7 +20,7 @@ CREATE TABLE processed_events (
     event_id TEXT NOT NULL
         CHECK (length(event_id) = 64 AND event_id GLOB '[0-9a-fA-F]*'), -- 64-char hex
     account_id INTEGER NOT NULL,          -- Which account was it processed for?
-    processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
     UNIQUE(event_id, account_id)          -- Each account can only process a specific event once
