@@ -106,10 +106,11 @@ impl Whitenoise {
             let relays_to_use = member.relays(RelayType::Inbox, &self.database).await?;
 
             self.nostr
-                .publish_gift_wrap_with_signer(
+                .publish_gift_wrap_to(
                     &member_pubkey,
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
+                    creator_account,
                     &relays_to_use,
                     keys.clone(),
                 )
@@ -286,11 +287,15 @@ impl Whitenoise {
                 )));
             }
             self.nostr
-                .publish_event_to(evolution_event, &fallback_relays)
+                .publish_mls_commit_to(evolution_event, account, &fallback_relays)
                 .await?;
         } else {
             self.nostr
-                .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
+                .publish_mls_commit_to(
+                    evolution_event,
+                    account,
+                    &relays.into_iter().collect::<Vec<_>>(),
+                )
                 .await?;
         }
 
@@ -322,10 +327,11 @@ impl Whitenoise {
             let relays_to_use = user.relays(RelayType::Inbox, &self.database).await?;
 
             self.nostr
-                .publish_gift_wrap_with_signer(
+                .publish_gift_wrap_to(
                     &member_pubkey,
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
+                    account,
                     &relays_to_use,
                     keys.clone(),
                 )
@@ -367,7 +373,11 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
+            .publish_mls_commit_to(
+                evolution_event,
+                account,
+                &relays.into_iter().collect::<Vec<_>>(),
+            )
             .await?;
         Ok(())
     }
@@ -400,7 +410,11 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_event_to(evolution_event, &relays.into_iter().collect::<Vec<_>>())
+            .publish_mls_commit_to(
+                evolution_event,
+                account,
+                &relays.into_iter().collect::<Vec<_>>(),
+            )
             .await?;
         Ok(())
     }

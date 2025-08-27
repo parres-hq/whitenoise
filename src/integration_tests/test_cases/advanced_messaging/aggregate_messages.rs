@@ -100,11 +100,9 @@ impl TestCase for AggregateMessagesTestCase {
                 );
             }
 
-            panic!(
-                "Expected at least {} messages, but got {} after retries. Check logs for details.",
-                self.expected_min_messages,
-                aggregated_messages.len()
-            );
+            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Failed to find all messages after retries"
+            )));
         }
 
         // Analyze message statistics

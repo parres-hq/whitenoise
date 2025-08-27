@@ -92,9 +92,6 @@ impl Whitenoise {
             account.unfollow_user(&user, &self.database).await?;
         }
 
-        // Only publish the follow list once after all changes are made
-        self.background_publish_account_follow_list(account).await?;
-
         tracing::debug!(
             target: "whitenoise::handle_contact_list",
             "Releasing concurrency guard for account {}",

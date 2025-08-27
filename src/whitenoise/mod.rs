@@ -14,7 +14,7 @@ pub mod app_settings;
 pub mod database;
 pub mod error;
 mod event_processor;
-pub mod event_tracking;
+pub mod event_tracker;
 pub mod follows;
 pub mod group_information;
 pub mod groups;
@@ -35,6 +35,7 @@ use accounts::*;
 use app_settings::*;
 use database::*;
 use error::{Result, WhitenoiseError};
+use event_tracker::WhitenoiseEventTracker;
 use relays::*;
 use secrets_store::SecretsStore;
 
@@ -154,7 +155,7 @@ impl Whitenoise {
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
-            NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
+            NostrManager::new(event_sender.clone(), Arc::new(WhitenoiseEventTracker::new()), NostrManager::default_timeout())
                 .await?;
 
         // Create SecretsStore
@@ -398,9 +399,13 @@ pub mod test_utils {
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
-        let nostr = NostrManager::new(event_sender.clone(), NostrManager::default_timeout())
-            .await
-            .expect("Failed to create NostrManager");
+        let nostr = NostrManager::new(
+            event_sender.clone(),
+            Arc::new(event_tracker::TestEventTracker::new(database.clone())),
+            NostrManager::default_timeout(),
+        )
+        .await
+        .expect("Failed to create NostrManager");
 
         // connect to default relays
         let default_relays_urls: Vec<RelayUrl> =
@@ -551,14 +556,13 @@ pub mod test_utils {
             accounts.push((account.clone(), keys.clone()));
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
-            let key_package_event_builder = EventBuilder::new(Kind::MlsKeyPackage, ekp).tags(tags);
 
             let _ = whitenoise
                 .nostr
-                .publish_event_builder_with_signer(
-                    key_package_event_builder,
-                    Kind::MlsKeyPackage,
+                .publish_key_package_with_signer(
+                    &ekp,
                     &account.key_package_relays(whitenoise).await.unwrap(),
+                    &tags,
                     keys,
                 )
                 .await

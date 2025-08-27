@@ -55,7 +55,7 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_event_to(message_event, &db_relays)
+            .publish_mls_message_to(message_event, account, &db_relays)
             .await?;
 
         let tokens = self.nostr.parse(&message.content);

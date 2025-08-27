@@ -91,8 +91,20 @@ impl Whitenoise {
                     // Process the event
                     match event {
                         ProcessableEvent::NostrEvent { event, subscription_id, retry_info } => {
+                            // Get the account from the subscription ID, log an error if we can't find it and skip the event
+                            let account = match whitenoise.account_from_subscription_id(subscription_id.clone()).await {
+                                Ok(account) => account,
+                                Err(e) => {
+                                    tracing::error!(
+                                        target: "whitenoise::event_processor::process_events",
+                                        "Error getting account from subscription ID: {}", e
+                                    );
+                                    continue;
+                                }
+                            };
+
                             // Check if we already processed this event - skip if so
-                            let already_processed = whitenoise.already_processed_event(&event.id).await.unwrap_or(false);
+                            let already_processed = whitenoise.nostr.event_tracker.already_processed_event(&event.id, &account.pubkey).await.unwrap_or(false);
                             if already_processed {
                                 tracing::debug!(
                                     target: "whitenoise::event_processor::process_events",
@@ -106,18 +118,9 @@ impl Whitenoise {
                             // For account-specific events, check if WE published this event
                             // We don't skip giftwraps and MLS messages because we need them to process in nostr-mls
                             let should_skip = match event.kind {
-                                Kind::ContactList => {
-                                    if let Some(sub_id) = &subscription_id {
-                                        if let Ok(account) = whitenoise.account_from_subscription_id(Some(sub_id.clone())).await {
-                                            whitenoise.did_we_publish_event(&event.id, &account).await.unwrap_or(false)
-                                        } else {
-                                            false
-                                        }
-                                    } else {
-                                        false
-                                    }
-                                }
-                                _ => false,
+                                Kind::MlsGroupMessage => false,
+                                Kind::GiftWrap => false,
+                                _ => whitenoise.nostr.event_tracker.account_published_event(&event.id, &account.pubkey).await.unwrap_or(false),
                             };
 
                             if should_skip {
@@ -133,21 +136,13 @@ impl Whitenoise {
                             // Filter and route nostr events based on kind
                             let result = match event.kind {
                                 Kind::GiftWrap => {
-                                    match whitenoise.account_from_subscription_id(subscription_id.clone()).await {
-                                        Ok(target_account) => {
-                                            match validate_giftwrap_target(&target_account, &event) {
-                                                Ok(()) => whitenoise.handle_giftwrap(&target_account, event.clone()).await,
-                                                Err(e) => Err(e),
-                                            }
-                                        }
+                                    match validate_giftwrap_target(&account, &event) {
+                                        Ok(()) => whitenoise.handle_giftwrap(&account, event.clone()).await,
                                         Err(e) => Err(e),
                                     }
                                 }
                                 Kind::MlsGroupMessage => {
-                                    match whitenoise.account_from_subscription_id(subscription_id.clone()).await {
-                                        Ok(target_account) => whitenoise.handle_mls_message(&target_account, event.clone()).await,
-                                        Err(e) => Err(e),
-                                    }
+                                    whitenoise.handle_mls_message(&account, event.clone()).await
                                 }
                                 Kind::Metadata => {
                                     whitenoise.handle_metadata(event.clone()).await
@@ -156,10 +151,7 @@ impl Whitenoise {
                                     whitenoise.handle_relay_list(event.clone()).await
                                 }
                                 Kind::ContactList => {
-                                    match whitenoise.account_from_subscription_id(subscription_id.clone()).await {
-                                        Ok(target_account) => whitenoise.handle_contact_list(&target_account, event.clone()).await,
-                                        Err(e) => Err(e),
-                                    }
+                                    whitenoise.handle_contact_list(&account, event.clone()).await
                                 }
                                 _ => {
                                     // TODO: Add more event types as needed
@@ -174,7 +166,7 @@ impl Whitenoise {
 
                             // If processing was successful, record that we processed this event
                             if result.is_ok() {
-                                if let Err(e) = whitenoise.record_processed_event(&event.id, event.kind).await {
+                                if let Err(e) = whitenoise.nostr.event_tracker.track_processed_event(&event.id, &account.pubkey).await {
                                     tracing::warn!(
                                         target: "whitenoise::event_processor::process_events",
                                         "Failed to record processed event {}: {}",
