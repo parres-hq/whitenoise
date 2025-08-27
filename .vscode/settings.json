@@ -2,5 +2,10 @@
     "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer"
     },
-    "rust-analyzer.cargo.features": "all"
+    "rust-analyzer.cargo.features": "all",
+    "search.exclude": {
+        "**/Cargo.lock": true,
+        "**/target": true,
+        "**/.git": true
+    }
 }
