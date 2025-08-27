@@ -97,7 +97,8 @@ impl EventTracker for WhitenoiseEventTracker {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let whitenoise = Whitenoise::get_instance()?;
         let account = Account::find_by_pubkey(pubkey, &whitenoise.database).await?;
-        PublishedEvent::create(event_id, account.id.unwrap(), &whitenoise.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        PublishedEvent::create(event_id, account_id, &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(())
@@ -110,7 +111,8 @@ impl EventTracker for WhitenoiseEventTracker {
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let whitenoise = Whitenoise::get_instance()?;
         let account = Account::find_by_pubkey(pubkey, &whitenoise.database).await?;
-        PublishedEvent::exists(event_id, account.id.unwrap(), &whitenoise.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        PublishedEvent::exists(event_id, account_id, &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -122,7 +124,8 @@ impl EventTracker for WhitenoiseEventTracker {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let whitenoise = Whitenoise::get_instance()?;
         let account = Account::find_by_pubkey(pubkey, &whitenoise.database).await?;
-        ProcessedEvent::create(event_id, account.id.unwrap(), &whitenoise.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        ProcessedEvent::create(event_id, account_id, &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -134,7 +137,8 @@ impl EventTracker for WhitenoiseEventTracker {
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let whitenoise = Whitenoise::get_instance()?;
         let account = Account::find_by_pubkey(pubkey, &whitenoise.database).await?;
-        ProcessedEvent::exists(event_id, account.id.unwrap(), &whitenoise.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        ProcessedEvent::exists(event_id, account_id, &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -159,7 +163,8 @@ impl EventTracker for TestEventTracker {
         pubkey: &PublicKey,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        PublishedEvent::create(event_id, account.id.unwrap(), &self.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        PublishedEvent::create(event_id, account_id, &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(())
@@ -171,7 +176,8 @@ impl EventTracker for TestEventTracker {
         pubkey: &PublicKey,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        PublishedEvent::exists(event_id, account.id.unwrap(), &self.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        PublishedEvent::exists(event_id, account_id, &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -182,7 +188,8 @@ impl EventTracker for TestEventTracker {
         pubkey: &PublicKey,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        ProcessedEvent::create(event_id, account.id.unwrap(), &self.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        ProcessedEvent::create(event_id, account_id, &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -193,7 +200,8 @@ impl EventTracker for TestEventTracker {
         pubkey: &PublicKey,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        ProcessedEvent::exists(event_id, account.id.unwrap(), &self.database)
+        let account_id = account.id.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "Account missing id"))?;
+        ProcessedEvent::exists(event_id, account_id, &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }

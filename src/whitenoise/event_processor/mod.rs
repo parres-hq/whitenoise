@@ -104,7 +104,18 @@ impl Whitenoise {
                             };
 
                             // Check if we already processed this event - skip if so
-                            let already_processed = whitenoise.nostr.event_tracker.already_processed_event(&event.id, &account.pubkey).await.unwrap_or(false);
+                            let already_processed = match whitenoise.nostr.event_tracker.already_processed_event(&event.id, &account.pubkey).await {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    tracing::error!(
+                                        target: "whitenoise::event_processor::process_events",
+                                        "Already processed check failed for {}: {}",
+                                        event.id.to_hex(),
+                                        e
+                                    );
+                                    false
+                                }
+                            };
                             if already_processed {
                                 tracing::debug!(
                                     target: "whitenoise::event_processor::process_events",
@@ -120,7 +131,18 @@ impl Whitenoise {
                             let should_skip = match event.kind {
                                 Kind::MlsGroupMessage => false,
                                 Kind::GiftWrap => false,
-                                _ => whitenoise.nostr.event_tracker.account_published_event(&event.id, &account.pubkey).await.unwrap_or(false),
+                                _ => match whitenoise.nostr.event_tracker.account_published_event(&event.id, &account.pubkey).await {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        tracing::error!(
+                                            target: "whitenoise::event_processor::process_events",
+                                            "Account published check failed for {}: {}",
+                                            event.id.to_hex(),
+                                            e
+                                        );
+                                        false
+                                    }
+                                }
                             };
 
                             if should_skip {

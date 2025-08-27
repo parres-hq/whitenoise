@@ -112,7 +112,13 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-            let relays_to_use = member.relays(RelayType::Inbox, &self.database).await?;
+            // If the member has no inbox relays configured, use their nip65 relays
+            let member_inbox_relays = member.relays(RelayType::Inbox, &self.database).await?;
+            let relays_to_use = if member_inbox_relays.is_empty() {
+                member.relays(RelayType::Nip65, &self.database).await?
+            } else {
+                member_inbox_relays
+            };
 
             self.nostr
                 .publish_gift_wrap_to(

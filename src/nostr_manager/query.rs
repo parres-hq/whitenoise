@@ -110,7 +110,7 @@ mod contact_list_logic_tests {
         let e_tags = event
             .tags
             .iter()
-            .filter(|tag| tag.kind() == TagKind::Custom("e".into()))
+            .filter(|tag| tag.kind() == TagKind::e())
             .count();
         let p_tags = event
             .tags
