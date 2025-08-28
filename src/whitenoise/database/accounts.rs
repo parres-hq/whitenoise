@@ -286,31 +286,6 @@ impl Account {
         Ok(())
     }
 
-    /// Makes this account follow multiple users.
-    ///
-    /// # Arguments
-    ///
-    /// * `users` - A slice of `User` references to follow
-    /// * `database` - A reference to the `Database` instance for database operations
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if any database operation fails.
-    pub(crate) async fn follow_users(
-        &self,
-        users: &[User],
-        database: &Database,
-    ) -> Result<(), WhitenoiseError> {
-        for user in users {
-            self.follow_user(user, database).await?;
-        }
-        Ok(())
-    }
-
     /// Saves this account to the database.
     ///
     /// # Arguments
