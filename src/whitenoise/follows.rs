@@ -74,15 +74,4 @@ impl Whitenoise {
     pub async fn follows(&self, account: &Account) -> Result<Vec<User>> {
         account.follows(&self.database).await
     }
-
-    pub async fn follow_users(&self, account: &Account, pubkeys: &[PublicKey]) -> Result<()> {
-        let mut users = Vec::new();
-        for pubkey in pubkeys {
-            let (user, _) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
-            users.push(user);
-        }
-        account.follow_users(&users, &self.database).await?;
-        self.background_publish_account_follow_list(account).await?;
-        Ok(())
-    }
 }

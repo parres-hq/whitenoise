@@ -33,7 +33,6 @@ impl Scenario for FollowManagementScenario {
         // Create some test contact public keys
         let test_contact1 = Keys::generate().public_key();
         let test_contact2 = Keys::generate().public_key();
-        let test_contact3 = Keys::generate().public_key();
 
         // Test following a single user
         FollowUserTestCase::new("follow_mgmt_follower", test_contact1)
@@ -47,12 +46,6 @@ impl Scenario for FollowManagementScenario {
 
         // Test unfollowing the first user
         UnfollowUserTestCase::new("follow_mgmt_follower", test_contact1)
-            .execute(&mut self.context)
-            .await?;
-
-        // Test bulk following multiple users
-        let bulk_contacts = vec![test_contact2, test_contact3];
-        BulkFollowUsersTestCase::new("follow_mgmt_follower", bulk_contacts)
             .execute(&mut self.context)
             .await?;
 
