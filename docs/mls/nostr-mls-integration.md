@@ -8,8 +8,8 @@ Whitenoise uses the `nostr-mls` crate for MLS protocol implementation. This docu
 
 From `Cargo.toml`:
 ```toml
-nostr-mls = { version = "0.43.0", git="https://github.com/erskingardner/rust-nostr", rev = "5ec43be393f895622a90e3957dfc3d7d8df6d508" }
-nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/erskingardner/rust-nostr", rev = "5ec43be393f895622a90e3957dfc3d7d8df6d508" }
+nostr-mls = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "84b1a016cffc30625567a03e2d3bcae86463f075" }
+nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "84b1a016cffc30625567a03e2d3bcae86463f075" }
 ```
 
 ## Core Integration Points

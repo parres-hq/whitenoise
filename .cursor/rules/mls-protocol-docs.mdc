@@ -26,7 +26,7 @@ This project implements the MLS (Messaging Layer Security) protocol on top of No
 
 ## Implementation References
 
-- **Rust nostr-mls crate**: https://github.com/erskingardner/rust-nostr
+- **Rust nostr-mls crate**: https://github.com/rust-nostr/nostr
   - Used in this project via `Cargo.toml` dependencies
   - Local integration docs: [docs/mls/nostr-mls-integration.md](mdc:docs/mls/nostr-mls-integration.md)
 

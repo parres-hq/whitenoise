@@ -51,8 +51,8 @@ MLS state is stored using the `nostr-mls-sqlite-storage` crate, integrated with 
 1. **Forward Secrecy**: MLS provides automatic forward secrecy through epoch key rotation
 2. **Post-Compromise Security**: Regular key updates ensure recovery from key compromise
 3. **Authentication**: All group members are authenticated via their Nostr public keys
-4. **Transport Security**: Messages are encrypted both at MLS layer and via Nostr's encryption
-5. **Metadata Protection**: Messages published to nostr relays don't provide any identitying information
+4. **Transport Security**: Messages are encrypted both at the MLS layer and via Nostr's encryption
+5. **Metadata Protection**: Messages published to nostr relays don't provide any identifying information
 
 ## Testing
 

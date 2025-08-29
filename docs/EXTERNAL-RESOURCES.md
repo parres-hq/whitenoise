@@ -35,7 +35,7 @@ This file provides a comprehensive index of external resources, specifications, 
   - Status: Official NIP (merged)
 
 ### Rust Nostr Implementation
-- **rust-nostr Repository**: https://github.com/nostr/rust-nostr
+- **rust-nostr Repository**: https://github.com/rust-nostr/nostr
 
 ## Cryptographic Foundations
 
@@ -64,6 +64,9 @@ This file provides a comprehensive index of external resources, specifications, 
 To cache external documentation locally, use these commands:
 
 ```bash
+# Create directories first
+mkdir -p docs/mls docs/external
+
 # Download MLS RFCs
 curl -s https://www.rfc-editor.org/rfc/rfc9420.txt > docs/mls/rfc9420.txt
 curl -s https://www.rfc-editor.org/rfc/rfc9750.txt > docs/mls/rfc9750.txt
