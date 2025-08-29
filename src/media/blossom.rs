@@ -144,7 +144,8 @@ impl BlossomClient {
         let auth_header = self.create_auth_event(&sha256, "upload", &keys).await?;
 
         // Upload the file with the auth header
-        let response = self.client
+        let response = self
+            .client
             .put(format!("{}/upload", self.url))
             .header("Content-Length", file.len())
             .header("Content-Type", "application/octet-stream")
@@ -189,7 +190,8 @@ impl BlossomClient {
         let auth_header = self.create_auth_event(sha256, "delete", keys).await?;
 
         // Delete the file with the auth header
-        let response = self.client
+        let response = self
+            .client
             .delete(format!("{}/{}", self.url, sha256))
             .header("Authorization", auth_header)
             .send()
@@ -238,7 +240,8 @@ impl BlossomClient {
         let auth_header = self.create_auth_event(&sha256, "media", keys).await?;
 
         // Upload the file with the auth header
-        let response = self.client
+        let response = self
+            .client
             .put(format!("{}/media", self.url))
             .header("Content-Length", file.len())
             .header("Content-Type", content_type)
@@ -294,7 +297,8 @@ impl BlossomClient {
             })?;
 
         // Check upload requirements
-        let response = self.client
+        let response = self
+            .client
             .head(format!("{}/upload", self.url))
             .header("X-SHA-256", sha256)
             .header("X-Content-Type", content_type)
@@ -359,7 +363,8 @@ impl BlossomClient {
             })?;
 
         // Check upload requirements
-        let response = self.client
+        let response = self
+            .client
             .head(format!("{}/media", self.url))
             .header("X-SHA-256", sha256)
             .header("X-Content-Type", content_type)

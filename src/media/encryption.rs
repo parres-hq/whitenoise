@@ -18,7 +18,11 @@ use crate::media::errors::MediaError;
 /// # Returns
 /// * `Ok((Vec<u8>, Vec<u8>))` - The encrypted data and nonce
 /// * `Err(MediaError)` - Error if encryption fails
-pub fn encrypt_file(data: &[u8], key: &[u8; 32], nonce: &[u8]) -> Result<(Vec<u8>, Vec<u8>), MediaError> {
+pub fn encrypt_file(
+    data: &[u8],
+    key: &[u8; 32],
+    nonce: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), MediaError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
