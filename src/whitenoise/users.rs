@@ -343,6 +343,7 @@ impl Whitenoise {
     ///
     /// This method looks up a user in the database using their Nostr public key.
     /// If the user doesn't exist, it creates a new user record with default metadata.
+    /// It also updates the created user's relay lists and metadata.
     /// The user may have been discovered through various means such as:
     /// - Following lists from accounts
     /// - Message interactions
@@ -367,12 +368,8 @@ impl Whitenoise {
     ///
     /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// let pubkey = PublicKey::parse("npub1...")?;
-    /// let (user, was_created) = whitenoise.find_or_create_user_by_pubkey(&pubkey).await?;
-    /// if was_created {
-    ///     println!("Created new user: {:?}", user.metadata.name);
-    /// } else {
-    ///     println!("Found existing user: {:?}", user.metadata.name);
-    /// }
+    /// let user = whitenoise.find_or_create_user_by_pubkey(&pubkey).await?;
+    /// println!("Found user: {:?}", user.metadata.name);
     /// # Ok(())
     /// # }
     /// ```
@@ -382,8 +379,27 @@ impl Whitenoise {
     /// This method will return an error if:
     /// - There's a database connection or query error
     /// - The public key format is invalid (though this is typically caught at the type level)
-    pub async fn find_or_create_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<(User, bool)> {
-        User::find_or_create_by_pubkey(pubkey, &self.database).await
+    pub async fn find_or_create_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<User> {
+        let (mut user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+        if created {
+            if let Err(e) = user.update_relay_lists(self).await {
+                tracing::warn!(
+                    target: "whitenoise::users::find_or_create_user_by_pubkey",
+                    "Failed to update relay lists for new user {}: {}",
+                    user.pubkey,
+                    e
+                );
+            }
+        }
+        if let Err(e) = user.sync_metadata(self).await {
+            tracing::warn!(
+                target: "whitenoise::users::find_or_create_user_by_pubkey",
+                "Failed to sync metadata for new user {}: {}",
+                user.pubkey,
+                e
+            );
+        }
+        Ok(user)
     }
 
     pub(crate) async fn background_fetch_user_data(&self, user: &User) -> Result<()> {
@@ -656,5 +672,59 @@ mod tests {
             final_user.metadata.about,
             Some("Test description".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_find_or_create_user_by_pubkey_existing_user() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let original_user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new()
+                .name("Original User")
+                .about("Original description"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let saved_user = original_user.save(&whitenoise.database).await.unwrap();
+        let original_id = saved_user.id.unwrap();
+
+        let found_user = whitenoise
+            .find_or_create_user_by_pubkey(&test_pubkey)
+            .await
+            .unwrap();
+
+        assert_eq!(found_user.id, Some(original_id));
+        assert_eq!(found_user.pubkey, test_pubkey);
+        assert_eq!(found_user.metadata.name, Some("Original User".to_string()));
+        assert_eq!(
+            found_user.metadata.about,
+            Some("Original description".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_find_or_create_user_by_pubkey_new_user() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+
+        let user_exists = whitenoise.find_user_by_pubkey(&test_pubkey).await.is_ok();
+        assert!(!user_exists);
+
+        let created_user = whitenoise
+            .find_or_create_user_by_pubkey(&test_pubkey)
+            .await
+            .unwrap();
+
+        assert!(created_user.id.is_some());
+        assert_eq!(created_user.pubkey, test_pubkey);
+        assert_eq!(created_user.metadata.name, None);
+        assert_eq!(created_user.metadata.about, None);
+
+        let found_user = whitenoise.find_user_by_pubkey(&test_pubkey).await.unwrap();
+        assert_eq!(found_user.id, created_user.id);
+        assert_eq!(found_user.pubkey, created_user.pubkey);
     }
 }
