@@ -198,6 +198,7 @@ impl Whitenoise {
             self,
             &group.mls_group_id,
             group_type,
+            None,
             participant_count,
         )
         .await?;

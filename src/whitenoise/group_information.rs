@@ -44,6 +44,7 @@ pub struct GroupInformation {
     pub id: Option<i64>,
     pub mls_group_id: GroupId,
     pub group_type: GroupType,
+    pub group_image: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -66,6 +67,7 @@ impl GroupInformation {
         whitenoise: &Whitenoise,
         mls_group_id: &GroupId,
         group_type: Option<GroupType>,
+        group_image: Option<Vec<u8>>,
         participant_count: usize,
     ) -> Result<GroupInformation, WhitenoiseError> {
         let group_type = group_type
@@ -73,6 +75,7 @@ impl GroupInformation {
         let (group_info, _was_created) = Self::find_or_create_by_mls_group_id(
             mls_group_id,
             Some(group_type),
+            group_image,
             &whitenoise.database,
         )
         .await?;
@@ -87,6 +90,7 @@ impl GroupInformation {
         let (group_info, _was_created) = GroupInformation::find_or_create_by_mls_group_id(
             mls_group_id,
             Some(GroupType::default()),
+            None,
             &whitenoise.database,
         )
         .await?;
@@ -123,6 +127,7 @@ impl GroupInformation {
                 let (new_info, _was_created) = GroupInformation::find_or_create_by_mls_group_id(
                     mls_group_id,
                     Some(GroupType::default()),
+                    None,
                     &whitenoise.database,
                 )
                 .await?;
@@ -243,6 +248,7 @@ mod tests {
             &whitenoise,
             &group_id,
             Some(GroupType::DirectMessage),
+            None,
             5, // Should be ignored when explicit type provided
         )
         .await;
@@ -262,6 +268,7 @@ mod tests {
         let result = GroupInformation::create_for_group(
             &whitenoise,
             &group_id,
+            None,
             None,
             2, // Should infer DirectMessage
         )
@@ -283,6 +290,7 @@ mod tests {
             &whitenoise,
             &group_id,
             None,
+            None,
             5, // Should infer Group
         )
         .await;
@@ -300,9 +308,14 @@ mod tests {
         let group_id = GroupId::from_slice(&[4; 32]);
 
         // First call - should create
-        let result1 =
-            GroupInformation::create_for_group(&whitenoise, &group_id, Some(GroupType::Group), 3)
-                .await;
+        let result1 = GroupInformation::create_for_group(
+            &whitenoise,
+            &group_id,
+            Some(GroupType::Group),
+            None,
+            3,
+        )
+        .await;
         assert!(result1.is_ok());
         let group_info1 = result1.unwrap();
 
@@ -311,6 +324,7 @@ mod tests {
             &whitenoise,
             &group_id,
             Some(GroupType::DirectMessage), // Different type, but should find existing
+            None,
             2,
         )
         .await;
@@ -347,6 +361,7 @@ mod tests {
             &whitenoise,
             &group_id,
             Some(GroupType::DirectMessage),
+            None,
             2,
         )
         .await
@@ -368,15 +383,21 @@ mod tests {
         let group_id2 = GroupId::from_slice(&[8; 32]);
 
         // Create both groups first
-        let _info1 =
-            GroupInformation::create_for_group(&whitenoise, &group_id1, Some(GroupType::Group), 5)
-                .await
-                .unwrap();
+        let _info1 = GroupInformation::create_for_group(
+            &whitenoise,
+            &group_id1,
+            Some(GroupType::Group),
+            None,
+            5,
+        )
+        .await
+        .unwrap();
 
         let _info2 = GroupInformation::create_for_group(
             &whitenoise,
             &group_id2,
             Some(GroupType::DirectMessage),
+            None,
             2,
         )
         .await
@@ -420,6 +441,7 @@ mod tests {
             &whitenoise,
             &group_id1,
             Some(GroupType::DirectMessage),
+            None,
             2,
         )
         .await

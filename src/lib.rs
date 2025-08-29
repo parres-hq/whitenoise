@@ -4,6 +4,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::EnvFilter, fmt::Layer, prelude::*, registry::Registry};
 
 // mod media;
+mod media;
 mod nostr_manager;
 mod types;
 pub mod whitenoise;
