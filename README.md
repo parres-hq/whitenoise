@@ -14,7 +14,7 @@ This crate is the core library that powers our Flutter app. It is front-end agno
 
 ## The Spec
 
-White Noise is an implementation of the [NIP-EE](https://github.com/nostr-protocol/nips/pull/1427) spec.
+White Noise is an implementation of the [NIP-EE](https://github.com/nostr-protocol/nips/blob/master/EE.md) spec.
 
 ## Releases
 
@@ -26,7 +26,7 @@ White Noise is a standard rust crate. Check it out and use it like you would any
 
 1. Clone the repo: `git clone https://github.com/parres-hq/whitenoise.git` and `cd whitenoise`.
 
-In addition, there is a `integration_test` binary in the codebase that runs through much of the API and functions as a sort of integration test. Run it with the following
+In addition, there are extensive integration tests in the codebase that run through much of the API and functions. Run it with the following
 
 ```sh
 just int-test

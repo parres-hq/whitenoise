@@ -1,12 +1,14 @@
 use std::{collections::HashSet, time::Duration};
 
 use nostr_mls::prelude::*;
+use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 
 use crate::{
     whitenoise::{
         accounts::Account,
         error::{Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
+        relays::Relay,
         users::User,
         Whitenoise,
     },
@@ -14,6 +16,48 @@ use crate::{
 };
 
 impl Whitenoise {
+    /// Ensures that group relays are available for publishing evolution events.
+    /// Returns the validated relay URLs.
+    ///
+    /// # Arguments
+    /// * `nostr_mls` - The NostrMls instance to get relays from
+    /// * `group_id` - The ID of the group
+    ///
+    /// # Returns
+    /// * `Ok(Vec<nostr_sdk::RelayUrl>)` - Vector of relay URLs
+    /// * `Err(WhitenoiseError::GroupMissingRelays)` - If no relays are configured
+    fn ensure_group_relays(
+        nostr_mls: &NostrMls<NostrMlsSqliteStorage>,
+        group_id: &GroupId,
+    ) -> Result<Vec<nostr_sdk::RelayUrl>> {
+        let group_relays = nostr_mls.get_relays(group_id)?;
+
+        if group_relays.is_empty() {
+            return Err(WhitenoiseError::GroupMissingRelays);
+        }
+
+        Ok(group_relays.into_iter().collect())
+    }
+
+    /// Converts relay URLs to database Relay objects.
+    ///
+    /// # Arguments
+    /// * `relay_urls` - Vector of relay URLs to convert
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Relay>)` - Vector of database Relay objects
+    /// * `Err(WhitenoiseError)` - If relay creation fails
+    async fn convert_relay_urls_to_relays(
+        &self,
+        relay_urls: Vec<nostr_sdk::RelayUrl>,
+    ) -> Result<Vec<Relay>> {
+        let mut relays = Vec::new();
+        for relay_url in relay_urls {
+            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
+            relays.push(db_relay);
+        }
+        Ok(relays)
+    }
     /// Creates a new MLS group with the specified members and settings
     ///
     /// # Arguments
@@ -172,7 +216,7 @@ impl Whitenoise {
             .map_err(WhitenoiseError::from)?
             .into_iter()
             .filter(|group| !active_filter || group.state == group_types::GroupState::Active)
-            .collect())
+            .collect::<Vec<group_types::Group>>())
     }
 
     pub async fn group_members(
@@ -185,7 +229,7 @@ impl Whitenoise {
             .get_members(group_id)
             .map_err(WhitenoiseError::from)?
             .into_iter()
-            .collect())
+            .collect::<Vec<PublicKey>>())
     }
 
     pub async fn group_admins(
@@ -200,7 +244,7 @@ impl Whitenoise {
             .ok_or(WhitenoiseError::GroupNotFound)?
             .admin_pubkeys
             .into_iter()
-            .collect())
+            .collect::<Vec<PublicKey>>())
     }
 
     /// Adds new members to an existing MLS group
@@ -256,28 +300,25 @@ impl Whitenoise {
             users.push(user);
         }
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let update_result = nostr_mls.add_members(group_id, &key_package_events)?;
-        // Merge the pending commit immediately after creating it
-        // This ensures our local state is correct before publishing
-        nostr_mls.merge_pending_commit(group_id)?;
+        let (relay_urls, evolution_event, welcome_rumors) = {
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
 
-        // Publish the evolution event to the group
-        let group_relays = nostr_mls.get_relays(group_id)?;
+            let update_result = nostr_mls.add_members(group_id, &key_package_events)?;
+            // Merge the pending commit immediately after creating it
+            // This ensures our local state is correct before publishing
+            nostr_mls.merge_pending_commit(group_id)?;
 
-        if group_relays.is_empty() {
-            return Err(WhitenoiseError::GroupMissingRelays);
-        }
+            (
+                relay_urls,
+                update_result.evolution_event,
+                update_result.welcome_rumors,
+            )
+        };
 
-        let mut relays = HashSet::new();
-        for relay_url in group_relays.clone() {
-            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
-            relays.insert(db_relay);
-        }
+        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
 
-        let evolution_event = update_result.evolution_event;
-
-        let welcome_rumors = match update_result.welcome_rumors {
+        let welcome_rumors = match welcome_rumors {
             None => {
                 return Err(WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(
                     "Missing welcome message".to_owned(),
@@ -293,11 +334,7 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_mls_commit_to(
-                evolution_event,
-                account,
-                &relays.into_iter().collect::<Vec<_>>(),
-            )
+            .publish_mls_commit_to(evolution_event, account, &relays)
             .await?;
 
         // Evolution event published successfully
@@ -365,29 +402,20 @@ impl Whitenoise {
         group_id: &GroupId,
         members: Vec<PublicKey>,
     ) -> Result<()> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let update_result = nostr_mls.remove_members(group_id, &members)?;
-        nostr_mls.merge_pending_commit(group_id)?;
-        let group_relays = nostr_mls.get_relays(group_id)?;
+        let (relay_urls, evolution_event) = {
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
 
-        if group_relays.is_empty() {
-            return Err(WhitenoiseError::GroupMissingRelays);
-        }
+            let update_result = nostr_mls.remove_members(group_id, &members)?;
+            nostr_mls.merge_pending_commit(group_id)?;
 
-        let evolution_event = update_result.evolution_event;
+            (relay_urls, update_result.evolution_event)
+        };
 
-        let mut relays = HashSet::new();
-        for relay_url in group_relays {
-            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
-            relays.insert(db_relay);
-        }
+        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
 
         self.nostr
-            .publish_mls_commit_to(
-                evolution_event,
-                account,
-                &relays.into_iter().collect::<Vec<_>>(),
-            )
+            .publish_mls_commit_to(evolution_event, account, &relays)
             .await?;
         Ok(())
     }
@@ -406,30 +434,56 @@ impl Whitenoise {
         group_id: &GroupId,
         group_data: NostrGroupDataUpdate,
     ) -> Result<()> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let update_result = nostr_mls.update_group_data(group_id, group_data)?;
-        nostr_mls.merge_pending_commit(group_id)?;
-        let group_relays = nostr_mls.get_relays(group_id)?;
+        let (relay_urls, evolution_event) = {
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
 
-        if group_relays.is_empty() {
-            return Err(WhitenoiseError::GroupMissingRelays);
-        }
+            let update_result = nostr_mls.update_group_data(group_id, group_data)?;
+            nostr_mls.merge_pending_commit(group_id)?;
 
-        let evolution_event = update_result.evolution_event;
+            (relay_urls, update_result.evolution_event)
+        };
 
-        let mut relays = HashSet::new();
-        for relay_url in group_relays {
-            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
-            relays.insert(db_relay);
-        }
+        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
 
         self.nostr
-            .publish_mls_commit_to(
-                evolution_event,
-                account,
-                &relays.into_iter().collect::<Vec<_>>(),
-            )
+            .publish_mls_commit_to(evolution_event, account, &relays)
             .await?;
+        Ok(())
+    }
+
+    /// Initiates the process to leave a group by creating a self-removal proposal.
+    ///
+    /// This method creates a self-removal proposal using the nostr-mls library and publishes
+    /// it to the group relays. The proposal will need to be committed by a group admin before
+    /// the removal is finalized.
+    ///
+    /// # Arguments
+    /// * `account` - The account that wants to leave the group
+    /// * `group_id` - The ID of the group to leave
+    ///
+    /// # Returns
+    /// * `Ok(())` if the proposal was successfully created and published
+    /// * `Err(WhitenoiseError)` if the operation failed
+    pub async fn leave_group(&self, account: &Account, group_id: &GroupId) -> Result<()> {
+        let (relay_urls, evolution_event) = {
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
+
+            // Create a self-removal proposal
+            let update_result = nostr_mls.leave_group(group_id)?;
+
+            (relay_urls, update_result.evolution_event)
+        };
+
+        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
+
+        // Publish the self-removal proposal to the group
+        self.nostr
+            .publish_mls_commit_to(evolution_event, account, &relays)
+            .await?;
+
+        // TODO: Do any local updates to ensure that we're accurately reflecting that the account is trying to leave this group
         Ok(())
     }
 }
@@ -841,6 +895,7 @@ mod tests {
             description: Some("Updated description".to_string()),
             image_url: Some(Some("https://example.com/new_image.png".to_string())),
             image_key: Some(Some(b"new image key".to_vec())),
+            image_nonce: Some(Some(b"new image nonce".to_vec())),
             admins: None,
             relays: None,
         };
@@ -910,5 +965,56 @@ mod tests {
         );
 
         // All groups should be in a valid state (exact verification depends on state enum implementation)
+    }
+
+    #[tokio::test]
+    async fn test_leave_group() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator and members
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 2).await;
+        let member_accounts = members.iter().map(|(acc, _)| acc).collect::<Vec<_>>();
+        let member_pubkeys = member_accounts
+            .iter()
+            .map(|acc| acc.pubkey)
+            .collect::<Vec<_>>();
+
+        // Create group with creator and members as admins (so they can process the leave proposal)
+        let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let group = whitenoise
+            .create_group(&creator_account, member_pubkeys.clone(), config, None)
+            .await
+            .unwrap();
+
+        // Verify initial membership
+        let initial_members = whitenoise
+            .group_members(&creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(initial_members.len(), 3); // creator + 2 members
+
+        // Creator leaves the group (creates proposal)
+        // Note: In a real scenario, members would need to accept welcome messages
+        // to have access to the group. For this test, we use the creator who
+        // has immediate access to the group.
+        let leave_result = whitenoise
+            .leave_group(&creator_account, &group.mls_group_id)
+            .await;
+
+        assert!(
+            leave_result.is_ok(),
+            "Failed to initiate leave group: {:?}",
+            leave_result.unwrap_err()
+        );
+
+        // Note: At this point, the member has only created a proposal to leave.
+        // The actual removal would happen when an admin processes the commit,
+        // but that's part of the message processing pipeline that would be
+        // tested separately in integration tests.
+
+        // For now, we just verify that the proposal was successfully created and published
+        // without errors, which indicates the leave_group method works correctly.
     }
 }
