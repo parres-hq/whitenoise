@@ -210,16 +210,13 @@ impl Whitenoise {
         account: &Account,
         active_filter: bool,
     ) -> Result<Vec<group_types::Group>> {
-        let groups = {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            nostr_mls
-                .get_groups()
-                .map_err(WhitenoiseError::from)?
-                .into_iter()
-                .filter(|group| !active_filter || group.state == group_types::GroupState::Active)
-                .collect::<Vec<group_types::Group>>()
-        };
-        Ok(groups)
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        Ok(nostr_mls
+            .get_groups()
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .filter(|group| !active_filter || group.state == group_types::GroupState::Active)
+            .collect::<Vec<group_types::Group>>())
     }
 
     pub async fn group_members(
@@ -227,15 +224,12 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        let members = {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            nostr_mls
-                .get_members(group_id)
-                .map_err(WhitenoiseError::from)?
-                .into_iter()
-                .collect::<Vec<PublicKey>>()
-        };
-        Ok(members)
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        Ok(nostr_mls
+            .get_members(group_id)
+            .map_err(WhitenoiseError::from)?
+            .into_iter()
+            .collect::<Vec<PublicKey>>())
     }
 
     pub async fn group_admins(
@@ -243,17 +237,14 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        let admins = {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            nostr_mls
-                .get_group(group_id)
-                .map_err(WhitenoiseError::from)?
-                .ok_or(WhitenoiseError::GroupNotFound)?
-                .admin_pubkeys
-                .into_iter()
-                .collect::<Vec<PublicKey>>()
-        };
-        Ok(admins)
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        Ok(nostr_mls
+            .get_group(group_id)
+            .map_err(WhitenoiseError::from)?
+            .ok_or(WhitenoiseError::GroupNotFound)?
+            .admin_pubkeys
+            .into_iter()
+            .collect::<Vec<PublicKey>>())
     }
 
     /// Adds new members to an existing MLS group
