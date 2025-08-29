@@ -55,6 +55,7 @@ impl TestCase for CreateGroupTestCase {
                     self.group_description.clone(),
                     None, // image_url
                     None, // image_key
+                    None, // image_nonce
                     vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
                     admin_pubkeys,
                 ),
