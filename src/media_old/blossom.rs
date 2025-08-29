@@ -64,7 +64,6 @@ pub struct BlobDescriptor {
 pub struct BlossomClient {
     /// Base URL of the Blossom server
     pub url: String,
-    client: reqwest::Client,
 }
 
 impl BlossomClient {
@@ -75,7 +74,6 @@ impl BlossomClient {
     pub fn new(url: &str) -> Self {
         BlossomClient {
             url: url.to_string(),
-            client: reqwest::Client::new(),
         }
     }
 
@@ -126,6 +124,7 @@ impl BlossomClient {
         &self,
         file: Vec<u8>,
     ) -> Result<(BlobDescriptor, Keys), Box<dyn std::error::Error + Send + Sync>> {
+        let client = reqwest::Client::new();
         tracing::info!(
             target: "whitenoise::nostr_manager::blossom",
             "Uploading file to Blossom server: {}",
@@ -144,7 +143,7 @@ impl BlossomClient {
         let auth_header = self.create_auth_event(&sha256, "upload", &keys).await?;
 
         // Upload the file with the auth header
-        let response = self.client
+        let response = client
             .put(format!("{}/upload", self.url))
             .header("Content-Length", file.len())
             .header("Content-Type", "application/octet-stream")
@@ -179,6 +178,7 @@ impl BlossomClient {
         sha256: &str,
         keys: &Keys,
     ) -> Result<BlobDescriptor, Box<dyn std::error::Error + Send + Sync>> {
+        let client = reqwest::Client::new();
         tracing::info!(
             target: "whitenoise::nostr_manager::blossom",
             "Deleting file from Blossom server: {}",
@@ -189,7 +189,7 @@ impl BlossomClient {
         let auth_header = self.create_auth_event(sha256, "delete", keys).await?;
 
         // Delete the file with the auth header
-        let response = self.client
+        let response = client
             .delete(format!("{}/{}", self.url, sha256))
             .header("Authorization", auth_header)
             .send()
@@ -223,6 +223,7 @@ impl BlossomClient {
         content_type: &str,
         keys: &Keys,
     ) -> Result<BlobDescriptor, Box<dyn std::error::Error + Send + Sync>> {
+        let client = reqwest::Client::new();
         tracing::info!(
             target: "whitenoise::nostr_manager::blossom",
             "Uploading media to Blossom server: {}",
@@ -238,7 +239,7 @@ impl BlossomClient {
         let auth_header = self.create_auth_event(&sha256, "media", keys).await?;
 
         // Upload the file with the auth header
-        let response = self.client
+        let response = client
             .put(format!("{}/media", self.url))
             .header("Content-Length", file.len())
             .header("Content-Type", content_type)
@@ -278,6 +279,7 @@ impl BlossomClient {
         content_length: u64,
         keys: &Keys,
     ) -> UploadRequirementsResult {
+        let client = reqwest::Client::new();
         tracing::info!(
             target: "whitenoise::nostr_manager::blossom",
             "Checking upload requirements on Blossom server: {}",
@@ -294,7 +296,7 @@ impl BlossomClient {
             })?;
 
         // Check upload requirements
-        let response = self.client
+        let response = client
             .head(format!("{}/upload", self.url))
             .header("X-SHA-256", sha256)
             .header("X-Content-Type", content_type)
@@ -343,6 +345,7 @@ impl BlossomClient {
         content_length: u64,
         keys: &Keys,
     ) -> UploadRequirementsResult {
+        let client = reqwest::Client::new();
         tracing::info!(
             target: "whitenoise::nostr_manager::blossom",
             "Checking media upload requirements on Blossom server: {}",
@@ -359,7 +362,7 @@ impl BlossomClient {
             })?;
 
         // Check upload requirements
-        let response = self.client
+        let response = client
             .head(format!("{}/media", self.url))
             .header("X-SHA-256", sha256)
             .header("X-Content-Type", content_type)

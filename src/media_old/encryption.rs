@@ -18,7 +18,7 @@ use crate::media::errors::MediaError;
 /// # Returns
 /// * `Ok((Vec<u8>, Vec<u8>))` - The encrypted data and nonce
 /// * `Err(MediaError)` - Error if encryption fails
-pub fn encrypt_file(data: &[u8], key: &[u8; 32], nonce: &[u8]) -> Result<(Vec<u8>, Vec<u8>), MediaError> {
+pub fn encrypt_file(data: &[u8], key: &[u8; 32]) -> Result<(Vec<u8>, Vec<u8>), MediaError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
@@ -57,9 +57,8 @@ mod tests {
     async fn test_encrypt_file() {
         let keys = Keys::generate();
         let data = b"test data";
-        let nonce = b"random_bytes";
 
-        let encrypted = encrypt_file(data, &keys.secret_key().to_secret_bytes(), nonce).unwrap();
+        let encrypted = encrypt_file(data, &keys.secret_key().to_secret_bytes()).unwrap();
 
         // Encrypted data should be different from original
         assert_ne!(encrypted.0, data);
@@ -72,9 +71,8 @@ mod tests {
     async fn test_decrypt_file() {
         let keys = Keys::generate();
         let data = b"test data";
-        let nonce = b"random_bytes";
 
-        let encrypted = encrypt_file(data, &keys.secret_key().to_secret_bytes(), nonce).unwrap();
+        let encrypted = encrypt_file(data, &keys.secret_key().to_secret_bytes()).unwrap();
 
         let decrypted = decrypt_file(
             &encrypted.0,
