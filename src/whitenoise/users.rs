@@ -339,6 +339,53 @@ impl Whitenoise {
         User::find_by_pubkey(pubkey, &self.database).await
     }
 
+    /// Finds a user by their public key or creates a new one if not found.
+    ///
+    /// This method looks up a user in the database using their Nostr public key.
+    /// If the user doesn't exist, it creates a new user record with default metadata.
+    /// The user may have been discovered through various means such as:
+    /// - Following lists from accounts
+    /// - Message interactions
+    /// - Direct user lookups
+    /// - Metadata events
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The Nostr public key of the user to find or create
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result<(User, bool)>` containing:
+    /// - `Ok((User, bool))` - A tuple with the user and a boolean indicating if the user was newly created (true) or found (false)
+    /// - `Err(WhitenoiseError)` - If there's a database error
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use nostr_sdk::PublicKey;
+    /// use whitenoise::Whitenoise;
+    ///
+    /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
+    /// let pubkey = PublicKey::parse("npub1...")?;
+    /// let (user, was_created) = whitenoise.find_or_create_user_by_pubkey(&pubkey).await?;
+    /// if was_created {
+    ///     println!("Created new user: {:?}", user.metadata.name);
+    /// } else {
+    ///     println!("Found existing user: {:?}", user.metadata.name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if:
+    /// - There's a database connection or query error
+    /// - The public key format is invalid (though this is typically caught at the type level)
+    pub async fn find_or_create_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<(User, bool)> {
+        User::find_or_create_by_pubkey(pubkey, &self.database).await
+    }
+
     pub(crate) async fn background_fetch_user_data(&self, user: &User) -> Result<()> {
         let user_clone = user.clone();
         let mut mut_user_clone = user.clone();
