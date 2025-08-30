@@ -215,46 +215,51 @@ impl Whitenoise {
         Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
 
         // Fetch events and setup subscriptions for all accounts after event processing has started
-        {
-            let accounts = Account::all(&whitenoise_ref.database).await?;
-            for account in accounts {
-                // Trigger background data fetch for each account (non-critical)
-                if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
-                    tracing::warn!(
-                        target: "whitenoise::load_accounts",
-                        "Failed to trigger background fetch for account {}: {}",
-                        account.pubkey.to_hex(),
-                        e
-                    );
-                    // Continue - background fetch failure should not prevent account loading
-                }
-                // Setup subscriptions for this account
-                match whitenoise_ref.setup_subscriptions(&account).await {
-                    Ok(()) => {
-                        tracing::debug!(
-                            target: "whitenoise::initialize_whitenoise",
-                            "Successfully set up subscriptions for account: {}",
-                            account.pubkey.to_hex()
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            target: "whitenoise::initialize_whitenoise",
-                            "Failed to set up subscriptions for account {}: {}",
-                            account.pubkey.to_hex(),
-                            e
-                        );
-                        // Continue with other accounts instead of failing completely
-                    }
-                }
-            }
-        }
+        Self::setup_accounts_sync_and_subscriptions(whitenoise_ref).await?;
 
         tracing::debug!(
             target: "whitenoise::initialize_whitenoise",
             "Completed initialization for all loaded accounts"
         );
 
+        Ok(())
+    }
+
+    async fn setup_accounts_sync_and_subscriptions(
+        whitenoise_ref: &'static Whitenoise,
+    ) -> Result<()> {
+        let accounts = Account::all(&whitenoise_ref.database).await?;
+        for account in accounts {
+            // Trigger background data fetch for each account (non-critical)
+            if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
+                tracing::warn!(
+                    target: "whitenoise::load_accounts",
+                    "Failed to trigger background fetch for account {}: {}",
+                    account.pubkey.to_hex(),
+                    e
+                );
+                // Continue - background fetch failure should not prevent account loading
+            }
+            // Setup subscriptions for this account
+            match whitenoise_ref.setup_subscriptions(&account).await {
+                Ok(()) => {
+                    tracing::debug!(
+                        target: "whitenoise::initialize_whitenoise",
+                        "Successfully set up subscriptions for account: {}",
+                        account.pubkey.to_hex()
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::initialize_whitenoise",
+                        "Failed to set up subscriptions for account {}: {}",
+                        account.pubkey.to_hex(),
+                        e
+                    );
+                    // Continue with other accounts instead of failing completely
+                }
+            }
+        }
         Ok(())
     }
 
