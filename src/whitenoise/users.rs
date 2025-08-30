@@ -293,6 +293,21 @@ impl User {
         self.sync_relay_urls(whitenoise, relay_type, &network_relay_urls)
             .await
     }
+
+    pub(crate) async fn all_users_with_relay_urls(
+        whitenoise: &Whitenoise,
+    ) -> Result<Vec<(PublicKey, Vec<RelayUrl>)>> {
+        let users = User::all(&whitenoise.database).await?;
+        let mut users_with_relays = Vec::new();
+
+        for user in users {
+            let relays = user.relays(RelayType::Nip65, &whitenoise.database).await?;
+            let relay_urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+            users_with_relays.push((user.pubkey, relay_urls));
+        }
+
+        Ok(users_with_relays)
+    }
 }
 
 impl Whitenoise {
@@ -716,5 +731,36 @@ mod tests {
         let found_user = whitenoise.find_user_by_pubkey(&test_pubkey).await.unwrap();
         assert_eq!(found_user.id, created_user.id);
         assert_eq!(found_user.pubkey, created_user.pubkey);
+    }
+
+    #[tokio::test]
+    async fn test_all_users_with_relay_urls() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let users_with_relays = User::all_users_with_relay_urls(&whitenoise).await.unwrap();
+        assert!(users_with_relays.is_empty());
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new().name("Test User"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let saved_user = user.save(&whitenoise.database).await.unwrap();
+        let relay_url = RelayUrl::parse("wss://test.example.com").unwrap();
+        let relay = whitenoise
+            .find_or_create_relay_by_url(&relay_url)
+            .await
+            .unwrap();
+        saved_user
+            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let users_with_relays = User::all_users_with_relay_urls(&whitenoise).await.unwrap();
+        assert_eq!(users_with_relays.len(), 1);
+        assert_eq!(users_with_relays[0].0, test_pubkey);
+        assert_eq!(users_with_relays[0].1, vec![relay_url]);
     }
 }
