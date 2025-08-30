@@ -277,7 +277,7 @@ impl NostrManager {
         Ok(relay.status())
     }
 
-    /// Ensures that the client is connected to all the specified relays.
+    /// Ensures that the client is connected to all the specified relay URLs.
     ///
     /// This method checks each relay URL in the provided list and adds it to the client's
     /// relay pool if it's not already connected. It then attempts to establish connections
@@ -286,29 +286,29 @@ impl NostrManager {
     /// This is essential for subscription setup and event publishing to work correctly,
     /// as the nostr-sdk client needs to be connected to relays before it can subscribe
     /// to them or publish events to them.
-    pub(crate) async fn ensure_relays_connected(&self, relays: &[Relay]) -> Result<()> {
-        if relays.is_empty() {
+    pub(crate) async fn ensure_relays_connected(&self, relay_urls: &[RelayUrl]) -> Result<()> {
+        if relay_urls.is_empty() {
             return Ok(());
         }
 
         tracing::debug!(
             target: "whitenoise::nostr_manager::ensure_relays_connected",
-            "Ensuring connection to {} relays",
-            relays.len()
+            "Ensuring connection to {} relay URLs",
+            relay_urls.len()
         );
 
         // Track newly added relays for connection
         let mut newly_added_relays = Vec::new();
 
-        for relay in relays.iter() {
+        for relay_url in relay_urls.iter() {
             // Check if we're already connected to this relay by attempting to get its status
-            match self.client.relay(relay.url.clone()).await {
+            match self.client.relay(relay_url.clone()).await {
                 Ok(_) => {
                     // Relay already exists in the client, skip
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::ensure_relays_connected",
                         "Relay {} already connected",
-                        relay.url
+                        relay_url
                     );
                 }
                 Err(_) => {
@@ -316,23 +316,23 @@ impl NostrManager {
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::ensure_relays_connected",
                         "Adding new relay: {}",
-                        relay.url
+                        relay_url
                     );
 
-                    match self.client.add_relay(relay.url.clone()).await {
+                    match self.client.add_relay(relay_url.clone()).await {
                         Ok(_) => {
-                            newly_added_relays.push(relay.url.clone());
+                            newly_added_relays.push(relay_url.clone());
                             tracing::debug!(
                                 target: "whitenoise::nostr_manager::ensure_relays_connected",
                                 "Successfully added relay: {}",
-                                relay.url
+                                relay_url
                             );
                         }
                         Err(e) => {
                             tracing::warn!(
                                 target: "whitenoise::nostr_manager::ensure_relays_connected",
                                 "Failed to add relay {}: {}",
-                                relay.url,
+                                relay_url,
                                 e
                             );
                             // Continue with other relays rather than failing completely
@@ -355,7 +355,7 @@ impl NostrManager {
 
         tracing::debug!(
             target: "whitenoise::nostr_manager::ensure_relays_connected",
-            "Relay connection ensuring completed"
+            "Relay connections ensuring completed"
         );
 
         Ok(())

@@ -168,11 +168,12 @@ impl NostrManager {
         &self,
         event: Event,
         account: &Account,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<Output<EventId>> {
-        // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays).await?;
         let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+
+        // Ensure we're connected to all target relays before publishing
+        self.ensure_relays_connected(&urls).await?;
         let result = self.client.send_event_to(urls, &event).await?;
 
         // Track the published event if we have a successful result (best-effort)
@@ -195,15 +196,15 @@ impl NostrManager {
     async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Get the public key from the signer for account lookup
         let pubkey = signer.get_public_key().await?;
+        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
 
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(relays).await?;
-        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+        self.ensure_relays_connected(&urls).await?;
         self.client.set_signer(signer).await;
         let result = self
             .client

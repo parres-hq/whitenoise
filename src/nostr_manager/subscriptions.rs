@@ -53,7 +53,7 @@ impl NostrManager {
     async fn setup_user_events_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: &[Relay],
+        user_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_user_events_subscription",
@@ -62,8 +62,9 @@ impl NostrManager {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
 
+        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(user_relays).await?;
+        self.ensure_relays_connected(&urls).await?;
 
         // Combine all user event types into a single subscription
         let user_events_filter = Filter::new()
@@ -75,7 +76,6 @@ impl NostrManager {
             ])
             .author(pubkey);
 
-        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         self.client
             .subscribe_with_id_to(urls, subscription_id, user_events_filter, None)
             .await?;
@@ -91,7 +91,7 @@ impl NostrManager {
     async fn setup_giftwrap_subscription(
         &self,
         pubkey: PublicKey,
-        inbox_relays: &[Relay],
+        inbox_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_giftwrap_subscription",
@@ -100,12 +100,12 @@ impl NostrManager {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
 
+        let urls: Vec<RelayUrl> = inbox_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all inbox relays before subscribing
-        self.ensure_relays_connected(inbox_relays).await?;
+        self.ensure_relays_connected(&urls).await?;
 
         let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
 
-        let urls: Vec<RelayUrl> = inbox_relays.iter().map(|r| r.url.clone()).collect();
         self.client
             .subscribe_with_id_to(urls, subscription_id, giftwrap_filter, None)
             .await?;
@@ -121,7 +121,7 @@ impl NostrManager {
     pub(crate) async fn setup_contacts_metadata_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: &[Relay],
+        user_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_contacts_metadata_subscription",
@@ -138,14 +138,14 @@ impl NostrManager {
             return Ok(());
         }
 
+        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(user_relays).await?;
+        self.ensure_relays_connected(&urls).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
 
         let contacts_metadata_filter = Filter::new().kind(Kind::Metadata).authors(contacts_pubkeys);
-        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         self.client
             .subscribe_with_id_to(urls, subscription_id, contacts_metadata_filter, None)
             .await?;
@@ -162,7 +162,7 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         nostr_group_ids: &[String],
-        group_relays: &[Relay],
+        group_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_group_messages_subscription",
@@ -173,8 +173,9 @@ impl NostrManager {
             return Ok(());
         }
 
+        let urls: Vec<RelayUrl> = group_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all group relays before subscribing
-        self.ensure_relays_connected(group_relays).await?;
+        self.ensure_relays_connected(&urls).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));
@@ -183,7 +184,6 @@ impl NostrManager {
             .kind(Kind::MlsGroupMessage)
             .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids);
 
-        let urls: Vec<RelayUrl> = group_relays.iter().map(|r| r.url.clone()).collect();
         self.client
             .subscribe_with_id_to(urls, subscription_id, mls_message_filter, None)
             .await?;
