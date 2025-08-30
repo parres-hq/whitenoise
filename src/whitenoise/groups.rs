@@ -2,11 +2,14 @@ use std::{collections::HashSet, time::Duration};
 
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use nostr_sdk::hashes::sha256::Hash as Sha256Hash;
+use nwc::nostr::hashes::Hash;
 
 use crate::{
+    media::encryption::decrypt_data,
     whitenoise::{
         accounts::Account,
-        error::{Result, WhitenoiseError},
+        error::{BlossomError, Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
         relays::Relay,
         users::User,
@@ -486,6 +489,41 @@ impl Whitenoise {
 
         // TODO: Do any local updates to ensure that we're accurately reflecting that the account is trying to leave this group
         Ok(())
+    }
+
+    pub async fn get_group_image(&self, account: &Account, group_id: &GroupId) -> Result<Vec<u8>> {
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        match GroupInformation::get_by_mls_group_id(group_id, self)
+            .await?
+            .group_image
+        {
+            Some(img) => Ok(img),
+            None => {
+                let group = match nostr_mls.get_group(group_id)? {
+                    None => return Err(WhitenoiseError::GroupNotFound),
+                    Some(group) => group,
+                };
+                let image_hash = group
+                    .image_hash
+                    .ok_or(WhitenoiseError::GroupImageNotFound)?;
+                let image_hash_array: [u8; 32] = image_hash
+                    .try_into()
+                    .map_err(|_| BlossomError::InvalidSha256)?;
+                let sha256 = Sha256Hash::from_byte_array(image_hash_array);
+
+                let encrypted_bytes = self
+                    .blossom
+                    .get_blob(sha256, None, None, Option::<&Keys>::None)
+                    .await
+                    .map_err(BlossomError::from)?;
+
+                let image_key = group.image_key.ok_or(WhitenoiseError::GroupImageNotFound)?;
+                let image_nonce = group
+                    .image_nonce
+                    .ok_or(WhitenoiseError::GroupImageNotFound)?;
+                Ok(decrypt_data(&encrypted_bytes, &image_key, &image_nonce)?)
+            }
+        }
     }
 }
 

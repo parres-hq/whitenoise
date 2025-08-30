@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::{
+    media::errors::MediaError,
     nostr_manager::NostrManagerError,
     whitenoise::{
         accounts::AccountError, database::DatabaseError, secrets_store::SecretsStoreError,
@@ -34,6 +35,9 @@ pub enum WhitenoiseError {
 
     #[error("Group has no relays configured")]
     GroupMissingRelays,
+
+    #[error("Group image not found")]
+    GroupImageNotFound,
 
     #[error("Account not found")]
     AccountNotFound,
@@ -110,6 +114,12 @@ pub enum WhitenoiseError {
     #[error("Event handler error: {0}")]
     EventProcessor(String),
 
+    #[error("Blossom error: {0}")]
+    Blossom(String),
+
+    #[error("Media error: {0}")]
+    Media(#[from] MediaError),
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }
@@ -118,4 +128,19 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {
     fn from(err: Box<dyn std::error::Error + Send + Sync>) -> Self {
         WhitenoiseError::Other(anyhow::anyhow!(err.to_string()))
     }
+}
+
+// To avoid clippy error WhitenoiseError exceeds 160bytes
+impl From<BlossomError> for WhitenoiseError {
+    fn from(value: BlossomError) -> Self {
+        WhitenoiseError::Blossom(value.to_string())
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum BlossomError {
+    #[error("Blossom Client error: {0}")]
+    Client(#[from] nostr_blossom::error::Error),
+    #[error("Invalid sha256 to locate the blob")]
+    InvalidSha256,
 }

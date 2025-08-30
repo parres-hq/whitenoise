@@ -17,6 +17,7 @@ use crate::media::errors::MediaError;
 /// # Returns
 /// * `Ok((Vec<u8>, Vec<u8>))` - The encrypted data and nonce
 /// * `Err(MediaError)` - Error if encryption fails
+#[allow(dead_code)]
 pub fn encrypt_file(
     data: &[u8],
     key: &[u8; 32],
