@@ -6,3 +6,4 @@ pub mod group_membership;
 pub mod metadata_management;
 pub mod shared;
 pub mod subscription_processing;
+pub mod user_discovery;

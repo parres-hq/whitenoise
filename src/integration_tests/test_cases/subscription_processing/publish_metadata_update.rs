@@ -39,15 +39,9 @@ impl TestCase for PublishMetadataUpdateTestCase {
             .collect();
 
         // Create external client
-        let test_client = Client::default();
-        for relay in &dev_relay_urls {
-            test_client.add_relay(relay.clone()).await.unwrap();
-        }
-        test_client.connect().await;
-        test_client.set_signer(keys).await;
-
-        // Wait for client to connect
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        let test_client = create_test_client(&context.dev_relays, keys.clone()).await?;
+        let relay_urls: Vec<String> = dev_relay_urls.iter().map(|url| url.to_string()).collect();
+        publish_relay_lists(&test_client, relay_urls).await?;
 
         // Wait an additional second to ensure external event has newer timestamp than initial account metadata
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
