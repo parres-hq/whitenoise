@@ -40,6 +40,7 @@ impl TestCase for PublishRelayListUpdateTestCase {
 
         // Create external client
         let test_client = create_test_client(&context.dev_relays, keys.clone()).await?;
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         let relay_urls: Vec<String> = dev_relay_urls.iter().map(|url| url.to_string()).collect();
         publish_relay_lists(&test_client, relay_urls).await?;
 
