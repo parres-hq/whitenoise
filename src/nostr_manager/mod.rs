@@ -5,7 +5,6 @@ use nostr_sdk::prelude::*;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 
-// use crate::media::blossom::BlossomClient;
 use crate::{
     types::ProcessableEvent,
     whitenoise::{

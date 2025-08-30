@@ -344,7 +344,7 @@ impl Whitenoise {
 
     fn default_blossom() -> BlossomClient {
         if cfg!(debug_assertions) {
-            BlossomClient::new(Url::parse("https://localhost:3000").unwrap())
+            BlossomClient::new(Url::parse("http://localhost:3000").unwrap())
         } else {
             BlossomClient::new(Url::parse("https://blossom.primal.net/").unwrap())
         }
