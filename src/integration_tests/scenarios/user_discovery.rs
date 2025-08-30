@@ -21,23 +21,27 @@ impl Scenario for UserDiscoveryScenario {
     }
 
     async fn run_scenario(&mut self) -> Result<(), WhitenoiseError> {
-        tracing::info!("=== Starting Find Or Create User Scenario ===");
-
         tracing::info!("Testing: No metadata and no relays");
-        FindOrCreateUser::no_data()
+        FindOrCreateUserTestCase::basic()
             .execute(&mut self.context)
             .await?;
 
         tracing::info!("Testing: With metadata");
-        FindOrCreateUser::with_metadata()
+        FindOrCreateUserTestCase::basic()
+            .with_metadata()
             .execute(&mut self.context)
             .await?;
+
         tracing::info!("Testing: With relays");
-        FindOrCreateUser::with_relays()
+        FindOrCreateUserTestCase::basic()
+            .with_relays()
             .execute(&mut self.context)
             .await?;
+
         tracing::info!("Testing: With metadata and relays");
-        FindOrCreateUser::with_metadata_and_relays()
+        FindOrCreateUserTestCase::basic()
+            .with_metadata()
+            .with_relays()
             .execute(&mut self.context)
             .await?;
 

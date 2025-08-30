@@ -3,7 +3,7 @@ use crate::WhitenoiseError;
 use async_trait::async_trait;
 use nostr_sdk::{Keys, Metadata, RelayUrl};
 
-pub struct FindOrCreateUser {
+pub struct FindOrCreateUserTestCase {
     test_keys: Keys,
     should_have_metadata: bool,
     should_have_relays: bool,
@@ -11,8 +11,8 @@ pub struct FindOrCreateUser {
     test_relays: Vec<RelayUrl>,
 }
 
-impl FindOrCreateUser {
-    pub fn no_data() -> Self {
+impl FindOrCreateUserTestCase {
+    pub fn basic() -> Self {
         let keys = Keys::generate();
         Self {
             test_keys: keys,
@@ -23,90 +23,66 @@ impl FindOrCreateUser {
         }
     }
 
-    pub fn with_metadata() -> Self {
-        let keys = Keys::generate();
+    pub fn with_metadata(mut self) -> Self {
         let metadata = Metadata::new()
             .name("Test User")
             .display_name("Test Display Name")
             .about("Test about section");
 
-        Self {
-            test_keys: keys,
-            should_have_metadata: true,
-            should_have_relays: false,
-            test_metadata: Some(metadata),
-            test_relays: vec![],
-        }
+        self.should_have_metadata = true;
+        self.test_metadata = Some(metadata);
+        self
     }
 
-    pub fn with_relays() -> Self {
-        let keys = Keys::generate();
+    pub fn with_relays(mut self) -> Self {
         let test_relays = vec![
             RelayUrl::parse("ws://localhost:8080").unwrap(),
             RelayUrl::parse("ws://localhost:7777").unwrap(),
         ];
 
-        Self {
-            test_keys: keys,
-            should_have_metadata: false,
-            should_have_relays: true,
-            test_metadata: None,
-            test_relays,
-        }
+        self.should_have_relays = true;
+        self.test_relays = test_relays;
+        self
     }
 
-    pub fn with_metadata_and_relays() -> Self {
-        let keys = Keys::generate();
-        let metadata = Metadata::new()
-            .name("Full Test User")
-            .display_name("Full Display Name")
-            .about("Full test about section")
-            .nip05("test@example.com");
-
-        let test_relays = vec![
-            RelayUrl::parse("ws://localhost:8080").unwrap(),
-            RelayUrl::parse("ws://localhost:7777").unwrap(),
-        ];
-
-        Self {
-            test_keys: keys,
-            should_have_metadata: true,
-            should_have_relays: true,
-            test_metadata: Some(metadata),
-            test_relays,
-        }
-    }
-
-    async fn publish_test_data(&self, context: &ScenarioContext) -> Result<(), WhitenoiseError> {
+    async fn publish_metadata(&self, context: &ScenarioContext) -> Result<(), WhitenoiseError> {
         let temp_account = context
             .whitenoise
             .login(self.test_keys.secret_key().to_secret_hex())
             .await?;
 
-        if self.should_have_metadata {
-            if let Some(metadata) = &self.test_metadata {
-                tracing::info!("Publishing test metadata for test pubkey");
-                temp_account
-                    .update_metadata(metadata, context.whitenoise)
-                    .await?;
-            }
+        if let Some(metadata) = &self.test_metadata {
+            tracing::info!("Publishing test metadata for test pubkey");
+            temp_account
+                .update_metadata(metadata, context.whitenoise)
+                .await?;
         }
 
-        if self.should_have_relays {
-            tracing::info!("Publishing test relay list for test pubkey");
-            for relay_url in &self.test_relays {
-                let relay = context
-                    .whitenoise
-                    .find_or_create_relay_by_url(relay_url)
-                    .await?;
-                temp_account
-                    .add_relay(
-                        &relay,
-                        crate::whitenoise::relays::RelayType::Nip65,
-                        context.whitenoise,
-                    )
-                    .await?;
-            }
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        context.whitenoise.logout(&temp_account.pubkey).await?;
+
+        Ok(())
+    }
+
+    async fn publish_relays_data(&self, context: &ScenarioContext) -> Result<(), WhitenoiseError> {
+        let temp_account = context
+            .whitenoise
+            .login(self.test_keys.secret_key().to_secret_hex())
+            .await?;
+
+        tracing::info!("Publishing test relay list for test pubkey");
+        for relay_url in &self.test_relays {
+            let relay = context
+                .whitenoise
+                .find_or_create_relay_by_url(relay_url)
+                .await?;
+            temp_account
+                .add_relay(
+                    &relay,
+                    crate::whitenoise::relays::RelayType::Nip65,
+                    context.whitenoise,
+                )
+                .await?;
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -117,7 +93,7 @@ impl FindOrCreateUser {
 }
 
 #[async_trait]
-impl TestCase for FindOrCreateUser {
+impl TestCase for FindOrCreateUserTestCase {
     async fn run(&self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError> {
         let test_pubkey = self.test_keys.public_key();
         tracing::info!("Testing find_or_create_user for pubkey: {}", test_pubkey);
@@ -128,8 +104,12 @@ impl TestCase for FindOrCreateUser {
             .is_ok();
         assert!(!user_exists, "User should not exist initially");
 
-        if self.should_have_metadata || self.should_have_relays {
-            self.publish_test_data(context).await?;
+        if self.should_have_metadata {
+            self.publish_metadata(context).await?;
+        }
+
+        if self.should_have_relays {
+            self.publish_relays_data(context).await?;
         }
 
         let user = context
