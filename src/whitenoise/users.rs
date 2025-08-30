@@ -356,8 +356,8 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns a `Result<(User, bool)>` containing:
-    /// - `Ok((User, bool))` - A tuple with the user and a boolean indicating if the user was newly created (true) or found (false)
+    /// Returns a `Result<User>` containing:
+    /// - `Ok(User)` - The found or created user
     /// - `Err(WhitenoiseError)` - If there's a database error
     ///
     /// # Examples
