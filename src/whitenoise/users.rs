@@ -299,11 +299,6 @@ impl Whitenoise {
     /// Retrieves a user by their public key.
     ///
     /// This method looks up a user in the database using their Nostr public key.
-    /// The user may have been discovered through various means such as:
-    /// - Following lists from accounts
-    /// - Message interactions
-    /// - Direct user lookups
-    /// - Metadata events
     ///
     /// # Arguments
     ///
@@ -342,13 +337,8 @@ impl Whitenoise {
     /// Finds a user by their public key or creates a new one if not found.
     ///
     /// This method looks up a user in the database using their Nostr public key.
-    /// If the user doesn't exist, it creates a new user record with default metadata.
+    /// If the user doesn't exist, it creates a new user record
     /// It also updates the created user's relay lists and metadata.
-    /// The user may have been discovered through various means such as:
-    /// - Following lists from accounts
-    /// - Message interactions
-    /// - Direct user lookups
-    /// - Metadata events
     ///
     /// # Arguments
     ///
