@@ -38,6 +38,7 @@ use error::{Result, WhitenoiseError};
 use event_tracker::WhitenoiseEventTracker;
 use relays::*;
 use secrets_store::SecretsStore;
+use users::User;
 
 #[derive(Clone, Debug)]
 pub struct WhitenoiseConfig {
@@ -214,7 +215,8 @@ impl Whitenoise {
 
         Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
 
-        // Fetch events and setup subscriptions for all accounts after event processing has started
+        // Fetch events and setup subscriptions after event processing has started
+        Self::setup_global_users_subscriptions(whitenoise_ref).await?;
         Self::setup_accounts_sync_and_subscriptions(whitenoise_ref).await?;
 
         tracing::debug!(
@@ -222,6 +224,17 @@ impl Whitenoise {
             "Completed initialization for all loaded accounts"
         );
 
+        Ok(())
+    }
+
+    async fn setup_global_users_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
+        let users_with_relays = User::all_users_with_relay_urls(whitenoise_ref).await?;
+        let default_relays: Vec<RelayUrl> =
+            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+        whitenoise_ref
+            .nostr
+            .setup_global_users_subscriptions(users_with_relays, &default_relays)
+            .await?;
         Ok(())
     }
 

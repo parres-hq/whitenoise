@@ -20,6 +20,43 @@ impl NostrManager {
         format!("{:x}", hash)[..12].to_string()
     }
 
+    pub(crate) async fn setup_global_users_subscriptions(
+        &self,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+    ) -> Result<()> {
+        if users_with_relays.is_empty() {
+            return Ok(());
+        }
+
+        for (user_pubkey, mut relay_urls) in users_with_relays {
+            if relay_urls.is_empty() {
+                // If we don't know the user relays
+                relay_urls = default_relays.to_vec(); // Use default relays
+            }
+
+            let pubkey_hex = user_pubkey.to_hex();
+            let subscription_id = SubscriptionId::new(format!(
+                "{}_global_users",
+                &pubkey_hex[..13.min(pubkey_hex.len())]
+            ));
+
+            let filter = Filter::new().author(user_pubkey).kinds([
+                Kind::Metadata,
+                Kind::RelayList,
+                Kind::InboxRelays,
+                Kind::MlsKeyPackageRelays,
+            ]);
+
+            self.ensure_relays_connected(&relay_urls).await?;
+
+            self.client
+                .subscribe_with_id_to(relay_urls, subscription_id, filter, None)
+                .await?;
+        }
+        Ok(())
+    }
+
     pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
