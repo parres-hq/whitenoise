@@ -56,7 +56,6 @@ pub struct NostrManager {
     session_salt: [u8; 16],
     timeout: Duration,
     pub(crate) event_tracker: std::sync::Arc<dyn EventTracker>,
-    // blossom: BlossomClient,
 }
 
 pub type Result<T> = std::result::Result<T, NostrManagerError>;

@@ -6,7 +6,6 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use rand::RngCore;
 
 use crate::media::errors::MediaError;
 /// Encrypts file data using ChaCha20-Poly1305 encryption.
@@ -24,13 +23,11 @@ pub fn encrypt_file(
     nonce: &[u8],
 ) -> Result<(Vec<u8>, Vec<u8>), MediaError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-    let mut nonce_bytes = [0u8; 12];
-    rand::rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from_slice(nonce);
 
     cipher
         .encrypt(nonce, data)
-        .map(|encrypted| (encrypted, nonce_bytes.to_vec()))
+        .map(|encrypted| (encrypted, nonce.to_vec()))
         .map_err(|e| MediaError::Encryption(e.to_string()))
 }
 
@@ -44,8 +41,7 @@ pub fn encrypt_file(
 /// # Returns
 /// * `Ok(Vec<u8>)` - The decrypted data
 /// * `Err(MediaError)` - Error if decryption fails
-#[allow(dead_code)]
-pub fn decrypt_file(data: &[u8], key: &[u8], nonce: &[u8]) -> Result<Vec<u8>, MediaError> {
+pub fn decrypt_data(data: &[u8], key: &[u8], nonce: &[u8]) -> Result<Vec<u8>, MediaError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     cipher
         .decrypt(nonce.into(), data)
@@ -80,7 +76,7 @@ mod tests {
 
         let encrypted = encrypt_file(data, &keys.secret_key().to_secret_bytes(), nonce).unwrap();
 
-        let decrypted = decrypt_file(
+        let decrypted = decrypt_data(
             &encrypted.0,
             &keys.secret_key().to_secret_bytes(),
             &encrypted.1,
