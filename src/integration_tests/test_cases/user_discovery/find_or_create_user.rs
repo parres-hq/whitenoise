@@ -1,0 +1,226 @@
+use crate::integration_tests::core::*;
+use crate::WhitenoiseError;
+use async_trait::async_trait;
+use nostr_sdk::{Keys, Metadata, RelayUrl};
+
+pub struct FindOrCreateUser {
+    test_keys: Keys,
+    should_have_metadata: bool,
+    should_have_relays: bool,
+    test_metadata: Option<Metadata>,
+    test_relays: Vec<RelayUrl>,
+}
+
+impl FindOrCreateUser {
+    pub fn no_data() -> Self {
+        let keys = Keys::generate();
+        Self {
+            test_keys: keys,
+            should_have_metadata: false,
+            should_have_relays: false,
+            test_metadata: None,
+            test_relays: vec![],
+        }
+    }
+
+    pub fn with_metadata() -> Self {
+        let keys = Keys::generate();
+        let metadata = Metadata::new()
+            .name("Test User")
+            .display_name("Test Display Name")
+            .about("Test about section");
+
+        Self {
+            test_keys: keys,
+            should_have_metadata: true,
+            should_have_relays: false,
+            test_metadata: Some(metadata),
+            test_relays: vec![],
+        }
+    }
+
+    pub fn with_relays() -> Self {
+        let keys = Keys::generate();
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        Self {
+            test_keys: keys,
+            should_have_metadata: false,
+            should_have_relays: true,
+            test_metadata: None,
+            test_relays,
+        }
+    }
+
+    pub fn with_metadata_and_relays() -> Self {
+        let keys = Keys::generate();
+        let metadata = Metadata::new()
+            .name("Full Test User")
+            .display_name("Full Display Name")
+            .about("Full test about section")
+            .nip05("test@example.com");
+
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        Self {
+            test_keys: keys,
+            should_have_metadata: true,
+            should_have_relays: true,
+            test_metadata: Some(metadata),
+            test_relays,
+        }
+    }
+
+    async fn publish_test_data(&self, context: &ScenarioContext) -> Result<(), WhitenoiseError> {
+        let temp_account = context
+            .whitenoise
+            .login(self.test_keys.secret_key().to_secret_hex())
+            .await?;
+
+        if self.should_have_metadata {
+            if let Some(metadata) = &self.test_metadata {
+                tracing::info!("Publishing test metadata for test pubkey");
+                temp_account
+                    .update_metadata(metadata, context.whitenoise)
+                    .await?;
+            }
+        }
+
+        if self.should_have_relays {
+            tracing::info!("Publishing test relay list for test pubkey");
+            for relay_url in &self.test_relays {
+                let relay = context
+                    .whitenoise
+                    .find_or_create_relay_by_url(relay_url)
+                    .await?;
+                temp_account
+                    .add_relay(
+                        &relay,
+                        crate::whitenoise::relays::RelayType::Nip65,
+                        context.whitenoise,
+                    )
+                    .await?;
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        context.whitenoise.logout(&temp_account.pubkey).await?;
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl TestCase for FindOrCreateUser {
+    async fn run(&self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError> {
+        let test_pubkey = self.test_keys.public_key();
+        tracing::info!("Testing find_or_create_user for pubkey: {}", test_pubkey);
+        let user_exists = context
+            .whitenoise
+            .find_user_by_pubkey(&test_pubkey)
+            .await
+            .is_ok();
+        assert!(!user_exists, "User should not exist initially");
+
+        if self.should_have_metadata || self.should_have_relays {
+            self.publish_test_data(context).await?;
+        }
+
+        let user = context
+            .whitenoise
+            .find_or_create_user_by_pubkey(&test_pubkey)
+            .await?;
+
+        assert_eq!(user.pubkey, test_pubkey, "User pubkey should match");
+        assert!(user.id.is_some(), "User should have an ID after creation");
+
+        tracing::info!(
+            "✓ User created with ID: {} for pubkey: {}",
+            user.id.unwrap(),
+            test_pubkey
+        );
+
+        let found_user = context.whitenoise.find_user_by_pubkey(&test_pubkey).await?;
+        assert_eq!(found_user.pubkey, test_pubkey, "Found user should match");
+        assert_eq!(found_user.id, user.id, "Found user ID should match");
+
+        tracing::info!("✓ User can be found by pubkey after creation");
+
+        if self.should_have_metadata {
+            if let Some(expected_metadata) = &self.test_metadata {
+                assert_eq!(
+                    user.metadata.name, expected_metadata.name,
+                    "Metadata name should match published data"
+                );
+                assert_eq!(
+                    user.metadata.display_name, expected_metadata.display_name,
+                    "Metadata display_name should match published data"
+                );
+                assert_eq!(
+                    user.metadata.about, expected_metadata.about,
+                    "Metadata about should match published data"
+                );
+
+                tracing::info!(
+                    "✓ User metadata matches published data: name={:?}, display_name={:?}",
+                    user.metadata.name,
+                    user.metadata.display_name
+                );
+            }
+        } else {
+            assert!(
+                user.metadata.name.is_none() || user.metadata.name == Some(String::new()),
+                "User should have empty/no name when no metadata published"
+            );
+            tracing::info!("✓ User has empty metadata as expected (nothing published)");
+        }
+
+        if self.should_have_relays {
+            let user_relays = user
+                .relays_by_type(
+                    crate::whitenoise::relays::RelayType::Nip65,
+                    context.whitenoise,
+                )
+                .await?;
+
+            let relay_urls: Vec<&RelayUrl> = user_relays.iter().map(|r| &r.url).collect();
+            for expected_relay in &self.test_relays {
+                assert!(
+                    relay_urls.contains(&expected_relay),
+                    "User should have relay {} that was published",
+                    expected_relay
+                );
+            }
+
+            tracing::info!(
+                "✓ User relay list matches published data: {} relays found",
+                user_relays.len()
+            );
+        } else {
+            tracing::info!("✓ No relay publication needed for this test case");
+        }
+
+        let user_again = context
+            .whitenoise
+            .find_or_create_user_by_pubkey(&test_pubkey)
+            .await?;
+        assert_eq!(
+            user_again.id, user.id,
+            "Should return same user on second call"
+        );
+        assert_eq!(
+            user_again.pubkey, user.pubkey,
+            "Should return same user pubkey"
+        );
+
+        tracing::info!("✓ find_or_create returns existing user on second call");
+
+        Ok(())
+    }
+}
