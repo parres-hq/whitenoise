@@ -75,6 +75,15 @@ impl From<UserRow> for User {
 }
 
 impl User {
+    pub(crate) async fn all(database: &Database) -> Result<Vec<User>, WhitenoiseError> {
+        let user_rows = sqlx::query_as::<_, UserRow>("SELECT * FROM users")
+            .fetch_all(&database.pool)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        Ok(user_rows.into_iter().map(Self::from).collect())
+    }
+
     /// Finds an existing user by public key or creates a new one if not found.
     ///
     /// # Arguments
@@ -587,6 +596,43 @@ mod tests {
         } else {
             panic!("Expected ColumnDecode error for updated_at timestamp");
         }
+    }
+
+    #[tokio::test]
+    async fn test_all_users() {
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let users = User::all(&whitenoise.database).await.unwrap();
+        assert!(users.is_empty());
+
+        let test_pubkey1 = nostr_sdk::Keys::generate().public_key();
+        let test_pubkey2 = nostr_sdk::Keys::generate().public_key();
+
+        let user1 = User {
+            id: None,
+            pubkey: test_pubkey1,
+            metadata: Metadata::new().name("User One"),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let user2 = User {
+            id: None,
+            pubkey: test_pubkey2,
+            metadata: Metadata::new().name("User Two"),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let saved1 = user1.save(&whitenoise.database).await.unwrap();
+        let saved2 = user2.save(&whitenoise.database).await.unwrap();
+
+        let all_users = User::all(&whitenoise.database).await.unwrap();
+        assert_eq!(all_users.len(), 2);
+
+        let pubkeys: Vec<_> = all_users.iter().map(|u| u.pubkey).collect();
+        assert!(pubkeys.contains(&saved1.pubkey));
+        assert!(pubkeys.contains(&saved2.pubkey));
     }
 
     #[tokio::test]
