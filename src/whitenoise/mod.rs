@@ -545,7 +545,7 @@ pub mod test_utils {
         NostrGroupConfigData {
             name: "Test group".to_owned(),
             description: "test description".to_owned(),
-            image_url: Some("http://test_blossom:53232/fake_img.png".to_owned()),
+            image_hash: Some(b"hash of image blob".to_vec()),
             image_key: Some(b"fake key to encrypt image".to_vec()),
             image_nonce: Some(b"fake nonce to encrypt image".to_vec()),
             relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
