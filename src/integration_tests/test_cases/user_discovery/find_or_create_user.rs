@@ -1,3 +1,4 @@
+use crate::integration_tests::core::test_clients::{create_test_client, publish_relay_lists};
 use crate::integration_tests::core::*;
 use crate::WhitenoiseError;
 use async_trait::async_trait;
@@ -46,47 +47,30 @@ impl FindOrCreateUserTestCase {
     }
 
     async fn publish_metadata(&self, context: &ScenarioContext) -> Result<(), WhitenoiseError> {
-        let temp_account = context
-            .whitenoise
-            .login(self.test_keys.secret_key().to_secret_hex())
-            .await?;
+        let test_client = create_test_client(&context.dev_relays, self.test_keys.clone()).await?;
 
         if let Some(metadata) = &self.test_metadata {
             tracing::info!("Publishing test metadata for test pubkey");
-            temp_account
-                .update_metadata(metadata, context.whitenoise)
+            test_client
+                .send_event_builder(nostr_sdk::EventBuilder::metadata(metadata))
                 .await?;
         }
 
+        test_client.disconnect().await;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        context.whitenoise.logout(&temp_account.pubkey).await?;
 
         Ok(())
     }
 
     async fn publish_relays_data(&self, context: &ScenarioContext) -> Result<(), WhitenoiseError> {
-        let temp_account = context
-            .whitenoise
-            .login(self.test_keys.secret_key().to_secret_hex())
-            .await?;
+        let test_client = create_test_client(&context.dev_relays, self.test_keys.clone()).await?;
 
         tracing::info!("Publishing test relay list for test pubkey");
-        for relay_url in &self.test_relays {
-            let relay = context
-                .whitenoise
-                .find_or_create_relay_by_url(relay_url)
-                .await?;
-            temp_account
-                .add_relay(
-                    &relay,
-                    crate::whitenoise::relays::RelayType::Nip65,
-                    context.whitenoise,
-                )
-                .await?;
-        }
+        let relay_urls: Vec<String> = self.test_relays.iter().map(|url| url.to_string()).collect();
+        publish_relay_lists(&test_client, relay_urls).await?;
 
+        test_client.disconnect().await;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        context.whitenoise.logout(&temp_account.pubkey).await?;
 
         Ok(())
     }
