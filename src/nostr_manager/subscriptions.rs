@@ -1,6 +1,8 @@
 //! Subscription functions for NostrManager
 //! This mostly handles subscribing and processing events as they come in while the user is active.
 
+use std::time::Duration;
+
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
 
@@ -35,25 +37,83 @@ impl NostrManager {
                 relay_urls = default_relays.to_vec(); // Use default relays
             }
 
-            let pubkey_hex = user_pubkey.to_hex();
-            let subscription_id = SubscriptionId::new(format!(
-                "{}_global_users",
-                &pubkey_hex[..13.min(pubkey_hex.len())]
-            ));
+            let result = self
+                .subscribe_pubkey_global_user(user_pubkey, relay_urls)
+                .await;
+            if let Err(e) = result {
+                tracing::warn!(
+                    "Failed to subscribe to global user subscription for {}: {}",
+                    user_pubkey.to_hex(),
+                    e
+                );
+            }
+        }
+        Ok(())
+    }
 
-            let filter = Filter::new().author(user_pubkey).kinds([
-                Kind::Metadata,
-                Kind::RelayList,
-                Kind::InboxRelays,
-                Kind::MlsKeyPackageRelays,
-            ]);
-
-            self.ensure_relays_connected(&relay_urls).await?;
-
-            self.client
-                .subscribe_with_id_to(relay_urls, subscription_id, filter, None)
+    pub(crate) async fn refresh_global_users_subscriptions(
+        &self,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+    ) -> Result<()> {
+        for (user_pubkey, mut relay_urls) in users_with_relays {
+            if relay_urls.is_empty() {
+                relay_urls = default_relays.to_vec();
+            }
+            self.refresh_global_user_subscription(user_pubkey, relay_urls)
                 .await?;
         }
+        Ok(())
+    }
+
+    async fn refresh_global_user_subscription(
+        &self,
+        pubkey: PublicKey,
+        relay_urls: Vec<RelayUrl>,
+    ) -> Result<()> {
+        let buffer_time = Timestamp::now() - Duration::from_secs(10);
+        let subscription_id = self.pubkey_to_global_user_subscription_id(pubkey);
+        self.client.unsubscribe(&subscription_id).await;
+        self.subscribe_pubkey_user_with_id(pubkey, relay_urls, subscription_id, Some(buffer_time))
+            .await
+    }
+
+    async fn subscribe_pubkey_global_user(
+        &self,
+        pubkey: PublicKey,
+        relay_urls: Vec<RelayUrl>,
+    ) -> Result<()> {
+        let subscription_id = self.pubkey_to_global_user_subscription_id(pubkey);
+        self.subscribe_pubkey_user_with_id(pubkey, relay_urls, subscription_id, None)
+            .await
+    }
+
+    fn pubkey_to_global_user_subscription_id(&self, pubkey: PublicKey) -> SubscriptionId {
+        let pubkey_hex = pubkey.to_hex();
+        let pubkey_hex_prefix = &pubkey_hex[..13.min(pubkey_hex.len())];
+        SubscriptionId::new(format!("{}_global_users", pubkey_hex_prefix))
+    }
+
+    async fn subscribe_pubkey_user_with_id(
+        &self,
+        pubkey: PublicKey,
+        relay_urls: Vec<RelayUrl>,
+        subscription_id: SubscriptionId,
+        since: Option<Timestamp>,
+    ) -> Result<()> {
+        let mut filter = Filter::new().author(pubkey).kinds([
+            Kind::Metadata,
+            Kind::RelayList,
+            Kind::InboxRelays,
+            Kind::MlsKeyPackageRelays,
+        ]);
+        if let Some(since) = since {
+            filter = filter.since(since);
+        }
+        self.ensure_relays_connected(&relay_urls).await?;
+        self.client
+            .subscribe_with_id_to(relay_urls, subscription_id, filter, None)
+            .await?;
         Ok(())
     }
 
