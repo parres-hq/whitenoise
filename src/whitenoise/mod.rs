@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use dashmap::DashMap;
+use nostr_blossom::client::BlossomClient;
 use nostr_mls::prelude::*;
 use tokio::sync::{
     mpsc::{self, Sender},
@@ -103,6 +104,7 @@ pub struct Whitenoise {
     shutdown_sender: Sender<()>,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
     contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
+    blossom: BlossomClient,
 }
 
 static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
@@ -177,6 +179,7 @@ impl Whitenoise {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            blossom: Whitenoise::default_blossom(),
         };
 
         // Create default relays in the database if they don't exist
@@ -338,6 +341,14 @@ impl Whitenoise {
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
         &self.message_aggregator
     }
+
+    fn default_blossom() -> BlossomClient {
+        if cfg!(debug_assertions) {
+            BlossomClient::new(Url::parse("https://localhost:3000").unwrap())
+        } else {
+            BlossomClient::new(Url::parse("https://blossom.primal.net/").unwrap())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -429,6 +440,7 @@ pub mod test_utils {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            blossom: Whitenoise::default_blossom(),
         };
 
         (whitenoise, data_temp, logs_temp)

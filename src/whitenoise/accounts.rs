@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use nostr_blossom::client::BlossomClient;
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
@@ -228,13 +227,12 @@ impl Account {
         server: Url,
         whitenoise: &Whitenoise,
     ) -> Result<String> {
-        let client = BlossomClient::new(server);
         let keys = whitenoise
             .secrets_store
             .get_nostr_keys_for_pubkey(&self.pubkey)?;
         let data = tokio::fs::read(file_path).await?;
 
-        let descriptor = client
+        let descriptor = whitenoise.blossom
             .upload_blob(
                 data,
                 Some(image_type.mime_type().to_string()),
