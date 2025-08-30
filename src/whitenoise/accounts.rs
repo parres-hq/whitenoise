@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use nostr_blossom::client::BlossomClient;
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
@@ -225,16 +224,15 @@ impl Account {
         &self,
         file_path: &str,
         image_type: ImageType,
-        server: Url,
         whitenoise: &Whitenoise,
     ) -> Result<String> {
-        let client = BlossomClient::new(server);
         let keys = whitenoise
             .secrets_store
             .get_nostr_keys_for_pubkey(&self.pubkey)?;
         let data = tokio::fs::read(file_path).await?;
 
-        let descriptor = client
+        let descriptor = whitenoise
+            .blossom
             .upload_blob(
                 data,
                 Some(image_type.mime_type().to_string()),
@@ -895,6 +893,8 @@ mod tests {
     use super::*;
     use crate::whitenoise::accounts::Account;
     use crate::whitenoise::test_utils::*;
+    use nostr_sdk::hashes::sha256::Hash as Sha256Hash;
+    use nostr_sdk::hashes::Hash;
 
     #[tokio::test]
     #[ignore]
@@ -1285,5 +1285,27 @@ mod tests {
             assert_eq!(published_metadata.display_name, new_metadata.display_name);
             assert_eq!(published_metadata.about, new_metadata.about);
         }
+    }
+
+    #[tokio::test]
+    async fn test_upload_profile_picture() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+        let img_path = "./dev/test_image.jpeg";
+
+        // Upload test image as profile picture
+        let _descriptor_url = account
+            .upload_profile_picture(img_path, ImageType::Jpeg, &whitenoise)
+            .await
+            .unwrap();
+
+        // Verify the upload
+        let img_bytes = std::fs::read(img_path).unwrap();
+        let sha256 = Sha256Hash::hash(&img_bytes);
+        assert!(whitenoise
+            .blossom
+            .has_blob(sha256, None, Option::<&Keys>::None)
+            .await
+            .unwrap());
     }
 }

@@ -15,6 +15,7 @@ struct GroupInformationRow {
     id: i64,
     mls_group_id: GroupId,
     group_type: String,
+    group_image: Option<Vec<u8>>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -31,6 +32,7 @@ where
         let id: i64 = row.try_get("id")?;
         let mls_group_id_bytes: Vec<u8> = row.try_get("mls_group_id")?;
         let group_type: String = row.try_get("group_type")?;
+        let group_image: Option<Vec<u8>> = row.try_get("group_image")?;
 
         let mls_group_id = GroupId::from_slice(&mls_group_id_bytes);
         let created_at = parse_timestamp(row, "created_at")?;
@@ -40,6 +42,7 @@ where
             id,
             mls_group_id,
             group_type,
+            group_image,
             created_at,
             updated_at,
         })
@@ -59,6 +62,7 @@ impl GroupInformationRow {
             id: Some(self.id),
             mls_group_id: self.mls_group_id,
             group_type,
+            group_image: self.group_image,
             created_at: self.created_at,
             updated_at: self.updated_at,
         })
@@ -85,7 +89,7 @@ impl GroupInformation {
         database: &Database,
     ) -> Result<Self, WhitenoiseError> {
         let group_information_row = sqlx::query_as::<_, GroupInformationRow>(
-            "SELECT id, mls_group_id, group_type, created_at, updated_at FROM group_information WHERE mls_group_id = ?",
+            "SELECT id, mls_group_id, group_type, group_image, created_at, updated_at FROM group_information WHERE mls_group_id = ?",
         )
         .bind(mls_group_id.as_slice())
         .fetch_one(&database.pool)
@@ -112,14 +116,19 @@ impl GroupInformation {
     pub(crate) async fn find_or_create_by_mls_group_id(
         mls_group_id: &GroupId,
         group_type: Option<GroupType>,
+        group_image: Option<Vec<u8>>,
         database: &Database,
     ) -> Result<(Self, bool), WhitenoiseError> {
         match Self::find_by_mls_group_id(mls_group_id, database).await {
             Ok(group_info) => Ok((group_info, false)),
             Err(WhitenoiseError::SqlxError(sqlx::Error::RowNotFound)) => {
-                let group_info =
-                    Self::insert_new(mls_group_id, group_type.unwrap_or_default(), database)
-                        .await?;
+                let group_info = Self::insert_new(
+                    mls_group_id,
+                    group_type.unwrap_or_default(),
+                    group_image,
+                    database,
+                )
+                .await?;
                 Ok((group_info, true))
             }
             Err(e) => Err(e),
@@ -156,7 +165,7 @@ impl GroupInformation {
         let placeholders = placeholders.trim_end_matches(',');
 
         let query = format!(
-            "SELECT id, mls_group_id, group_type, created_at, updated_at
+            "SELECT id, mls_group_id, group_type, group_image, created_at, updated_at
              FROM group_information
              WHERE mls_group_id IN ({})",
             placeholders
@@ -179,17 +188,19 @@ impl GroupInformation {
     async fn insert_new(
         mls_group_id: &GroupId,
         group_type: GroupType,
+        group_image: Option<Vec<u8>>,
         database: &Database,
     ) -> Result<Self, WhitenoiseError> {
         let now_ms = Utc::now().timestamp_millis();
 
         let row = sqlx::query_as::<_, GroupInformationRow>(
-            "INSERT INTO group_information (mls_group_id, group_type, created_at, updated_at)
-             VALUES (?, ?, ?, ?)
-             RETURNING id, mls_group_id, group_type, created_at, updated_at",
+            "INSERT INTO group_information (mls_group_id, group_type, group_image, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)
+             RETURNING id, mls_group_id, group_type, group_image, created_at, updated_at",
         )
         .bind(mls_group_id.as_slice())
         .bind(group_type.to_string())
+        .bind(group_image)
         .bind(now_ms)
         .bind(now_ms)
         .fetch_one(&database.pool)
@@ -226,6 +237,7 @@ mod tests {
         let (group_info, was_created) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id,
             Some(GroupType::Group),
+            None,
             &whitenoise.database,
         )
         .await
@@ -246,6 +258,7 @@ mod tests {
         let (original_group_info, was_created) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id,
             Some(GroupType::DirectMessage),
+            None,
             &whitenoise.database,
         )
         .await
@@ -256,6 +269,7 @@ mod tests {
         let (found_group_info, was_created) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id,
             Some(GroupType::Group), // Different type, but should find existing
+            None,
             &whitenoise.database,
         )
         .await
@@ -275,6 +289,7 @@ mod tests {
         let (group_info, was_created) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id,
             None, // Should use default (Group)
+            None,
             &whitenoise.database,
         )
         .await
@@ -303,6 +318,7 @@ mod tests {
         let (created_group_info, _) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id,
             Some(GroupType::DirectMessage),
+            None,
             &whitenoise.database,
         )
         .await
@@ -331,6 +347,7 @@ mod tests {
         let (group_info1, _) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id1,
             Some(GroupType::Group),
+            None,
             &whitenoise.database,
         )
         .await
@@ -339,6 +356,7 @@ mod tests {
         let (group_info2, _) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id2,
             Some(GroupType::DirectMessage),
+            None,
             &whitenoise.database,
         )
         .await
@@ -393,6 +411,7 @@ mod tests {
         let (dm_group_info, _) = GroupInformation::find_or_create_by_mls_group_id(
             &group_id,
             Some(GroupType::DirectMessage),
+            None,
             &whitenoise.database,
         )
         .await

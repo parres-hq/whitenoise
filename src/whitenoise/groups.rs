@@ -2,11 +2,14 @@ use std::{collections::HashSet, time::Duration};
 
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use nostr_sdk::hashes::sha256::Hash as Sha256Hash;
+use nwc::nostr::hashes::Hash;
 
 use crate::{
+    media::encryption::decrypt_data,
     whitenoise::{
         accounts::Account,
-        error::{Result, WhitenoiseError},
+        error::{BlossomError, Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
         relays::Relay,
         users::User,
@@ -198,6 +201,7 @@ impl Whitenoise {
             self,
             &group.mls_group_id,
             group_type,
+            None,
             participant_count,
         )
         .await?;
@@ -486,6 +490,41 @@ impl Whitenoise {
         // TODO: Do any local updates to ensure that we're accurately reflecting that the account is trying to leave this group
         Ok(())
     }
+
+    pub async fn get_group_image(&self, account: &Account, group_id: &GroupId) -> Result<Vec<u8>> {
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        match GroupInformation::get_by_mls_group_id(group_id, self)
+            .await?
+            .group_image
+        {
+            Some(img) => Ok(img),
+            None => {
+                let group = match nostr_mls.get_group(group_id)? {
+                    None => return Err(WhitenoiseError::GroupNotFound),
+                    Some(group) => group,
+                };
+                let image_hash = group
+                    .image_hash
+                    .ok_or(WhitenoiseError::GroupImageNotFound)?;
+                let image_hash_array: [u8; 32] = image_hash
+                    .try_into()
+                    .map_err(|_| BlossomError::InvalidSha256)?;
+                let sha256 = Sha256Hash::from_byte_array(image_hash_array);
+
+                let encrypted_bytes = self
+                    .blossom
+                    .get_blob(sha256, None, None, Option::<&Keys>::None)
+                    .await
+                    .map_err(BlossomError::from)?;
+
+                let image_key = group.image_key.ok_or(WhitenoiseError::GroupImageNotFound)?;
+                let image_nonce = group
+                    .image_nonce
+                    .ok_or(WhitenoiseError::GroupImageNotFound)?;
+                Ok(decrypt_data(&encrypted_bytes, &image_key, &image_nonce)?)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -580,7 +619,7 @@ mod tests {
         // Verify group metadata matches configuration
         assert_eq!(group.name, config.name);
         assert_eq!(group.description, config.description);
-        assert_eq!(group.image_url, config.image_url);
+        assert_eq!(group.image_hash, config.image_hash);
         assert_eq!(group.image_key, config.image_key);
 
         // Verify admin configuration
@@ -893,7 +932,7 @@ mod tests {
         let new_group_data = nostr_mls::groups::NostrGroupDataUpdate {
             name: Some("Updated Group Name".to_string()),
             description: Some("Updated description".to_string()),
-            image_url: Some(Some("https://example.com/new_image.png".to_string())),
+            image_hash: Some(Some(b"hash of image blob".to_vec())),
             image_key: Some(Some(b"new image key".to_vec())),
             image_nonce: Some(Some(b"new image nonce".to_vec())),
             admins: None,
@@ -925,7 +964,7 @@ mod tests {
             updated_group.description,
             new_group_data.description.unwrap()
         );
-        assert_eq!(updated_group.image_url, new_group_data.image_url.unwrap());
+        assert_eq!(updated_group.image_hash, new_group_data.image_hash.unwrap());
         assert_eq!(updated_group.image_key, new_group_data.image_key.unwrap());
     }
 
