@@ -116,7 +116,7 @@ impl EventTracker for WhitenoiseEventTracker {
         let account_id = account
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        PublishedEvent::exists(event_id, account_id, &whitenoise.database)
+        PublishedEvent::exists(event_id, Some(account_id), &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -131,7 +131,7 @@ impl EventTracker for WhitenoiseEventTracker {
         let account_id = account
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        ProcessedEvent::create(event_id, account_id, &whitenoise.database)
+        ProcessedEvent::create(event_id, Some(account_id), &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -146,7 +146,7 @@ impl EventTracker for WhitenoiseEventTracker {
         let account_id = account
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        ProcessedEvent::exists(event_id, account_id, &whitenoise.database)
+        ProcessedEvent::exists(event_id, Some(account_id), &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -189,7 +189,7 @@ impl EventTracker for TestEventTracker {
         let account_id = account
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        PublishedEvent::exists(event_id, account_id, &self.database)
+        PublishedEvent::exists(event_id, Some(account_id), &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -203,7 +203,7 @@ impl EventTracker for TestEventTracker {
         let account_id = account
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        ProcessedEvent::create(event_id, account_id, &self.database)
+        ProcessedEvent::create(event_id, Some(account_id), &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -217,7 +217,7 @@ impl EventTracker for TestEventTracker {
         let account_id = account
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        ProcessedEvent::exists(event_id, account_id, &self.database)
+        ProcessedEvent::exists(event_id, Some(account_id), &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
