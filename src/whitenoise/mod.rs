@@ -595,6 +595,10 @@ pub mod test_utils {
                 rng.random_range(..=255u8),
             ])
         });
+        let path = format!("./dev/data/images/{}.png", filename);
+     if let Some(parent) = std::path::Path::new(&path).parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         rand_image
             .save(format!("./dev/data/images/{}.png", filename))
             .unwrap();

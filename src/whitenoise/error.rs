@@ -115,7 +115,7 @@ pub enum WhitenoiseError {
     EventProcessor(String),
 
     #[error("Blossom error: {0}")]
-    Blossom(String),
+    Blossom(Box<BlossomError>),
 
     #[error("Media error: {0}")]
     Media(#[from] MediaError),
@@ -133,7 +133,7 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {
 // To avoid clippy error WhitenoiseError exceeds 160bytes
 impl From<BlossomError> for WhitenoiseError {
     fn from(value: BlossomError) -> Self {
-        WhitenoiseError::Blossom(value.to_string())
+        WhitenoiseError::Blossom(Box::new(value))
     }
 }
 

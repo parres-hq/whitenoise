@@ -218,7 +218,6 @@ impl Account {
     /// # Arguments
     /// * `file_path` - Path to the image file to upload
     /// * `image_type` - Image type (JPEG, PNG, etc.)
-    /// * `server` - Blossom server URL
     /// * `whitenoise` - Whitenoise instance for accessing account keys
     pub async fn upload_profile_picture(
         &self,
@@ -1292,6 +1291,7 @@ mod tests {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
         let account = whitenoise.create_identity().await.unwrap();
 
+        std::fs::create_dir_all("dev/data/images").unwrap();
         create_random_png("profile_picture");
         let img_path = "dev/data/images/profile_picture.png";
 

@@ -3,8 +3,7 @@
 //! with better cross-platform performance characteristics compared to AES-GCM.
 
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
-    AeadCore, ChaCha20Poly1305, Key,
+    AeadCore, ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit, OsRng}
 };
 
 use crate::media::errors::MediaError;
@@ -39,8 +38,9 @@ pub fn encrypt_data(data: &[u8], key: &[u8; 32]) -> Result<(Vec<u8>, [u8; 12]), 
 /// * `Err(MediaError)` - Error if decryption fails
 pub fn decrypt_data(data: &[u8], key: &[u8], nonce: &[u8]) -> Result<Vec<u8>, MediaError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let nonce: &Nonce = Nonce::from_slice(nonce);
     cipher
-        .decrypt(nonce.into(), data)
+        .decrypt(nonce, data)
         .map_err(|e| MediaError::Decryption(e.to_string()))
 }
 
