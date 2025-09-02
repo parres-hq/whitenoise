@@ -1,4 +1,4 @@
--- Migration: Add group_image column to group_information
+-- Migration: Store local file pointer for the group image (no inline BLOB)
 
 ALTER TABLE group_information
-ADD COLUMN group_image BLOB;
+  ADD COLUMN image_pointer TEXT;

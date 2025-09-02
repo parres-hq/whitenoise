@@ -141,7 +141,7 @@ impl Whitenoise {
         let logs_dir = &config.logs_dir;
 
         // Setup directories
-        std::fs::create_dir_all(data_dir)
+        std::fs::create_dir_all(data_dir.join("group_images"))
             .with_context(|| format!("Failed to create data directory: {:?}", data_dir))
             .map_err(WhitenoiseError::from)?;
         std::fs::create_dir_all(logs_dir)
@@ -354,6 +354,8 @@ impl Whitenoise {
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
+    use ::rand::Rng;
+    use image_extern::{ImageBuffer, Rgb};
     use tempfile::TempDir;
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
@@ -391,7 +393,7 @@ pub mod test_utils {
         let (config, data_temp, logs_temp) = create_test_config();
 
         // Create directories manually to avoid issues
-        std::fs::create_dir_all(&config.data_dir).unwrap();
+        std::fs::create_dir_all(config.data_dir.join("group_images")).unwrap();
         std::fs::create_dir_all(&config.logs_dir).unwrap();
 
         // Initialize minimal tracing for tests
@@ -545,9 +547,9 @@ pub mod test_utils {
         NostrGroupConfigData {
             name: "Test group".to_owned(),
             description: "test description".to_owned(),
-            image_hash: Some(b"hash of image blob".to_vec()),
-            image_key: Some(b"fake key to encrypt image".to_vec()),
-            image_nonce: Some(b"fake nonce to encrypt image".to_vec()),
+            image_hash: Some([1u8; 32]),
+            image_key: Some([1u8; 32]),
+            image_nonce: Some([0u8; 12]),
             relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
             admins,
         }
@@ -582,6 +584,20 @@ pub mod test_utils {
                 .unwrap();
         }
         accounts
+    }
+
+    pub(crate) fn create_random_png(filename: &str) {
+        let mut rng = ::rand::rng();
+        let rand_image = ImageBuffer::from_fn(4, 4, |_x, _y| {
+            Rgb([
+                rng.random_range(..=255u8),
+                rng.random_range(..=255u8),
+                rng.random_range(..=255u8),
+            ])
+        });
+        rand_image
+            .save(format!("./dev/data/images/{}.png", filename))
+            .unwrap();
     }
 }
 

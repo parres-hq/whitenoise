@@ -44,7 +44,7 @@ pub struct GroupInformation {
     pub id: Option<i64>,
     pub mls_group_id: GroupId,
     pub group_type: GroupType,
-    pub group_image: Option<Vec<u8>>,
+    pub image_pointer: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -67,7 +67,7 @@ impl GroupInformation {
         whitenoise: &Whitenoise,
         mls_group_id: &GroupId,
         group_type: Option<GroupType>,
-        group_image: Option<Vec<u8>>,
+        image_pointer: Option<String>,
         participant_count: usize,
     ) -> Result<GroupInformation, WhitenoiseError> {
         let group_type = group_type
@@ -75,7 +75,7 @@ impl GroupInformation {
         let (group_info, _was_created) = Self::find_or_create_by_mls_group_id(
             mls_group_id,
             Some(group_type),
-            group_image,
+            image_pointer,
             &whitenoise.database,
         )
         .await?;

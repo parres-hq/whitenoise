@@ -1291,11 +1291,13 @@ mod tests {
     async fn test_upload_profile_picture() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
         let account = whitenoise.create_identity().await.unwrap();
-        let img_path = "./dev/test_image.jpeg";
+
+        create_random_png("profile_picture");
+        let img_path = "dev/data/images/profile_picture.png";
 
         // Upload test image as profile picture
         let _descriptor_url = account
-            .upload_profile_picture(img_path, ImageType::Jpeg, &whitenoise)
+            .upload_profile_picture(img_path, ImageType::Png, &whitenoise)
             .await
             .unwrap();
 

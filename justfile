@@ -25,8 +25,10 @@ int-test:
 
 # Run all tests (unit tests, integration tests, and doc tests)
 test:
+    mkdir -p ./dev/data/images
     cargo test --all-features --all-targets
     cargo test --all-features --doc
+    rm -rf ./dev/data/images/*
 
 # Check clippy
 check-clippy:

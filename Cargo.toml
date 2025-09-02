@@ -29,30 +29,30 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-nostr-mls = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "ced021763a9395e57de62fe525bbb688ad753a1d" }
-nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "ced021763a9395e57de62fe525bbb688ad753a1d" }
-nwc = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "ced021763a9395e57de62fe525bbb688ad753a1d" }
-nostr-blossom = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "ced021763a9395e57de62fe525bbb688ad753a1d" }
-nostr-sdk = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "ced021763a9395e57de62fe525bbb688ad753a1d", features = [
-    "lmdb",
-    "nip04",
-    "nip44",
-    "nip47",
-    "nip59",
-] }
-
-# LOCAL RUST_NOSTR FOR DEVELOPMENT
-# nostr-mls = { version = "0.43", path="../rust-nostr/mls/nostr-mls" }
-# nostr-mls-sqlite-storage = { version = "0.43", path="../rust-nostr/mls/nostr-mls-sqlite-storage" }
-# nwc = { version = "0.43", path="../rust-nostr/crates/nwc" }
-# nostr-blossom = { version = "0.43", path="../rust-nostr/rfs/nostr-blossom" }
-# nostr-sdk = { version = "0.43", path="../rust-nostr/crates/nostr-sdk", features = [
+# nostr-mls = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "350cf0f9087f9ed2727bf6909ffa02ba1464b50e" }
+# nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "350cf0f9087f9ed2727bf6909ffa02ba1464b50e" }
+# nwc = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "350cf0f9087f9ed2727bf6909ffa02ba1464b50e" }
+# nostr-blossom = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "350cf0f9087f9ed2727bf6909ffa02ba1464b50e" }
+# nostr-sdk = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "350cf0f9087f9ed2727bf6909ffa02ba1464b50e", features = [
 #     "lmdb",
 #     "nip04",
 #     "nip44",
 #     "nip47",
 #     "nip59",
 # ] }
+
+# LOCAL RUST_NOSTR FOR DEVELOPMENT
+nostr-mls = { version = "0.43", path="../rust-nostr/mls/nostr-mls" }
+nostr-mls-sqlite-storage = { version = "0.43", path="../rust-nostr/mls/nostr-mls-sqlite-storage" }
+nwc = { version = "0.43", path="../rust-nostr/crates/nwc" }
+nostr-blossom = { version = "0.43", path="../rust-nostr/rfs/nostr-blossom" }
+nostr-sdk = { version = "0.43", path="../rust-nostr/crates/nostr-sdk", features = [
+    "lmdb",
+    "nip04",
+    "nip44",
+    "nip47",
+    "nip59",
+] }
 
 petname = "2.0.2"
 rand = "0.9"
@@ -75,6 +75,7 @@ dotenvy = "0.15"
 [dev-dependencies]
 mockito = "1.2"
 tempfile = "3.19.1"
+image_extern = { package = "image", version = "0.25", features = ["png"] }
 
 [features]
 default = []
