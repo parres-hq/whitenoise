@@ -71,7 +71,6 @@ impl Whitenoise {
             return Ok(());
         }
 
-        // Process new follows (but don't publish follow list after each individual follow)
         for pubkey in &users_to_follow {
             let (user, newly_created) =
                 crate::whitenoise::users::User::find_or_create_by_pubkey(pubkey, &self.database)
@@ -84,11 +83,13 @@ impl Whitenoise {
             account.follow_user(&user, &self.database).await?;
         }
 
-        // Process unfollows (but don't publish follow list after each individual unfollow)
         for pubkey in &users_to_unfollow {
-            let (user, _) =
+            let (user, created) =
                 crate::whitenoise::users::User::find_or_create_by_pubkey(pubkey, &self.database)
                     .await?;
+            if created {
+                self.background_fetch_user_data(&user).await?;
+            }
             account.unfollow_user(&user, &self.database).await?;
         }
 

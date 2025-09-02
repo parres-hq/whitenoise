@@ -308,6 +308,18 @@ impl User {
 
         Ok(users_with_relays)
     }
+
+    pub(crate) async fn refresh_global_subscription(&self, whitenoise: &Whitenoise) -> Result<()> {
+        let relays = self.relays(RelayType::Nip65, &whitenoise.database).await?;
+        let relay_urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+        let default_relays: Vec<RelayUrl> =
+            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+        whitenoise
+            .nostr
+            .refresh_global_users_subscriptions(vec![(self.pubkey, relay_urls)], &default_relays)
+            .await?;
+        Ok(())
+    }
 }
 
 impl Whitenoise {
@@ -395,6 +407,14 @@ impl Whitenoise {
                     e
                 );
             }
+            if let Err(e) = user.refresh_global_subscription(self).await {
+                tracing::warn!(
+                    target: "whitenoise::users::find_or_create_user_by_pubkey",
+                    "Failed to refresh global subscription for new user {}: {}",
+                    user.pubkey,
+                    e
+                );
+            }
         }
         if let Err(e) = user.sync_metadata(self).await {
             tracing::warn!(
@@ -428,6 +448,15 @@ impl Whitenoise {
             }
             if let Err(e) = metadata_result {
                 tracing::warn!("Failed to fetch metadata for {}: {}", user_clone.pubkey, e);
+            }
+
+            if let Err(e) = user_clone.refresh_global_subscription(whitenoise).await {
+                tracing::warn!(
+                    target: "whitenoise::users::background_fetch_user_data",
+                    "Failed to refresh global subscription for {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
             }
 
             Ok::<(), WhitenoiseError>(())

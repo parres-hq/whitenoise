@@ -25,18 +25,36 @@ pub trait EventTracker: Send + Sync {
         pubkey: &PublicKey,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Track that we processed a specific event
-    async fn track_processed_event(
+    /// Check if we published a given event, regardless of account
+    async fn global_published_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Track that we processed a specific event for an account
+    async fn track_processed_acount_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Check if we already processed a specific event
-    async fn already_processed_event(
+    /// Check if we already processed a specific event for an account
+    async fn already_processed_account_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Track that we processed a specific global event
+    async fn track_processed_global_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Check if we already processed a specific global event
+    async fn already_processed_global_event(
+        &self,
+        event_id: &EventId,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
 }
 
@@ -61,7 +79,14 @@ impl EventTracker for NoEventTracker {
         Ok(false) // Do nothing
     }
 
-    async fn track_processed_event(
+    async fn global_published_event(
+        &self,
+        _event_id: &EventId,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(false) // Do nothing
+    }
+
+    async fn track_processed_acount_event(
         &self,
         _event_id: &EventId,
         _pubkey: &PublicKey,
@@ -69,10 +94,24 @@ impl EventTracker for NoEventTracker {
         Ok(()) // Do nothing
     }
 
-    async fn already_processed_event(
+    async fn already_processed_account_event(
         &self,
         _event_id: &EventId,
         _pubkey: &PublicKey,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(false) // Do nothing
+    }
+
+    async fn track_processed_global_event(
+        &self,
+        _event_id: &EventId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(()) // Do nothing
+    }
+
+    async fn already_processed_global_event(
+        &self,
+        _event_id: &EventId,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         Ok(false) // Do nothing
     }
@@ -121,7 +160,17 @@ impl EventTracker for WhitenoiseEventTracker {
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    async fn track_processed_event(
+    async fn global_published_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let whitenoise = Whitenoise::get_instance()?;
+        PublishedEvent::exists(event_id, None, &whitenoise.database)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn track_processed_acount_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
@@ -136,7 +185,7 @@ impl EventTracker for WhitenoiseEventTracker {
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    async fn already_processed_event(
+    async fn already_processed_account_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
@@ -147,6 +196,26 @@ impl EventTracker for WhitenoiseEventTracker {
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
         ProcessedEvent::exists(event_id, Some(account_id), &whitenoise.database)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn track_processed_global_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let whitenoise = Whitenoise::get_instance()?;
+        ProcessedEvent::create(event_id, None, &whitenoise.database)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn already_processed_global_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let whitenoise = Whitenoise::get_instance()?;
+        ProcessedEvent::exists(event_id, None, &whitenoise.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
@@ -194,7 +263,16 @@ impl EventTracker for TestEventTracker {
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    async fn track_processed_event(
+    async fn global_published_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        PublishedEvent::exists(event_id, None, &self.database)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn track_processed_acount_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
@@ -208,7 +286,7 @@ impl EventTracker for TestEventTracker {
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    async fn already_processed_event(
+    async fn already_processed_account_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
@@ -218,6 +296,24 @@ impl EventTracker for TestEventTracker {
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
         ProcessedEvent::exists(event_id, Some(account_id), &self.database)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn track_processed_global_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        ProcessedEvent::create(event_id, None, &self.database)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    async fn already_processed_global_event(
+        &self,
+        event_id: &EventId,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        ProcessedEvent::exists(event_id, None, &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }

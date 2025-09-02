@@ -130,56 +130,45 @@ impl NostrManager {
             "Setting up account subscriptions"
         );
         // Set up core subscriptions in parallel
-        let (user_events_result, giftwrap_result, contacts_result, groups_result) = tokio::join!(
-            self.setup_user_events_subscription(pubkey, user_relays),
+        let (user_follow_list_result, giftwrap_result, groups_result) = tokio::join!(
+            self.setup_user_follow_list_subscription(pubkey, user_relays),
             self.setup_giftwrap_subscription(pubkey, inbox_relays),
-            self.setup_contacts_metadata_subscription(pubkey, user_relays),
             self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays)
         );
 
         // Handle results
-        user_events_result?;
+        user_follow_list_result?;
         giftwrap_result?;
-        contacts_result?;
         groups_result?;
 
         Ok(())
     }
 
-    /// Set up subscription for user's own events (contact list, metadata, relay lists)
-    async fn setup_user_events_subscription(
+    async fn setup_user_follow_list_subscription(
         &self,
         pubkey: PublicKey,
         user_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_user_events_subscription",
-            "Setting up user events subscription"
+            target: "whitenoise::nostr_manager::setup_user_follow_list_subscription",
+            "Setting up user follow list subscription"
         );
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
-        let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
+        let subscription_id = SubscriptionId::new(format!("{}_user_follow_list", pubkey_hash));
 
         let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all user relays before subscribing
         self.ensure_relays_connected(&urls).await?;
 
-        // Combine all user event types into a single subscription
-        let user_events_filter = Filter::new()
-            .kinds([
-                Kind::ContactList,
-                Kind::Metadata,
-                Kind::RelayList,
-                Kind::InboxRelays,
-            ])
-            .author(pubkey);
+        let user_follow_list_filter = Filter::new().kind(Kind::ContactList).author(pubkey);
 
         self.client
-            .subscribe_with_id_to(urls, subscription_id, user_events_filter, None)
+            .subscribe_with_id_to(urls, subscription_id, user_follow_list_filter, None)
             .await?;
 
         tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_user_events_subscription",
-            "User events subscription set up"
+            target: "whitenoise::nostr_manager::setup_user_follow_list_subscription",
+            "User follow list subscription set up"
         );
         Ok(())
     }
@@ -210,46 +199,6 @@ impl NostrManager {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_giftwrap_subscription",
             "Giftwrap subscription set up"
-        );
-        Ok(())
-    }
-
-    /// Set up subscription for contacts' metadata - can be updated when contacts change
-    pub(crate) async fn setup_contacts_metadata_subscription(
-        &self,
-        pubkey: PublicKey,
-        user_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
-    ) -> Result<()> {
-        tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_contacts_metadata_subscription",
-            "Setting up contacts metadata subscription using user relays, {:?}",
-            user_relays
-        );
-        let contacts_pubkeys = self
-            .client
-            .get_contact_list_public_keys(self.timeout)
-            .await?;
-
-        if contacts_pubkeys.is_empty() {
-            // No contacts yet, skip subscription
-            return Ok(());
-        }
-
-        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
-        // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(&urls).await?;
-
-        let pubkey_hash = self.create_pubkey_hash(&pubkey);
-        let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
-
-        let contacts_metadata_filter = Filter::new().kind(Kind::Metadata).authors(contacts_pubkeys);
-        self.client
-            .subscribe_with_id_to(urls, subscription_id, contacts_metadata_filter, None)
-            .await?;
-
-        tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_contacts_metadata_subscription",
-            "Contacts metadata subscription set up"
         );
         Ok(())
     }
