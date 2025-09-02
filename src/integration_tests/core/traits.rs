@@ -100,12 +100,10 @@ pub trait Scenario {
             }
         }
 
-        context
-            .whitenoise
-            .database
-            .delete_all_data()
-            .await
-            .map_err(WhitenoiseError::Database)?;
+        context.whitenoise.wipe_database().await?;
+        context.whitenoise.reset_nostr_client().await?;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         Ok(())
     }

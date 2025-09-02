@@ -93,9 +93,6 @@ impl WhitenoiseConfig {
 
 pub struct Whitenoise {
     pub config: WhitenoiseConfig,
-    #[cfg(feature = "integration-tests")]
-    pub database: Arc<Database>,
-    #[cfg(not(feature = "integration-tests"))]
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,
@@ -355,6 +352,18 @@ impl Whitenoise {
     /// This allows consumers to access the message aggregator directly for custom processing
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
         &self.message_aggregator
+    }
+
+    #[cfg(feature = "integration-tests")]
+    pub async fn wipe_database(&self) -> Result<()> {
+        self.database.delete_all_data().await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "integration-tests")]
+    pub async fn reset_nostr_client(&self) -> Result<()> {
+        self.nostr.client.reset().await;
+        Ok(())
     }
 }
 
