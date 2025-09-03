@@ -521,9 +521,9 @@ impl Whitenoise {
 
         // Update mls group data
         let group_data = NostrGroupDataUpdate::new()
-            .image_hash(Some(*blob_descriptor.sha256.as_byte_array()))
-            .image_key(Some(secret_key))
-            .image_nonce(Some(nonce_bytes));
+            .image_hash(Some(blob_descriptor.sha256.as_byte_array().to_vec()))
+            .image_key(Some(secret_key.to_vec()))
+            .image_nonce(Some(nonce_bytes.to_vec()));
 
         self.update_group_data(account, group_id, group_data).await
     }
@@ -544,7 +544,10 @@ impl Whitenoise {
                 let image_hash = group
                     .image_hash
                     .ok_or(WhitenoiseError::GroupImageNotFound)?;
-                let sha256 = Sha256Hash::from_byte_array(image_hash);
+                let image_hash_array: [u8; 32] = image_hash
+                    .try_into()
+                    .map_err(|_| BlossomError::InvalidSha256)?;
+                let sha256 = Sha256Hash::from_byte_array(image_hash_array);
 
                 // Fetch and decrypt the encrypted bytes from blossom
                 let encrypted_bytes = self
@@ -552,8 +555,9 @@ impl Whitenoise {
                     .get_blob(sha256, None, None, Option::<&Keys>::None)
                     .await
                     .map_err(BlossomError::from)?;
+
                 tracing::info!(
-                    "groups::get_group_image: Fetched blob from blossom for hash {image_hash:?}"
+                    "groups::get_group_image: Fetched blob from blossom for hash {image_hash_array:?}"
                 );
 
                 let image_key = group.image_key.ok_or(WhitenoiseError::GroupImageNotFound)?;
@@ -988,9 +992,9 @@ mod tests {
         let new_group_data = nostr_mls::groups::NostrGroupDataUpdate {
             name: Some("Updated Group Name".to_string()),
             description: Some("Updated description".to_string()),
-            image_hash: Some(Some([1u8; 32])),
-            image_key: Some(Some([1u8; 32])),
-            image_nonce: Some(Some([0u8; 12])),
+            image_hash: Some(Some(vec![1u8; 32])),
+            image_key: Some(Some(vec![1u8; 32])),
+            image_nonce: Some(Some(vec![0u8; 12])),
             admins: None,
             relays: None,
         };

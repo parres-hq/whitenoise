@@ -3,7 +3,8 @@
 //! with better cross-platform performance characteristics compared to AES-GCM.
 
 use chacha20poly1305::{
-    AeadCore, ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit, OsRng}
+    aead::{Aead, KeyInit, OsRng},
+    AeadCore, ChaCha20Poly1305, Key, Nonce,
 };
 
 use crate::media::errors::MediaError;

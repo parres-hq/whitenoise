@@ -29,11 +29,11 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-nostr-mls = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "fe2c68c8038da58642fcade64bc3aa866ae2b7f6" }
-nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "fe2c68c8038da58642fcade64bc3aa866ae2b7f6" }
-nwc = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "fe2c68c8038da58642fcade64bc3aa866ae2b7f6" }
-nostr-blossom = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "fe2c68c8038da58642fcade64bc3aa866ae2b7f6" }
-nostr-sdk = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "fe2c68c8038da58642fcade64bc3aa866ae2b7f6", features = [
+nostr-mls = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nwc = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nostr-blossom = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nostr-sdk = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6", features = [
     "lmdb",
     "nip04",
     "nip44",

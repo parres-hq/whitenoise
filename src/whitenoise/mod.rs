@@ -547,9 +547,9 @@ pub mod test_utils {
         NostrGroupConfigData {
             name: "Test group".to_owned(),
             description: "test description".to_owned(),
-            image_hash: Some([1u8; 32]),
-            image_key: Some([1u8; 32]),
-            image_nonce: Some([0u8; 12]),
+            image_hash: Some(vec![1u8; 32]),
+            image_key: Some(vec![1u8; 32]),
+            image_nonce: Some(vec![0u8; 12]),
             relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
             admins,
         }
@@ -596,7 +596,7 @@ pub mod test_utils {
             ])
         });
         let path = format!("./dev/data/images/{}.png", filename);
-     if let Some(parent) = std::path::Path::new(&path).parent() {
+        if let Some(parent) = std::path::Path::new(&path).parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         rand_image
