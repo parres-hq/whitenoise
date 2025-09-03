@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use dashmap::DashMap;
+use nostr_blossom::client::BlossomClient;
 use nostr_mls::prelude::*;
 use tokio::sync::{
     mpsc::{self, Sender},
@@ -103,6 +104,7 @@ pub struct Whitenoise {
     shutdown_sender: Sender<()>,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
     contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
+    blossom: BlossomClient,
 }
 
 static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
@@ -139,7 +141,7 @@ impl Whitenoise {
         let logs_dir = &config.logs_dir;
 
         // Setup directories
-        std::fs::create_dir_all(data_dir)
+        std::fs::create_dir_all(data_dir.join("group_images"))
             .with_context(|| format!("Failed to create data directory: {:?}", data_dir))
             .map_err(WhitenoiseError::from)?;
         std::fs::create_dir_all(logs_dir)
@@ -177,6 +179,7 @@ impl Whitenoise {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            blossom: Whitenoise::default_blossom(),
         };
 
         // Create default relays in the database if they don't exist
@@ -338,11 +341,21 @@ impl Whitenoise {
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
         &self.message_aggregator
     }
+
+    fn default_blossom() -> BlossomClient {
+        if cfg!(debug_assertions) {
+            BlossomClient::new(Url::parse("http://localhost:3000").unwrap())
+        } else {
+            BlossomClient::new(Url::parse("https://blossom.primal.net/").unwrap())
+        }
+    }
 }
 
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
+    use ::rand::Rng;
+    use image_extern::{ImageBuffer, Rgb};
     use tempfile::TempDir;
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
@@ -380,7 +393,7 @@ pub mod test_utils {
         let (config, data_temp, logs_temp) = create_test_config();
 
         // Create directories manually to avoid issues
-        std::fs::create_dir_all(&config.data_dir).unwrap();
+        std::fs::create_dir_all(config.data_dir.join("group_images")).unwrap();
         std::fs::create_dir_all(&config.logs_dir).unwrap();
 
         // Initialize minimal tracing for tests
@@ -429,6 +442,7 @@ pub mod test_utils {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            blossom: Whitenoise::default_blossom(),
         };
 
         (whitenoise, data_temp, logs_temp)
@@ -533,9 +547,9 @@ pub mod test_utils {
         NostrGroupConfigData {
             name: "Test group".to_owned(),
             description: "test description".to_owned(),
-            image_url: Some("http://test_blossom:53232/fake_img.png".to_owned()),
-            image_key: Some(b"fake key to encrypt image".to_vec()),
-            image_nonce: Some(b"fake nonce to encrypt image".to_vec()),
+            image_hash: Some(vec![1u8; 32]),
+            image_key: Some(vec![1u8; 32]),
+            image_nonce: Some(vec![0u8; 12]),
             relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
             admins,
         }
@@ -570,6 +584,24 @@ pub mod test_utils {
                 .unwrap();
         }
         accounts
+    }
+
+    pub(crate) fn create_random_png(filename: &str) {
+        let mut rng = ::rand::rng();
+        let rand_image = ImageBuffer::from_fn(4, 4, |_x, _y| {
+            Rgb([
+                rng.random_range(..=255u8),
+                rng.random_range(..=255u8),
+                rng.random_range(..=255u8),
+            ])
+        });
+        let path = format!("./dev/data/images/{}.png", filename);
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        rand_image
+            .save(format!("./dev/data/images/{}.png", filename))
+            .unwrap();
     }
 }
 

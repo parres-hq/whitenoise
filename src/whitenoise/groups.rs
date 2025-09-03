@@ -2,11 +2,16 @@ use std::{collections::HashSet, time::Duration};
 
 use nostr_mls::prelude::*;
 use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use nostr_sdk::hashes::sha256::Hash as Sha256Hash;
+use nwc::nostr::hashes::Hash;
+
+use tokio::fs;
 
 use crate::{
+    media::encryption::{decrypt_data, encrypt_data},
     whitenoise::{
         accounts::Account,
-        error::{Result, WhitenoiseError},
+        error::{BlossomError, Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
         relays::Relay,
         users::User,
@@ -198,6 +203,7 @@ impl Whitenoise {
             self,
             &group.mls_group_id,
             group_type,
+            None,
             participant_count,
         )
         .await?;
@@ -486,6 +492,102 @@ impl Whitenoise {
         // TODO: Do any local updates to ensure that we're accurately reflecting that the account is trying to leave this group
         Ok(())
     }
+
+    pub async fn update_group_image(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        image_path: &str,
+    ) -> Result<()> {
+        // Fetch and encrypt image bytes
+        let image_bytes = fs::read(image_path).await?;
+        let secret_key = Keys::generate().secret_key().to_secret_bytes();
+
+        let (encrypted_bytes, nonce_bytes) = encrypt_data(&image_bytes, &secret_key)?;
+
+        // upload to blossom
+        let account_keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let blob_descriptor = self
+            .blossom
+            .upload_blob(encrypted_bytes, None, None, Some(&account_keys))
+            .await
+            .map_err(BlossomError::from)?;
+
+        tracing::info!(
+            "groups::update_group_image: Uploaded blob to blossom for image in {image_path}"
+        );
+
+        // Update mls group data
+        let group_data = NostrGroupDataUpdate::new()
+            .image_hash(Some(blob_descriptor.sha256.as_byte_array().to_vec()))
+            .image_key(Some(secret_key.to_vec()))
+            .image_nonce(Some(nonce_bytes.to_vec()));
+
+        self.update_group_data(account, group_id, group_data).await
+    }
+
+    pub async fn get_group_image(&self, account: &Account, group_id: &GroupId) -> Result<Vec<u8>> {
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        let group_info = GroupInformation::get_by_mls_group_id(group_id, self).await?;
+        match group_info.image_pointer {
+            Some(image_pointer) => {
+                let image_bytes = fs::read(image_pointer).await?;
+                Ok(image_bytes)
+            }
+            None => {
+                // Get image information from Mls Group
+                let group = nostr_mls
+                    .get_group(group_id)?
+                    .ok_or(WhitenoiseError::GroupNotFound)?;
+                let image_hash = group
+                    .image_hash
+                    .ok_or(WhitenoiseError::GroupImageNotFound)?;
+                let image_hash_array: [u8; 32] = image_hash
+                    .try_into()
+                    .map_err(|_| BlossomError::InvalidSha256)?;
+                let sha256 = Sha256Hash::from_byte_array(image_hash_array);
+
+                // Fetch and decrypt the encrypted bytes from blossom
+                let encrypted_bytes = self
+                    .blossom
+                    .get_blob(sha256, None, None, Option::<&Keys>::None)
+                    .await
+                    .map_err(BlossomError::from)?;
+
+                tracing::info!(
+                    "groups::get_group_image: Fetched blob from blossom for hash {image_hash_array:?}"
+                );
+
+                let image_key = group.image_key.ok_or(WhitenoiseError::GroupImageNotFound)?;
+                let image_nonce = group
+                    .image_nonce
+                    .ok_or(WhitenoiseError::GroupImageNotFound)?;
+
+                let decrypted_bytes = decrypt_data(&encrypted_bytes, &image_key, &image_nonce)?;
+
+                // Save the decrypted files locally
+                let image_pointer = self
+                    .config
+                    .data_dir
+                    .join("group_images")
+                    .join(sha256.to_string());
+                fs::write(image_pointer.clone(), &decrypted_bytes).await?;
+
+                // Store the image pointer in group information table
+                let _group_info = GroupInformation::insert_new(
+                    group_id,
+                    group_info.group_type,
+                    Some(image_pointer.to_string_lossy().into_owned()),
+                    &self.database,
+                )
+                .await?;
+
+                Ok(decrypted_bytes)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -564,23 +666,20 @@ mod tests {
     ) {
         let config = create_nostr_group_config_data(admin_pubkeys.clone());
         // Create the group
-        let result = whitenoise
+        let group = whitenoise
             .create_group(
                 creator_account,
                 member_pubkeys.clone(),
                 config.clone(),
                 None,
             )
-            .await;
-
-        // Assert the group was created successfully
-        assert!(result.is_ok(), "Error {:?}", result.unwrap_err());
-        let group = result.unwrap();
+            .await
+            .unwrap();
 
         // Verify group metadata matches configuration
         assert_eq!(group.name, config.name);
         assert_eq!(group.description, config.description);
-        assert_eq!(group.image_url, config.image_url);
+        assert_eq!(group.image_hash, config.image_hash);
         assert_eq!(group.image_key, config.image_key);
 
         // Verify admin configuration
@@ -893,9 +992,9 @@ mod tests {
         let new_group_data = nostr_mls::groups::NostrGroupDataUpdate {
             name: Some("Updated Group Name".to_string()),
             description: Some("Updated description".to_string()),
-            image_url: Some(Some("https://example.com/new_image.png".to_string())),
-            image_key: Some(Some(b"new image key".to_vec())),
-            image_nonce: Some(Some(b"new image nonce".to_vec())),
+            image_hash: Some(Some(vec![1u8; 32])),
+            image_key: Some(Some(vec![1u8; 32])),
+            image_nonce: Some(Some(vec![0u8; 12])),
             admins: None,
             relays: None,
         };
@@ -925,8 +1024,12 @@ mod tests {
             updated_group.description,
             new_group_data.description.unwrap()
         );
-        assert_eq!(updated_group.image_url, new_group_data.image_url.unwrap());
+        assert_eq!(updated_group.image_hash, new_group_data.image_hash.unwrap());
         assert_eq!(updated_group.image_key, new_group_data.image_key.unwrap());
+        assert_eq!(
+            updated_group.image_nonce,
+            new_group_data.image_nonce.unwrap()
+        );
     }
 
     #[tokio::test]
@@ -1016,5 +1119,63 @@ mod tests {
 
         // For now, we just verify that the proposal was successfully created and published
         // without errors, which indicates the leave_group method works correctly.
+    }
+
+    #[tokio::test]
+    async fn test_group_image() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator account
+        let creator_account = whitenoise.create_identity().await.unwrap();
+
+        // Setup member accounts
+        let mut member_pubkeys = Vec::new();
+        let mut all_accounts = vec![creator_account.clone()];
+        for _ in 0..2 {
+            let member_account = whitenoise.create_identity().await.unwrap();
+            let member_user = User::find_by_pubkey(&member_account.pubkey, &whitenoise.database)
+                .await
+                .unwrap();
+            creator_account
+                .follow_user(&member_user, &whitenoise.database)
+                .await
+                .unwrap();
+            member_pubkeys.push(member_account.pubkey);
+
+            all_accounts.push(member_account);
+        }
+
+        // Setup admin accounts (creator + one member as admin)
+        let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
+
+        // Create the group
+        let group = whitenoise
+            .create_group(
+                &creator_account,
+                member_pubkeys.clone(),
+                config.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Update with group image
+        create_random_png("group_image");
+        let image_path = "./dev/data/images/group_image.png";
+        whitenoise
+            .update_group_image(&creator_account, &group.mls_group_id, image_path)
+            .await
+            .unwrap();
+
+        let created_image_bytes = fs::read(image_path).await.unwrap();
+
+        for account in all_accounts {
+            let group_image_bytes = whitenoise
+                .get_group_image(&account, &group.mls_group_id)
+                .await
+                .unwrap();
+            assert_eq!(created_image_bytes, group_image_bytes);
+        }
     }
 }

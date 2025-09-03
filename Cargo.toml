@@ -29,11 +29,11 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-nostr-mls = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "84b1a016cffc30625567a03e2d3bcae86463f075" }
-nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "84b1a016cffc30625567a03e2d3bcae86463f075" }
-nwc = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "84b1a016cffc30625567a03e2d3bcae86463f075" }
-nostr-blossom = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "84b1a016cffc30625567a03e2d3bcae86463f075" }
-nostr-sdk = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "84b1a016cffc30625567a03e2d3bcae86463f075", features = [
+nostr-mls = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nwc = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nostr-blossom = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6" }
+nostr-sdk = { version = "0.43.0", git="https://github.com/delcin-raj/nostr", rev = "975ba9c46273c17414742526d637d991e16afac6", features = [
     "lmdb",
     "nip04",
     "nip44",
@@ -75,6 +75,7 @@ dotenvy = "0.15"
 [dev-dependencies]
 mockito = "1.2"
 tempfile = "3.19.1"
+image_extern = { package = "image", version = "0.25", features = ["png"] }
 
 [features]
 default = []

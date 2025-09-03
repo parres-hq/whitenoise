@@ -5,7 +5,6 @@ use nostr_sdk::prelude::*;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 
-// use crate::media::blossom::BlossomClient;
 use crate::{
     types::ProcessableEvent,
     whitenoise::{
@@ -56,7 +55,6 @@ pub struct NostrManager {
     session_salt: [u8; 16],
     timeout: Duration,
     pub(crate) event_tracker: std::sync::Arc<dyn EventTracker>,
-    // blossom: BlossomClient,
 }
 
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
