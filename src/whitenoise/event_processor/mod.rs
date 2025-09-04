@@ -115,7 +115,7 @@ impl Whitenoise {
     }
 
     fn is_event_global(&self, subscription_id: &str) -> bool {
-        subscription_id.ends_with("_global_users")
+        subscription_id.starts_with("global_users_")
     }
 
     /// Schedule a retry for a failed event processing attempt

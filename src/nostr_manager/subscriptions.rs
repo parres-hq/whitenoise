@@ -1,10 +1,13 @@
 //! Subscription functions for NostrManager
 //! This mostly handles subscribing and processing events as they come in while the user is active.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
+
+const MAX_USERS_PER_GLOBAL_SUBSCRIPTION: usize = 1000;
 
 use crate::{
     nostr_manager::{NostrManager, Result},
@@ -22,86 +25,112 @@ impl NostrManager {
         format!("{:x}", hash)[..12].to_string()
     }
 
-    pub(crate) async fn setup_global_users_subscriptions(
+    // Sets up subscriptions in batches for all users and their relays
+    pub(crate) async fn setup_batched_relay_subscriptions(
         &self,
         users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
         default_relays: &[RelayUrl],
     ) -> Result<()> {
-        if users_with_relays.is_empty() {
-            return Ok(());
-        }
+        // 1. Group users by relay
+        let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
 
-        for (user_pubkey, mut relay_urls) in users_with_relays {
-            if relay_urls.is_empty() {
-                // If we don't know the user relays
-                relay_urls = default_relays.to_vec(); // Use default relays
-            }
-
-            let result = self
-                .subscribe_pubkey_global_user(user_pubkey, relay_urls)
-                .await;
-            if let Err(e) = result {
-                tracing::warn!(
-                    "Failed to subscribe to global user subscription for {}: {}",
-                    user_pubkey.to_hex(),
-                    e
-                );
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) async fn refresh_global_users_subscriptions(
-        &self,
-        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
-        default_relays: &[RelayUrl],
-    ) -> Result<()> {
-        for (user_pubkey, mut relay_urls) in users_with_relays {
-            if relay_urls.is_empty() {
-                relay_urls = default_relays.to_vec();
-            }
-            self.refresh_global_user_subscription(user_pubkey, relay_urls)
+        // 2. Create deterministic batches per relay
+        for (relay_url, users) in relay_user_map {
+            self.create_deterministic_batches_for_relay(relay_url, users)
                 .await?;
         }
+
         Ok(())
     }
 
-    async fn refresh_global_user_subscription(
+    async fn create_deterministic_batches_for_relay(
         &self,
-        pubkey: PublicKey,
-        relay_urls: Vec<RelayUrl>,
+        relay_url: RelayUrl,
+        users: Vec<PublicKey>,
     ) -> Result<()> {
-        let buffer_time = Timestamp::now() - Duration::from_secs(10);
-        let subscription_id = self.pubkey_to_global_user_subscription_id(pubkey);
-        self.client.unsubscribe(&subscription_id).await;
-        self.subscribe_pubkey_user_with_id(pubkey, relay_urls, subscription_id, Some(buffer_time))
-            .await
+        let batch_count = self.calculate_batch_count(users.len());
+
+        // Group users into deterministic batches
+        let mut batches: Vec<Vec<PublicKey>> = vec![Vec::new(); batch_count];
+        for user in users {
+            let batch_id = self.user_to_batch_id(&user, batch_count);
+            batches[batch_id].push(user);
+        }
+
+        // Create subscription for each non-empty batch
+        for (batch_id, batch_users) in batches.into_iter().enumerate() {
+            if !batch_users.is_empty() {
+                let subscription_id = self.batched_subscription_id(&relay_url, batch_id);
+                self.subscribe_user_batch(relay_url.clone(), batch_users, subscription_id, None)
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 
-    async fn subscribe_pubkey_global_user(
+    /// Calculate batch count based on user count (stateless)
+    fn calculate_batch_count(&self, user_count: usize) -> usize {
+        if user_count == 0 {
+            1
+        } else {
+            user_count.div_ceil(MAX_USERS_PER_GLOBAL_SUBSCRIPTION)
+        }
+    }
+
+    /// Deterministic batch assignment: hash(pubkey) % batch_count
+    fn user_to_batch_id(&self, pubkey: &PublicKey, batch_count: usize) -> usize {
+        let mut hasher = Sha256::new();
+        hasher.update(pubkey.to_bytes());
+        let hash = hasher.finalize();
+        let hash_int = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]);
+        (hash_int as usize) % batch_count
+    }
+
+    fn group_users_by_relay(
         &self,
-        pubkey: PublicKey,
-        relay_urls: Vec<RelayUrl>,
-    ) -> Result<()> {
-        let subscription_id = self.pubkey_to_global_user_subscription_id(pubkey);
-        self.subscribe_pubkey_user_with_id(pubkey, relay_urls, subscription_id, None)
-            .await
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+    ) -> HashMap<RelayUrl, Vec<PublicKey>> {
+        let mut relay_user_map: HashMap<RelayUrl, Vec<PublicKey>> = HashMap::new();
+
+        for (user_pubkey, mut user_relays) in users_with_relays {
+            if user_relays.is_empty() {
+                user_relays = default_relays.to_vec();
+            }
+
+            for relay_url in user_relays {
+                relay_user_map
+                    .entry(relay_url)
+                    .or_default()
+                    .push(user_pubkey);
+            }
+        }
+
+        relay_user_map
     }
 
-    fn pubkey_to_global_user_subscription_id(&self, pubkey: PublicKey) -> SubscriptionId {
-        let pubkey_hex = pubkey.to_hex();
-        let pubkey_hex_prefix = &pubkey_hex[..13.min(pubkey_hex.len())];
-        SubscriptionId::new(format!("{}_global_users", pubkey_hex_prefix))
+    /// Helper methods for batched subscriptions
+    fn batched_subscription_id(&self, relay_url: &RelayUrl, batch_id: usize) -> SubscriptionId {
+        let relay_hash = self.create_relay_hash(relay_url);
+        SubscriptionId::new(format!("global_users_{}_{}", relay_hash, batch_id))
     }
 
-    async fn subscribe_pubkey_user_with_id(
+    fn create_relay_hash(&self, relay_url: &RelayUrl) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(relay_url.as_str().as_bytes());
+        let hash = hasher.finalize();
+        format!("{:x}", hash)[..12].to_string()
+    }
+
+    async fn subscribe_user_batch(
         &self,
-        pubkey: PublicKey,
-        relay_urls: Vec<RelayUrl>,
+        relay_url: RelayUrl,
+        batch_users: Vec<PublicKey>,
         subscription_id: SubscriptionId,
         since: Option<Timestamp>,
     ) -> Result<()> {
-        let mut filter = Filter::new().author(pubkey).kinds([
+        let mut filter = Filter::new().authors(batch_users).kinds([
             Kind::Metadata,
             Kind::RelayList,
             Kind::InboxRelays,
@@ -110,11 +139,76 @@ impl NostrManager {
         if let Some(since) = since {
             filter = filter.since(since);
         }
-        self.ensure_relays_connected(&relay_urls).await?;
+
+        self.ensure_relays_connected(&[relay_url.clone()]).await?;
         self.client
-            .subscribe_with_id_to(relay_urls, subscription_id, filter, None)
+            .subscribe_with_id_to(vec![relay_url], subscription_id, filter, None)
             .await?;
         Ok(())
+    }
+
+    /// Refresh subscriptions for a specific user across all their relays
+    pub(crate) async fn refresh_user_global_subscriptions(
+        &self,
+        user_pubkey: PublicKey,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+    ) -> Result<()> {
+        let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
+
+        for (relay_url, users) in relay_user_map {
+            // Only refresh batches only for relays where the triggering user is present
+            if users.contains(&user_pubkey) {
+                self.refresh_batch_for_relay_containing_user(relay_url, users, user_pubkey)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// This method rebuilds the subscriptions for all of the relays the user has
+    async fn refresh_batch_for_relay_containing_user(
+        &self,
+        relay_url: RelayUrl,
+        users: Vec<PublicKey>,
+        user_pubkey: PublicKey,
+    ) -> Result<()> {
+        let batch_count = self.calculate_batch_count(users.len());
+        let user_batch_id = self.user_to_batch_id(&user_pubkey, batch_count);
+
+        // Group users into deterministic batches (same logic as setup)
+        // we need this because we need to know all the users present in the batch
+        let mut batches: Vec<Vec<PublicKey>> = vec![Vec::new(); batch_count];
+        for user in users {
+            let batch_id = self.user_to_batch_id(&user, batch_count);
+            batches[batch_id].push(user);
+        }
+
+        // Only refresh the batch containing the triggering user
+        if let Some(batch_users) = batches.get(user_batch_id) {
+            if !batch_users.is_empty() {
+                self.refresh_batch_subscription(relay_url, user_batch_id, batch_users.clone())
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn refresh_batch_subscription(
+        &self,
+        relay_url: RelayUrl,
+        batch_id: usize,
+        batch_users: Vec<PublicKey>,
+    ) -> Result<()> {
+        let buffer_time = Timestamp::now() - Duration::from_secs(10);
+
+        let subscription_id = self.batched_subscription_id(&relay_url, batch_id);
+        self.client.unsubscribe(&subscription_id).await;
+
+        self.subscribe_user_batch(relay_url, batch_users, subscription_id, Some(buffer_time))
+            .await
     }
 
     pub async fn setup_account_subscriptions(

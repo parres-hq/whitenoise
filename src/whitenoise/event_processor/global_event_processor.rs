@@ -16,13 +16,24 @@ impl Whitenoise {
         subscription_id: String,
         retry_info: RetryInfo,
     ) {
-        let user = match self
-            .user_from_subscription_id(subscription_id.clone())
-            .await
+        if self
+            .validate_batched_subscription_id(&subscription_id)
+            .is_err()
         {
+            tracing::error!(
+                target: "whitenoise::event_processor::process_global_event",
+                "Invalid batched subscription ID: {}", subscription_id
+            );
+            return;
+        }
+
+        let user = match User::find_by_pubkey(&event.pubkey, &self.database).await {
             Ok(user) => user,
             Err(e) => {
-                tracing::error!(target: "whitenoise::event_processor::process_global_event", "Failed to get user from subscription ID: {}", e);
+                tracing::error!(
+                    target: "whitenoise::event_processor::process_global_event",
+                    "Failed to get user {} from subscription ID: {}", event.pubkey.to_hex(), e
+                );
                 return;
             }
         };
@@ -73,14 +84,6 @@ impl Whitenoise {
                 }
             }
         }
-    }
-
-    async fn user_from_subscription_id(&self, subscription_id: String) -> Result<User> {
-        let pubkey_prefix = self
-            .extract_pubkey_prefix_from_global_subscription_id(&subscription_id)
-            .await?;
-        let user = User::find_by_pubkey_prefix(&pubkey_prefix, &self.database).await?;
-        Ok(user)
     }
 
     /// Check if a global event should be skipped (not processed)
@@ -154,21 +157,17 @@ impl Whitenoise {
         }
     }
 
-    /// Extract the user pubkey prefix from a global user subscription_id
-    /// Subscription IDs follow the format: {truncated_pubkey}_{global_users}
-    async fn extract_pubkey_prefix_from_global_subscription_id(
-        &self,
-        subscription_id: &str,
-    ) -> Result<String> {
-        let underscore_pos = subscription_id.find('_');
-        if underscore_pos.is_none() {
-            return Err(WhitenoiseError::InvalidEvent(format!(
-                "Invalid subscription ID: {}",
+    fn validate_batched_subscription_id(&self, subscription_id: &str) -> Result<()> {
+        // Simple validation format: global_users_abc123_0
+        // we could have a more robust validation here but this is good enough for now
+        if subscription_id.starts_with("global_users_") && subscription_id.matches('_').count() == 3
+        {
+            Ok(())
+        } else {
+            Err(WhitenoiseError::InvalidEvent(format!(
+                "Invalid batched subscription ID: {}",
                 subscription_id
-            )));
+            )))
         }
-
-        let pubkey_prefix = &subscription_id[..underscore_pos.unwrap()];
-        Ok(pubkey_prefix.to_string())
     }
 }

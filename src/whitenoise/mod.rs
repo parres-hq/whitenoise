@@ -228,9 +228,10 @@ impl Whitenoise {
         let users_with_relays = User::all_users_with_relay_urls(whitenoise_ref).await?;
         let default_relays: Vec<RelayUrl> =
             Relay::defaults().iter().map(|r| r.url.clone()).collect();
+
         whitenoise_ref
             .nostr
-            .setup_global_users_subscriptions(users_with_relays, &default_relays)
+            .setup_batched_relay_subscriptions(users_with_relays, &default_relays)
             .await?;
         Ok(())
     }

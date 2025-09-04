@@ -149,51 +149,6 @@ impl User {
         Ok(user_row.into())
     }
 
-    /// Finds a user by a public key prefix.
-    ///
-    /// # Arguments
-    ///
-    /// * `pubkey_prefix` - A hex string prefix to match against user public keys
-    /// * `database` - A reference to the `Database` instance for database operations
-    ///
-    /// # Returns
-    ///
-    /// Returns a `User` whose public key starts with the given prefix. The caller should try
-    /// to use a prefix that won't match multiple users.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WhitenoiseError::InvalidInput`] if the prefix is empty or contains non-hex characters.
-    /// Returns [`WhitenoiseError::UserNotFound`] if no user with a matching prefix exists.
-    pub(crate) async fn find_by_pubkey_prefix(
-        pubkey_prefix: &str,
-        database: &Database,
-    ) -> Result<User, WhitenoiseError> {
-        if pubkey_prefix.is_empty() {
-            return Err(WhitenoiseError::InvalidInput(
-                "Pubkey prefix cannot be empty".to_string(),
-            ));
-        }
-
-        if !pubkey_prefix.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(WhitenoiseError::InvalidInput(
-                "Pubkey prefix must contain only hex characters".to_string(),
-            ));
-        }
-
-        let like_prefix_pattern = format!("{}%", pubkey_prefix);
-        let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey LIKE ?")
-            .bind(like_prefix_pattern)
-            .fetch_one(&database.pool)
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => WhitenoiseError::UserNotFound,
-                _ => WhitenoiseError::Database(DatabaseError::Sqlx(e)),
-            })?;
-
-        Ok(user_row.into())
-    }
-
     /// Gets all relays of a specific type associated with this user.
     ///
     /// # Arguments
@@ -1560,64 +1515,5 @@ mod tests {
         );
         // ID should be set by database
         assert!(loaded_relay.id.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_find_by_pubkey_prefix_success() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let user = User {
-            id: None,
-            pubkey: test_pubkey,
-            metadata: Metadata::new().name("Test User"),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        user.save(&whitenoise.database).await.unwrap();
-
-        let pubkey_hex = test_pubkey.to_hex();
-
-        // Test various prefix lengths and case sensitivity
-        for prefix_len in [1, 4, 16, 32, pubkey_hex.len()] {
-            let prefix = &pubkey_hex[..prefix_len];
-            // Test both lowercase and uppercase
-            for case_prefix in [prefix.to_lowercase(), prefix.to_uppercase()] {
-                let found_user = User::find_by_pubkey_prefix(&case_prefix, &whitenoise.database)
-                    .await
-                    .unwrap();
-                assert_eq!(found_user.pubkey, test_pubkey);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_find_by_pubkey_prefix_invalid_input() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Empty input
-        let result = User::find_by_pubkey_prefix("", &whitenoise.database).await;
-        assert!(matches!(result, Err(WhitenoiseError::InvalidInput(_))));
-
-        // Non-hex characters
-        let invalid_prefixes = ["xyz", "123g", "abc!", "abc def"];
-        for prefix in invalid_prefixes {
-            let result = User::find_by_pubkey_prefix(prefix, &whitenoise.database).await;
-            assert!(matches!(result, Err(WhitenoiseError::InvalidInput(_))));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_find_by_pubkey_prefix_not_found() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        let result = User::find_by_pubkey_prefix("ffff", &whitenoise.database).await;
-        assert!(matches!(result, Err(WhitenoiseError::UserNotFound)));
     }
 }

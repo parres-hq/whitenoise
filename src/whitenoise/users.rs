@@ -310,13 +310,13 @@ impl User {
     }
 
     pub(crate) async fn refresh_global_subscription(&self, whitenoise: &Whitenoise) -> Result<()> {
-        let relays = self.relays(RelayType::Nip65, &whitenoise.database).await?;
-        let relay_urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+        let users_with_relays = User::all_users_with_relay_urls(whitenoise).await?;
         let default_relays: Vec<RelayUrl> =
             Relay::defaults().iter().map(|r| r.url.clone()).collect();
+
         whitenoise
             .nostr
-            .refresh_global_users_subscriptions(vec![(self.pubkey, relay_urls)], &default_relays)
+            .refresh_user_global_subscriptions(self.pubkey, users_with_relays, &default_relays)
             .await?;
         Ok(())
     }
