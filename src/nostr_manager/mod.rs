@@ -302,7 +302,7 @@ impl NostrManager {
 
         for relay_url in relay_urls.iter() {
             // Check if we're already connected to this relay by attempting to get its status
-            match self.client.relay(relay_url.clone()).await {
+            match self.client.relay(relay_url).await {
                 Ok(_) => {
                     // Relay already exists in the client, skip
                     tracing::debug!(
