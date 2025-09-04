@@ -1,8 +1,13 @@
 //! Subscription functions for NostrManager
 //! This mostly handles subscribing and processing events as they come in while the user is active.
 
+use std::collections::HashMap;
+use std::time::Duration;
+
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
+
+const MAX_USERS_PER_GLOBAL_SUBSCRIPTION: usize = 1000;
 
 use crate::{
     nostr_manager::{NostrManager, Result},
@@ -20,6 +25,192 @@ impl NostrManager {
         format!("{:x}", hash)[..12].to_string()
     }
 
+    // Sets up subscriptions in batches for all users and their relays
+    pub(crate) async fn setup_batched_relay_subscriptions(
+        &self,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+    ) -> Result<()> {
+        // 1. Group users by relay
+        let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
+
+        // 2. Create deterministic batches per relay
+        for (relay_url, users) in relay_user_map {
+            self.create_deterministic_batches_for_relay(relay_url, users)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn create_deterministic_batches_for_relay(
+        &self,
+        relay_url: RelayUrl,
+        users: Vec<PublicKey>,
+    ) -> Result<()> {
+        let batch_count = self.calculate_batch_count(users.len());
+
+        // Group users into deterministic batches
+        let mut batches: Vec<Vec<PublicKey>> = vec![Vec::new(); batch_count];
+        for user in users {
+            let batch_id = self.user_to_batch_id(&user, batch_count);
+            batches[batch_id].push(user);
+        }
+
+        // Create subscription for each non-empty batch
+        for (batch_id, batch_users) in batches.into_iter().enumerate() {
+            if !batch_users.is_empty() {
+                let subscription_id = self.batched_subscription_id(&relay_url, batch_id);
+                self.subscribe_user_batch(relay_url.clone(), batch_users, subscription_id, None)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Calculate batch count based on user count (stateless)
+    fn calculate_batch_count(&self, user_count: usize) -> usize {
+        if user_count == 0 {
+            1
+        } else {
+            user_count.div_ceil(MAX_USERS_PER_GLOBAL_SUBSCRIPTION)
+        }
+    }
+
+    /// Deterministic batch assignment: hash(pubkey) % batch_count
+    fn user_to_batch_id(&self, pubkey: &PublicKey, batch_count: usize) -> usize {
+        let mut hasher = Sha256::new();
+        hasher.update(pubkey.to_bytes());
+        let hash = hasher.finalize();
+        let hash_int = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]);
+        (hash_int as usize) % batch_count
+    }
+
+    fn group_users_by_relay(
+        &self,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+    ) -> HashMap<RelayUrl, Vec<PublicKey>> {
+        let mut relay_user_map: HashMap<RelayUrl, Vec<PublicKey>> = HashMap::new();
+
+        for (user_pubkey, mut user_relays) in users_with_relays {
+            if user_relays.is_empty() {
+                user_relays = default_relays.to_vec();
+            }
+
+            for relay_url in user_relays {
+                relay_user_map
+                    .entry(relay_url)
+                    .or_default()
+                    .push(user_pubkey);
+            }
+        }
+
+        relay_user_map
+    }
+
+    /// Helper methods for batched subscriptions
+    fn batched_subscription_id(&self, relay_url: &RelayUrl, batch_id: usize) -> SubscriptionId {
+        let relay_hash = self.create_relay_hash(relay_url);
+        SubscriptionId::new(format!("global_users_{}_{}", relay_hash, batch_id))
+    }
+
+    fn create_relay_hash(&self, relay_url: &RelayUrl) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(relay_url.as_str().as_bytes());
+        let hash = hasher.finalize();
+        format!("{:x}", hash)[..12].to_string()
+    }
+
+    async fn subscribe_user_batch(
+        &self,
+        relay_url: RelayUrl,
+        batch_users: Vec<PublicKey>,
+        subscription_id: SubscriptionId,
+        since: Option<Timestamp>,
+    ) -> Result<()> {
+        let mut filter = Filter::new().authors(batch_users).kinds([
+            Kind::Metadata,
+            Kind::RelayList,
+            Kind::InboxRelays,
+            Kind::MlsKeyPackageRelays,
+        ]);
+        if let Some(since) = since {
+            filter = filter.since(since);
+        }
+
+        self.ensure_relays_connected(&[relay_url.clone()]).await?;
+        self.client
+            .subscribe_with_id_to(vec![relay_url], subscription_id, filter, None)
+            .await?;
+        Ok(())
+    }
+
+    /// Refresh subscriptions for a specific user across all their relays
+    pub(crate) async fn refresh_user_global_subscriptions(
+        &self,
+        user_pubkey: PublicKey,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+    ) -> Result<()> {
+        let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
+
+        for (relay_url, users) in relay_user_map {
+            // Only refresh batches only for relays where the triggering user is present
+            if users.contains(&user_pubkey) {
+                self.refresh_batch_for_relay_containing_user(relay_url, users, user_pubkey)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// This method rebuilds the subscriptions for all of the relays the user has
+    async fn refresh_batch_for_relay_containing_user(
+        &self,
+        relay_url: RelayUrl,
+        users: Vec<PublicKey>,
+        user_pubkey: PublicKey,
+    ) -> Result<()> {
+        let batch_count = self.calculate_batch_count(users.len());
+        let user_batch_id = self.user_to_batch_id(&user_pubkey, batch_count);
+
+        // Group users into deterministic batches (same logic as setup)
+        // we need this because we need to know all the users present in the batch
+        let mut batches: Vec<Vec<PublicKey>> = vec![Vec::new(); batch_count];
+        for user in users {
+            let batch_id = self.user_to_batch_id(&user, batch_count);
+            batches[batch_id].push(user);
+        }
+
+        // Only refresh the batch containing the triggering user
+        if let Some(batch_users) = batches.get(user_batch_id) {
+            if !batch_users.is_empty() {
+                self.refresh_batch_subscription(relay_url, user_batch_id, batch_users.clone())
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn refresh_batch_subscription(
+        &self,
+        relay_url: RelayUrl,
+        batch_id: usize,
+        batch_users: Vec<PublicKey>,
+    ) -> Result<()> {
+        let buffer_time = Timestamp::now() - Duration::from_secs(10);
+
+        let subscription_id = self.batched_subscription_id(&relay_url, batch_id);
+        self.client.unsubscribe(&subscription_id).await;
+
+        self.subscribe_user_batch(relay_url, batch_users, subscription_id, Some(buffer_time))
+            .await
+    }
+
     pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
@@ -33,56 +224,45 @@ impl NostrManager {
             "Setting up account subscriptions"
         );
         // Set up core subscriptions in parallel
-        let (user_events_result, giftwrap_result, contacts_result, groups_result) = tokio::join!(
-            self.setup_user_events_subscription(pubkey, user_relays),
+        let (user_follow_list_result, giftwrap_result, groups_result) = tokio::join!(
+            self.setup_user_follow_list_subscription(pubkey, user_relays),
             self.setup_giftwrap_subscription(pubkey, inbox_relays),
-            self.setup_contacts_metadata_subscription(pubkey, user_relays),
             self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays)
         );
 
         // Handle results
-        user_events_result?;
+        user_follow_list_result?;
         giftwrap_result?;
-        contacts_result?;
         groups_result?;
 
         Ok(())
     }
 
-    /// Set up subscription for user's own events (contact list, metadata, relay lists)
-    async fn setup_user_events_subscription(
+    async fn setup_user_follow_list_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: &[Relay],
+        user_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_user_events_subscription",
-            "Setting up user events subscription"
+            target: "whitenoise::nostr_manager::setup_user_follow_list_subscription",
+            "Setting up user follow list subscription"
         );
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
-        let subscription_id = SubscriptionId::new(format!("{}_user_events", pubkey_hash));
-
-        // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(user_relays).await?;
-
-        // Combine all user event types into a single subscription
-        let user_events_filter = Filter::new()
-            .kinds([
-                Kind::ContactList,
-                Kind::Metadata,
-                Kind::RelayList,
-                Kind::InboxRelays,
-            ])
-            .author(pubkey);
+        let subscription_id = SubscriptionId::new(format!("{}_user_follow_list", pubkey_hash));
 
         let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
+        // Ensure we're connected to all user relays before subscribing
+        self.ensure_relays_connected(&urls).await?;
+
+        let user_follow_list_filter = Filter::new().kind(Kind::ContactList).author(pubkey);
+
         self.client
-            .subscribe_with_id_to(urls, subscription_id, user_events_filter, None)
+            .subscribe_with_id_to(urls, subscription_id, user_follow_list_filter, None)
             .await?;
 
         tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_user_events_subscription",
-            "User events subscription set up"
+            target: "whitenoise::nostr_manager::setup_user_follow_list_subscription",
+            "User follow list subscription set up"
         );
         Ok(())
     }
@@ -91,7 +271,7 @@ impl NostrManager {
     async fn setup_giftwrap_subscription(
         &self,
         pubkey: PublicKey,
-        inbox_relays: &[Relay],
+        inbox_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_giftwrap_subscription",
@@ -100,12 +280,12 @@ impl NostrManager {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
 
+        let urls: Vec<RelayUrl> = inbox_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all inbox relays before subscribing
-        self.ensure_relays_connected(inbox_relays).await?;
+        self.ensure_relays_connected(&urls).await?;
 
         let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
 
-        let urls: Vec<RelayUrl> = inbox_relays.iter().map(|r| r.url.clone()).collect();
         self.client
             .subscribe_with_id_to(urls, subscription_id, giftwrap_filter, None)
             .await?;
@@ -117,52 +297,12 @@ impl NostrManager {
         Ok(())
     }
 
-    /// Set up subscription for contacts' metadata - can be updated when contacts change
-    pub(crate) async fn setup_contacts_metadata_subscription(
-        &self,
-        pubkey: PublicKey,
-        user_relays: &[Relay],
-    ) -> Result<()> {
-        tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_contacts_metadata_subscription",
-            "Setting up contacts metadata subscription using user relays, {:?}",
-            user_relays
-        );
-        let contacts_pubkeys = self
-            .client
-            .get_contact_list_public_keys(self.timeout)
-            .await?;
-
-        if contacts_pubkeys.is_empty() {
-            // No contacts yet, skip subscription
-            return Ok(());
-        }
-
-        // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(user_relays).await?;
-
-        let pubkey_hash = self.create_pubkey_hash(&pubkey);
-        let subscription_id = SubscriptionId::new(format!("{}_contacts_metadata", pubkey_hash));
-
-        let contacts_metadata_filter = Filter::new().kind(Kind::Metadata).authors(contacts_pubkeys);
-        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
-        self.client
-            .subscribe_with_id_to(urls, subscription_id, contacts_metadata_filter, None)
-            .await?;
-
-        tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_contacts_metadata_subscription",
-            "Contacts metadata subscription set up"
-        );
-        Ok(())
-    }
-
     /// Set up subscription for group messages - can be updated when groups change
     pub(crate) async fn setup_group_messages_subscription(
         &self,
         pubkey: PublicKey,
         nostr_group_ids: &[String],
-        group_relays: &[Relay],
+        group_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_group_messages_subscription",
@@ -173,8 +313,9 @@ impl NostrManager {
             return Ok(());
         }
 
+        let urls: Vec<RelayUrl> = group_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all group relays before subscribing
-        self.ensure_relays_connected(group_relays).await?;
+        self.ensure_relays_connected(&urls).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));
@@ -183,7 +324,6 @@ impl NostrManager {
             .kind(Kind::MlsGroupMessage)
             .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids);
 
-        let urls: Vec<RelayUrl> = group_relays.iter().map(|r| r.url.clone()).collect();
         self.client
             .subscribe_with_id_to(urls, subscription_id, mls_message_filter, None)
             .await?;

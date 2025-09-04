@@ -293,6 +293,33 @@ impl User {
         self.sync_relay_urls(whitenoise, relay_type, &network_relay_urls)
             .await
     }
+
+    pub(crate) async fn all_users_with_relay_urls(
+        whitenoise: &Whitenoise,
+    ) -> Result<Vec<(PublicKey, Vec<RelayUrl>)>> {
+        let users = User::all(&whitenoise.database).await?;
+        let mut users_with_relays = Vec::new();
+
+        for user in users {
+            let relays = user.relays(RelayType::Nip65, &whitenoise.database).await?;
+            let relay_urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+            users_with_relays.push((user.pubkey, relay_urls));
+        }
+
+        Ok(users_with_relays)
+    }
+
+    pub(crate) async fn refresh_global_subscription(&self, whitenoise: &Whitenoise) -> Result<()> {
+        let users_with_relays = User::all_users_with_relay_urls(whitenoise).await?;
+        let default_relays: Vec<RelayUrl> =
+            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+
+        whitenoise
+            .nostr
+            .refresh_user_global_subscriptions(self.pubkey, users_with_relays, &default_relays)
+            .await?;
+        Ok(())
+    }
 }
 
 impl Whitenoise {
@@ -380,6 +407,14 @@ impl Whitenoise {
                     e
                 );
             }
+            if let Err(e) = user.refresh_global_subscription(self).await {
+                tracing::warn!(
+                    target: "whitenoise::users::find_or_create_user_by_pubkey",
+                    "Failed to refresh global subscription for new user {}: {}",
+                    user.pubkey,
+                    e
+                );
+            }
         }
         if let Err(e) = user.sync_metadata(self).await {
             tracing::warn!(
@@ -413,6 +448,15 @@ impl Whitenoise {
             }
             if let Err(e) = metadata_result {
                 tracing::warn!("Failed to fetch metadata for {}: {}", user_clone.pubkey, e);
+            }
+
+            if let Err(e) = user_clone.refresh_global_subscription(whitenoise).await {
+                tracing::warn!(
+                    target: "whitenoise::users::background_fetch_user_data",
+                    "Failed to refresh global subscription for {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
             }
 
             Ok::<(), WhitenoiseError>(())
@@ -716,5 +760,36 @@ mod tests {
         let found_user = whitenoise.find_user_by_pubkey(&test_pubkey).await.unwrap();
         assert_eq!(found_user.id, created_user.id);
         assert_eq!(found_user.pubkey, created_user.pubkey);
+    }
+
+    #[tokio::test]
+    async fn test_all_users_with_relay_urls() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let users_with_relays = User::all_users_with_relay_urls(&whitenoise).await.unwrap();
+        assert!(users_with_relays.is_empty());
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new().name("Test User"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let saved_user = user.save(&whitenoise.database).await.unwrap();
+        let relay_url = RelayUrl::parse("wss://test.example.com").unwrap();
+        let relay = whitenoise
+            .find_or_create_relay_by_url(&relay_url)
+            .await
+            .unwrap();
+        saved_user
+            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let users_with_relays = User::all_users_with_relay_urls(&whitenoise).await.unwrap();
+        assert_eq!(users_with_relays.len(), 1);
+        assert_eq!(users_with_relays[0].0, test_pubkey);
+        assert_eq!(users_with_relays[0].1, vec![relay_url]);
     }
 }

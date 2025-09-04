@@ -38,6 +38,7 @@ use error::{Result, WhitenoiseError};
 use event_tracker::WhitenoiseEventTracker;
 use relays::*;
 use secrets_store::SecretsStore;
+use users::User;
 
 #[derive(Clone, Debug)]
 pub struct WhitenoiseConfig {
@@ -92,9 +93,6 @@ impl WhitenoiseConfig {
 
 pub struct Whitenoise {
     pub config: WhitenoiseConfig,
-    #[cfg(feature = "integration-tests")]
-    pub database: Arc<Database>,
-    #[cfg(not(feature = "integration-tests"))]
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,
@@ -214,47 +212,65 @@ impl Whitenoise {
 
         Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
 
-        // Fetch events and setup subscriptions for all accounts after event processing has started
-        {
-            let accounts = Account::all(&whitenoise_ref.database).await?;
-            for account in accounts {
-                // Trigger background data fetch for each account (non-critical)
-                if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
-                    tracing::warn!(
-                        target: "whitenoise::load_accounts",
-                        "Failed to trigger background fetch for account {}: {}",
-                        account.pubkey.to_hex(),
-                        e
-                    );
-                    // Continue - background fetch failure should not prevent account loading
-                }
-                // Setup subscriptions for this account
-                match whitenoise_ref.setup_subscriptions(&account).await {
-                    Ok(()) => {
-                        tracing::debug!(
-                            target: "whitenoise::initialize_whitenoise",
-                            "Successfully set up subscriptions for account: {}",
-                            account.pubkey.to_hex()
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            target: "whitenoise::initialize_whitenoise",
-                            "Failed to set up subscriptions for account {}: {}",
-                            account.pubkey.to_hex(),
-                            e
-                        );
-                        // Continue with other accounts instead of failing completely
-                    }
-                }
-            }
-        }
+        // Fetch events and setup subscriptions after event processing has started
+        Self::setup_global_users_subscriptions(whitenoise_ref).await?;
+        Self::setup_accounts_sync_and_subscriptions(whitenoise_ref).await?;
 
         tracing::debug!(
             target: "whitenoise::initialize_whitenoise",
             "Completed initialization for all loaded accounts"
         );
 
+        Ok(())
+    }
+
+    async fn setup_global_users_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
+        let users_with_relays = User::all_users_with_relay_urls(whitenoise_ref).await?;
+        let default_relays: Vec<RelayUrl> =
+            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+
+        whitenoise_ref
+            .nostr
+            .setup_batched_relay_subscriptions(users_with_relays, &default_relays)
+            .await?;
+        Ok(())
+    }
+
+    async fn setup_accounts_sync_and_subscriptions(
+        whitenoise_ref: &'static Whitenoise,
+    ) -> Result<()> {
+        let accounts = Account::all(&whitenoise_ref.database).await?;
+        for account in accounts {
+            // Trigger background data fetch for each account (non-critical)
+            if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
+                tracing::warn!(
+                    target: "whitenoise::load_accounts",
+                    "Failed to trigger background fetch for account {}: {}",
+                    account.pubkey.to_hex(),
+                    e
+                );
+                // Continue - background fetch failure should not prevent account loading
+            }
+            // Setup subscriptions for this account
+            match whitenoise_ref.setup_subscriptions(&account).await {
+                Ok(()) => {
+                    tracing::debug!(
+                        target: "whitenoise::initialize_whitenoise",
+                        "Successfully set up subscriptions for account: {}",
+                        account.pubkey.to_hex()
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::initialize_whitenoise",
+                        "Failed to set up subscriptions for account {}: {}",
+                        account.pubkey.to_hex(),
+                        e
+                    );
+                    // Continue with other accounts instead of failing completely
+                }
+            }
+        }
         Ok(())
     }
 
@@ -337,6 +353,18 @@ impl Whitenoise {
     /// This allows consumers to access the message aggregator directly for custom processing
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
         &self.message_aggregator
+    }
+
+    #[cfg(feature = "integration-tests")]
+    pub async fn wipe_database(&self) -> Result<()> {
+        self.database.delete_all_data().await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "integration-tests")]
+    pub async fn reset_nostr_client(&self) -> Result<()> {
+        self.nostr.client.reset().await;
+        Ok(())
     }
 }
 

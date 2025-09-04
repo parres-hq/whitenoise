@@ -112,6 +112,9 @@ pub enum WhitenoiseError {
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
+
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {

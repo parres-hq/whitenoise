@@ -294,10 +294,6 @@ impl Whitenoise {
         let mut account = self.create_base_account_with_private_key(&keys).await?;
         tracing::debug!(target: "whitenoise::create_identity", "Keys stored in secret store and account saved to database");
 
-        let (_user, _newly_created) =
-            User::find_or_create_by_pubkey(&account.pubkey, &self.database).await?;
-        tracing::debug!(target: "whitenoise::create_identity", "User created for account: {:?}", account.pubkey);
-
         self.setup_relays_for_new_account(&mut account).await?;
         tracing::debug!(target: "whitenoise::create_identity", "Relays setup");
         tracing::debug!(target: "whitenoise::create_identity", "Nip65 relays: {:?}", account.nip65_relays(self).await?);
@@ -330,10 +326,6 @@ impl Whitenoise {
 
         let mut account = self.create_base_account_with_private_key(&keys).await?;
         tracing::debug!(target: "whitenoise::login", "Keys stored in secret store and account saved to database");
-
-        let (_user, _newly_created) =
-            User::find_or_create_by_pubkey(&account.pubkey, &self.database).await?;
-        tracing::debug!(target: "whitenoise::login", "User created for account: {:?}", account.pubkey);
 
         // Always check for existing relay lists when logging in, even if the user is
         // newly created in our database, because the keypair might already exist in
@@ -429,6 +421,16 @@ impl Whitenoise {
     async fn activate_account(&self, account: &Account) -> Result<()> {
         account.connect_relays(self).await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Relays connected");
+        let user = account.user(&self.database).await?;
+        if let Err(e) = user.refresh_global_subscription(self).await {
+            tracing::warn!(
+                target: "whitenoise::persist_and_activate_account",
+                "Failed to refresh global subscription for new user {}: {}",
+                user.pubkey,
+                e
+            );
+        }
+        tracing::debug!(target: "whitenoise::persist_and_activate_account", "Global subscription refreshed for account user");
         self.setup_subscriptions(account).await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Subscriptions setup");
         self.setup_key_package(account).await?;

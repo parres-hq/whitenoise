@@ -62,20 +62,30 @@ impl PublishedEvent {
     }
 
     /// Checks if we published a specific event
+    /// - account_id: Some(id) for account-specific processing, None for global processing
     pub(crate) async fn exists(
         event_id: &EventId,
-        account_id: i64,
+        account_id: Option<i64>,
         database: &Database,
     ) -> Result<bool, DatabaseError> {
-        let result: Option<(bool,)> = sqlx::query_as(
-            "SELECT EXISTS(SELECT 1 FROM published_events WHERE event_id = ? AND account_id = ?)",
-        )
-        .bind(event_id.to_hex())
-        .bind(account_id)
-        .fetch_optional(&database.pool)
-        .await?;
+        let result = if let Some(account_id) = account_id {
+            sqlx::query_as::<_, (i64,)>(
+                "SELECT EXISTS(SELECT 1 FROM published_events WHERE event_id = ? AND account_id = ?)",
+            )
+            .bind(event_id.to_hex())
+            .bind(account_id)
+            .fetch_optional(&database.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, (i64,)>(
+                "SELECT EXISTS(SELECT 1 FROM published_events WHERE event_id = ?)",
+            )
+            .bind(event_id.to_hex())
+            .fetch_optional(&database.pool)
+            .await?
+        };
 
-        Ok(result.map(|(exists,)| exists).unwrap_or(false))
+        Ok(result.is_some_and(|row| row.0 != 0))
     }
 }
 
@@ -275,7 +285,7 @@ mod tests {
             .unwrap();
 
         // Check if it exists
-        let exists = PublishedEvent::exists(&event_id, account_id, &database)
+        let exists = PublishedEvent::exists(&event_id, Some(account_id), &database)
             .await
             .unwrap();
 
@@ -290,7 +300,7 @@ mod tests {
         let account_id = 1i64;
 
         // Check if non-existent event exists
-        let exists = PublishedEvent::exists(&event_id, account_id, &database)
+        let exists = PublishedEvent::exists(&event_id, Some(account_id), &database)
             .await
             .unwrap();
 
@@ -311,7 +321,7 @@ mod tests {
             .unwrap();
 
         // Check if it exists for account 2 (should be false)
-        let exists = PublishedEvent::exists(&event_id, account_id2, &database)
+        let exists = PublishedEvent::exists(&event_id, Some(account_id2), &database)
             .await
             .unwrap();
 
@@ -348,12 +358,44 @@ mod tests {
             .unwrap();
 
         // Verify both accounts have their records
-        assert!(PublishedEvent::exists(&event_id, account_id1, &database)
+        assert!(
+            PublishedEvent::exists(&event_id, Some(account_id1), &database)
+                .await
+                .unwrap()
+        );
+        assert!(
+            PublishedEvent::exists(&event_id, Some(account_id2), &database)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_published_event_exists_global_check() {
+        let pool = setup_test_db().await;
+        let database = wrap_pool_in_database(pool);
+        let event_id = create_test_event_id();
+        let account_id = 1i64;
+
+        // Create a published event for specific account
+        PublishedEvent::create(&event_id, account_id, &database)
             .await
-            .unwrap());
-        assert!(PublishedEvent::exists(&event_id, account_id2, &database)
+            .unwrap();
+
+        // Check if event exists globally (without specifying account)
+        let exists_globally = PublishedEvent::exists(&event_id, None, &database)
             .await
-            .unwrap());
+            .unwrap();
+
+        assert!(exists_globally);
+
+        // Check with non-existent event globally
+        let non_existent_event = create_test_event_id();
+        let does_not_exist_globally = PublishedEvent::exists(&non_existent_event, None, &database)
+            .await
+            .unwrap();
+
+        assert!(!does_not_exist_globally);
     }
 
     #[tokio::test]

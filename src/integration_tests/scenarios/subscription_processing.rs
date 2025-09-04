@@ -25,23 +25,43 @@ impl Scenario for SubscriptionProcessingScenario {
     }
 
     async fn run_scenario(&mut self) -> Result<(), WhitenoiseError> {
-        CreateAccountsTestCase::with_names(vec!["subscription_test_user"])
+        CreateAccountsTestCase::with_names(vec!["subscription_test_account"])
             .execute(&mut self.context)
             .await?;
 
-        // Test subscription-driven metadata updates
-        let updated_metadata = Metadata {
+        // Test 1: Account metadata update
+        let account_metadata = Metadata {
             name: Some("Updated User via Subscription".to_string()),
             ..Default::default()
         };
-
-        PublishMetadataUpdateTestCase::new("subscription_test_user", updated_metadata)
+        PublishSubscriptionUpdateTestCase::for_account("subscription_test_account")
+            .with_metadata(account_metadata)
             .execute(&mut self.context)
             .await?;
 
-        // Test subscription-driven relay list updates
-        let new_relay_url = "wss://sub-update.example.com".to_string();
-        PublishRelayListUpdateTestCase::new("subscription_test_user", new_relay_url)
+        // Test 2: Account relay list update
+        let account_relay_url = "wss://sub-update.example.com".to_string();
+        PublishSubscriptionUpdateTestCase::for_account("subscription_test_account")
+            .with_relay_update(account_relay_url)
+            .execute(&mut self.context)
+            .await?;
+
+        // Test 3: External user metadata update
+        let alice_keys = Keys::generate();
+        let alice_metadata = Metadata {
+            name: Some("Alice Updated via Subscription".to_string()),
+            about: Some("Alice's updated bio from external client".to_string()),
+            ..Default::default()
+        };
+        PublishSubscriptionUpdateTestCase::for_external_user(alice_keys.clone())
+            .with_metadata(alice_metadata)
+            .execute(&mut self.context)
+            .await?;
+
+        // Test 4: External user relay list update
+        let alice_relay_url = "wss://alice-relay.example.com".to_string();
+        PublishSubscriptionUpdateTestCase::for_external_user(alice_keys)
+            .with_relay_update(alice_relay_url)
             .execute(&mut self.context)
             .await?;
 
