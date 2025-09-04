@@ -32,7 +32,7 @@ pub trait EventTracker: Send + Sync {
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Track that we processed a specific event for an account
-    async fn track_processed_acount_event(
+    async fn track_processed_account_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
@@ -86,7 +86,7 @@ impl EventTracker for NoEventTracker {
         Ok(false) // Do nothing
     }
 
-    async fn track_processed_acount_event(
+    async fn track_processed_account_event(
         &self,
         _event_id: &EventId,
         _pubkey: &PublicKey,
@@ -170,7 +170,7 @@ impl EventTracker for WhitenoiseEventTracker {
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    async fn track_processed_acount_event(
+    async fn track_processed_account_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,
@@ -272,7 +272,7 @@ impl EventTracker for TestEventTracker {
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    async fn track_processed_acount_event(
+    async fn track_processed_account_event(
         &self,
         event_id: &EventId,
         pubkey: &PublicKey,

@@ -75,7 +75,7 @@ impl Whitenoise {
                 if let Err(e) = self
                     .nostr
                     .event_tracker
-                    .track_processed_acount_event(&event.id, &account.pubkey)
+                    .track_processed_account_event(&event.id, &account.pubkey)
                     .await
                 {
                     tracing::warn!(
