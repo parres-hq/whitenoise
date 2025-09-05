@@ -9,8 +9,7 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     types::ProcessableEvent,
     whitenoise::{
-        accounts::Account, database::DatabaseError, event_tracker::EventTracker, relays::Relay,
-        Whitenoise,
+        accounts::Account, database::DatabaseError, event_tracker::EventTracker, Whitenoise,
     },
 };
 
@@ -192,9 +191,9 @@ impl NostrManager {
     pub(crate) async fn setup_account_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: &[Relay],
-        inbox_relays: &[Relay],
-        group_relays: &[Relay],
+        user_relays: &[RelayUrl],
+        inbox_relays: &[RelayUrl],
+        group_relays: &[RelayUrl],
         nostr_group_ids: &[String],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
@@ -210,6 +209,7 @@ impl NostrManager {
                 inbox_relays,
                 group_relays,
                 nostr_group_ids,
+                None,
             )
             .await;
         self.client.unset_signer().await;
@@ -219,13 +219,51 @@ impl NostrManager {
     pub(crate) async fn setup_group_messages_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: &[Relay],
+        user_relays: &[RelayUrl],
         nostr_group_ids: &[String],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         self.client.set_signer(signer).await;
         let result = self
-            .setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays)
+            .setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays, None)
+            .await;
+        self.client.unset_signer().await;
+        result
+    }
+
+    /// Updates account subscriptions by clearing from all relays first, then setting up new ones.
+    ///
+    /// This is necessary when relay sets change, as NIP-01 automatic replacement only works
+    /// within the same relay. Without explicit cleanup, old relays would keep orphaned subscriptions.
+    ///
+    /// Uses a time buffer to prevent missing events during the update window.
+    pub(crate) async fn update_account_subscriptions_with_signer(
+        &self,
+        pubkey: PublicKey,
+        user_relays: &[RelayUrl],
+        inbox_relays: &[RelayUrl],
+        group_relays: &[RelayUrl],
+        nostr_group_ids: &[String],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::update_account_subscriptions_with_signer",
+            "Updating account subscriptions with cleanup for relay changes"
+        );
+        self.client.set_signer(signer).await;
+        let buffer_time = Timestamp::now() - Duration::from_secs(10);
+
+        self.unsubscribe_account_subscriptions(&pubkey).await?;
+
+        let result = self
+            .setup_account_subscriptions(
+                pubkey,
+                user_relays,
+                inbox_relays,
+                group_relays,
+                nostr_group_ids,
+                Some(buffer_time),
+            )
             .await;
         self.client.unset_signer().await;
         result
