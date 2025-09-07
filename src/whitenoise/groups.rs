@@ -186,7 +186,7 @@ impl Whitenoise {
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 creator_account.pubkey,
-                &group_relays.into_iter().collect::<Vec<_>>(),
+                &relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
                 &group_ids,
                 keys,
             )

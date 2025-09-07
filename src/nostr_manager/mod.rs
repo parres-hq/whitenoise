@@ -251,12 +251,10 @@ impl NostrManager {
             "Updating account subscriptions with cleanup for relay changes"
         );
         self.client.set_signer(signer).await;
-        let buffer_time = Timestamp::now() - Duration::from_secs(10);
-
-        self.unsubscribe_account_subscriptions(&pubkey).await?;
-
-        let result = self
-            .setup_account_subscriptions(
+        let result = async {
+            let buffer_time = Timestamp::now() - Duration::from_secs(10);
+            self.unsubscribe_account_subscriptions(&pubkey).await?;
+            self.setup_account_subscriptions(
                 pubkey,
                 user_relays,
                 inbox_relays,
@@ -264,7 +262,9 @@ impl NostrManager {
                 nostr_group_ids,
                 Some(buffer_time),
             )
-            .await;
+            .await
+        }
+        .await;
         self.client.unset_signer().await;
         result
     }
