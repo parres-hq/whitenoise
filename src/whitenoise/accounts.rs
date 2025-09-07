@@ -361,6 +361,17 @@ impl Whitenoise {
     /// * `account` - The account to log out.
     pub async fn logout(&self, pubkey: &PublicKey) -> Result<()> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
+
+        // Unsubscribe from account-specific subscriptions before logout
+        if let Err(e) = self.nostr.unsubscribe_account_subscriptions(pubkey).await {
+            tracing::warn!(
+                target: "whitenoise::logout",
+                "Failed to unsubscribe from account subscriptions for {}: {}",
+                pubkey, e
+            );
+            // Don't fail logout if unsubscribe fails
+        }
+
         // Delete the account from the database
         account.delete(&self.database).await?;
 

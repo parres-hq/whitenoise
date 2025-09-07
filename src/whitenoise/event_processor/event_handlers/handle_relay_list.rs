@@ -2,7 +2,7 @@ use nostr_sdk::prelude::*;
 
 use crate::{
     nostr_manager::NostrManager,
-    whitenoise::{error::Result, users::User, Whitenoise},
+    whitenoise::{accounts::Account, error::Result, users::User, Whitenoise},
 };
 
 impl Whitenoise {
@@ -12,8 +12,34 @@ impl Whitenoise {
 
         let relay_type = event.kind.into();
         let relay_urls = NostrManager::relay_urls_from_event(event.clone());
-        user.sync_relay_urls(self, relay_type, &relay_urls).await?;
+        let relays_changed = user.sync_relay_urls(self, relay_type, &relay_urls).await?;
+
+        if relays_changed {
+            self.handle_subscriptions_refresh(&user, &event).await;
+        }
 
         Ok(())
+    }
+
+    async fn handle_subscriptions_refresh(&self, user: &User, event: &Event) {
+        // Refresh global subscriptions for this user (metadata, relay lists, key packages)
+        if let Err(e) = user.refresh_global_subscription(self).await {
+            tracing::warn!(
+                target: "whitenoise::handle_relay_list",
+                "Failed to refresh global subscriptions after relay list change for {}: {}",
+                event.pubkey, e
+            );
+        }
+
+        // If there's an account for this user, also refresh their account subscriptions
+        if let Ok(account) = Account::find_by_pubkey(&user.pubkey, &self.database).await {
+            if let Err(e) = self.refresh_account_subscriptions(&account).await {
+                tracing::warn!(
+                    target: "whitenoise::handle_relay_list",
+                    "Failed to refresh account subscriptions after relay list change for {}: {}",
+                    event.pubkey, e
+                );
+            }
+        }
     }
 }
