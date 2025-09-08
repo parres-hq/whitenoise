@@ -178,15 +178,15 @@ impl Whitenoise {
         }
 
         let mut relays = HashSet::new();
-        for relay_url in group_relays {
-            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
+        for relay_url in &group_relays {
+            let db_relay = self.find_or_create_relay_by_url(relay_url).await?;
             relays.insert(db_relay);
         }
 
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 creator_account.pubkey,
-                &relays.into_iter().collect::<Vec<_>>(),
+                &relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
                 &group_ids,
                 keys,
             )

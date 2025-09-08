@@ -361,6 +361,17 @@ impl Whitenoise {
     /// * `account` - The account to log out.
     pub async fn logout(&self, pubkey: &PublicKey) -> Result<()> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
+
+        // Unsubscribe from account-specific subscriptions before logout
+        if let Err(e) = self.nostr.unsubscribe_account_subscriptions(pubkey).await {
+            tracing::warn!(
+                target: "whitenoise::logout",
+                "Failed to unsubscribe from account subscriptions for {}: {}",
+                pubkey, e
+            );
+            // Don't fail logout if unsubscribe fails
+        }
+
         // Delete the account from the database
         account.delete(&self.database).await?;
 
@@ -804,64 +815,66 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Extract group data including relay URLs and group IDs for subscription setup.
+    async fn extract_groups_relays_and_ids(
+        &self,
+        account: &Account,
+    ) -> Result<(Vec<RelayUrl>, Vec<String>)> {
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        let groups = nostr_mls.get_groups()?;
+        let mut group_relays_set = HashSet::new();
+        let mut group_ids = vec![];
+
+        for group in &groups {
+            let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+            group_relays_set.extend(relays);
+            group_ids.push(hex::encode(group.nostr_group_id));
+        }
+
+        let group_relays_urls = group_relays_set.into_iter().collect::<Vec<_>>();
+
+        Ok((group_relays_urls, group_ids))
+    }
+
     pub(crate) async fn setup_subscriptions(&self, account: &Account) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::setup_subscriptions",
             "Setting up subscriptions for account: {:?}",
             account
         );
-        let mut group_relays = HashSet::new();
-        let groups: Vec<group_types::Group>;
-        {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            groups = nostr_mls.get_groups()?;
-            // Collect all relays from all groups into a single vector
-            for group in &groups {
-                let relays = nostr_mls.get_relays(&group.mls_group_id)?;
-                for relay in relays {
-                    group_relays.insert(relay.clone());
-                }
-            }
-        };
-        tracing::debug!(
-            target: "whitenoise::setup_subscriptions",
-            "Found {} groups",
-            groups.len()
-        );
-        // We do this in two stages to deduplicate the relays
-        let mut group_relays_vec = Vec::new();
-        for relay in group_relays {
-            group_relays_vec.push(Relay::find_or_create_by_url(&relay, &self.database).await?);
+
+        let user_relays: Vec<RelayUrl> = account
+            .nip65_relays(self)
+            .await?
+            .into_iter()
+            .map(|r| r.url)
+            .collect();
+
+        let inbox_relays: Vec<RelayUrl> = account
+            .inbox_relays(self)
+            .await?
+            .into_iter()
+            .map(|r| r.url)
+            .collect();
+
+        let (group_relays_urls, nostr_group_ids) =
+            self.extract_groups_relays_and_ids(account).await?;
+
+        // Ensure group relays are in the database
+        for relay_url in &group_relays_urls {
+            Relay::find_or_create_by_url(relay_url, &self.database).await?;
         }
 
-        tracing::debug!(
-            target: "whitenoise::setup_subscriptions",
-            "Found {} group relays",
-            group_relays_vec.len()
-        );
-
-        let nostr_group_ids = groups
-            .into_iter()
-            .map(|group| hex::encode(group.nostr_group_id))
-            .collect::<Vec<String>>();
-
-        // Use the signer-aware subscription setup method
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
-        let user_relays = account.nip65_relays(self).await?;
-        tracing::debug!(
-            target: "whitenoise::setup_subscriptions",
-            "About to setup account subscriptions with user relays: {:?}",
-            user_relays
-        );
         self.nostr
             .setup_account_subscriptions_with_signer(
                 account.pubkey,
-                &account.nip65_relays(self).await?,
-                &account.inbox_relays(self).await?,
-                &group_relays_vec,
+                &user_relays,
+                &inbox_relays,
+                &group_relays_urls,
                 &nostr_group_ids,
                 keys,
             )
@@ -872,6 +885,56 @@ impl Whitenoise {
             "Subscriptions setup"
         );
         Ok(())
+    }
+
+    /// Refresh account subscriptions.
+    ///
+    /// This method updates subscriptions when account state changes (group membership, relay preferences).
+    /// Uses explicit cleanup to handle relay changes properly - NIP-01 auto-replacement only works
+    /// within the same relay, so changing relays would leave orphaned subscriptions without cleanup.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account to refresh subscriptions for
+    pub(crate) async fn refresh_account_subscriptions(&self, account: &Account) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::refresh_account_subscriptions",
+            "Refreshing account subscriptions for account: {:?}",
+            account.pubkey
+        );
+
+        let user_relays: Vec<RelayUrl> = account
+            .nip65_relays(self)
+            .await?
+            .into_iter()
+            .map(|r| r.url)
+            .collect();
+
+        let inbox_relays: Vec<RelayUrl> = account
+            .inbox_relays(self)
+            .await?
+            .into_iter()
+            .map(|r| r.url)
+            .collect();
+
+        let (group_relays_urls, nostr_group_ids) =
+            self.extract_groups_relays_and_ids(account).await?;
+
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        self.nostr
+            .update_account_subscriptions_with_signer(
+                account.pubkey,
+                &user_relays,
+                &inbox_relays,
+                &group_relays_urls,
+                &nostr_group_ids,
+                keys,
+            )
+            .await
+            .map_err(WhitenoiseError::from)
     }
 }
 

@@ -9,10 +9,7 @@ use sha2::{Digest, Sha256};
 
 const MAX_USERS_PER_GLOBAL_SUBSCRIPTION: usize = 1000;
 
-use crate::{
-    nostr_manager::{NostrManager, Result},
-    whitenoise::relays::Relay,
-};
+use crate::nostr_manager::{NostrManager, Result};
 
 impl NostrManager {
     /// Create a short hash from a pubkey for use in subscription IDs
@@ -214,10 +211,11 @@ impl NostrManager {
     pub async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
-        user_relays: &[Relay],
-        inbox_relays: &[Relay],
-        group_relays: &[Relay],
+        user_relays: &[RelayUrl],
+        inbox_relays: &[RelayUrl],
+        group_relays: &[RelayUrl],
         nostr_group_ids: &[String],
+        since: Option<Timestamp>,
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_account_subscriptions",
@@ -225,9 +223,9 @@ impl NostrManager {
         );
         // Set up core subscriptions in parallel
         let (user_follow_list_result, giftwrap_result, groups_result) = tokio::join!(
-            self.setup_user_follow_list_subscription(pubkey, user_relays),
-            self.setup_giftwrap_subscription(pubkey, inbox_relays),
-            self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays)
+            self.setup_user_follow_list_subscription(pubkey, user_relays, since),
+            self.setup_giftwrap_subscription(pubkey, inbox_relays, since),
+            self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays, since)
         );
 
         // Handle results
@@ -241,7 +239,8 @@ impl NostrManager {
     async fn setup_user_follow_list_subscription(
         &self,
         pubkey: PublicKey,
-        user_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        user_relays: &[RelayUrl],
+        since: Option<Timestamp>,
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_user_follow_list_subscription",
@@ -250,14 +249,16 @@ impl NostrManager {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_follow_list", pubkey_hash));
 
-        let urls: Vec<RelayUrl> = user_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(&urls).await?;
+        self.ensure_relays_connected(user_relays).await?;
 
-        let user_follow_list_filter = Filter::new().kind(Kind::ContactList).author(pubkey);
+        let mut user_follow_list_filter = Filter::new().kind(Kind::ContactList).author(pubkey);
+        if let Some(since) = since {
+            user_follow_list_filter = user_follow_list_filter.since(since);
+        }
 
         self.client
-            .subscribe_with_id_to(urls, subscription_id, user_follow_list_filter, None)
+            .subscribe_with_id_to(user_relays, subscription_id, user_follow_list_filter, None)
             .await?;
 
         tracing::debug!(
@@ -267,11 +268,11 @@ impl NostrManager {
         Ok(())
     }
 
-    /// Set up subscription for giftwrap messages to the user
     async fn setup_giftwrap_subscription(
         &self,
         pubkey: PublicKey,
-        inbox_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        inbox_relays: &[RelayUrl],
+        since: Option<Timestamp>,
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_giftwrap_subscription",
@@ -280,14 +281,16 @@ impl NostrManager {
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
 
-        let urls: Vec<RelayUrl> = inbox_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all inbox relays before subscribing
-        self.ensure_relays_connected(&urls).await?;
+        self.ensure_relays_connected(inbox_relays).await?;
 
-        let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
+        let mut giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
+        if let Some(since) = since {
+            giftwrap_filter = giftwrap_filter.since(since);
+        }
 
         self.client
-            .subscribe_with_id_to(urls, subscription_id, giftwrap_filter, None)
+            .subscribe_with_id_to(inbox_relays, subscription_id, giftwrap_filter, None)
             .await?;
 
         tracing::debug!(
@@ -302,7 +305,8 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         nostr_group_ids: &[String],
-        group_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        group_relays: &[RelayUrl],
+        since: Option<Timestamp>,
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_group_messages_subscription",
@@ -313,19 +317,22 @@ impl NostrManager {
             return Ok(());
         }
 
-        let urls: Vec<RelayUrl> = group_relays.iter().map(|r| r.url.clone()).collect();
         // Ensure we're connected to all group relays before subscribing
-        self.ensure_relays_connected(&urls).await?;
+        self.ensure_relays_connected(group_relays).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));
 
-        let mls_message_filter = Filter::new()
+        let mut mls_message_filter = Filter::new()
             .kind(Kind::MlsGroupMessage)
             .custom_tags(SingleLetterTag::lowercase(Alphabet::H), nostr_group_ids);
 
+        if let Some(since) = since {
+            mls_message_filter = mls_message_filter.since(since);
+        }
+
         self.client
-            .subscribe_with_id_to(urls, subscription_id, mls_message_filter, None)
+            .subscribe_with_id_to(group_relays, subscription_id, mls_message_filter, None)
             .await?;
 
         tracing::debug!(
@@ -333,5 +340,52 @@ impl NostrManager {
             "Group messages subscription set up"
         );
         Ok(())
+    }
+
+    /// Unsubscribe from all account-specific subscriptions for a given pubkey.
+    /// This includes user follow list, giftwrap, and MLS group message subscriptions.
+    pub(crate) async fn unsubscribe_account_subscriptions(&self, pubkey: &PublicKey) -> Result<()> {
+        let pubkey_hash = self.create_pubkey_hash(pubkey);
+
+        let subscription_ids = [
+            SubscriptionId::new(format!("{}_user_follow_list", pubkey_hash)),
+            SubscriptionId::new(format!("{}_giftwrap", pubkey_hash)),
+            SubscriptionId::new(format!("{}_mls_messages", pubkey_hash)),
+        ];
+
+        let unsubscribe_futures = subscription_ids
+            .iter()
+            .map(|id| self.client.unsubscribe(id));
+
+        futures::future::join_all(unsubscribe_futures).await;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::whitenoise::event_tracker::NoEventTracker;
+    use nostr_sdk::Keys;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_create_pubkey_hash() {
+        let (event_sender, _) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        let pubkey = Keys::generate().public_key();
+        let hash1 = nostr_manager.create_pubkey_hash(&pubkey);
+        let hash2 = nostr_manager.create_pubkey_hash(&pubkey);
+
+        // Same pubkey should produce same hash with same session salt
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 12); // Should be 12 characters as specified
     }
 }
