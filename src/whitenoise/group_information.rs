@@ -2,9 +2,10 @@ use std::{fmt, str::FromStr};
 
 use chrono::{DateTime, Utc};
 use nostr_mls::prelude::GroupId;
+use nostr_sdk::PublicKey;
 use serde::{Deserialize, Serialize};
 
-use crate::whitenoise::{Whitenoise, WhitenoiseError};
+use crate::whitenoise::{accounts::Account, Whitenoise, WhitenoiseError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GroupType {
@@ -49,9 +50,9 @@ pub struct GroupInformation {
 }
 
 impl GroupInformation {
-    fn infer_group_type_from_participant_count(participant_count: usize) -> GroupType {
-        match participant_count {
-            2 => GroupType::DirectMessage,
+    pub(crate) fn infer_group_type_from_group_name(group_name: &str) -> GroupType {
+        match group_name {
+            "" => GroupType::DirectMessage,
             _ => GroupType::Group,
         }
     }
@@ -59,17 +60,17 @@ impl GroupInformation {
     ///
     /// # Arguments
     /// * `mls_group_id` - The MLS group ID
-    /// * `group_type` - Optional explicit group type. If None, will be inferred from participant count
-    /// * `participant_count` - Total number of participants including the creator (used for inference if group_type is None)
+    /// * `group_type` - Optional explicit group type. If None, will be inferred from group name
+    /// * `group_name` - The name of the group
     /// * `whitenoise` - Reference to the Whitenoise instance for database operations
     pub async fn create_for_group(
         whitenoise: &Whitenoise,
         mls_group_id: &GroupId,
         group_type: Option<GroupType>,
-        participant_count: usize,
+        group_name: &str,
     ) -> Result<GroupInformation, WhitenoiseError> {
-        let group_type = group_type
-            .unwrap_or_else(|| Self::infer_group_type_from_participant_count(participant_count));
+        let group_type =
+            group_type.unwrap_or_else(|| Self::infer_group_type_from_group_name(group_name));
         let (group_info, _was_created) = Self::find_or_create_by_mls_group_id(
             mls_group_id,
             Some(group_type),
@@ -79,14 +80,19 @@ impl GroupInformation {
         Ok(group_info)
     }
 
-    /// Get group information by MLS group ID, creating it with default type if it doesn't exist
+    /// Get group information by MLS group ID, creating it with a type inferred from the group name if it doesn't exist
     pub async fn get_by_mls_group_id(
+        account_pubkey: PublicKey,
         mls_group_id: &GroupId,
         whitenoise: &Whitenoise,
     ) -> Result<GroupInformation, WhitenoiseError> {
+        let nostr_mls = Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)?;
+        let group = nostr_mls
+            .get_group(mls_group_id)?
+            .ok_or(WhitenoiseError::GroupNotFound)?;
         let (group_info, _was_created) = GroupInformation::find_or_create_by_mls_group_id(
             mls_group_id,
-            Some(GroupType::default()),
+            Some(Self::infer_group_type_from_group_name(&group.name)),
             &whitenoise.database,
         )
         .await?;
@@ -94,8 +100,9 @@ impl GroupInformation {
     }
 
     /// Get group information for multiple MLS group IDs
-    /// Missing groups will be created with default type (Group)
+    /// Missing groups will be created with a type inferred from the group name
     pub async fn get_by_mls_group_ids(
+        account_pubkey: PublicKey,
         mls_group_ids: &[GroupId],
         whitenoise: &Whitenoise,
     ) -> Result<Vec<GroupInformation>, WhitenoiseError> {
@@ -103,26 +110,27 @@ impl GroupInformation {
         let existing =
             GroupInformation::find_by_mls_group_ids(mls_group_ids, &whitenoise.database).await?;
 
-        // If we got all the records we need, return them
-        if existing.len() == mls_group_ids.len() {
-            return Ok(existing);
-        }
-
-        // Otherwise, we need to create missing ones
+        // Create a map for quick lookups, but continue to preserve input order
         let mut existing_map: std::collections::HashMap<GroupId, GroupInformation> = existing
             .into_iter()
             .map(|gi| (gi.mls_group_id.clone(), gi))
             .collect();
+
+        let nostr_mls = Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)?;
 
         let mut results = Vec::new();
         for mls_group_id in mls_group_ids {
             if let Some(existing_info) = existing_map.remove(mls_group_id) {
                 results.push(existing_info);
             } else {
-                // Create missing record with default type
+                // Create missing record with a type inferred from the group name
+                let group = nostr_mls
+                    .get_group(mls_group_id)?
+                    .ok_or(WhitenoiseError::GroupNotFound)?;
+                let group_type = Self::infer_group_type_from_group_name(&group.name);
                 let (new_info, _was_created) = GroupInformation::find_or_create_by_mls_group_id(
                     mls_group_id,
-                    Some(GroupType::default()),
+                    Some(group_type),
                     &whitenoise.database,
                 )
                 .await?;
@@ -137,16 +145,18 @@ impl GroupInformation {
 impl Whitenoise {
     pub async fn get_group_information_by_mls_group_id(
         &self,
+        account_pubkey: PublicKey,
         mls_group_id: &GroupId,
     ) -> Result<GroupInformation, WhitenoiseError> {
-        GroupInformation::get_by_mls_group_id(mls_group_id, self).await
+        GroupInformation::get_by_mls_group_id(account_pubkey, mls_group_id, self).await
     }
 
     pub async fn get_group_information_by_mls_group_ids(
         &self,
+        account_pubkey: PublicKey,
         mls_group_ids: &[GroupId],
     ) -> Result<Vec<GroupInformation>, WhitenoiseError> {
-        GroupInformation::get_by_mls_group_ids(mls_group_ids, self).await
+        GroupInformation::get_by_mls_group_ids(account_pubkey, mls_group_ids, self).await
     }
 }
 
@@ -211,26 +221,14 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_group_type_from_participant_count() {
+    fn test_infer_group_type_from_group_name() {
         assert_eq!(
-            GroupInformation::infer_group_type_from_participant_count(1),
+            GroupInformation::infer_group_type_from_group_name("test"),
             GroupType::Group
         );
         assert_eq!(
-            GroupInformation::infer_group_type_from_participant_count(2),
+            GroupInformation::infer_group_type_from_group_name(""),
             GroupType::DirectMessage
-        );
-        assert_eq!(
-            GroupInformation::infer_group_type_from_participant_count(3),
-            GroupType::Group
-        );
-        assert_eq!(
-            GroupInformation::infer_group_type_from_participant_count(10),
-            GroupType::Group
-        );
-        assert_eq!(
-            GroupInformation::infer_group_type_from_participant_count(0),
-            GroupType::Group
         );
     }
 
@@ -243,7 +241,7 @@ mod tests {
             &whitenoise,
             &group_id,
             Some(GroupType::DirectMessage),
-            5, // Should be ignored when explicit type provided
+            "test", // Should be ignored when explicit type provided
         )
         .await;
 
@@ -263,7 +261,7 @@ mod tests {
             &whitenoise,
             &group_id,
             None,
-            2, // Should infer DirectMessage
+            "", // Should infer DirectMessage
         )
         .await;
 
@@ -283,7 +281,7 @@ mod tests {
             &whitenoise,
             &group_id,
             None,
-            5, // Should infer Group
+            "test", // Should infer Group
         )
         .await;
 
@@ -300,9 +298,13 @@ mod tests {
         let group_id = GroupId::from_slice(&[4; 32]);
 
         // First call - should create
-        let result1 =
-            GroupInformation::create_for_group(&whitenoise, &group_id, Some(GroupType::Group), 3)
-                .await;
+        let result1 = GroupInformation::create_for_group(
+            &whitenoise,
+            &group_id,
+            Some(GroupType::Group),
+            "test",
+        )
+        .await;
         assert!(result1.is_ok());
         let group_info1 = result1.unwrap();
 
@@ -311,7 +313,7 @@ mod tests {
             &whitenoise,
             &group_id,
             Some(GroupType::DirectMessage), // Different type, but should find existing
-            2,
+            "",
         )
         .await;
         assert!(result2.is_ok());
@@ -326,13 +328,28 @@ mod tests {
     #[tokio::test]
     async fn test_get_by_mls_group_id_creates_with_default() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let group_id = GroupId::from_slice(&[5; 32]);
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let member_account = whitenoise.create_identity().await.unwrap();
 
-        let result = GroupInformation::get_by_mls_group_id(&group_id, &whitenoise).await;
+        // Create actual MLS group with default name (non-empty) to infer Group type
+        let config = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group = whitenoise
+            .create_group(&creator_account, vec![member_account.pubkey], config, None)
+            .await
+            .unwrap();
+
+        let result = GroupInformation::get_by_mls_group_id(
+            creator_account.pubkey,
+            &group.mls_group_id,
+            &whitenoise,
+        )
+        .await;
 
         assert!(result.is_ok());
         let group_info = result.unwrap();
-        assert_eq!(group_info.mls_group_id, group_id);
+        assert_eq!(group_info.mls_group_id, group.mls_group_id);
         assert_eq!(group_info.group_type, GroupType::Group); // Default type
         assert!(group_info.id.is_some());
     }
@@ -340,20 +357,37 @@ mod tests {
     #[tokio::test]
     async fn test_get_by_mls_group_id_finds_existing() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let group_id = GroupId::from_slice(&[6; 32]);
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let member_account = whitenoise.create_identity().await.unwrap();
 
-        // First create with specific type
+        // Create actual MLS group with empty name to infer DirectMessage type
+        let mut config = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+            member_account.pubkey,
+        ]);
+        config.name = "".to_string(); // Empty name for DirectMessage
+        let group = whitenoise
+            .create_group(&creator_account, vec![member_account.pubkey], config, None)
+            .await
+            .unwrap();
+
+        // First create with specific type via create_for_group
         let original = GroupInformation::create_for_group(
             &whitenoise,
-            &group_id,
+            &group.mls_group_id,
             Some(GroupType::DirectMessage),
-            2,
+            "",
         )
         .await
         .unwrap();
 
         // Get should find the existing one
-        let result = GroupInformation::get_by_mls_group_id(&group_id, &whitenoise).await;
+        let result = GroupInformation::get_by_mls_group_id(
+            creator_account.pubkey,
+            &group.mls_group_id,
+            &whitenoise,
+        )
+        .await;
         assert!(result.is_ok());
         let found = result.unwrap();
 
@@ -368,22 +402,29 @@ mod tests {
         let group_id2 = GroupId::from_slice(&[8; 32]);
 
         // Create both groups first
-        let _info1 =
-            GroupInformation::create_for_group(&whitenoise, &group_id1, Some(GroupType::Group), 5)
-                .await
-                .unwrap();
+        let _info1 = GroupInformation::create_for_group(
+            &whitenoise,
+            &group_id1,
+            Some(GroupType::Group),
+            "test",
+        )
+        .await
+        .unwrap();
 
         let _info2 = GroupInformation::create_for_group(
             &whitenoise,
             &group_id2,
             Some(GroupType::DirectMessage),
-            2,
+            "",
         )
         .await
         .unwrap();
 
+        let creator_account = whitenoise.create_identity().await.unwrap();
+
         // Get both
         let result = GroupInformation::get_by_mls_group_ids(
+            creator_account.pubkey,
             &[group_id1.clone(), group_id2.clone()],
             &whitenoise,
         )
@@ -411,23 +452,56 @@ mod tests {
     #[tokio::test]
     async fn test_get_by_mls_group_ids_mixed_existing_and_missing() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let group_id1 = GroupId::from_slice(&[9; 32]);
-        let group_id2 = GroupId::from_slice(&[10; 32]);
-        let group_id3 = GroupId::from_slice(&[11; 32]);
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let member1 = whitenoise.create_identity().await.unwrap();
+        let member2 = whitenoise.create_identity().await.unwrap();
+        let member3 = whitenoise.create_identity().await.unwrap();
 
-        // Create only the first one
+        // Create actual MLS groups
+        let mut config1 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+            member1.pubkey,
+        ]);
+        config1.name = "".to_string(); // Empty name for DirectMessage
+        let group1 = whitenoise
+            .create_group(&creator_account, vec![member1.pubkey], config1, None)
+            .await
+            .unwrap();
+
+        let config2 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group2 = whitenoise
+            .create_group(&creator_account, vec![member2.pubkey], config2, None)
+            .await
+            .unwrap();
+
+        let config3 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group3 = whitenoise
+            .create_group(&creator_account, vec![member3.pubkey], config3, None)
+            .await
+            .unwrap();
+
+        // Create only the first one in database via create_for_group
         let _info1 = GroupInformation::create_for_group(
             &whitenoise,
-            &group_id1,
+            &group1.mls_group_id,
             Some(GroupType::DirectMessage),
-            2,
+            "",
         )
         .await
         .unwrap();
 
-        // Get all three (one exists, two missing)
+        // Get all three (one exists in db, two missing from db)
         let result = GroupInformation::get_by_mls_group_ids(
-            &[group_id1.clone(), group_id2.clone(), group_id3.clone()],
+            creator_account.pubkey,
+            &[
+                group1.mls_group_id.clone(),
+                group2.mls_group_id.clone(),
+                group3.mls_group_id.clone(),
+            ],
             &whitenoise,
         )
         .await;
@@ -437,25 +511,44 @@ mod tests {
         assert_eq!(group_infos.len(), 3);
 
         // Check results - should preserve order from input
-        assert_eq!(group_infos[0].mls_group_id, group_id1);
+        assert_eq!(group_infos[0].mls_group_id, group1.mls_group_id);
         assert_eq!(group_infos[0].group_type, GroupType::DirectMessage); // Existing type preserved
 
-        assert_eq!(group_infos[1].mls_group_id, group_id2);
+        assert_eq!(group_infos[1].mls_group_id, group2.mls_group_id);
         assert_eq!(group_infos[1].group_type, GroupType::Group); // Default for new
 
-        assert_eq!(group_infos[2].mls_group_id, group_id3);
+        assert_eq!(group_infos[2].mls_group_id, group3.mls_group_id);
         assert_eq!(group_infos[2].group_type, GroupType::Group); // Default for new
     }
 
     #[tokio::test]
     async fn test_get_by_mls_group_ids_all_missing() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let group_id1 = GroupId::from_slice(&[12; 32]);
-        let group_id2 = GroupId::from_slice(&[13; 32]);
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let member1 = whitenoise.create_identity().await.unwrap();
+        let member2 = whitenoise.create_identity().await.unwrap();
 
-        // Get both (neither exists)
+        // Create actual MLS groups
+        let config1 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group1 = whitenoise
+            .create_group(&creator_account, vec![member1.pubkey], config1, None)
+            .await
+            .unwrap();
+
+        let config2 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group2 = whitenoise
+            .create_group(&creator_account, vec![member2.pubkey], config2, None)
+            .await
+            .unwrap();
+
+        // Get both (neither exists in database yet)
         let result = GroupInformation::get_by_mls_group_ids(
-            &[group_id1.clone(), group_id2.clone()],
+            creator_account.pubkey,
+            &[group1.mls_group_id.clone(), group2.mls_group_id.clone()],
             &whitenoise,
         )
         .await;
@@ -465,18 +558,20 @@ mod tests {
         assert_eq!(group_infos.len(), 2);
 
         // Both should be created with default type
-        assert_eq!(group_infos[0].mls_group_id, group_id1);
+        assert_eq!(group_infos[0].mls_group_id, group1.mls_group_id);
         assert_eq!(group_infos[0].group_type, GroupType::Group);
 
-        assert_eq!(group_infos[1].mls_group_id, group_id2);
+        assert_eq!(group_infos[1].mls_group_id, group2.mls_group_id);
         assert_eq!(group_infos[1].group_type, GroupType::Group);
     }
 
     #[tokio::test]
     async fn test_get_by_mls_group_ids_empty_input() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
 
-        let result = GroupInformation::get_by_mls_group_ids(&[], &whitenoise).await;
+        let result =
+            GroupInformation::get_by_mls_group_ids(creator_account.pubkey, &[], &whitenoise).await;
 
         assert!(result.is_ok());
         let group_infos = result.unwrap();
@@ -486,13 +581,44 @@ mod tests {
     #[tokio::test]
     async fn test_get_by_mls_group_ids_preserves_order() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let group_id1 = GroupId::from_slice(&[14; 32]);
-        let group_id2 = GroupId::from_slice(&[15; 32]);
-        let group_id3 = GroupId::from_slice(&[16; 32]);
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let member1 = whitenoise.create_identity().await.unwrap();
+        let member2 = whitenoise.create_identity().await.unwrap();
+        let member3 = whitenoise.create_identity().await.unwrap();
 
-        // Test order preservation when all are missing
+        // Create actual MLS groups
+        let config1 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group1 = whitenoise
+            .create_group(&creator_account, vec![member1.pubkey], config1, None)
+            .await
+            .unwrap();
+
+        let config2 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group2 = whitenoise
+            .create_group(&creator_account, vec![member2.pubkey], config2, None)
+            .await
+            .unwrap();
+
+        let config3 = crate::whitenoise::test_utils::create_nostr_group_config_data(vec![
+            creator_account.pubkey,
+        ]);
+        let group3 = whitenoise
+            .create_group(&creator_account, vec![member3.pubkey], config3, None)
+            .await
+            .unwrap();
+
+        // Test order preservation when all are missing from database
         let result = GroupInformation::get_by_mls_group_ids(
-            &[group_id2.clone(), group_id1.clone(), group_id3.clone()], // Intentional different order
+            creator_account.pubkey,
+            &[
+                group2.mls_group_id.clone(),
+                group1.mls_group_id.clone(),
+                group3.mls_group_id.clone(),
+            ], // Intentional different order
             &whitenoise,
         )
         .await;
@@ -502,8 +628,8 @@ mod tests {
         assert_eq!(group_infos.len(), 3);
 
         // Should preserve input order
-        assert_eq!(group_infos[0].mls_group_id, group_id2);
-        assert_eq!(group_infos[1].mls_group_id, group_id1);
-        assert_eq!(group_infos[2].mls_group_id, group_id3);
+        assert_eq!(group_infos[0].mls_group_id, group2.mls_group_id);
+        assert_eq!(group_infos[1].mls_group_id, group1.mls_group_id);
+        assert_eq!(group_infos[2].mls_group_id, group3.mls_group_id);
     }
 }
