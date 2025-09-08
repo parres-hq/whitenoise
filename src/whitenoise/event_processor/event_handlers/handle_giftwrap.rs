@@ -94,15 +94,16 @@ mod tests {
         member_pubkey: PublicKey,
     ) -> Event {
         // Fetch a real key package event for the member from relays
+        let relays_urls = creator_account
+            .key_package_relays(whitenoise)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         let key_pkg_event = whitenoise
             .nostr
-            .fetch_user_key_package(
-                member_pubkey,
-                &creator_account
-                    .key_package_relays(whitenoise)
-                    .await
-                    .unwrap(),
-            )
+            .fetch_user_key_package(member_pubkey, &relays_urls)
             .await
             .unwrap()
             .expect("member must have a published key package");

@@ -13,7 +13,7 @@ use crate::{
 impl NostrManager {
     pub(crate) async fn fetch_metadata_from(
         &self,
-        nip65_relays: &[Relay],
+        nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
@@ -32,7 +32,7 @@ impl NostrManager {
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        nip65_relays: &[Relay],
+        nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
     ) -> Result<HashSet<RelayUrl>> {
         let filter = Filter::new()
             .author(pubkey)
@@ -41,7 +41,7 @@ impl NostrManager {
         let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let relay_events = self
             .client
-            .fetch_events_from(urls, filter.clone(), self.timeout)
+            .fetch_events_from(urls, filter, self.timeout)
             .await?;
         tracing::debug!("Fetched relay events {:?}", relay_events);
 
@@ -54,16 +54,15 @@ impl NostrManager {
     pub(crate) async fn fetch_user_key_package(
         &self,
         pubkey: PublicKey,
-        relays: &[Relay],
+        relays: &[RelayUrl],
     ) -> Result<Option<Event>> {
-        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
         let filter = Filter::new()
             .kind(Kind::MlsKeyPackage)
             .author(pubkey)
             .limit(1);
         let events = self
             .client
-            .fetch_events_from(urls, filter.clone(), self.timeout)
+            .fetch_events_from(relays, filter, self.timeout)
             .await?;
 
         Ok(events.first_owned())

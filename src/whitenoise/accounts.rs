@@ -485,9 +485,13 @@ impl Whitenoise {
     async fn setup_key_package(&self, account: &Account) -> Result<()> {
         let relays = account.key_package_relays(self).await?;
         tracing::debug!(target: "whitenoise::setup_key_package", "Found {} key package relays", relays.len());
+        let relays_urls = relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         let key_package_event = self
             .nostr
-            .fetch_user_key_package(account.pubkey, &relays)
+            .fetch_user_key_package(account.pubkey, &relays_urls)
             .await?;
         if key_package_event.is_none() {
             self.publish_key_package_for_account(account).await?;
@@ -1063,7 +1067,13 @@ mod tests {
             .nostr
             .fetch_user_key_package(
                 account.pubkey,
-                &account.nip65_relays(&whitenoise).await.unwrap(),
+                &account
+                    .nip65_relays(&whitenoise)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|r| r.url.clone())
+                    .collect::<Vec<RelayUrl>>(),
             )
             .await
             .unwrap();
@@ -1155,7 +1165,13 @@ mod tests {
             .nostr
             .fetch_user_key_package(
                 account.pubkey,
-                &account.key_package_relays(whitenoise).await.unwrap(),
+                &account
+                    .key_package_relays(whitenoise)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|r| r.url.clone())
+                    .collect::<Vec<RelayUrl>>(),
             )
             .await
             .unwrap();
