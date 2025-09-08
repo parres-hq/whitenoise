@@ -114,6 +114,7 @@ impl Whitenoise {
         tracing::debug!("Succefully fetched the key packages of members");
 
         let group_relays = config.relays.clone();
+        let group_name = config.name.clone();
 
         let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir)?;
         let create_group_result =
@@ -193,14 +194,8 @@ impl Whitenoise {
             .await
             .map_err(WhitenoiseError::from)?;
 
-        let participant_count = member_pubkeys.len() + 1;
-        GroupInformation::create_for_group(
-            self,
-            &group.mls_group_id,
-            group_type,
-            participant_count,
-        )
-        .await?;
+        GroupInformation::create_for_group(self, &group.mls_group_id, group_type, &group_name)
+            .await?;
 
         Ok(group)
     }
@@ -597,9 +592,13 @@ mod tests {
         // Just check that group is in a valid state (we can't verify exact state without knowing the enum path)
 
         // Verify group information was created properly
-        let group_info = GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise)
-            .await
-            .unwrap();
+        let group_info = GroupInformation::get_by_mls_group_id(
+            creator_account.pubkey,
+            &group.mls_group_id,
+            whitenoise,
+        )
+        .await
+        .unwrap();
         assert_eq!(group_info.mls_group_id, group.mls_group_id);
         assert_eq!(
             group_info.group_type,
@@ -725,7 +724,8 @@ mod tests {
             "Direct message group should have 2 admins (both participants)"
         );
 
-        let config = create_nostr_group_config_data(admin_pubkeys.clone());
+        let mut config = create_nostr_group_config_data(admin_pubkeys.clone());
+        config.name = "".to_string();
         let result = whitenoise
             .create_group(creator_account, member_pubkeys.clone(), config, None)
             .await;
@@ -734,9 +734,13 @@ mod tests {
         let group = result.unwrap();
 
         // Verify it's automatically classified as DirectMessage type
-        let group_info = GroupInformation::get_by_mls_group_id(&group.mls_group_id, whitenoise)
-            .await
-            .unwrap();
+        let group_info = GroupInformation::get_by_mls_group_id(
+            creator_account.pubkey,
+            &group.mls_group_id,
+            whitenoise,
+        )
+        .await
+        .unwrap();
         assert_eq!(group_info.mls_group_id, group.mls_group_id);
         assert_eq!(
             group_info.group_type,
