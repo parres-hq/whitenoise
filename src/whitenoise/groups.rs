@@ -575,7 +575,7 @@ mod tests {
         // Verify group metadata matches configuration
         assert_eq!(group.name, config.name);
         assert_eq!(group.description, config.description);
-        assert_eq!(group.image_url, config.image_url);
+        assert_eq!(group.image_hash, config.image_hash);
         assert_eq!(group.image_key, config.image_key);
 
         // Verify admin configuration
@@ -897,9 +897,9 @@ mod tests {
         let new_group_data = nostr_mls::groups::NostrGroupDataUpdate {
             name: Some("Updated Group Name".to_string()),
             description: Some("Updated description".to_string()),
-            image_url: Some(Some("https://example.com/new_image.png".to_string())),
-            image_key: Some(Some(b"new image key".to_vec())),
-            image_nonce: Some(Some(b"new image nonce".to_vec())),
+            image_hash: Some(Some([3u8; 32])), // 32-byte hash for new image
+            image_key: Some(Some([4u8; 32])),  // 32-byte encryption key
+            image_nonce: Some(Some([5u8; 12])), // 12-byte nonce
             admins: None,
             relays: None,
         };
@@ -929,7 +929,7 @@ mod tests {
             updated_group.description,
             new_group_data.description.unwrap()
         );
-        assert_eq!(updated_group.image_url, new_group_data.image_url.unwrap());
+        assert_eq!(updated_group.image_hash, new_group_data.image_hash.unwrap());
         assert_eq!(updated_group.image_key, new_group_data.image_key.unwrap());
     }
 
