@@ -64,9 +64,26 @@ impl User {
         let key_package_relays = self
             .relays(RelayType::KeyPackage, &whitenoise.database)
             .await?;
+        let mut key_package_relays_urls_set: HashSet<RelayUrl> =
+            key_package_relays.iter().map(|r| r.url.clone()).collect();
+        if key_package_relays.is_empty() {
+            tracing::warn!(
+                target: "whitenoise::users::key_package_event",
+                "User {} has no key package relays, using nip65 relays",
+                self.pubkey
+            );
+            key_package_relays_urls_set.extend(
+                self.relays(RelayType::Nip65, &whitenoise.database)
+                    .await?
+                    .iter()
+                    .map(|r| r.url.clone()),
+            );
+        }
+        let key_package_relays_urls: Vec<RelayUrl> =
+            key_package_relays_urls_set.into_iter().collect();
         let key_package_event = whitenoise
             .nostr
-            .fetch_user_key_package(self.pubkey, &key_package_relays)
+            .fetch_user_key_package(self.pubkey, &key_package_relays_urls)
             .await?;
         Ok(key_package_event)
     }

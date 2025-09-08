@@ -103,7 +103,14 @@ impl Whitenoise {
                 }
             }
             let kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
-            let some_event = self.nostr.fetch_user_key_package(*pk, &kp_relays).await?;
+            let kp_relays_urls = kp_relays
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
+            let some_event = self
+                .nostr
+                .fetch_user_key_package(*pk, &kp_relays_urls)
+                .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
@@ -284,9 +291,13 @@ impl Whitenoise {
                 );
                 relays_to_use = account.nip65_relays(self).await?;
             }
+            let relays_to_use_urls = relays_to_use
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
             let some_event = self
                 .nostr
-                .fetch_user_key_package(*pk, &relays_to_use)
+                .fetch_user_key_package(*pk, &relays_to_use_urls)
                 .await?;
             let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
                 nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
