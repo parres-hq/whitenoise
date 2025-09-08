@@ -53,7 +53,7 @@ impl TestCase for CreateGroupTestCase {
                 NostrGroupConfigData::new(
                     self.group_name.clone(),
                     self.group_description.clone(),
-                    None, // image_url
+                    None, // image_hash
                     None, // image_key
                     None, // image_nonce
                     vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
