@@ -170,7 +170,7 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::whitenoise::{test_utils::*, group_information::GroupType};
+    use crate::whitenoise::{group_information::GroupType, test_utils::*};
 
     #[tokio::test]
     #[ignore]
@@ -229,7 +229,8 @@ mod tests {
         // Setup creator and member accounts
         let creator_account = whitenoise.create_identity().await.unwrap();
         let member_accounts = setup_multiple_test_accounts(&whitenoise, 2).await;
-        let member_pubkeys: Vec<PublicKey> = member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+        let member_pubkeys: Vec<PublicKey> =
+            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
 
         // Create a regular group (non-empty name should infer Group type)
         let admin_pubkeys = vec![creator_account.pubkey];
@@ -253,7 +254,10 @@ mod tests {
 
         // Get pending welcomes for a member
         let member_account = &member_accounts[0].0;
-        let welcomes = whitenoise.pending_welcomes(&member_account.pubkey).await.unwrap();
+        let welcomes = whitenoise
+            .pending_welcomes(&member_account.pubkey)
+            .await
+            .unwrap();
 
         // If no welcomes are pending, create one manually by inviting the member
         if welcomes.is_empty() {
@@ -265,7 +269,9 @@ mod tests {
                 &group.mls_group_id,
                 None, // Will infer from group name
                 &whitenoise.database,
-            ).await.unwrap();
+            )
+            .await
+            .unwrap();
 
             assert_eq!(group_info.group_type, GroupType::Group);
             assert_eq!(group_info.mls_group_id, group.mls_group_id);
@@ -277,8 +283,14 @@ mod tests {
         let welcome_event_id = welcome.id.to_hex();
 
         // Accept the welcome
-        let accept_result = whitenoise.accept_welcome(&member_account.pubkey, welcome_event_id).await;
-        assert!(accept_result.is_ok(), "Failed to accept welcome: {:?}", accept_result.unwrap_err());
+        let accept_result = whitenoise
+            .accept_welcome(&member_account.pubkey, welcome_event_id)
+            .await;
+        assert!(
+            accept_result.is_ok(),
+            "Failed to accept welcome: {:?}",
+            accept_result.unwrap_err()
+        );
 
         // Verify group information was created with correct type
         let member_group_info = GroupInformation::get_by_mls_group_id(
@@ -300,7 +312,8 @@ mod tests {
         // Setup creator and one member for DM
         let creator_account = whitenoise.create_identity().await.unwrap();
         let member_accounts = setup_multiple_test_accounts(&whitenoise, 1).await;
-        let member_pubkeys: Vec<PublicKey> = member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
+        let member_pubkeys: Vec<PublicKey> =
+            member_accounts.iter().map(|(acc, _)| acc.pubkey).collect();
 
         // Create a direct message group (empty name should infer DirectMessage type)
         let admin_pubkeys = vec![creator_account.pubkey, member_pubkeys[0]];
@@ -328,7 +341,9 @@ mod tests {
             &group.mls_group_id,
             None, // Will infer from group name via nostr_mls.get_group()
             &whitenoise.database,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(dm_group_info.group_type, GroupType::DirectMessage);
         assert_eq!(dm_group_info.mls_group_id, group.mls_group_id);
@@ -347,7 +362,9 @@ mod tests {
             &group_id,
             None, // Should infer Group type
             "My Test Group",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(regular_group_info.group_type, GroupType::Group);
 
         // Test with empty name (should infer DirectMessage)
@@ -357,7 +374,9 @@ mod tests {
             &group_id2,
             None, // Should infer DirectMessage type
             "",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(dm_group_info.group_type, GroupType::DirectMessage);
 
         // Test with explicit type override
@@ -366,8 +385,10 @@ mod tests {
             &whitenoise,
             &group_id3,
             Some(GroupType::DirectMessage), // Explicit override
-            "This Would Be A Group", // Non-empty name, but explicit type should override
-        ).await.unwrap();
+            "This Would Be A Group",        // Non-empty name, but explicit type should override
+        )
+        .await
+        .unwrap();
         assert_eq!(explicit_group_info.group_type, GroupType::DirectMessage);
     }
 
@@ -383,7 +404,9 @@ mod tests {
             &group_id,
             Some(GroupType::DirectMessage),
             "Test Group",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         assert_eq!(original_info.group_type, GroupType::DirectMessage);
 
         // Simulate accept_welcome calling create_for_group again with different inference
@@ -392,7 +415,9 @@ mod tests {
             &group_id,
             None, // Would infer Group from non-empty name
             "Test Group",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         // Should preserve the original type, not create new record
         assert_eq!(subsequent_info.id, original_info.id);
