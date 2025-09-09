@@ -183,13 +183,24 @@ impl NostrManager {
     ) -> Result<()> {
         let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
 
-        for (relay_url, users) in relay_user_map {
-            // Only refresh batches only for relays where the triggering user is present
-            if users.contains(&user_pubkey) {
-                self.refresh_batch_for_relay_containing_user(relay_url, users, user_pubkey)
-                    .await?;
-            }
-        }
+        let refresh_futures = relay_user_map
+            .into_iter()
+            .filter(|(_, users)| users.contains(&user_pubkey))
+            .map(|(relay_url, users)| async move {
+                if let Err(e) = self
+                    .refresh_batch_for_relay_containing_user(relay_url.clone(), users, user_pubkey)
+                    .await
+                {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::refresh_user_global_subscriptions",
+                        error = %e,
+                        "Failed to refresh batch for relay: {}",
+                        relay_url
+                    );
+                }
+            });
+
+        futures::future::join_all(refresh_futures).await;
 
         Ok(())
     }
@@ -212,12 +223,34 @@ impl NostrManager {
             batches[batch_id].push(user);
         }
 
+        let mut non_empty_batches = 0;
+        let mut failed_batches = 0;
+
         // Only refresh the batch containing the triggering user
         if let Some(batch_users) = batches.get(user_batch_id) {
             if !batch_users.is_empty() {
-                self.refresh_batch_subscription(relay_url, user_batch_id, batch_users.clone())
-                    .await?;
+                non_empty_batches += 1;
+                if let Err(e) = self
+                    .refresh_batch_subscription(
+                        relay_url.clone(),
+                        user_batch_id,
+                        batch_users.clone(),
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::refresh_batch_for_relay_containing_user",
+                        error = %e,
+                        "Failed to refresh batch for relay: {}",
+                        relay_url
+                    );
+                    failed_batches += 1;
+                }
             }
+        }
+
+        if failed_batches == non_empty_batches {
+            return Err(NostrManagerError::NoRelayConnections);
         }
 
         Ok(())
