@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use nostr_mls::prelude::*;
 
@@ -92,7 +92,7 @@ impl Whitenoise {
             .await?;
 
             let groups = nostr_mls.get_groups()?;
-            let mut group_relays = Vec::new();
+            let mut group_relays_set = BTreeSet::new();
             let group_ids = groups
                 .iter()
                 .map(|g| hex::encode(g.nostr_group_id))
@@ -101,12 +101,10 @@ impl Whitenoise {
             // Collect all relays from all groups into a single vector
             for group in &groups {
                 let relays = nostr_mls.get_relays(&group.mls_group_id)?;
-                group_relays.extend(relays);
+                group_relays_set.extend(relays);
             }
 
-            // Remove duplicates by sorting and deduplicating
-            group_relays.sort();
-            group_relays.dedup();
+            let group_relays = group_relays_set.into_iter().collect::<Vec<_>>();
             Ok((group_ids, group_relays))
         } else {
             Err(WhitenoiseError::WelcomeNotFound)
@@ -114,10 +112,8 @@ impl Whitenoise {
 
         let (group_ids, group_relays) = result;
 
-        let mut relays = HashSet::new();
         for relay in &group_relays {
-            let db_relay = Relay::find_or_create_by_url(relay, &self.database).await?;
-            relays.insert(db_relay);
+            let _ = Relay::find_or_create_by_url(relay, &self.database).await?;
         }
 
         let group_relays_urls = group_relays.into_iter().collect::<Vec<_>>();
@@ -129,8 +125,7 @@ impl Whitenoise {
                 &group_ids,
                 keys,
             )
-            .await
-            .map_err(WhitenoiseError::from)?;
+            .await?;
 
         Ok(())
     }
@@ -265,10 +260,11 @@ mod tests {
             // by manually creating group information to test the accept_welcome flow
 
             // Manually create the welcome-like scenario by creating group info
-            let (group_info, _was_created) = GroupInformation::find_or_create_by_mls_group_id(
+            let group_info = GroupInformation::create_for_group(
+                &whitenoise,
                 &group.mls_group_id,
-                None, // Will infer from group name
-                &whitenoise.database,
+                None,          // Will infer from group name
+                "Test Group",  // Non-empty name for Group type
             )
             .await
             .unwrap();
@@ -337,10 +333,11 @@ mod tests {
 
         // For this test, manually verify the group info creation logic
         // since the full welcome flow requires relay coordination
-        let (dm_group_info, _was_created) = GroupInformation::find_or_create_by_mls_group_id(
+        let dm_group_info = GroupInformation::create_for_group(
+            &whitenoise,
             &group.mls_group_id,
-            None, // Will infer from group name via nostr_mls.get_group()
-            &whitenoise.database,
+            None, // Will infer from group name
+            "",   // Empty name for DirectMessage type
         )
         .await
         .unwrap();
