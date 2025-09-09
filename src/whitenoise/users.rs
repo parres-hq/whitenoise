@@ -79,6 +79,15 @@ impl User {
                     .map(|r| r.url.clone()),
             );
         }
+        if key_package_relays_urls_set.is_empty() {
+            tracing::warn!(
+                target: "whitenoise::users::key_package_event",
+                "User {} has neither key package nor NIP-65 relays; returning None",
+                self.pubkey
+            );
+            return Ok(None);
+        }
+
         let key_package_relays_urls: Vec<RelayUrl> =
             key_package_relays_urls_set.into_iter().collect();
         let key_package_event = whitenoise
@@ -808,5 +817,67 @@ mod tests {
         assert_eq!(users_with_relays.len(), 1);
         assert_eq!(users_with_relays[0].0, test_pubkey);
         assert_eq!(users_with_relays[0].1, vec![relay_url]);
+    }
+
+    #[tokio::test]
+    async fn test_key_package_event_gradual_relay_addition() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let user = User {
+            id: None,
+            pubkey: test_pubkey,
+            metadata: Metadata::new().name("Test User"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+        // Test 1: No relays - should return None
+        let kp_relays = saved_user
+            .relays(RelayType::KeyPackage, &whitenoise.database)
+            .await
+            .unwrap();
+        assert!(kp_relays.is_empty());
+
+        let nip65_relays = saved_user
+            .relays(RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+        assert!(nip65_relays.is_empty());
+
+        let result = saved_user.key_package_event(&whitenoise).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+
+        // Test 2: Add only NIP-65 relays - expect Ok(None); actual usage not asserted here
+        let nip65_relay_url = RelayUrl::parse("ws://localhost:7777").unwrap();
+        let nip65_relay = whitenoise
+            .find_or_create_relay_by_url(&nip65_relay_url)
+            .await
+            .unwrap();
+        saved_user
+            .add_relay(&nip65_relay, RelayType::Nip65, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let result = saved_user.key_package_event(&whitenoise).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+
+        // Test 3: Add a key package relay - expect Ok(None); priority over NIP-65 not asserted here
+        let kp_relay_url = RelayUrl::parse("ws://localhost:8080").unwrap();
+        let kp_relay = whitenoise
+            .find_or_create_relay_by_url(&kp_relay_url)
+            .await
+            .unwrap();
+        saved_user
+            .add_relay(&kp_relay, RelayType::KeyPackage, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let result = saved_user.key_package_event(&whitenoise).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
     }
 }
