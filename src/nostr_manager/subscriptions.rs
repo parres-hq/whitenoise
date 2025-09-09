@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 const MAX_USERS_PER_GLOBAL_SUBSCRIPTION: usize = 1000;
 
-use crate::nostr_manager::{NostrManager, Result};
+use crate::nostr_manager::{NostrManager, NostrManagerError, Result};
 
 impl NostrManager {
     /// Create a short hash from a pubkey for use in subscription IDs
@@ -31,11 +31,24 @@ impl NostrManager {
         // 1. Group users by relay
         let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
 
-        // 2. Create deterministic batches per relay
-        for (relay_url, users) in relay_user_map {
-            self.create_deterministic_batches_for_relay(relay_url, users)
-                .await?;
-        }
+        // 2. Create deterministic batches per relay in parallel
+        let batch_futures = relay_user_map
+            .into_iter()
+            .map(|(relay_url, users)| async move {
+                if let Err(e) = self
+                    .create_deterministic_batches_for_relay(relay_url.clone(), users)
+                    .await
+                {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::setup_batched_relay_subscriptions",
+                        error = %e,
+                        "Failed to create deterministic batches for relay: {}",
+                        relay_url
+                    );
+                }
+            });
+
+        futures::future::join_all(batch_futures).await;
 
         Ok(())
     }
@@ -54,13 +67,30 @@ impl NostrManager {
             batches[batch_id].push(user);
         }
 
+        let mut non_empty_batches = 0;
+        let mut failed_batches = 0;
         // Create subscription for each non-empty batch
         for (batch_id, batch_users) in batches.into_iter().enumerate() {
             if !batch_users.is_empty() {
+                non_empty_batches += 1;
                 let subscription_id = self.batched_subscription_id(&relay_url, batch_id);
-                self.subscribe_user_batch(relay_url.clone(), batch_users, subscription_id, None)
-                    .await?;
+                if let Err(e) = self
+                    .subscribe_user_batch(relay_url.clone(), batch_users, subscription_id, None)
+                    .await
+                {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::create_deterministic_batches_for_relay",
+                        error = %e,
+                        "Failed to subscribe user batch for relay: {}",
+                        relay_url
+                    );
+                    failed_batches += 1;
+                }
             }
+        }
+
+        if failed_batches == non_empty_batches {
+            return Err(NostrManagerError::NoRelayConnections);
         }
 
         Ok(())
