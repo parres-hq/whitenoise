@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
 use nostr_mls::prelude::*;
 
@@ -263,8 +263,8 @@ mod tests {
             let group_info = GroupInformation::create_for_group(
                 &whitenoise,
                 &group.mls_group_id,
-                None,          // Will infer from group name
-                "Test Group",  // Non-empty name for Group type
+                None,         // Will infer from group name
+                "Test Group", // Non-empty name for Group type
             )
             .await
             .unwrap();
