@@ -89,7 +89,7 @@ impl NostrManager {
             }
         }
 
-        if failed_batches == non_empty_batches {
+        if (non_empty_batches > 0) && (non_empty_batches == failed_batches) {
             return Err(NostrManagerError::NoRelayConnections);
         }
 
@@ -249,7 +249,7 @@ impl NostrManager {
             }
         }
 
-        if failed_batches == non_empty_batches {
+        if (non_empty_batches > 0) && (non_empty_batches == failed_batches) {
             return Err(NostrManagerError::NoRelayConnections);
         }
 
