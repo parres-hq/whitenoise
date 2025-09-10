@@ -213,14 +213,19 @@ impl Whitenoise {
         Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
 
         // Fetch events and setup subscriptions after event processing has started
-        Self::setup_global_users_subscriptions(whitenoise_ref).await?;
-        Self::setup_accounts_sync_and_subscriptions(whitenoise_ref).await?;
+        Self::setup_all_subscriptions(whitenoise_ref).await?;
 
         tracing::debug!(
             target: "whitenoise::initialize_whitenoise",
             "Completed initialization for all loaded accounts"
         );
 
+        Ok(())
+    }
+
+    pub async fn setup_all_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
+        Self::setup_global_users_subscriptions(whitenoise_ref).await?;
+        Self::setup_accounts_sync_and_subscriptions(whitenoise_ref).await?;
         Ok(())
     }
 
