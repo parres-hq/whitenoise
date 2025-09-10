@@ -101,6 +101,30 @@ impl Account {
             .collect::<Result<Vec<Account>, WhitenoiseError>>()
     }
 
+    /// Gets the oldest account from the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns the oldest `Account` from the database on success. If no account exists, return None.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database query fails.
+    pub(crate) async fn first(database: &Database) -> Result<Option<Account>, WhitenoiseError> {
+        let row_opt = sqlx::query_as::<_, AccountRow>(
+            "SELECT * FROM accounts ORDER BY created_at ASC, id ASC LIMIT 1",
+        )
+        .fetch_optional(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        row_opt.map(|row| row.into_account()).transpose()
+    }
+
     /// Finds an account by its public key.
     ///
     /// # Arguments
@@ -345,6 +369,8 @@ impl Account {
 
 #[cfg(test)]
 mod tests {
+    use crate::whitenoise::test_utils::create_mock_whitenoise;
+
     use super::*;
     use sqlx::sqlite::SqliteRow;
     use sqlx::{FromRow, SqlitePool};
@@ -639,8 +665,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_account_success() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Create test account
@@ -683,8 +707,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_account_with_null_last_synced() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         let test_pubkey = nostr_sdk::Keys::generate().public_key();
@@ -722,8 +744,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_account_not_found() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Try to load a non-existent account
@@ -740,8 +760,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_and_load_account_roundtrip() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Create test account with all fields
@@ -792,7 +810,6 @@ mod tests {
     // Tests for follows method
     #[tokio::test]
     async fn test_follows_multiple_followers() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
         use crate::whitenoise::users::User;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -898,8 +915,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_follows_no_followers() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Create test account
@@ -931,7 +946,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_follows_single_follower() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
         use crate::whitenoise::users::User;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -1005,7 +1019,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_follows_with_complex_user_metadata() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
         use crate::whitenoise::users::User;
         use nostr_sdk::prelude::Url;
 
@@ -1085,8 +1098,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_follows_account_with_invalid_id() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
-
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         // Create an account with an invalid ID that doesn't exist in the database
@@ -1110,7 +1121,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_follows_ordering_consistency() {
-        use crate::whitenoise::test_utils::create_mock_whitenoise;
         use crate::whitenoise::users::User;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
@@ -1183,5 +1193,43 @@ mod tests {
             assert_eq!(follower.pubkey, followers2[i].pubkey);
             assert_eq!(follower.metadata.name, followers2[i].metadata.name);
         }
+    }
+
+    #[tokio::test]
+    async fn test_first_account() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Should return None when no accounts exist
+        let account = Account::first(&whitenoise.database).await.unwrap();
+        assert!(account.is_none());
+
+        // If there's a single account, it should return that account
+        let test_keys = nostr_sdk::Keys::generate();
+        User::find_or_create_by_pubkey(&test_keys.public_key(), &whitenoise.database).await.unwrap();
+        let (test_account, _) = Account::new(&whitenoise, Some(test_keys)).await.unwrap();
+        test_account.save(&whitenoise.database).await.unwrap();
+        let account = Account::first(&whitenoise.database).await.unwrap();
+        assert!(account.is_some());
+        assert_eq!(account.unwrap().pubkey, test_account.pubkey);
+
+        // If there's more than one account, it should still return the first one
+        let test_keys2 = nostr_sdk::Keys::generate();
+        User::find_or_create_by_pubkey(&test_keys2.public_key(), &whitenoise.database).await.unwrap();
+        let (test_account2, _) = Account::new(&whitenoise, Some(test_keys2)).await.unwrap();
+        test_account2.save(&whitenoise.database).await.unwrap();
+        let account2 = Account::first(&whitenoise.database).await.unwrap();
+        assert!(account2.is_some());
+        assert_eq!(account2.unwrap().pubkey, test_account.pubkey);
+
+        // If that first account is deleted, it should return the second one
+        test_account.delete(&whitenoise.database).await.unwrap();
+        let account3 = Account::first(&whitenoise.database).await.unwrap();
+        assert!(account3.is_some());
+        assert_eq!(account3.unwrap().pubkey, test_account2.pubkey);
+
+        // If all accounts are deleted, it should return None
+        test_account2.delete(&whitenoise.database).await.unwrap();
+        let account4 = Account::first(&whitenoise.database).await.unwrap();
+        assert!(account4.is_none());
     }
 }
