@@ -310,7 +310,7 @@ mod tests {
 
         // Find it in batch query
         let results =
-            GroupInformation::find_by_mls_group_ids(&[group_id.clone()], &whitenoise.database)
+            GroupInformation::find_by_mls_group_ids(std::slice::from_ref(&group_id), &whitenoise.database)
                 .await
                 .unwrap();
 

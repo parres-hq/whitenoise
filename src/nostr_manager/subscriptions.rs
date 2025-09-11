@@ -167,7 +167,7 @@ impl NostrManager {
             filter = filter.since(since);
         }
 
-        self.ensure_relays_connected(&[relay_url.clone()]).await?;
+        self.ensure_relays_connected(std::slice::from_ref(&relay_url)).await?;
         self.client
             .subscribe_with_id_to(vec![relay_url], subscription_id, filter, None)
             .await?;
