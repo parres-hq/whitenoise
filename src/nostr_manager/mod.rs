@@ -329,6 +329,8 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::delete_all_data",
             "Deleting Nostr data"
         );
+        // Acquire signer lock before unsetting signer to prevent race conditions
+        let _guard = self.signer_lock.lock().await;
         self.client.unset_signer().await;
         self.client.unsubscribe_all().await;
         Ok(())

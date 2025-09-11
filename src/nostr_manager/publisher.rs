@@ -205,12 +205,16 @@ impl NostrManager {
 
         // Ensure we're connected to all target relays before publishing
         self.ensure_relays_connected(&urls).await?;
-        self.client.set_signer(signer).await;
+
+        // Use with_signer to ensure proper lock acquisition
         let result = self
-            .client
-            .send_event_builder_to(urls, event_builder.clone())
+            .with_signer(signer, || async {
+                self.client
+                    .send_event_builder_to(urls, event_builder.clone())
+                    .await
+                    .map_err(NostrManagerError::from)
+            })
             .await?;
-        self.client.unset_signer().await;
 
         // Track the published event if we have a successful result (best-effort)
         if !result.success.is_empty() {
