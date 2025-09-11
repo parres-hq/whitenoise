@@ -55,6 +55,7 @@ pub struct NostrManager {
     session_salt: [u8; 16],
     timeout: Duration,
     pub(crate) event_tracker: std::sync::Arc<dyn EventTracker>,
+    signer_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     // blossom: BlossomClient,
 }
 
@@ -181,6 +182,7 @@ impl NostrManager {
             session_salt,
             timeout,
             event_tracker,
+            signer_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -193,6 +195,7 @@ impl NostrManager {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<T>> + Send,
     {
+        let _guard = self.signer_lock.lock().await;
         self.client.set_signer(signer).await;
         let result = f().await;
         self.client.unset_signer().await;
