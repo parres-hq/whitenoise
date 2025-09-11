@@ -130,7 +130,7 @@ impl Whitenoise {
         let mut key_package_stream = self
             .nostr
             .client
-            .stream_events(key_package_filter, Duration::from_secs(10))
+            .stream_events_from(relay_urls, key_package_filter, Duration::from_secs(10))
             .await?;
 
         let mut key_package_events = Vec::new();
