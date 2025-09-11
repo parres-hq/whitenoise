@@ -433,7 +433,7 @@ impl Whitenoise {
         account.connect_relays(self).await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Relays connected");
         let user = account.user(&self.database).await?;
-        if let Err(e) = user.refresh_global_subscription(self).await {
+        if let Err(e) = self.refresh_global_subscription_for_user(&user).await {
             tracing::warn!(
                 target: "whitenoise::persist_and_activate_account",
                 "Failed to refresh global subscription for new user {}: {}",

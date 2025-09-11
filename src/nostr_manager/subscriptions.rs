@@ -271,7 +271,7 @@ impl NostrManager {
             .await
     }
 
-    pub async fn setup_account_subscriptions(
+    pub(crate) async fn setup_account_subscriptions(
         &self,
         pubkey: PublicKey,
         user_relays: &[RelayUrl],
