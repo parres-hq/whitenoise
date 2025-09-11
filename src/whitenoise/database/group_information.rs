@@ -309,10 +309,12 @@ mod tests {
         .unwrap();
 
         // Find it in batch query
-        let results =
-            GroupInformation::find_by_mls_group_ids(&[group_id.clone()], &whitenoise.database)
-                .await
-                .unwrap();
+        let results = GroupInformation::find_by_mls_group_ids(
+            std::slice::from_ref(&group_id),
+            &whitenoise.database,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, created_group_info.id);

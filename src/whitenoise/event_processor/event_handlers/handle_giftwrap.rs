@@ -64,16 +64,21 @@ impl Whitenoise {
             .and_then(|content| EventId::parse(content).ok());
 
         if let Some(key_package_event_id) = key_package_event_id {
-            self.delete_key_package_from_relays_for_account(
-                account,
-                &key_package_event_id,
-                false, // For now we don't want to delete the key packages from MLS storage
-            )
-            .await?;
-            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Deleted used key package from relays");
+            let deleted = self
+                .delete_key_package_for_account(
+                    account,
+                    &key_package_event_id,
+                    false, // For now we don't want to delete the key packages from MLS storage
+                )
+                .await?;
 
-            self.publish_key_package_for_account(account).await?;
-            tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Published new key package");
+            if deleted {
+                tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Deleted used key package from relays");
+                self.publish_key_package_for_account(account).await?;
+                tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Published new key package");
+            } else {
+                tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Key package already deleted, skipping publish");
+            }
         } else {
             tracing::warn!(target: "whitenoise::event_processor::process_welcome", "No key package event id found in welcome event");
         }
