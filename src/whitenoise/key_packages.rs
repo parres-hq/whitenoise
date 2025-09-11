@@ -90,12 +90,9 @@ impl Whitenoise {
                 return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
             }
 
-            let result = self.nostr
-                .publish_event_deletion_with_signer(
-                    &event.id,
-                    &key_package_relays,
-                    signer,
-                )
+            let result = self
+                .nostr
+                .publish_event_deletion_with_signer(&event.id, &key_package_relays, signer)
                 .await?;
             if !result.success.is_empty() {
                 return Ok(true);

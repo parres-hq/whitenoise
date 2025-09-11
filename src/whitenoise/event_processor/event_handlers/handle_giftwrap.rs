@@ -64,12 +64,13 @@ impl Whitenoise {
             .and_then(|content| EventId::parse(content).ok());
 
         if let Some(key_package_event_id) = key_package_event_id {
-            let deleted = self.delete_key_package_for_account(
-                account,
-                &key_package_event_id,
-                false, // For now we don't want to delete the key packages from MLS storage
-            )
-            .await?;
+            let deleted = self
+                .delete_key_package_for_account(
+                    account,
+                    &key_package_event_id,
+                    false, // For now we don't want to delete the key packages from MLS storage
+                )
+                .await?;
 
             if deleted {
                 tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Deleted used key package from relays");
