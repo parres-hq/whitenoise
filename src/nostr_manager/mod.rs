@@ -535,101 +535,110 @@ impl NostrManager {
         account: &Account,
         group_ids: Vec<String>,
     ) -> Result<()> {
-        self.with_signer(signer, || async {
-            let mut contacts_and_self =
-                match self.client.get_contact_list_public_keys(self.timeout).await {
-                    Ok(contacts) => contacts,
-                    Err(e) => {
-                        tracing::error!(
-                            target: "whitenoise::nostr_manager::fetch_all_user_data_to_nostr_cache",
-                            "Failed to get contact list public keys: {}",
-                            e
-                        );
-                        return Err(NostrManagerError::Client(e));
-                    }
-                };
-            contacts_and_self.push(account.pubkey);
+        let (
+            mut metadata_events,
+            mut relay_events,
+            mut contact_list_events,
+            mut giftwrap_events,
+            mut group_messages,
+        ) = self
+            .with_signer(signer, || async {
+                let mut contacts_and_self =
+                    match self.client.get_contact_list_public_keys(self.timeout).await {
+                        Ok(contacts) => contacts,
+                        Err(e) => {
+                            tracing::error!(
+                                target: "whitenoise::nostr_manager::fetch_all_user_data",
+                                "Failed to get contact list public keys: {}",
+                                e
+                            );
+                            return Err(NostrManagerError::Client(e));
+                        }
+                    };
+                contacts_and_self.push(account.pubkey);
 
-            let metadata_filter = Filter::new()
-                .authors(contacts_and_self.clone())
-                .kinds(vec![Kind::Metadata]);
-            let relay_filter = Filter::new().authors(contacts_and_self.clone()).kinds(vec![
-                Kind::RelayList,
-                Kind::InboxRelays,
-                Kind::MlsKeyPackageRelays,
-            ]);
-            let contact_list_filter = Filter::new().author(account.pubkey).kind(Kind::ContactList);
-            let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(account.pubkey);
-            let group_messages_filter = Filter::new()
-                .kind(Kind::MlsGroupMessage)
-                .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
-                .since(Timestamp::from(
-                    account.last_synced_at.unwrap_or_default().timestamp() as u64,
-                ));
+                let metadata_filter = Filter::new()
+                    .authors(contacts_and_self.clone())
+                    .kinds(vec![Kind::Metadata]);
+                let relay_filter = Filter::new().authors(contacts_and_self.clone()).kinds(vec![
+                    Kind::RelayList,
+                    Kind::InboxRelays,
+                    Kind::MlsKeyPackageRelays,
+                ]);
+                let contact_list_filter =
+                    Filter::new().author(account.pubkey).kind(Kind::ContactList);
+                let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(account.pubkey);
+                let group_messages_filter = Filter::new()
+                    .kind(Kind::MlsGroupMessage)
+                    .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
+                    .since(Timestamp::from(
+                        account.last_synced_at.unwrap_or_default().timestamp() as u64,
+                    ));
 
-            let timeout_duration = Duration::from_secs(10);
+                let timeout_duration = Duration::from_secs(10);
 
-            let mut metadata_events = self
-                .client
-                .stream_events(metadata_filter, timeout_duration)
-                .await?;
-            let mut relay_events = self
-                .client
-                .stream_events(relay_filter, timeout_duration)
-                .await?;
-            let mut contact_list_events = self
-                .client
-                .stream_events(contact_list_filter, timeout_duration)
-                .await?;
-            let mut giftwrap_events = self
-                .client
-                .stream_events(giftwrap_filter, timeout_duration)
-                .await?;
-            let mut group_messages = self
-                .client
-                .stream_events(group_messages_filter, timeout_duration)
-                .await?;
+                let (
+                    metadata_events,
+                    relay_events,
+                    contact_list_events,
+                    giftwrap_events,
+                    group_messages,
+                ) = tokio::try_join!(
+                    self.client.stream_events(metadata_filter, timeout_duration),
+                    self.client.stream_events(relay_filter, timeout_duration),
+                    self.client
+                        .stream_events(contact_list_filter, timeout_duration),
+                    self.client.stream_events(giftwrap_filter, timeout_duration),
+                    self.client
+                        .stream_events(group_messages_filter, timeout_duration)
+                )?;
+                Ok((
+                    metadata_events,
+                    relay_events,
+                    contact_list_events,
+                    giftwrap_events,
+                    group_messages,
+                ))
+            })
+            .await?;
 
-            let whitenoise = Whitenoise::get_instance()
+        let whitenoise = Whitenoise::get_instance()
+            .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+
+        while let Some(event) = metadata_events.next().await {
+            whitenoise
+                .handle_metadata(event)
+                .await
                 .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+        }
 
-            while let Some(event) = metadata_events.next().await {
-                whitenoise
-                    .handle_metadata(event)
-                    .await
-                    .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-            }
+        while let Some(event) = relay_events.next().await {
+            whitenoise
+                .handle_relay_list(event)
+                .await
+                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+        }
 
-            while let Some(event) = relay_events.next().await {
-                whitenoise
-                    .handle_relay_list(event)
-                    .await
-                    .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-            }
+        while let Some(event) = contact_list_events.next().await {
+            whitenoise
+                .handle_contact_list(account, event)
+                .await
+                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+        }
 
-            while let Some(event) = contact_list_events.next().await {
-                whitenoise
-                    .handle_contact_list(account, event)
-                    .await
-                    .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-            }
+        while let Some(event) = giftwrap_events.next().await {
+            whitenoise
+                .handle_giftwrap(account, event)
+                .await
+                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+        }
 
-            while let Some(event) = giftwrap_events.next().await {
-                whitenoise
-                    .handle_giftwrap(account, event)
-                    .await
-                    .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-            }
-
-            while let Some(event) = group_messages.next().await {
-                whitenoise
-                    .handle_mls_message(account, event)
-                    .await
-                    .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-            }
-
-            Ok(())
-        })
-        .await
+        while let Some(event) = group_messages.next().await {
+            whitenoise
+                .handle_mls_message(account, event)
+                .await
+                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+        }
+        Ok(())
     }
 }
