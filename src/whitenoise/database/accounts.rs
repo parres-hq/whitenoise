@@ -1205,7 +1205,9 @@ mod tests {
 
         // If there's a single account, it should return that account
         let test_keys = nostr_sdk::Keys::generate();
-        User::find_or_create_by_pubkey(&test_keys.public_key(), &whitenoise.database).await.unwrap();
+        User::find_or_create_by_pubkey(&test_keys.public_key(), &whitenoise.database)
+            .await
+            .unwrap();
         let (test_account, _) = Account::new(&whitenoise, Some(test_keys)).await.unwrap();
         test_account.save(&whitenoise.database).await.unwrap();
         let account = Account::first(&whitenoise.database).await.unwrap();
@@ -1214,7 +1216,9 @@ mod tests {
 
         // If there's more than one account, it should still return the first one
         let test_keys2 = nostr_sdk::Keys::generate();
-        User::find_or_create_by_pubkey(&test_keys2.public_key(), &whitenoise.database).await.unwrap();
+        User::find_or_create_by_pubkey(&test_keys2.public_key(), &whitenoise.database)
+            .await
+            .unwrap();
         let (test_account2, _) = Account::new(&whitenoise, Some(test_keys2)).await.unwrap();
         test_account2.save(&whitenoise.database).await.unwrap();
         let account2 = Account::first(&whitenoise.database).await.unwrap();

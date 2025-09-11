@@ -88,6 +88,11 @@ impl TestCase for FindOrCreateUserTestCase {
             .is_ok();
         assert!(!user_exists, "User should not exist initially");
 
+        if self.should_have_metadata || self.should_have_relays {
+            // Create an account: We need to have at least one account to be able to subscribe to events
+            context.whitenoise.create_identity().await?;
+        }
+
         if self.should_have_metadata {
             self.publish_metadata(context).await?;
         }

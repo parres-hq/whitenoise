@@ -234,9 +234,21 @@ impl Whitenoise {
         let default_relays: Vec<RelayUrl> =
             Relay::defaults().iter().map(|r| r.url.clone()).collect();
 
+        let Some(signer_account) = Account::first(&whitenoise_ref.database).await? else {
+            tracing::info!(
+                target: "whitenoise::setup_global_users_subscriptions",
+                "No signer account found, skipping global user subscriptions"
+            );
+            return Ok(());
+        };
+
+        let keys = whitenoise_ref
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&signer_account.pubkey)?;
+
         whitenoise_ref
             .nostr
-            .setup_batched_relay_subscriptions(users_with_relays, &default_relays)
+            .setup_batched_relay_subscriptions_with_signer(users_with_relays, &default_relays, keys)
             .await?;
         Ok(())
     }
@@ -358,6 +370,34 @@ impl Whitenoise {
     /// This allows consumers to access the message aggregator directly for custom processing
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
         &self.message_aggregator
+    }
+
+    pub(crate) async fn refresh_global_subscription_for_user(&self, user: &User) -> Result<()> {
+        let users_with_relays = User::all_users_with_relay_urls(self).await?;
+        let default_relays: Vec<RelayUrl> =
+            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+
+        let Some(signer_account) = Account::first(&self.database).await? else {
+            tracing::info!(
+                target: "whitenoise::users::refresh_global_subscription",
+                "No signer account found, skipping global user subscriptions"
+            );
+            return Ok(());
+        };
+
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&signer_account.pubkey)?;
+
+        self.nostr
+            .refresh_user_global_subscriptions_with_signer(
+                user.pubkey,
+                users_with_relays,
+                &default_relays,
+                keys,
+            )
+            .await?;
+        Ok(())
     }
 
     #[cfg(feature = "integration-tests")]

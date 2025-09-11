@@ -184,6 +184,21 @@ impl NostrManager {
         })
     }
 
+    /// Reusable helper to execute operations with a temporary signer.
+    ///
+    /// This helper ensures that the signer is always unset after the operation completes,
+    /// even if the operation returns early or encounters an error.
+    async fn with_signer<F, Fut, T>(&self, signer: impl NostrSigner + 'static, f: F) -> Result<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T>> + Send,
+    {
+        self.client.set_signer(signer).await;
+        let result = f().await;
+        self.client.unset_signer().await;
+        result
+    }
+
     /// Sets up account subscriptions using a temporary signer.
     ///
     /// This method allows setting up subscriptions with a signer that is only used for this specific operation.
@@ -201,9 +216,8 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::setup_account_subscriptions_with_signer",
             "Setting up account subscriptions with signer"
         );
-        self.client.set_signer(signer).await;
-        let result = self
-            .setup_account_subscriptions(
+        self.with_signer(signer, || async {
+            self.setup_account_subscriptions(
                 pubkey,
                 user_relays,
                 inbox_relays,
@@ -211,9 +225,9 @@ impl NostrManager {
                 nostr_group_ids,
                 None,
             )
-            .await;
-        self.client.unset_signer().await;
-        result
+            .await
+        })
+        .await
     }
 
     pub(crate) async fn setup_group_messages_subscriptions_with_signer(
@@ -223,12 +237,15 @@ impl NostrManager {
         nostr_group_ids: &[String],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
-        self.client.set_signer(signer).await;
-        let result = self
-            .setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays, None)
-            .await;
-        self.client.unset_signer().await;
-        result
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_group_messages_subscriptions_with_signer",
+            "Setting up group messages subscriptions with signer"
+        );
+        self.with_signer(signer, || async {
+            self.setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays, None)
+                .await
+        })
+        .await
     }
 
     /// Updates account subscriptions by clearing from all relays first, then setting up new ones.
@@ -250,8 +267,7 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::update_account_subscriptions_with_signer",
             "Updating account subscriptions with cleanup for relay changes"
         );
-        self.client.set_signer(signer).await;
-        let result = async {
+        self.with_signer(signer, || async {
             let buffer_time = Timestamp::now() - Duration::from_secs(10);
             self.unsubscribe_account_subscriptions(&pubkey).await?;
             self.setup_account_subscriptions(
@@ -263,10 +279,45 @@ impl NostrManager {
                 Some(buffer_time),
             )
             .await
-        }
-        .await;
-        self.client.unset_signer().await;
-        result
+        })
+        .await
+    }
+
+    pub(crate) async fn setup_batched_relay_subscriptions_with_signer(
+        &self,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_batched_relay_subscriptions_with_signer",
+            "Setting up batched relay subscriptions with signer (users={}, defaults={})",
+            users_with_relays.len(),
+            default_relays.len()
+        );
+        self.with_signer(signer, || async {
+            self.setup_batched_relay_subscriptions(users_with_relays, default_relays)
+                .await
+        })
+        .await
+    }
+
+    pub(crate) async fn refresh_user_global_subscriptions_with_signer(
+        &self,
+        user_pubkey: PublicKey,
+        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
+        default_relays: &[RelayUrl],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::refresh_user_global_subscriptions_with_signer",
+            "Refreshing user global subscriptions with signer"
+        );
+        self.with_signer(signer, || async {
+            self.refresh_user_global_subscriptions(user_pubkey, users_with_relays, default_relays)
+                .await
+        })
+        .await
     }
 
     /// Ensures that the signer is unset and all subscriptions are cleared.
@@ -481,9 +532,7 @@ impl NostrManager {
         account: &Account,
         group_ids: Vec<String>,
     ) -> Result<()> {
-        self.client.set_signer(signer).await;
-
-        let result = async {
+        self.with_signer(signer, || async {
             let mut contacts_and_self =
                 match self.client.get_contact_list_public_keys(self.timeout).await {
                     Ok(contacts) => contacts,
@@ -577,11 +626,7 @@ impl NostrManager {
             }
 
             Ok(())
-        }
-        .await;
-
-        self.client.unset_signer().await;
-
-        result
+        })
+        .await
     }
 }
