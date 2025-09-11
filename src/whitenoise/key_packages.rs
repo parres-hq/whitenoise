@@ -51,12 +51,14 @@ impl Whitenoise {
     }
 
     /// Deletes the key package from the relays for the given account.
-    pub async fn delete_key_package_from_relays_for_account(
+    ///
+    /// Returns `true` if a key package was found and deleted, `false` if no key package was found.
+    pub async fn delete_key_package_for_account(
         &self,
         account: &Account,
         event_id: &EventId,
         delete_mls_stored_keys: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let key_package_filter = Filter::new()
             .id(*event_id)
             .kind(Kind::MlsKeyPackage)
@@ -88,19 +90,22 @@ impl Whitenoise {
                 return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
             }
 
-            self.nostr
+            let result = self.nostr
                 .publish_event_deletion_with_signer(
                     &event.id,
                     &key_package_relays,
                     signer,
                 )
                 .await?;
+            if !result.success.is_empty() {
+                return Ok(true);
+            }
         } else {
             tracing::warn!(target: "whitenoise::delete_key_package_from_relays_for_account", "Key package event not found for account: {}", account.pubkey.to_hex());
-            return Ok(());
+            return Ok(false);
         }
 
-        Ok(())
+        Ok(false)
     }
 
     /// Finds and returns all key package events for the given account from its key package relays.
