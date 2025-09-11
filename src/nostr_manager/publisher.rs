@@ -20,7 +20,7 @@ impl NostrManager {
         &self,
         event: Event,
         account: &Account,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<Output<EventId>> {
         self.publish_event_to(event, account, relays).await
     }
@@ -34,7 +34,7 @@ impl NostrManager {
         &self,
         event: Event,
         account: &Account,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
     ) -> Result<Output<EventId>> {
         self.publish_event_to(event, account, relays).await
     }
@@ -54,7 +54,7 @@ impl NostrManager {
         rumor: UnsignedEvent,
         extra_tags: &[Tag],
         account: &Account,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let wrapped_event =
@@ -66,7 +66,7 @@ impl NostrManager {
     pub(crate) async fn publish_metadata_with_signer(
         &self,
         metadata: &Metadata,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let event_builder = EventBuilder::metadata(metadata);
@@ -77,9 +77,9 @@ impl NostrManager {
     /// Publishes a Nostr relay list event using a passed signer.
     pub(crate) async fn publish_relay_list_with_signer(
         &self,
-        relay_list: &[Relay],
+        relay_list: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         relay_type: RelayType,
-        target_relays: &[Relay],
+        target_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         let tags: Vec<Tag> = match relay_type {
@@ -106,7 +106,7 @@ impl NostrManager {
     pub(crate) async fn publish_follow_list_with_signer(
         &self,
         follow_list: &[PublicKey],
-        target_relays: &[Relay],
+        target_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         if follow_list.is_empty() {
@@ -136,7 +136,7 @@ impl NostrManager {
     pub(crate) async fn publish_key_package_with_signer(
         &self,
         encoded_key_package: &str,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         tags: &[Tag],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
@@ -151,7 +151,7 @@ impl NostrManager {
     pub(crate) async fn publish_event_deletion_with_signer(
         &self,
         event_id: &EventId,
-        relays: &[Relay],
+        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let event_deletion_event_builder =
@@ -205,12 +205,14 @@ impl NostrManager {
 
         // Ensure we're connected to all target relays before publishing
         self.ensure_relays_connected(&urls).await?;
-        self.client.set_signer(signer).await;
         let result = self
-            .client
-            .send_event_builder_to(urls, event_builder.clone())
+            .with_signer(signer, || async {
+                self.client
+                    .send_event_builder_to(urls, event_builder)
+                    .await
+                    .map_err(NostrManagerError::Client)
+            })
             .await?;
-        self.client.unset_signer().await;
 
         // Track the published event if we have a successful result (best-effort)
         if !result.success.is_empty() {
