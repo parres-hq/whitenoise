@@ -11,9 +11,13 @@ impl Whitenoise {
         account: &Account,
     ) -> Result<(String, [Tag; 4])> {
         let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let key_package_relay_urls = account
-            .key_package_relays(self)
-            .await?
+        let key_package_relays = account.key_package_relays(self).await?;
+
+        if key_package_relays.is_empty() {
+            return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
+        }
+
+        let key_package_relay_urls = key_package_relays
             .iter()
             .map(|r| r.url.clone())
             .collect::<Vec<RelayUrl>>();
@@ -25,10 +29,14 @@ impl Whitenoise {
     }
 
     /// Publishes the MLS key package for the given account to its key package relays.
-    pub(crate) async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
+    pub async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
         // Extract key package data while holding the lock
         let (encoded_key_package, tags) = self.encoded_key_package(account).await?;
         let relays = account.key_package_relays(self).await?;
+
+        if relays.is_empty() {
+            return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
+        }
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
@@ -43,7 +51,7 @@ impl Whitenoise {
     }
 
     /// Deletes the key package from the relays for the given account.
-    pub(crate) async fn delete_key_package_from_relays_for_account(
+    pub async fn delete_key_package_from_relays_for_account(
         &self,
         account: &Account,
         event_id: &EventId,
@@ -75,10 +83,15 @@ impl Whitenoise {
                 nostr_mls.delete_key_package_from_storage(&key_package)?;
             }
 
+            let key_package_relays = account.key_package_relays(self).await?;
+            if key_package_relays.is_empty() {
+                return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
+            }
+
             self.nostr
                 .publish_event_deletion_with_signer(
                     &event.id,
-                    &account.key_package_relays(self).await?,
+                    &key_package_relays,
                     signer,
                 )
                 .await?;
@@ -107,6 +120,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns an error if:
+    /// - Account has no key package relays configured
     /// - Failed to retrieve account's key package relays
     /// - Network error while fetching events from relays
     /// - NostrSDK error during event streaming
@@ -115,12 +129,7 @@ impl Whitenoise {
         let relay_urls: Vec<RelayUrl> = key_package_relays.iter().map(|r| r.url.clone()).collect();
 
         if relay_urls.is_empty() {
-            tracing::warn!(
-                target: "whitenoise::find_all_key_packages_for_account",
-                "Account {} has no key package relays configured",
-                account.pubkey.to_hex()
-            );
-            return Ok(Vec::new());
+            return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
         }
 
         let key_package_filter = Filter::new()
@@ -166,6 +175,7 @@ impl Whitenoise {
     /// # Errors
     ///
     /// Returns an error if:
+    /// - Account has no key package relays configured
     /// - Failed to retrieve account's key package relays
     /// - Failed to get signing keys for the account
     /// - Network error while fetching or publishing events
@@ -190,6 +200,10 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
         let key_package_relays = account.key_package_relays(self).await?;
+
+        if key_package_relays.is_empty() {
+            return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
+        }
 
         let mut deleted_count = 0;
 

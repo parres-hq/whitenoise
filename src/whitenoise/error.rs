@@ -35,6 +35,9 @@ pub enum WhitenoiseError {
     #[error("Group has no relays configured")]
     GroupMissingRelays,
 
+    #[error("Account has no key package relays configured")]
+    AccountMissingKeyPackageRelays,
+
     #[error("Account not found")]
     AccountNotFound,
 
