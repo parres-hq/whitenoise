@@ -120,7 +120,10 @@ impl Whitenoise {
     /// - Failed to retrieve account's key package relays
     /// - Network error while fetching events from relays
     /// - NostrSDK error during event streaming
-    pub async fn fetch_all_key_packages_for_account(&self, account: &Account) -> Result<Vec<Event>> {
+    pub async fn fetch_all_key_packages_for_account(
+        &self,
+        account: &Account,
+    ) -> Result<Vec<Event>> {
         let key_package_relays = account.key_package_relays(self).await?;
         let relay_urls: Vec<RelayUrl> = key_package_relays.iter().map(|r| r.url.clone()).collect();
 
@@ -234,7 +237,6 @@ impl Whitenoise {
 
         // Delete from relays (always happens regardless of delete_mls_stored_keys)
         for event in &key_package_events {
-
             // Publish deletion event
             match self
                 .nostr
