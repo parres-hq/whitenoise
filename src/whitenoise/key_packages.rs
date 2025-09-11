@@ -94,14 +94,8 @@ impl Whitenoise {
                 .nostr
                 .publish_event_deletion_with_signer(&event.id, &key_package_relays, signer)
                 .await?;
-            if !result.success.is_empty() {
-                return Ok(true);
-            }
-        } else {
-            tracing::warn!(target: "whitenoise::delete_key_package_from_relays_for_account", "Key package event not found for account: {}", account.pubkey.to_hex());
-            return Ok(false);
+            return Ok(!result.success.is_empty());
         }
-
         Ok(false)
     }
 
@@ -126,7 +120,7 @@ impl Whitenoise {
     /// - Failed to retrieve account's key package relays
     /// - Network error while fetching events from relays
     /// - NostrSDK error during event streaming
-    pub async fn find_all_key_packages_for_account(&self, account: &Account) -> Result<Vec<Event>> {
+    pub async fn fetch_all_key_packages_for_account(&self, account: &Account) -> Result<Vec<Event>> {
         let key_package_relays = account.key_package_relays(self).await?;
         let relay_urls: Vec<RelayUrl> = key_package_relays.iter().map(|r| r.url.clone()).collect();
 
@@ -150,7 +144,7 @@ impl Whitenoise {
         }
 
         tracing::debug!(
-            target: "whitenoise::find_all_key_packages_for_account",
+            target: "whitenoise::fetch_all_key_packages_for_account",
             "Found {} key package events for account {}",
             key_package_events.len(),
             account.pubkey.to_hex()
@@ -187,7 +181,7 @@ impl Whitenoise {
         account: &Account,
         delete_mls_stored_keys: bool,
     ) -> Result<usize> {
-        let key_package_events = self.find_all_key_packages_for_account(account).await?;
+        let key_package_events = self.fetch_all_key_packages_for_account(account).await?;
 
         if key_package_events.is_empty() {
             tracing::info!(
@@ -209,39 +203,37 @@ impl Whitenoise {
 
         let mut deleted_count = 0;
 
-        for event in &key_package_events {
-            if delete_mls_stored_keys {
-                match Account::create_nostr_mls(account.pubkey, &self.config.data_dir) {
-                    Ok(nostr_mls) => match nostr_mls.parse_key_package(event) {
-                        Ok(key_package) => {
-                            if let Err(e) = nostr_mls.delete_key_package_from_storage(&key_package)
-                            {
-                                tracing::warn!(
-                                    target: "whitenoise::delete_all_key_packages_for_account",
-                                    "Failed to delete key package from storage for event {}: {}",
-                                    event.id,
-                                    e
-                                );
-                            }
-                        }
-                        Err(e) => {
+        if delete_mls_stored_keys {
+            // Create NostrMls instance once for MLS storage deletion
+            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+
+            for event in &key_package_events {
+                // Delete from MLS storage
+                match nostr_mls.parse_key_package(event) {
+                    Ok(key_package) => {
+                        if let Err(e) = nostr_mls.delete_key_package_from_storage(&key_package) {
                             tracing::warn!(
                                 target: "whitenoise::delete_all_key_packages_for_account",
-                                "Failed to parse key package for event {}: {}",
+                                "Failed to delete key package from storage for event {}: {}",
                                 event.id,
                                 e
                             );
                         }
-                    },
+                    }
                     Err(e) => {
                         tracing::warn!(
                             target: "whitenoise::delete_all_key_packages_for_account",
-                            "Failed to create NostrMls instance: {}",
+                            "Failed to parse key package for event {}: {}",
+                            event.id,
                             e
                         );
                     }
                 }
             }
+        }
+
+        // Delete from relays (always happens regardless of delete_mls_stored_keys)
+        for event in &key_package_events {
 
             // Publish deletion event
             match self
