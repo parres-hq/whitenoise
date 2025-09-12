@@ -285,6 +285,20 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::setup_account_subscriptions",
             "Setting up account subscriptions"
         );
+
+        // Combine all relay types into a single deduplicated collection
+        let all_relays: Vec<RelayUrl> = user_relays
+            .iter()
+            .chain(inbox_relays)
+            .chain(group_relays)
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        // Ensure we're connected to all relays before subscribing
+        self.ensure_relays_connected(&all_relays).await?;
+
         // Set up core subscriptions in parallel
         let (user_follow_list_result, giftwrap_result, groups_result) = tokio::join!(
             self.setup_user_follow_list_subscription(pubkey, user_relays, since),
@@ -312,9 +326,6 @@ impl NostrManager {
         );
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_follow_list", pubkey_hash));
-
-        // Ensure we're connected to all user relays before subscribing
-        self.ensure_relays_connected(user_relays).await?;
 
         let mut user_follow_list_filter = Filter::new().kind(Kind::ContactList).author(pubkey);
         if let Some(since) = since {
@@ -344,9 +355,6 @@ impl NostrManager {
         );
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_giftwrap", pubkey_hash));
-
-        // Ensure we're connected to all inbox relays before subscribing
-        self.ensure_relays_connected(inbox_relays).await?;
 
         let mut giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
         if let Some(since) = since {
@@ -380,9 +388,6 @@ impl NostrManager {
             // No groups yet, skip subscription
             return Ok(());
         }
-
-        // Ensure we're connected to all group relays before subscribing
-        self.ensure_relays_connected(group_relays).await?;
 
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_mls_messages", pubkey_hash));

@@ -236,7 +236,7 @@ impl NostrManager {
     pub(crate) async fn setup_group_messages_subscriptions_with_signer(
         &self,
         pubkey: PublicKey,
-        user_relays: &[RelayUrl],
+        group_relays: &[RelayUrl],
         nostr_group_ids: &[String],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
@@ -245,7 +245,8 @@ impl NostrManager {
             "Setting up group messages subscriptions with signer"
         );
         self.with_signer(signer, || async {
-            self.setup_group_messages_subscription(pubkey, nostr_group_ids, user_relays, None)
+            self.ensure_relays_connected(group_relays).await?;
+            self.setup_group_messages_subscription(pubkey, nostr_group_ids, group_relays, None)
                 .await
         })
         .await
@@ -270,9 +271,9 @@ impl NostrManager {
             target: "whitenoise::nostr_manager::update_account_subscriptions_with_signer",
             "Updating account subscriptions with cleanup for relay changes"
         );
+        let buffer_time = Timestamp::now() - Duration::from_secs(10);
+        self.unsubscribe_account_subscriptions(&pubkey).await?;
         self.with_signer(signer, || async {
-            let buffer_time = Timestamp::now() - Duration::from_secs(10);
-            self.unsubscribe_account_subscriptions(&pubkey).await?;
             self.setup_account_subscriptions(
                 pubkey,
                 user_relays,
