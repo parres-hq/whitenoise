@@ -77,7 +77,13 @@ impl Relay {
 
     pub(crate) fn defaults() -> Vec<Relay> {
         let urls: &[&str] = if cfg!(debug_assertions) {
-            &["ws://localhost:8080", "ws://localhost:7777"]
+            &[
+                "ws://localhost:8080",
+                "ws://localhost:7777",
+                "wss://relay.damus.io",
+                "wss://relay.primal.net",
+                "wss://nos.lol",
+            ]
         } else {
             &[
                 "wss://relay.damus.io",

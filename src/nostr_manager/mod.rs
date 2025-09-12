@@ -195,7 +195,7 @@ impl NostrManager {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<T>> + Send,
     {
-        let _guard = self.signer_lock.lock().await;
+        // let _guard = self.signer_lock.lock().await;
         self.client.set_signer(signer).await;
         let result = f().await;
         self.client.unset_signer().await;
