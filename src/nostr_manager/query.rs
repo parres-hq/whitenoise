@@ -16,13 +16,18 @@ impl NostrManager {
         nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
         pubkey: PublicKey,
     ) -> Result<Option<Metadata>> {
-        let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
+        let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata);
         let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let events: Events = self
             .client
             .fetch_events_from(urls, filter, self.timeout)
             .await?;
-        match events.first() {
+
+        // Convert to Vec and sort by created_at timestamp descending to get the latest one
+        let mut events_vec: Vec<Event> = events.into_iter().collect();
+        events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        match events_vec.first() {
             Some(event) => Ok(Some(Metadata::try_from(event)?)),
             None => Ok(None),
         }
@@ -34,18 +39,24 @@ impl NostrManager {
         relay_type: RelayType,
         nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
     ) -> Result<HashSet<RelayUrl>> {
-        let filter = Filter::new()
-            .author(pubkey)
-            .kind(relay_type.into())
-            .limit(1);
+        let filter = Filter::new().author(pubkey).kind(relay_type.into());
         let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let relay_events = self
             .client
             .fetch_events_from(urls, filter, self.timeout)
             .await?;
-        tracing::debug!("Fetched relay events {:?}", relay_events);
 
-        match relay_events.first() {
+        // Convert to Vec and sort by created_at timestamp descending to get the latest one
+        let mut events_vec: Vec<Event> = relay_events.into_iter().collect();
+        events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        tracing::debug!(
+            "Fetched {} relay events, using latest: {:?}",
+            events_vec.len(),
+            events_vec.first().map(|e| e.created_at)
+        );
+
+        match events_vec.first() {
             None => Ok(HashSet::new()),
             Some(event) => Ok(Self::relay_urls_from_event(event.clone())),
         }
@@ -56,16 +67,17 @@ impl NostrManager {
         pubkey: PublicKey,
         relays: &[RelayUrl],
     ) -> Result<Option<Event>> {
-        let filter = Filter::new()
-            .kind(Kind::MlsKeyPackage)
-            .author(pubkey)
-            .limit(1);
+        let filter = Filter::new().kind(Kind::MlsKeyPackage).author(pubkey);
         let events = self
             .client
             .fetch_events_from(relays, filter, self.timeout)
             .await?;
 
-        Ok(events.first_owned())
+        // Convert to Vec and sort by created_at timestamp descending to get the latest one
+        let mut events_vec: Vec<Event> = events.into_iter().collect();
+        events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        Ok(events_vec.into_iter().next())
     }
 }
 
