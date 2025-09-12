@@ -287,43 +287,6 @@ impl NostrManager {
         .await
     }
 
-    pub(crate) async fn setup_batched_relay_subscriptions_with_signer(
-        &self,
-        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
-        default_relays: &[RelayUrl],
-        signer: impl NostrSigner + 'static,
-    ) -> Result<()> {
-        tracing::debug!(
-            target: "whitenoise::nostr_manager::setup_batched_relay_subscriptions_with_signer",
-            "Setting up batched relay subscriptions with signer (users={}, defaults={})",
-            users_with_relays.len(),
-            default_relays.len()
-        );
-        self.with_signer(signer, || async {
-            self.setup_batched_relay_subscriptions(users_with_relays, default_relays)
-                .await
-        })
-        .await
-    }
-
-    pub(crate) async fn refresh_user_global_subscriptions_with_signer(
-        &self,
-        user_pubkey: PublicKey,
-        users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
-        default_relays: &[RelayUrl],
-        signer: impl NostrSigner + 'static,
-    ) -> Result<()> {
-        tracing::debug!(
-            target: "whitenoise::nostr_manager::refresh_user_global_subscriptions_with_signer",
-            "Refreshing user global subscriptions with signer"
-        );
-        self.with_signer(signer, || async {
-            self.refresh_user_global_subscriptions(user_pubkey, users_with_relays, default_relays)
-                .await
-        })
-        .await
-    }
-
     /// Ensures that the signer is unset and all subscriptions are cleared.
     pub(crate) async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(

@@ -23,34 +23,49 @@ impl NostrManager {
     }
 
     // Sets up subscriptions in batches for all users and their relays
-    pub(crate) async fn setup_batched_relay_subscriptions(
+    pub(crate) async fn setup_batched_relay_subscriptions_with_signer(
         &self,
         users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
         default_relays: &[RelayUrl],
+        signer: impl NostrSigner + 'static,
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::setup_batched_relay_subscriptions_with_signer",
+            "Setting up batched relay subscriptions with signer (users={}, defaults={})",
+            users_with_relays.len(),
+            default_relays.len()
+        );
+
         // 1. Group users by relay
         let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
 
-        // 2. Create deterministic batches per relay in parallel
-        let batch_futures = relay_user_map
-            .into_iter()
-            .map(|(relay_url, users)| async move {
-                if let Err(e) = self
+        // 2. Set signer once and process all relays in parallel
+        self.with_signer(signer, || async {
+            let futures = relay_user_map.into_iter().map(|(relay_url, users)| async move {
+                match self
                     .create_deterministic_batches_for_relay(relay_url.clone(), users)
                     .await
                 {
-                    tracing::error!(
-                        target: "whitenoise::nostr_manager::setup_batched_relay_subscriptions",
-                        error = %e,
-                        "Failed to create deterministic batches for relay: {}",
-                        relay_url
-                    );
+                    Ok(_) => true,
+                    Err(e) => {
+                        tracing::error!(
+                            target: "whitenoise::nostr_manager::setup_batched_relay_subscriptions_with_signer",
+                            error = %e,
+                            "Failed to create deterministic batches for relay: {}",
+                            relay_url
+                        );
+                        false
+                    }
                 }
             });
 
-        futures::future::join_all(batch_futures).await;
-
-        Ok(())
+            let results = futures::future::join_all(futures).await;
+            if !results.into_iter().any(|success| success) {
+                return Err(NostrManagerError::NoRelayConnections);
+            }
+            Ok(())
+        })
+        .await
     }
 
     async fn create_deterministic_batches_for_relay(
@@ -67,29 +82,50 @@ impl NostrManager {
             batches[batch_id].push(user);
         }
 
-        let mut non_empty_batches = 0;
-        let mut failed_batches = 0;
-        // Create subscription for each non-empty batch
-        for (batch_id, batch_users) in batches.into_iter().enumerate() {
-            if !batch_users.is_empty() {
-                non_empty_batches += 1;
-                let subscription_id = self.batched_subscription_id(&relay_url, batch_id);
-                if let Err(e) = self
-                    .subscribe_user_batch(relay_url.clone(), batch_users, subscription_id, None)
-                    .await
-                {
-                    tracing::error!(
-                        target: "whitenoise::nostr_manager::create_deterministic_batches_for_relay",
-                        error = %e,
-                        "Failed to subscribe user batch for relay: {}",
-                        relay_url
-                    );
-                    failed_batches += 1;
-                }
+        // Create subscription for each non-empty batch in parallel (signer already set at outer level)
+        let batch_futures =
+            batches
+                .into_iter()
+                .enumerate()
+                .filter_map(|(batch_id, batch_users)| {
+                    if batch_users.is_empty() {
+                        None
+                    } else {
+                        let subscription_id = self.batched_subscription_id(&relay_url, batch_id);
+                        let relay_url_clone = relay_url.clone();
+                        Some(async move {
+                            let res = self
+                                .subscribe_user_batch(
+                                    relay_url_clone,
+                                    batch_users,
+                                    subscription_id,
+                                    None,
+                                )
+                                .await;
+                            (batch_id, res)
+                        })
+                    }
+                });
+
+        let results = futures::future::join_all(batch_futures).await;
+
+        let non_empty_batches = results.len();
+        let failed_batches = results.iter().filter(|(_, r)| r.is_err()).count();
+
+        // Log any errors
+        for (batch_id, result) in results.iter() {
+            if let Err(e) = result {
+                tracing::error!(
+                    target: "whitenoise::nostr_manager::create_deterministic_batches_for_relay",
+                    error = %e,
+                    "Failed to subscribe user batch {} for relay: {}",
+                    batch_id,
+                    relay_url
+                );
             }
         }
 
-        if (non_empty_batches > 0) && (non_empty_batches == failed_batches) {
+        if non_empty_batches > 0 && non_empty_batches == failed_batches {
             return Err(NostrManagerError::NoRelayConnections);
         }
 
@@ -176,34 +212,46 @@ impl NostrManager {
     }
 
     /// Refresh subscriptions for a specific user across all their relays
-    pub(crate) async fn refresh_user_global_subscriptions(
+    pub(crate) async fn refresh_user_global_subscriptions_with_signer(
         &self,
         user_pubkey: PublicKey,
         users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
         default_relays: &[RelayUrl],
+        signer: impl NostrSigner + 'static,
     ) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::nostr_manager::refresh_user_global_subscriptions_with_signer",
+            "Refreshing user global subscriptions with signer"
+        );
         let relay_user_map = self.group_users_by_relay(users_with_relays, default_relays);
 
-        let refresh_futures = relay_user_map
-            .into_iter()
-            .filter(|(_, users)| users.contains(&user_pubkey))
-            .map(|(relay_url, users)| async move {
-                if let Err(e) = self
-                    .refresh_batch_for_relay_containing_user(relay_url.clone(), users, user_pubkey)
-                    .await
-                {
-                    tracing::error!(
-                        target: "whitenoise::nostr_manager::refresh_user_global_subscriptions",
-                        error = %e,
-                        "Failed to refresh batch for relay: {}",
-                        relay_url
-                    );
-                }
-            });
+        // Set signer once and process all relays in parallel
+        self.with_signer(signer, || async {
+            let futures = relay_user_map
+                .into_iter()
+                .filter(|(_, users)| users.contains(&user_pubkey))
+                .map(|(relay_url, users)| async move {
+                    if let Err(e) = self
+                        .refresh_batch_for_relay_containing_user(
+                            relay_url.clone(),
+                            users,
+                            user_pubkey,
+                        )
+                        .await
+                    {
+                        tracing::error!(
+                            target: "whitenoise::nostr_manager::refresh_user_global_subscriptions",
+                            error = %e,
+                            "Failed to refresh batch for relay: {}",
+                            relay_url
+                        );
+                    }
+                });
 
-        futures::future::join_all(refresh_futures).await;
-
-        Ok(())
+            futures::future::join_all(futures).await;
+            Ok(())
+        })
+        .await
     }
 
     /// This method rebuilds the subscriptions for all of the relays the user has
