@@ -4,6 +4,37 @@ use nostr_sdk::RelayUrl;
 use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::{whitenoise::relays::Relay, WhitenoiseError};
 
+/// Normalizes a RelayUrl to ensure consistent database storage.
+///
+/// This function removes ALL trailing slashes from URLs to ensure consistency.
+/// Since most WebSocket/relay implementations treat URLs with and without trailing
+/// slashes as equivalent, normalizing to no trailing slash provides the cleanest
+/// and most predictable behavior.
+///
+/// # Arguments
+/// * `url` - The RelayUrl to normalize
+///
+/// # Returns
+/// A normalized string representation of the URL
+///
+/// # Examples
+///
+/// All trailing slashes are removed:
+/// - `"wss://relay.com/"` becomes `"wss://relay.com"`
+/// - `"ws://localhost:8080/"` becomes `"ws://localhost:8080"`
+/// - `"wss://relay.com/nostr/"` becomes `"wss://relay.com/nostr"`
+/// - `"wss://relay.com/path/sub/"` becomes `"wss://relay.com/path/sub"`
+///
+/// No change needed:
+/// - `"wss://relay.com"` stays `"wss://relay.com"`
+/// - `"wss://relay.com/path"` stays `"wss://relay.com/path"`
+fn normalize_relay_url(url: &RelayUrl) -> String {
+    let url_str = url.to_string();
+
+    // Remove trailing slash if present
+    url_str.trim_end_matches('/').to_string()
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct RelayRow {
     // id is the primary key
@@ -75,8 +106,9 @@ impl Relay {
         url: &RelayUrl,
         database: &Database,
     ) -> Result<Relay, WhitenoiseError> {
+        let normalized_url = normalize_relay_url(url);
         let relay_row = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
-            .bind(url.to_string())
+            .bind(normalized_url)
             .fetch_one(&database.pool)
             .await
             .map_err(|e| match e {
@@ -121,11 +153,12 @@ impl Relay {
     /// Returns a [`WhitenoiseError`] if the database operation fails.
     pub(crate) async fn save(&self, database: &Database) -> Result<Relay, WhitenoiseError> {
         let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
+        let normalized_url = normalize_relay_url(&self.url);
 
         sqlx::query(
             "INSERT INTO relays (url, created_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET updated_at = ?",
         )
-        .bind(self.url.to_string())
+        .bind(&normalized_url)
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
         .bind(Utc::now().timestamp_millis())
@@ -134,7 +167,7 @@ impl Relay {
         .map_err(DatabaseError::Sqlx)?;
 
         let inserted_relay = sqlx::query_as::<_, RelayRow>("SELECT * FROM relays WHERE url = ?")
-            .bind(self.url.to_string())
+            .bind(&normalized_url)
             .fetch_one(&mut *tx)
             .await
             .map_err(DatabaseError::Sqlx)?;
@@ -424,6 +457,182 @@ mod tests {
 
         assert_eq!(first_id, second_id);
         assert!(saved_relay2.updated_at >= saved_relay1.updated_at);
+    }
+
+    #[tokio::test]
+    async fn test_normalize_relay_url() {
+        // Test root path normalization (should remove trailing slash)
+        let url_with_slash = RelayUrl::parse("wss://relay.com/").unwrap();
+        let url_without_slash = RelayUrl::parse("wss://relay.com").unwrap();
+
+        assert_eq!(normalize_relay_url(&url_with_slash), "wss://relay.com");
+        assert_eq!(normalize_relay_url(&url_without_slash), "wss://relay.com");
+
+        // Test localhost variants
+        let localhost_with_slash = RelayUrl::parse("ws://localhost:8080/").unwrap();
+        let localhost_without_slash = RelayUrl::parse("ws://localhost:8080").unwrap();
+
+        assert_eq!(
+            normalize_relay_url(&localhost_with_slash),
+            "ws://localhost:8080"
+        );
+        assert_eq!(
+            normalize_relay_url(&localhost_without_slash),
+            "ws://localhost:8080"
+        );
+
+        // Test paths (should remove trailing slashes)
+        let path_with_slash = RelayUrl::parse("wss://relay.com/nostr/").unwrap();
+        let path_without_slash = RelayUrl::parse("wss://relay.com/nostr").unwrap();
+
+        assert_eq!(
+            normalize_relay_url(&path_with_slash),
+            "wss://relay.com/nostr"
+        );
+        assert_eq!(
+            normalize_relay_url(&path_without_slash),
+            "wss://relay.com/nostr"
+        );
+
+        // Test deep paths (should remove trailing slashes)
+        let deep_path_with_slash = RelayUrl::parse("wss://relay.com/path/sub/").unwrap();
+        let deep_path_without_slash = RelayUrl::parse("wss://relay.com/path/sub").unwrap();
+
+        assert_eq!(
+            normalize_relay_url(&deep_path_with_slash),
+            "wss://relay.com/path/sub"
+        );
+        assert_eq!(
+            normalize_relay_url(&deep_path_without_slash),
+            "wss://relay.com/path/sub"
+        );
+
+        // Test URLs with ports and paths (should remove trailing slashes)
+        let port_path_with_slash = RelayUrl::parse("wss://relay.com:8443/nostr/").unwrap();
+        let port_path_without_slash = RelayUrl::parse("wss://relay.com:8443/nostr").unwrap();
+
+        assert_eq!(
+            normalize_relay_url(&port_path_with_slash),
+            "wss://relay.com:8443/nostr"
+        );
+        assert_eq!(
+            normalize_relay_url(&port_path_without_slash),
+            "wss://relay.com:8443/nostr"
+        );
+
+        // Test URLs with ports but no path (should remove trailing slash)
+        let port_root_with_slash = RelayUrl::parse("wss://relay.com:8443/").unwrap();
+        let port_root_without_slash = RelayUrl::parse("wss://relay.com:8443").unwrap();
+
+        assert_eq!(
+            normalize_relay_url(&port_root_with_slash),
+            "wss://relay.com:8443"
+        );
+        assert_eq!(
+            normalize_relay_url(&port_root_without_slash),
+            "wss://relay.com:8443"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relay_find_by_url_normalization() {
+        use crate::whitenoise::database::Database;
+        use crate::whitenoise::relays::Relay;
+        use std::path::PathBuf;
+
+        let pool = setup_test_db().await;
+        let database = Database {
+            pool,
+            path: PathBuf::from(":memory:"),
+            last_connected: std::time::SystemTime::now(),
+        };
+
+        // Save a relay with trailing slash
+        let url_with_slash = RelayUrl::parse("wss://test.relay.com/").unwrap();
+        let saved_relay = Relay::new(&url_with_slash).save(&database).await.unwrap();
+
+        // Try to find it with and without trailing slash - both should work
+        let url_without_slash = RelayUrl::parse("wss://test.relay.com").unwrap();
+
+        let found_with_slash = Relay::find_by_url(&url_with_slash, &database)
+            .await
+            .unwrap();
+        let found_without_slash = Relay::find_by_url(&url_without_slash, &database)
+            .await
+            .unwrap();
+
+        assert_eq!(found_with_slash.id, saved_relay.id);
+        assert_eq!(found_without_slash.id, saved_relay.id);
+    }
+
+    #[tokio::test]
+    async fn test_relay_save_normalization_prevents_duplicates() {
+        use crate::whitenoise::database::Database;
+        use crate::whitenoise::relays::Relay;
+        use std::path::PathBuf;
+
+        let pool = setup_test_db().await;
+        let database = Database {
+            pool,
+            path: PathBuf::from(":memory:"),
+            last_connected: std::time::SystemTime::now(),
+        };
+
+        // Save relay without trailing slash
+        let url_without_slash = RelayUrl::parse("wss://test.relay.com").unwrap();
+        let relay1 = Relay::new(&url_without_slash)
+            .save(&database)
+            .await
+            .unwrap();
+
+        // Save relay with trailing slash - should update existing, not create new
+        let url_with_slash = RelayUrl::parse("wss://test.relay.com/").unwrap();
+        let relay2 = Relay::new(&url_with_slash).save(&database).await.unwrap();
+
+        // Should have same ID (no duplicate created)
+        assert_eq!(relay1.id, relay2.id);
+
+        // Updated_at should be newer for relay2
+        assert!(relay2.updated_at >= relay1.updated_at);
+    }
+
+    #[tokio::test]
+    async fn test_relay_normalization_with_paths() {
+        use crate::whitenoise::database::Database;
+        use crate::whitenoise::relays::Relay;
+        use std::path::PathBuf;
+
+        let pool = setup_test_db().await;
+        let database = Database {
+            pool,
+            path: PathBuf::from(":memory:"),
+            last_connected: std::time::SystemTime::now(),
+        };
+
+        // URLs with paths should be treated as duplicates when they differ only by trailing slash
+        let path_without_slash = RelayUrl::parse("wss://test.relay.com/nostr").unwrap();
+        let path_with_slash = RelayUrl::parse("wss://test.relay.com/nostr/").unwrap();
+
+        let relay1 = Relay::new(&path_without_slash)
+            .save(&database)
+            .await
+            .unwrap();
+        let relay2 = Relay::new(&path_with_slash).save(&database).await.unwrap();
+
+        // Should have same ID (normalized to same URL)
+        assert_eq!(relay1.id, relay2.id);
+
+        // Should be able to find the relay using either URL variant
+        let found1 = Relay::find_by_url(&path_without_slash, &database)
+            .await
+            .unwrap();
+        let found2 = Relay::find_by_url(&path_with_slash, &database)
+            .await
+            .unwrap();
+
+        assert_eq!(found1.id, relay1.id);
+        assert_eq!(found2.id, relay1.id);
+        assert_eq!(found1.id, found2.id);
     }
 
     #[tokio::test]
