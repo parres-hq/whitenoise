@@ -1,6 +1,6 @@
 //! This module contains functions for querying Nostr events from relays.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use nostr_sdk::prelude::*;
 
@@ -9,6 +9,9 @@ use crate::{
     whitenoise::relays::Relay,
     RelayType,
 };
+
+/// Maximum allowed skew for event timestamps in the future (1 hour)
+const MAX_FUTURE_SKEW: Duration = Duration::from_secs(60 * 60);
 
 impl NostrManager {
     pub(crate) async fn fetch_metadata_from(
@@ -23,7 +26,12 @@ impl NostrManager {
             .fetch_events_from(urls, filter, self.timeout)
             .await?;
 
-        let latest = events.into_iter().max_by_key(|e| e.created_at);
+        // Filter out events with timestamps too far in the future
+        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
+        let latest = events
+            .into_iter()
+            .filter(|e| e.created_at <= cutoff)
+            .max_by_key(|e| (e.created_at, e.id));
         match latest {
             Some(event) => Ok(Some(Metadata::try_from(&event)?)),
             None => Ok(None),
@@ -43,7 +51,12 @@ impl NostrManager {
             .fetch_events_from(urls, filter, self.timeout)
             .await?;
 
-        let latest = relay_events.into_iter().max_by_key(|e| e.created_at);
+        // Filter out events with timestamps too far in the future
+        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
+        let latest = relay_events
+            .into_iter()
+            .filter(|e| e.created_at <= cutoff)
+            .max_by_key(|e| (e.created_at, e.id));
 
         tracing::debug!(
             "Fetched relay events, using latest: {:?}",
@@ -67,7 +80,12 @@ impl NostrManager {
             .fetch_events_from(relays, filter, self.timeout)
             .await?;
 
-        let latest = events.into_iter().max_by_key(|e| e.created_at);
+        // Filter out events with timestamps too far in the future
+        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
+        let latest = events
+            .into_iter()
+            .filter(|e| e.created_at <= cutoff)
+            .max_by_key(|e| (e.created_at, e.id));
         Ok(latest)
     }
 }

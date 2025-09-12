@@ -32,11 +32,7 @@ fn normalize_relay_url(url: &RelayUrl) -> String {
     let url_str = url.to_string();
 
     // Remove trailing slash if present
-    if url_str.ends_with('/') {
-        url_str.trim_end_matches('/').to_string()
-    } else {
-        url_str
-    }
+    url_str.trim_end_matches('/').to_string()
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
