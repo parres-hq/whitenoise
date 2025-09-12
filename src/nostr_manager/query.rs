@@ -23,12 +23,9 @@ impl NostrManager {
             .fetch_events_from(urls, filter, self.timeout)
             .await?;
 
-        // Convert to Vec and sort by created_at timestamp descending to get the latest one
-        let mut events_vec: Vec<Event> = events.into_iter().collect();
-        events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-        match events_vec.first() {
-            Some(event) => Ok(Some(Metadata::try_from(event)?)),
+        let latest = events.into_iter().max_by_key(|e| e.created_at);
+        match latest {
+            Some(event) => Ok(Some(Metadata::try_from(&event)?)),
             None => Ok(None),
         }
     }
@@ -46,19 +43,16 @@ impl NostrManager {
             .fetch_events_from(urls, filter, self.timeout)
             .await?;
 
-        // Convert to Vec and sort by created_at timestamp descending to get the latest one
-        let mut events_vec: Vec<Event> = relay_events.into_iter().collect();
-        events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let latest = relay_events.into_iter().max_by_key(|e| e.created_at);
 
         tracing::debug!(
-            "Fetched {} relay events, using latest: {:?}",
-            events_vec.len(),
-            events_vec.first().map(|e| e.created_at)
+            "Fetched relay events, using latest: {:?}",
+            latest.as_ref().map(|e| e.created_at)
         );
 
-        match events_vec.first() {
+        match latest {
             None => Ok(HashSet::new()),
-            Some(event) => Ok(Self::relay_urls_from_event(event.clone())),
+            Some(event) => Ok(Self::relay_urls_from_event(event)),
         }
     }
 
@@ -73,11 +67,8 @@ impl NostrManager {
             .fetch_events_from(relays, filter, self.timeout)
             .await?;
 
-        // Convert to Vec and sort by created_at timestamp descending to get the latest one
-        let mut events_vec: Vec<Event> = events.into_iter().collect();
-        events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-        Ok(events_vec.into_iter().next())
+        let latest = events.into_iter().max_by_key(|e| e.created_at);
+        Ok(latest)
     }
 }
 
