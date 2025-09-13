@@ -1,12 +1,13 @@
+use nostr_blossom::bud02::BlobDescriptor;
 use nostr_mls::prelude::*;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row};
 
-use crate::media::{blossom::BlobDescriptor, sanitizer::SafeMediaMetadata};
+use super::sanitizer::SafeMediaMetadata;
 
 /// Represents a file upload received from the frontend application.
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct FileUpload {
+pub struct FileDetails {
     /// The original filename
     pub filename: String,
     /// The MIME type of the file (e.g., "image/jpeg", "video/mp4")
@@ -22,14 +23,8 @@ pub struct MediaFile {
     pub id: i64,
     /// The MLS group ID
     pub mls_group_id: GroupId,
-    /// The path to the file on the local filesystem
-    pub file_path: String,
-    /// The URL of the file on Blossom
-    pub blossom_url: Option<String>,
     /// The SHA256 hash of the file
     pub file_hash: String,
-    /// The nostr private key used to upload the file to Blossom
-    pub nostr_key: Option<String>,
     /// Unix timestamp when the file was created
     pub created_at: i64,
     /// JSONB metadata for the file
@@ -49,10 +44,7 @@ impl<'r> FromRow<'r, sqlx::sqlite::SqliteRow> for MediaFile {
         Ok(MediaFile {
             id: row.try_get("id")?,
             mls_group_id: GroupId::from_slice(&row.try_get::<Vec<u8>, _>("mls_group_id")?),
-            file_path: row.try_get("file_path")?,
-            blossom_url: row.try_get("blossom_url")?,
             file_hash: row.try_get("file_hash")?,
-            nostr_key: row.try_get("nostr_key")?,
             created_at: row.try_get("created_at")?,
             file_metadata,
         })

@@ -19,6 +19,7 @@ pub mod follows;
 pub mod group_information;
 pub mod groups;
 pub mod key_packages;
+mod media_manager;
 pub mod message_aggregator;
 pub mod messages;
 pub mod relays;
@@ -31,6 +32,7 @@ use crate::init_tracing;
 use crate::nostr_manager::NostrManager;
 
 use crate::types::ProcessableEvent;
+use crate::whitenoise::media_manager::MediaManager;
 use accounts::*;
 use app_settings::*;
 use database::*;
@@ -99,6 +101,7 @@ pub struct Whitenoise {
     message_aggregator: message_aggregator::MessageAggregator,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
+    pub media: MediaManager,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
     contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
 }
@@ -174,6 +177,7 @@ impl Whitenoise {
             message_aggregator,
             event_sender,
             shutdown_sender,
+            media: MediaManager::new(),
             contact_list_guards: DashMap::new(),
         };
 
@@ -501,6 +505,7 @@ pub mod test_utils {
             message_aggregator,
             event_sender,
             shutdown_sender,
+            media: MediaManager::new(),
             contact_list_guards: DashMap::new(),
         };
 

@@ -118,10 +118,31 @@ pub enum WhitenoiseError {
 
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+
+    #[error("Blossom error: {0}")]
+    Blossom(Box<BlossomError>),
+
+    #[error("Media error: {0}")]
+    Media(#[from] super::media_manager::MediaError),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {
     fn from(err: Box<dyn std::error::Error + Send + Sync>) -> Self {
         WhitenoiseError::Other(anyhow::anyhow!(err.to_string()))
     }
+}
+
+// To avoid clippy error WhitenoiseError exceeds 160bytes
+impl From<BlossomError> for WhitenoiseError {
+    fn from(value: BlossomError) -> Self {
+        WhitenoiseError::Blossom(Box::new(value))
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum BlossomError {
+    #[error("Blossom Client error: {0}")]
+    Client(#[from] nostr_blossom::error::Error),
+    #[error("Invalid sha256 to locate the blob")]
+    InvalidSha256,
 }

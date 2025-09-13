@@ -31,9 +31,6 @@ pub enum MediaError {
     #[error("Nostr MLS error: {0}")]
     NostrMLS(String),
 
-    #[error("Nostr MLS not initialized")]
-    NostrMLSNotInitialized,
-
-    #[error("No Active Account")]
-    NoActiveAccount,
+    #[error("Hex decoding error: {0}")]
+    HexDecode(#[from] hex::FromHexError),
 }
