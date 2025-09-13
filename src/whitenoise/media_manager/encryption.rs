@@ -8,7 +8,7 @@ use chacha20poly1305::{
 };
 use rand::RngCore;
 
-use crate::media::errors::MediaError;
+use super::errors::MediaError;
 /// Encrypts file data using ChaCha20-Poly1305 encryption.
 ///
 /// # Arguments
@@ -18,7 +18,7 @@ use crate::media::errors::MediaError;
 /// # Returns
 /// * `Ok((Vec<u8>, Vec<u8>))` - The encrypted data and nonce
 /// * `Err(MediaError)` - Error if encryption fails
-pub fn encrypt_file(data: &[u8], key: &[u8; 32]) -> Result<(Vec<u8>, Vec<u8>), MediaError> {
+pub fn encrypt_file(data: &[u8], key: &[u8; 32]) -> Result<(Vec<u8>, [u8; 12]), MediaError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
@@ -26,7 +26,7 @@ pub fn encrypt_file(data: &[u8], key: &[u8; 32]) -> Result<(Vec<u8>, Vec<u8>), M
 
     cipher
         .encrypt(nonce, data)
-        .map(|encrypted| (encrypted, nonce_bytes.to_vec()))
+        .map(|encrypted| (encrypted, nonce_bytes))
         .map_err(|e| MediaError::Encryption(e.to_string()))
 }
 

@@ -22,7 +22,7 @@ use image::{GenericImageView, ImageFormat, ImageOutputFormat};
 use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Encode, Type};
 
-use crate::media::{errors::MediaError, types::FileUpload};
+use super::{errors::MediaError, types::FileDetails};
 
 #[derive(Debug, Serialize, Deserialize, Type, Encode, Decode)]
 #[sqlx(type_name = "jsonb")]
@@ -60,7 +60,7 @@ pub struct SafeMediaMetadata {
 #[derive(Debug)]
 pub struct SanitizedMedia {
     pub data: Vec<u8>,
-    pub metadata: SafeMediaMetadata,
+    pub _metadata: SafeMediaMetadata,
 }
 
 /// Sanitizes an image by removing potentially sensitive metadata.
@@ -217,11 +217,11 @@ fn sanitize_image_file(data: &[u8], mime_type: &str) -> Result<SanitizedMedia, M
     let sanitized_data = sanitize_image(data, output_format)?;
 
     // Extract metadata
-    let metadata = extract_image_metadata(data, mime_type)?;
+    let _metadata = extract_image_metadata(data, mime_type)?;
 
     Ok(SanitizedMedia {
         data: sanitized_data,
-        metadata,
+        _metadata,
     })
 }
 
@@ -244,7 +244,7 @@ fn sanitize_video_file(data: &[u8], mime_type: &str) -> Result<SanitizedMedia, M
     // For now, we'll just return the original data with basic metadata
     Ok(SanitizedMedia {
         data: data.to_vec(),
-        metadata: SafeMediaMetadata {
+        _metadata: SafeMediaMetadata {
             mime_type: mime_type.to_string(),
             size_bytes: data.len() as u64,
             format: Some(mime_type.split('/').nth(1).unwrap_or("unknown").to_string()),
@@ -287,7 +287,7 @@ fn sanitize_video_file(data: &[u8], mime_type: &str) -> Result<SanitizedMedia, M
 ///
 /// * `Ok(SanitizedMedia)` - The sanitized file data and safe metadata
 /// * `Err(MediaError)` - Error if sanitization fails
-pub fn sanitize_media(file: &FileUpload) -> Result<SanitizedMedia, MediaError> {
+pub fn sanitize_media(file: &FileDetails) -> Result<SanitizedMedia, MediaError> {
     if file.mime_type.starts_with("image/") {
         sanitize_image_file(&file.data, &file.mime_type)
     } else if file.mime_type.starts_with("video/") {
@@ -296,7 +296,7 @@ pub fn sanitize_media(file: &FileUpload) -> Result<SanitizedMedia, MediaError> {
         // For non-image/video files, return the original data with minimal metadata
         Ok(SanitizedMedia {
             data: file.data.clone(),
-            metadata: SafeMediaMetadata {
+            _metadata: SafeMediaMetadata {
                 mime_type: file.mime_type.clone(),
                 size_bytes: file.data.len() as u64,
                 format: None,
@@ -338,8 +338,8 @@ mod tests {
         buffer
     }
 
-    fn create_test_file(filename: &str, mime_type: &str, data: &[u8]) -> FileUpload {
-        FileUpload {
+    fn create_test_file(filename: &str, mime_type: &str, data: &[u8]) -> FileDetails {
+        FileDetails {
             filename: filename.to_string(),
             mime_type: mime_type.to_string(),
             data: data.to_vec(),
@@ -438,15 +438,15 @@ mod tests {
         let jpeg_data = create_test_image(100, 100, ImageOutputFormat::Jpeg(85));
         let result = sanitize_image_file(&jpeg_data, "image/jpeg").unwrap();
         assert!(image::load_from_memory(&result.data).is_ok());
-        assert_eq!(result.metadata.dimensions, Some((100, 100)));
-        assert_eq!(result.metadata.format, Some("jpeg".to_string()));
+        assert_eq!(result._metadata.dimensions, Some((100, 100)));
+        assert_eq!(result._metadata.format, Some("jpeg".to_string()));
 
         // Test PNG file sanitization
         let png_data = create_test_image(100, 100, ImageOutputFormat::Png);
         let result = sanitize_image_file(&png_data, "image/png").unwrap();
         assert!(image::load_from_memory(&result.data).is_ok());
-        assert_eq!(result.metadata.dimensions, Some((100, 100)));
-        assert_eq!(result.metadata.format, Some("png".to_string()));
+        assert_eq!(result._metadata.dimensions, Some((100, 100)));
+        assert_eq!(result._metadata.format, Some("png".to_string()));
 
         // Test error handling
         let invalid_data = b"not an image";
@@ -460,15 +460,15 @@ mod tests {
         let result = sanitize_video_file(video_data, "video/mp4").unwrap();
 
         // Verify basic metadata
-        assert_eq!(result.metadata.mime_type, "video/mp4");
-        assert_eq!(result.metadata.size_bytes, 21);
-        assert_eq!(result.metadata.format, Some("mp4".to_string()));
+        assert_eq!(result._metadata.mime_type, "video/mp4");
+        assert_eq!(result._metadata.size_bytes, 21);
+        assert_eq!(result._metadata.format, Some("mp4".to_string()));
 
         // Verify video-specific fields are None
-        assert!(result.metadata.video_codec.is_none());
-        assert!(result.metadata.video_dimensions.is_none());
-        assert!(result.metadata.duration_seconds.is_none());
-        assert!(result.metadata.frame_rate.is_none());
+        assert!(result._metadata.video_codec.is_none());
+        assert!(result._metadata.video_dimensions.is_none());
+        assert!(result._metadata.duration_seconds.is_none());
+        assert!(result._metadata.frame_rate.is_none());
     }
 
     #[test]
@@ -478,22 +478,22 @@ mod tests {
         let file = create_test_file("test.jpg", "image/jpeg", &jpeg_data);
         let result = sanitize_media(&file).unwrap();
         assert!(image::load_from_memory(&result.data).is_ok());
-        assert_eq!(result.metadata.dimensions, Some((100, 100)));
-        assert_eq!(result.metadata.format, Some("jpeg".to_string()));
+        assert_eq!(result._metadata.dimensions, Some((100, 100)));
+        assert_eq!(result._metadata.format, Some("jpeg".to_string()));
 
         // Test video sanitization
         let video_data = b"not a real video file";
         let file = create_test_file("test.mp4", "video/mp4", video_data);
         let result = sanitize_media(&file).unwrap();
-        assert_eq!(result.metadata.mime_type, "video/mp4");
-        assert_eq!(result.metadata.format, Some("mp4".to_string()));
+        assert_eq!(result._metadata.mime_type, "video/mp4");
+        assert_eq!(result._metadata.format, Some("mp4".to_string()));
 
         // Test non-media file handling
         let test_data = b"not a media file";
         let file = create_test_file("test.txt", "text/plain", test_data);
         let result = sanitize_media(&file).unwrap();
         assert_eq!(result.data, test_data);
-        assert!(result.metadata.dimensions.is_none());
-        assert!(result.metadata.format.is_none());
+        assert!(result._metadata.dimensions.is_none());
+        assert!(result._metadata.format.is_none());
     }
 }
