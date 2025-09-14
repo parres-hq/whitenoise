@@ -71,7 +71,7 @@ fn init_tracing(logs_dir: &std::path::Path) {
             .with_target(true);
 
         Registry::default()
-            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,refinery_core=warn,refinery=warn")))
             .with(stdout_layer)
             .with(file_layer)
             .init();
