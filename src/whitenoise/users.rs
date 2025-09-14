@@ -44,10 +44,19 @@ impl User {
             if self.metadata != metadata {
                 self.metadata = metadata;
                 // Convert Nostr timestamp to DateTime<Utc>
-                self.event_created_at = Some(
-                    DateTime::from_timestamp(event_timestamp.as_u64() as i64, 0)
-                        .unwrap_or_else(Utc::now),
-                );
+                match DateTime::from_timestamp(event_timestamp.as_u64() as i64, 0) {
+                    Some(datetime) => {
+                        self.event_created_at = Some(datetime);
+                    }
+                    None => {
+                        tracing::warn!(
+                            "Invalid timestamp {} for metadata event from pubkey {}, leaving event_created_at unchanged",
+                            event_timestamp.as_u64(),
+                            self.pubkey
+                        );
+                        // Leave event_created_at unchanged
+                    }
+                }
                 self.save(&whitenoise.database).await?;
             }
         }
@@ -234,7 +243,7 @@ impl User {
         let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
         let relay_type_str = String::from(relay_type);
 
-        let result: Option<(Option<i64>,)> = sqlx::query_as(
+        let result: Option<i64> = sqlx::query_scalar(
             "SELECT MAX(event_created_at) FROM user_relays WHERE user_id = ? AND relay_type = ?",
         )
         .bind(user_id)
@@ -246,10 +255,10 @@ impl User {
         })?;
 
         match result {
-            Some((Some(timestamp_ms),)) => {
+            Some(timestamp_ms) => {
                 Ok(DateTime::from_timestamp_millis(timestamp_ms).or_else(|| Some(Utc::now())))
             }
-            _ => Ok(None),
+            None => Ok(None),
         }
     }
 

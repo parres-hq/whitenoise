@@ -225,7 +225,18 @@ impl User {
 
         // Use INSERT ON CONFLICT to handle both insert and update cases without deleting/replacing rows
         sqlx::query(
-            "INSERT INTO users (pubkey, metadata, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET metadata = excluded.metadata, updated_at = ?, event_created_at = excluded.event_created_at",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at, event_created_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(pubkey) DO UPDATE SET
+               metadata = excluded.metadata,
+               updated_at = ?,
+               event_created_at = CASE
+                 WHEN excluded.event_created_at IS NOT NULL
+                      AND (users.event_created_at IS NULL
+                           OR excluded.event_created_at > users.event_created_at)
+                 THEN excluded.event_created_at
+                 ELSE users.event_created_at
+               END",
         )
         .bind(self.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
