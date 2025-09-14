@@ -1,6 +1,8 @@
+use std::pin::Pin;
 use std::time::Duration;
 
 use ::rand::RngCore;
+use futures::Stream;
 use nostr_sdk::prelude::*;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -8,9 +10,7 @@ use tokio::sync::mpsc::Sender;
 // use crate::media::blossom::BlossomClient;
 use crate::{
     types::ProcessableEvent,
-    whitenoise::{
-        accounts::Account, database::DatabaseError, event_tracker::EventTracker, Whitenoise,
-    },
+    whitenoise::{database::DatabaseError, event_tracker::EventTracker},
 };
 
 pub mod parser;
@@ -60,6 +60,21 @@ pub struct NostrManager {
 }
 
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
+
+/// Container for different types of event streams fetched during user data synchronization.
+/// Each stream contains events of a specific type that need to be processed separately.
+pub struct UserEventStreams {
+    /// Stream of metadata events (kind 0) for the account and contacts
+    pub metadata_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
+    /// Stream of relay list events (kinds 10002, 10050, 10051)
+    pub relay_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
+    /// Stream of contact list events (kind 3) for the account
+    pub contact_list_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
+    /// Stream of gift wrap events (kind 1059) directed to the account
+    pub giftwrap_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
+    /// Stream of group message events (kind 444) for specified groups
+    pub group_messages: Pin<Box<dyn Stream<Item = Event> + Send>>,
+}
 
 impl NostrManager {
     /// Default timeout for client requests
@@ -410,16 +425,16 @@ impl NostrManager {
         }
     }
 
-    /// Syncs all user data from the Nostr network for an account and their contacts.
+    /// Fetches event streams for all user data types from the Nostr network.
     ///
-    /// This method performs a comprehensive data synchronization by fetching and processing
-    /// various types of Nostr events for the specified account and all users in their contact list.
-    /// It streams events in parallel and processes them through the appropriate handlers.
+    /// This method creates and returns streams for different types of events related to
+    /// an account and their contacts. The streams can then be processed separately,
+    /// allowing for better separation of concerns between data fetching and processing.
     ///
-    /// # Data Types Synchronized
+    /// # Data Types Fetched
     ///
     /// - **Metadata events** (kind 0): User profile information for the account and contacts
-    /// - **Contact list events** (kind 3): Account's contact/follow list for updating user_follows table
+    /// - **Contact list events** (kind 3): Account's contact/follow list
     /// - **Relay list events** (kinds 10002, 10050, 10051): NIP-65 relay lists, inbox relays, and MLS key package relays
     /// - **Gift wrap events** (kind 1059): Private messages directed to the account
     /// - **Group messages** (kind 444): MLS group messages for specified groups since last sync
@@ -427,40 +442,20 @@ impl NostrManager {
     /// # Arguments
     ///
     /// * `signer` - A Nostr signer implementation for authenticating with relays
-    /// * `account` - The account to sync data for (includes contact list lookup)
+    /// * `account` - The account to fetch data for (includes contact list lookup)
     /// * `group_ids` - Vector of hex-encoded group IDs to fetch group messages for
-    ///
-    /// # Process Flow
-    ///
-    /// 1. **Authentication**: Sets the signer on the Nostr client
-    /// 2. **Contact Discovery**: Fetches the account's contact list from the network
-    /// 3. **Filter Creation**: Creates targeted filters for each event type
-    /// 4. **Parallel Streaming**: Initiates concurrent event streams with 10-second timeout
-    /// 5. **Event Processing**: Processes each event type through appropriate handlers:
-    ///    - Metadata → `handle_metadata()`
-    ///    - Contact lists → `handle_contact_list()`
-    ///    - Relay lists → `handle_relay_list()`
-    ///    - Gift wraps → `handle_giftwrap()`
-    ///    - Group messages → `handle_mls_message()`
-    /// 6. **Cleanup**: Unsets the signer when complete
-    ///
-    /// # Time-based Filtering
-    ///
-    /// Group messages are filtered using the account's `last_synced_at` timestamp to only
-    /// fetch new messages since the last synchronization, improving efficiency.
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if synchronization completes successfully, even if individual
-    /// events fail to process (errors are logged but don't halt the overall sync).
+    /// Returns `UserEventStreams` containing separate streams for each event type.
+    /// These streams can be processed independently.
     ///
     /// # Errors
     ///
     /// This method will return an error if:
     /// - Failed to get contact list public keys from the network
     /// - Failed to create event streams
-    /// - Critical event processing errors occur
-    /// - Whitenoise instance is not available
+    /// - Authentication with the signer fails
     ///
     /// # Examples
     ///
@@ -471,66 +466,56 @@ impl NostrManager {
     /// let keys = Keys::generate();
     /// let group_ids = vec!["abc123".to_string(), "def456".to_string()];
     ///
-    /// nostr_manager.sync_all_user_data(keys, &account, group_ids).await?;
+    /// let streams = nostr_manager.fetch_user_event_streams(keys, &account, group_ids).await?;
+    /// // Process the streams separately...
     /// ```
-    ///
-    /// # Performance Considerations
-    ///
-    /// - Uses streaming to handle large result sets efficiently
-    /// - Parallel event fetching improves overall sync time
-    /// - 10-second timeout per stream prevents hanging on slow relays
-    /// - Incremental sync for group messages reduces bandwidth usage
-    ///
-    /// # Security Notes
-    ///
-    /// - The signer is automatically unset after completion to prevent key leakage
-    /// - Gift wrap events are filtered specifically for the account's public key
-    /// - Contact list access requires proper authentication via the signer
-    pub(crate) async fn sync_all_user_data(
+    pub(crate) async fn fetch_user_event_streams(
         &self,
         signer: impl NostrSigner + 'static,
-        account: &Account,
+        pubkey: PublicKey,
+        since: Timestamp,
         group_ids: Vec<String>,
-    ) -> Result<()> {
-        let (
-            mut metadata_events,
-            mut relay_events,
-            mut contact_list_events,
-            mut giftwrap_events,
-            mut group_messages,
-        ) = self
-            .with_signer(signer, || async {
+    ) -> Result<UserEventStreams> {
+        let (metadata_events, relay_events, contact_list_events, giftwrap_events, group_messages) =
+            self.with_signer(signer, || async {
                 let mut contacts_and_self =
                     match self.client.get_contact_list_public_keys(self.timeout).await {
                         Ok(contacts) => contacts,
                         Err(e) => {
                             tracing::error!(
-                                target: "whitenoise::nostr_manager::fetch_all_user_data",
+                                target: "whitenoise::nostr_manager::fetch_user_event_streams",
                                 "Failed to get contact list public keys: {}",
                                 e
                             );
                             return Err(NostrManagerError::Client(e));
                         }
                     };
-                contacts_and_self.push(account.pubkey);
+                contacts_and_self.push(pubkey);
 
                 let metadata_filter = Filter::new()
                     .authors(contacts_and_self.clone())
-                    .kinds(vec![Kind::Metadata]);
-                let relay_filter = Filter::new().authors(contacts_and_self.clone()).kinds(vec![
-                    Kind::RelayList,
-                    Kind::InboxRelays,
-                    Kind::MlsKeyPackageRelays,
-                ]);
-                let contact_list_filter =
-                    Filter::new().author(account.pubkey).kind(Kind::ContactList);
-                let giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(account.pubkey);
+                    .kinds(vec![Kind::Metadata])
+                    .since(since);
+                let relay_filter = Filter::new()
+                    .authors(contacts_and_self.clone())
+                    .kinds(vec![
+                        Kind::RelayList,
+                        Kind::InboxRelays,
+                        Kind::MlsKeyPackageRelays,
+                    ])
+                    .since(since);
+                let contact_list_filter = Filter::new()
+                    .author(pubkey)
+                    .kind(Kind::ContactList)
+                    .since(since);
+                let giftwrap_filter = Filter::new()
+                    .kind(Kind::GiftWrap)
+                    .pubkey(pubkey)
+                    .since(since);
                 let group_messages_filter = Filter::new()
                     .kind(Kind::MlsGroupMessage)
                     .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
-                    .since(Timestamp::from(
-                        account.last_synced_at.unwrap_or_default().timestamp() as u64,
-                    ));
+                    .since(since);
 
                 let timeout_duration = Duration::from_secs(10);
 
@@ -559,43 +544,12 @@ impl NostrManager {
             })
             .await?;
 
-        let whitenoise = Whitenoise::get_instance()
-            .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-
-        while let Some(event) = metadata_events.next().await {
-            whitenoise
-                .handle_metadata(event)
-                .await
-                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-        }
-
-        while let Some(event) = relay_events.next().await {
-            whitenoise
-                .handle_relay_list(event)
-                .await
-                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-        }
-
-        while let Some(event) = contact_list_events.next().await {
-            whitenoise
-                .handle_contact_list(account, event)
-                .await
-                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-        }
-
-        while let Some(event) = giftwrap_events.next().await {
-            whitenoise
-                .handle_giftwrap(account, event)
-                .await
-                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-        }
-
-        while let Some(event) = group_messages.next().await {
-            whitenoise
-                .handle_mls_message(account, event)
-                .await
-                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
-        }
-        Ok(())
+        Ok(UserEventStreams {
+            metadata_events: Box::pin(metadata_events),
+            relay_events: Box::pin(relay_events),
+            contact_list_events: Box::pin(contact_list_events),
+            giftwrap_events: Box::pin(giftwrap_events),
+            group_messages: Box::pin(group_messages),
+        })
     }
 }
