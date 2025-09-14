@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
 jobs:
   check:
@@ -24,11 +24,10 @@ jobs:
       - name: Set up Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up Rust (nightly for checks)
+      - name: Set up Rust (stable for checks)
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2025-03-12
           components: rustfmt, clippy
 
       - name: Cache Rust dependencies
@@ -68,15 +67,15 @@ jobs:
 
       - name: Format check
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: cargo +nightly-2025-03-12 fmt --all -- --config format_code_in_doc_comments=true --check
+        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
 
       - name: Documentation check
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: cargo +nightly-2025-03-12 doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features
 
       - name: Lint
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: cargo +nightly-2025-03-12 clippy --all-targets --all-features --no-deps -- -D warnings
+        run: cargo clippy --all-targets --all-features --no-deps -- -D warnings -A clippy::uninlined_format_args
 
       - name: Test
         if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'

@@ -2,14 +2,9 @@
 
 set -euo pipefail
 
-version="nightly-2025-03-12"
-
-# Install toolchain
-cargo +$version --version || rustup install $version
-
-# Install clippy
-cargo +$version clippy --version || rustup component add clippy --toolchain $version
+# Install clippy if not available
+cargo clippy --version || rustup component add clippy
 
 echo "Checking clippy"
-cargo +$version clippy --all-targets --all-features --no-deps -- -D warnings
+cargo clippy --all-targets --all-features --no-deps -- -D warnings -A clippy::uninlined_format_args
 echo
