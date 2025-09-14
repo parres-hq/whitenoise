@@ -1,7 +1,11 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
 
-use super::{relays::RelayRow, utils::{parse_timestamp, parse_optional_timestamp}, Database, DatabaseError};
+use super::{
+    relays::RelayRow,
+    utils::{parse_optional_timestamp, parse_timestamp},
+    Database, DatabaseError,
+};
 use crate::{
     whitenoise::{
         relays::{Relay, RelayType},
@@ -352,7 +356,8 @@ mod tests {
                 pubkey TEXT NOT NULL,
                 metadata JSONB,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                event_created_at INTEGER DEFAULT NULL
             )",
         )
         .execute(&pool)
@@ -1259,12 +1264,7 @@ mod tests {
 
         // Add relay association - should work with existing relay
         let result = loaded_user
-            .add_relay(
-                &saved_relay,
-                RelayType::Nip65,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&saved_relay, RelayType::Nip65, None, &whitenoise.database)
             .await;
         assert!(result.is_ok());
 
@@ -1317,12 +1317,7 @@ mod tests {
 
         // Add relay association
         let result = loaded_user
-            .add_relay(
-                &new_relay,
-                RelayType::Inbox,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&new_relay, RelayType::Inbox, None, &whitenoise.database)
             .await;
         assert!(result.is_ok());
 
@@ -1371,12 +1366,7 @@ mod tests {
             .await
             .unwrap();
         loaded_user
-            .add_relay(
-                &relay,
-                RelayType::Nip65,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&relay, RelayType::Nip65, None, &whitenoise.database)
             .await
             .unwrap();
 

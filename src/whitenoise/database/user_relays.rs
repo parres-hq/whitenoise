@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use super::utils::{parse_timestamp, parse_optional_timestamp};
+use super::utils::{parse_optional_timestamp, parse_timestamp};
 use crate::whitenoise::relays::RelayType;
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -73,7 +73,7 @@ mod tests {
                 relay_type TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                event_created_at INTEGER NOT NULL DEFAULT 0,
+                event_created_at INTEGER DEFAULT NULL,
                 PRIMARY KEY (user_id, relay_id, relay_type)
             )",
         )
@@ -145,13 +145,14 @@ mod tests {
 
             // Insert test data
             sqlx::query(
-                "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
             )
             .bind(test_user_id)
             .bind(test_relay_id)
             .bind(relay_type_str)
             .bind(test_timestamp)
             .bind(test_timestamp)
+            .bind(None::<i64>) // NULL event_created_at for legacy test data
             .execute(&pool)
             .await
             .unwrap();
@@ -194,6 +195,7 @@ mod tests {
         .bind(test_relay_type)
         .bind(invalid_timestamp)
         .bind(valid_timestamp)
+        .bind(None::<i64>) // NULL event_created_at
         .execute(&pool)
         .await
         .unwrap();
@@ -231,6 +233,7 @@ mod tests {
         .bind(test_relay_type)
         .bind(valid_timestamp)
         .bind(invalid_timestamp)
+        .bind(None::<i64>) // NULL event_created_at
         .execute(&pool)
         .await
         .unwrap();
@@ -270,7 +273,7 @@ mod tests {
         .bind(test_relay_type)
         .bind(0i64)
         .bind(0i64)
-        .bind(0i64)
+        .bind(Some(0i64)) // Valid event_created_at
         .execute(&pool)
         .await
         .unwrap();
@@ -302,6 +305,7 @@ mod tests {
         .bind(test_relay_type)
         .bind(future_timestamp)
         .bind(future_timestamp)
+        .bind(Some(future_timestamp)) // Valid event_created_at
         .execute(&pool)
         .await
         .unwrap();

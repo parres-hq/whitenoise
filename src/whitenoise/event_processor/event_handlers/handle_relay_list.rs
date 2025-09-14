@@ -13,8 +13,9 @@ impl Whitenoise {
 
         let relay_type = event.kind.into();
         let relay_urls = NostrManager::relay_urls_from_event(event.clone());
-        let event_created_at = Some(DateTime::from_timestamp(event.created_at.as_u64() as i64, 0)
-            .unwrap_or_else(Utc::now));
+        let event_created_at = Some(
+            DateTime::from_timestamp(event.created_at.as_u64() as i64, 0).unwrap_or_else(Utc::now),
+        );
         let relays_changed = user
             .sync_relay_urls(self, relay_type, &relay_urls, event_created_at)
             .await?;

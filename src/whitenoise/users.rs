@@ -44,8 +44,10 @@ impl User {
             if self.metadata != metadata {
                 self.metadata = metadata;
                 // Convert Nostr timestamp to DateTime<Utc>
-                self.event_created_at = Some(DateTime::from_timestamp(event_timestamp.as_u64() as i64, 0)
-                    .unwrap_or_else(Utc::now));
+                self.event_created_at = Some(
+                    DateTime::from_timestamp(event_timestamp.as_u64() as i64, 0)
+                        .unwrap_or_else(Utc::now),
+                );
                 self.save(&whitenoise.database).await?;
             }
         }
@@ -233,18 +235,19 @@ impl User {
         let relay_type_str = String::from(relay_type);
 
         let result: Option<(Option<i64>,)> = sqlx::query_as(
-            "SELECT MAX(event_created_at) FROM user_relays WHERE user_id = ? AND relay_type = ?"
+            "SELECT MAX(event_created_at) FROM user_relays WHERE user_id = ? AND relay_type = ?",
         )
         .bind(user_id)
         .bind(relay_type_str)
         .fetch_optional(&database.pool)
         .await
-        .map_err(|e| WhitenoiseError::Database(crate::whitenoise::database::DatabaseError::Sqlx(e)))?;
+        .map_err(|e| {
+            WhitenoiseError::Database(crate::whitenoise::database::DatabaseError::Sqlx(e))
+        })?;
 
         match result {
             Some((Some(timestamp_ms),)) => {
-                Ok(DateTime::from_timestamp_millis(timestamp_ms)
-                    .or_else(|| Some(Utc::now())))
+                Ok(DateTime::from_timestamp_millis(timestamp_ms).or_else(|| Some(Utc::now())))
             }
             _ => Ok(None),
         }
@@ -260,10 +263,14 @@ impl User {
     ) -> Result<bool> {
         // First, check if we should process this event based on timestamp
         if let Some(new_timestamp) = event_created_at {
-            let newest_stored_timestamp = self.newest_relay_event_timestamp(relay_type, &whitenoise.database).await?;
+            let newest_stored_timestamp = self
+                .newest_relay_event_timestamp(relay_type, &whitenoise.database)
+                .await?;
 
             match newest_stored_timestamp {
-                Some(stored_timestamp) if new_timestamp.timestamp() <= stored_timestamp.timestamp() => {
+                Some(stored_timestamp)
+                    if new_timestamp.timestamp() <= stored_timestamp.timestamp() =>
+                {
                     tracing::debug!(
                         target: "whitenoise::users::sync_relay_urls",
                         "Ignoring stale {:?} relay event for user {} (event: {}, stored: {})",
@@ -391,8 +398,10 @@ impl User {
         match network_relay_result {
             Some((network_relay_urls, event_timestamp)) => {
                 // Convert Nostr timestamp to DateTime<Utc>
-                let event_created_at = Some(DateTime::from_timestamp(event_timestamp.as_u64() as i64, 0)
-                    .unwrap_or_else(Utc::now));
+                let event_created_at = Some(
+                    DateTime::from_timestamp(event_timestamp.as_u64() as i64, 0)
+                        .unwrap_or_else(Utc::now),
+                );
                 self.sync_relay_urls(
                     whitenoise,
                     relay_type,
@@ -621,12 +630,7 @@ mod tests {
             .unwrap();
 
         saved_user
-            .add_relay(
-                &initial_relay,
-                RelayType::Nip65,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&initial_relay, RelayType::Nip65, None, &whitenoise.database)
             .await
             .unwrap();
 
@@ -686,12 +690,7 @@ mod tests {
             .await
             .unwrap();
         saved_user
-            .add_relay(
-                &relay,
-                RelayType::Nip65,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&relay, RelayType::Nip65, None, &whitenoise.database)
             .await
             .unwrap();
 
@@ -748,12 +747,7 @@ mod tests {
                 .await
                 .unwrap();
             saved_user
-                .add_relay(
-                    &relay,
-                    RelayType::Nip65,
-                    None,
-                    &whitenoise.database,
-                )
+                .add_relay(&relay, RelayType::Nip65, None, &whitenoise.database)
                 .await
                 .unwrap();
         }
@@ -818,12 +812,7 @@ mod tests {
             .await
             .unwrap();
         saved_user
-            .add_relay(
-                &relay,
-                RelayType::Nip65,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&relay, RelayType::Nip65, None, &whitenoise.database)
             .await
             .unwrap();
 
@@ -921,12 +910,7 @@ mod tests {
             .await
             .unwrap();
         saved_user
-            .add_relay(
-                &relay,
-                RelayType::Nip65,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&relay, RelayType::Nip65, None, &whitenoise.database)
             .await
             .unwrap();
 
@@ -975,12 +959,7 @@ mod tests {
             .await
             .unwrap();
         saved_user
-            .add_relay(
-                &nip65_relay,
-                RelayType::Nip65,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&nip65_relay, RelayType::Nip65, None, &whitenoise.database)
             .await
             .unwrap();
 
@@ -995,12 +974,7 @@ mod tests {
             .await
             .unwrap();
         saved_user
-            .add_relay(
-                &kp_relay,
-                RelayType::KeyPackage,
-                None,
-                &whitenoise.database,
-            )
+            .add_relay(&kp_relay, RelayType::KeyPackage, None, &whitenoise.database)
             .await
             .unwrap();
 

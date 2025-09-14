@@ -518,10 +518,11 @@ impl NostrManager {
                 };
 
                 // Fetch the account's contact list using our custom method
-                let mut contacts_and_self = match self.fetch_contact_list_events(account.pubkey, &user_relays).await {
-                    Ok(Some(contact_list_event)) => {
-                        Self::pubkeys_from_event(&contact_list_event)
-                    },
+                let mut contacts_and_self = match self
+                    .fetch_contact_list_events(account.pubkey, &user_relays)
+                    .await
+                {
+                    Ok(Some(contact_list_event)) => Self::pubkeys_from_event(&contact_list_event),
                     Ok(None) => {
                         tracing::debug!(
                             target: "whitenoise::nostr_manager::sync_all_user_data",
@@ -529,7 +530,7 @@ impl NostrManager {
                             account.pubkey.to_hex()
                         );
                         Vec::new()
-                    },
+                    }
                     Err(e) => {
                         tracing::error!(
                             target: "whitenoise::nostr_manager::sync_all_user_data",

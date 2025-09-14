@@ -31,7 +31,9 @@ impl Whitenoise {
         );
 
         // Check if this event is newer than what we already have
-        let current_event_time = account.get_latest_follow_list_timestamp(&self.database).await?;
+        let current_event_time = account
+            .get_latest_follow_list_timestamp(&self.database)
+            .await?;
         let event_timestamp = event.created_at.as_u64();
 
         if let Some(current_time) = current_event_time {
@@ -57,14 +59,19 @@ impl Whitenoise {
         let contacts_from_event = NostrManager::pubkeys_from_event(&event);
 
         // Use the new bulk update method and get the list of newly created users
-        let newly_created_pubkeys = account.update_follows_from_event(contacts_from_event.clone(), event_timestamp, &self.database).await?;
+        let newly_created_pubkeys = account
+            .update_follows_from_event(contacts_from_event.clone(), event_timestamp, &self.database)
+            .await?;
 
         // Store count for logging before consuming the vector
         let newly_created_count = newly_created_pubkeys.len();
 
         // Background fetch user data for newly created users
         for pubkey in newly_created_pubkeys {
-            if let Ok((user, _)) = crate::whitenoise::users::User::find_or_create_by_pubkey(&pubkey, &self.database).await {
+            if let Ok((user, _)) =
+                crate::whitenoise::users::User::find_or_create_by_pubkey(&pubkey, &self.database)
+                    .await
+            {
                 self.background_fetch_user_data(&user).await?;
             }
         }
