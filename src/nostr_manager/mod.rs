@@ -496,6 +496,7 @@ impl NostrManager {
             mut metadata_events,
             mut relay_events,
             mut contact_list_events,
+            fetched_contact_list,
             mut giftwrap_events,
             mut group_messages,
         ) = self
@@ -518,11 +519,12 @@ impl NostrManager {
                 };
 
                 // Fetch the account's contact list using our custom method
-                let mut contacts_and_self = match self
+                let fetched_contact_list = self
                     .fetch_contact_list_events(account.pubkey, &user_relays)
-                    .await
-                {
-                    Ok(Some(contact_list_event)) => Self::pubkeys_from_event(&contact_list_event),
+                    .await;
+
+                let mut contacts_and_self = match &fetched_contact_list {
+                    Ok(Some(contact_list_event)) => Self::pubkeys_from_event(contact_list_event),
                     Ok(None) => {
                         tracing::debug!(
                             target: "whitenoise::nostr_manager::sync_all_user_data",
@@ -582,6 +584,7 @@ impl NostrManager {
                     metadata_events,
                     relay_events,
                     contact_list_events,
+                    fetched_contact_list,
                     giftwrap_events,
                     group_messages,
                 ))
@@ -590,6 +593,20 @@ impl NostrManager {
 
         let whitenoise = Whitenoise::get_instance()
             .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+
+        // Process the fetched contact list first (if it exists)
+        // This ensures existing contact lists are processed during login even if no new events are streamed
+        if let Ok(Some(contact_list_event)) = fetched_contact_list {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::sync_all_user_data",
+                "Processing fetched contact list for account {}",
+                account.pubkey.to_hex()
+            );
+            whitenoise
+                .handle_contact_list(account, contact_list_event)
+                .await
+                .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+        }
 
         while let Some(event) = metadata_events.next().await {
             whitenoise
