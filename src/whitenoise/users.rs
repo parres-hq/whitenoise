@@ -269,15 +269,15 @@ impl User {
 
             match newest_stored_timestamp {
                 Some(stored_timestamp)
-                    if new_timestamp.timestamp() <= stored_timestamp.timestamp() =>
+                    if new_timestamp.timestamp_millis() <= stored_timestamp.timestamp_millis() =>
                 {
                     tracing::debug!(
                         target: "whitenoise::users::sync_relay_urls",
                         "Ignoring stale {:?} relay event for user {} (event: {}, stored: {})",
                         relay_type,
                         self.pubkey,
-                        new_timestamp.timestamp(),
-                        stored_timestamp.timestamp()
+                        new_timestamp.timestamp_millis(),
+                        stored_timestamp.timestamp_millis()
                     );
                     return Ok(false);
                 }
@@ -397,9 +397,9 @@ impl User {
 
         match network_relay_result {
             Some((network_relay_urls, event_timestamp)) => {
-                // Convert Nostr timestamp to DateTime<Utc>
+                // Convert Nostr timestamp to DateTime<Utc> (convert seconds to milliseconds)
                 let event_created_at = Some(
-                    DateTime::from_timestamp(event_timestamp.as_u64() as i64, 0)
+                    DateTime::from_timestamp_millis((event_timestamp.as_u64() * 1000) as i64)
                         .unwrap_or_else(Utc::now),
                 );
                 self.sync_relay_urls(

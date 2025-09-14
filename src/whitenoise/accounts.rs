@@ -209,6 +209,8 @@ impl Account {
         tracing::debug!(target: "whitenoise::accounts::update_metadata", "Updating metadata for account: {:?}", self.pubkey);
         let mut user = self.user(&whitenoise.database).await?;
         user.metadata = metadata.clone();
+        // Update the event timestamp to current time to ensure this update takes precedence over older events
+        user.event_created_at = Some(chrono::Utc::now());
         user.save(&whitenoise.database).await?;
         whitenoise.background_publish_account_metadata(self).await?;
         Ok(())

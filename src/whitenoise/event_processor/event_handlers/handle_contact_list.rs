@@ -34,7 +34,7 @@ impl Whitenoise {
         let current_event_time = account
             .get_latest_follow_list_timestamp(&self.database)
             .await?;
-        let event_timestamp = event.created_at.as_u64();
+        let event_timestamp = event.created_at.as_u64() * 1000; // Convert seconds to milliseconds
 
         if let Some(current_time) = current_event_time {
             if event_timestamp <= current_time {
