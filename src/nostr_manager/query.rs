@@ -91,6 +91,33 @@ impl NostrManager {
             .max_by_key(|e| (e.created_at, e.id));
         Ok(latest)
     }
+
+    pub(crate) async fn fetch_contact_list_events(
+        &self,
+        pubkey: PublicKey,
+        relays: &[RelayUrl],
+    ) -> Result<Option<Event>> {
+        let filter = Filter::new().author(pubkey).kind(Kind::ContactList);
+        let events = self
+            .client
+            .fetch_events_from(relays, filter, self.timeout)
+            .await?;
+
+        // Filter out events with timestamps too far in the future
+        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
+        let latest = events
+            .into_iter()
+            .filter(|e| e.created_at <= cutoff)
+            .max_by_key(|e| (e.created_at, e.id));
+
+        tracing::debug!(
+            "Fetched contact list events for {}, using latest: {:?}",
+            pubkey.to_hex(),
+            latest.as_ref().map(|e| e.created_at)
+        );
+
+        Ok(latest)
+    }
 }
 
 #[cfg(test)]

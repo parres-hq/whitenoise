@@ -500,18 +500,46 @@ impl NostrManager {
             mut group_messages,
         ) = self
             .with_signer(signer, || async {
-                let mut contacts_and_self =
-                    match self.client.get_contact_list_public_keys(self.timeout).await {
-                        Ok(contacts) => contacts,
-                        Err(e) => {
-                            tracing::error!(
-                                target: "whitenoise::nostr_manager::fetch_all_user_data",
-                                "Failed to get contact list public keys: {}",
-                                e
-                            );
-                            return Err(NostrManagerError::Client(e));
-                        }
-                    };
+                // Get whitenoise instance for database access
+                let whitenoise = Whitenoise::get_instance()
+                    .map_err(|e| NostrManagerError::EventProcessingError(e.to_string()))?;
+
+                // Get user's relay information for contact list fetching
+                let user_relays = match account.nip65_relays(whitenoise).await {
+                    Ok(relays) => relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
+                    Err(_) => {
+                        // Fallback to default relays if user has no specific relays
+                        vec![
+                            RelayUrl::parse("wss://relay.damus.io").unwrap(),
+                            RelayUrl::parse("wss://nos.lol").unwrap(),
+                            RelayUrl::parse("wss://relay.nostr.band").unwrap(),
+                        ]
+                    }
+                };
+
+                // Fetch the account's contact list using our custom method
+                let mut contacts_and_self = match self.fetch_contact_list_events(account.pubkey, &user_relays).await {
+                    Ok(Some(contact_list_event)) => {
+                        Self::pubkeys_from_event(&contact_list_event)
+                    },
+                    Ok(None) => {
+                        tracing::debug!(
+                            target: "whitenoise::nostr_manager::sync_all_user_data",
+                            "No contact list found for account {}",
+                            account.pubkey.to_hex()
+                        );
+                        Vec::new()
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            target: "whitenoise::nostr_manager::sync_all_user_data",
+                            "Failed to fetch contact list for account {}: {}",
+                            account.pubkey.to_hex(),
+                            e
+                        );
+                        Vec::new()
+                    }
+                };
                 contacts_and_self.push(account.pubkey);
 
                 let metadata_filter = Filter::new()

@@ -8,3 +8,7 @@ ALTER TABLE users ADD COLUMN event_created_at INTEGER DEFAULT NULL;
 -- Add event_created_at to user_relays table for relay list events
 -- NULL indicates we don't have the original event timestamp (legacy data)
 ALTER TABLE user_relays ADD COLUMN event_created_at INTEGER DEFAULT NULL;
+
+-- Add event_created_at to account_follows table for contact list events
+-- NULL indicates we don't have the original event timestamp (legacy data)
+ALTER TABLE account_follows ADD COLUMN event_created_at INTEGER DEFAULT NULL;

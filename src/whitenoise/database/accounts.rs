@@ -311,6 +311,117 @@ impl Account {
         Ok(())
     }
 
+    /// Updates this account's follow list from a ContactList event.
+    ///
+    /// This method atomically replaces all current follows with the follows from the
+    /// given ContactList event, tracking the event timestamp to prevent stale overwrites.
+    /// All operations are performed within a transaction to ensure data consistency.
+    ///
+    /// # Arguments
+    ///
+    /// * `contacts` - Vector of public keys from the ContactList event
+    /// * `event_timestamp` - Timestamp of the ContactList event (as u64)
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Vec<PublicKey>)` containing the public keys of newly created users.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operations fail.
+    pub(crate) async fn update_follows_from_event(
+        &self,
+        contacts: Vec<nostr_sdk::PublicKey>,
+        event_timestamp: u64,
+        database: &Database,
+    ) -> Result<Vec<nostr_sdk::PublicKey>, WhitenoiseError> {
+        use crate::whitenoise::users::User;
+        use chrono::Utc;
+
+        // Start transaction for atomic operations
+        let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
+
+        // Remove all current follows for this account
+        sqlx::query("DELETE FROM account_follows WHERE account_id = ?")
+            .bind(self.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        // Store the length before consuming the vector
+        let contacts_len = contacts.len();
+        let mut newly_created_users = Vec::new();
+
+        // Insert new follows with event timestamp
+        for pubkey in contacts {
+            let (user, newly_created) = User::find_or_create_by_pubkey(&pubkey, database).await?;
+
+            if newly_created {
+                // Track newly created users so the caller can fetch their metadata
+                newly_created_users.push(pubkey);
+                tracing::debug!("Created new user for follow: {}", pubkey.to_hex());
+            }
+
+            sqlx::query("INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+                .bind(self.id)
+                .bind(user.id)
+                .bind(event_timestamp as i64)
+                .bind(Utc::now().timestamp_millis())
+                .bind(Utc::now().timestamp_millis())
+                .execute(&mut *tx)
+                .await
+                .map_err(DatabaseError::Sqlx)?;
+        }
+
+        // Commit transaction
+        tx.commit().await.map_err(DatabaseError::Sqlx)?;
+
+        tracing::debug!(
+            target: "whitenoise::database::accounts::update_follows_from_event",
+            "Updated follows for account {} with {} contacts from event timestamp {}, {} newly created users",
+            self.pubkey.to_hex(),
+            contacts_len,
+            event_timestamp,
+            newly_created_users.len()
+        );
+
+        Ok(newly_created_users)
+    }
+
+    /// Gets the newest event timestamp among existing follows for this account.
+    ///
+    /// This method queries the account_follows table to find the latest event_created_at
+    /// timestamp among all follows for this account. This is used to determine if a
+    /// ContactList event is newer than what we already have stored.
+    ///
+    /// # Arguments
+    ///
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Some(timestamp))` if follows exist and have event timestamps,
+    /// `Ok(None)` if no follows exist or all follows have NULL event_created_at.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database query fails.
+    pub(crate) async fn get_latest_follow_list_timestamp(
+        &self,
+        database: &Database,
+    ) -> Result<Option<u64>, WhitenoiseError> {
+        let result = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(event_created_at) FROM account_follows WHERE account_id = ?",
+        )
+        .bind(self.id)
+        .fetch_one(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(result.map(|ts| ts as u64))
+    }
+
     /// Saves this account to the database.
     ///
     /// # Arguments
