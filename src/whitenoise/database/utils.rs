@@ -51,6 +51,41 @@ where
     ))
 }
 
+/// Parses an optional timestamp column, returning None for NULL values
+pub(crate) fn parse_optional_timestamp<'r, R>(
+    row: &'r R,
+    column_name: &'r str,
+) -> Result<Option<DateTime<Utc>>, sqlx::Error>
+where
+    R: Row,
+    &'r str: sqlx::ColumnIndex<R>,
+    i64: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    String: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+{
+    // Try INTEGER timestamp first (milliseconds)
+    if let Ok(timestamp_ms) = row.try_get::<Option<i64>, _>(column_name) {
+        return match timestamp_ms {
+            Some(ms) => DateTime::from_timestamp_millis(ms)
+                .map(Some)
+                .ok_or_else(|| create_column_decode_error(column_name, "Invalid timestamp value")),
+            None => Ok(None),
+        };
+    }
+
+    // Fall back to TEXT datetime string
+    if let Ok(datetime_str) = row.try_get::<Option<String>, _>(column_name) {
+        return match datetime_str {
+            Some(s) => parse_datetime_string(&s, column_name).map(Some),
+            None => Ok(None),
+        };
+    }
+
+    Err(create_column_decode_error(
+        column_name,
+        "Could not parse as INTEGER or DATETIME",
+    ))
+}
+
 fn parse_datetime_string(
     datetime_str: &str,
     column_name: &str,

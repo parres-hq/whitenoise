@@ -137,7 +137,7 @@ impl Account {
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.add_relay(relay, relay_type, &whitenoise.database)
+        user.add_relay(relay, relay_type, Some(Utc::now()), &whitenoise.database)
             .await?;
         whitenoise
             .background_publish_account_relay_list(self, relay_type)
@@ -641,15 +641,17 @@ impl Whitenoise {
         relay_type: RelayType,
         source_relays: &[Relay],
     ) -> Result<Vec<Relay>> {
-        let relay_urls = self
+        let relay_result = self
             .nostr
             .fetch_user_relays(pubkey, relay_type, source_relays)
             .await?;
 
         let mut relays = Vec::new();
-        for url in relay_urls {
-            let relay = self.find_or_create_relay_by_url(&url).await?;
-            relays.push(relay);
+        if let Some((relay_urls, _timestamp)) = relay_result {
+            for url in relay_urls {
+                let relay = self.find_or_create_relay_by_url(&url).await?;
+                relays.push(relay);
+            }
         }
 
         Ok(relays)
@@ -1080,11 +1082,11 @@ mod tests {
 
         // Verify that the relay list events were published
         assert!(
-            !inbox_events.is_empty(),
+            inbox_events.is_some() && !inbox_events.unwrap().0.is_empty(),
             "Inbox relays list (kind 10050) should be published for new accounts"
         );
         assert!(
-            !key_package_relays_events.is_empty(),
+            key_package_relays_events.is_some() && !key_package_relays_events.unwrap().0.is_empty(),
             "Key package relays list (kind 10051) should be published for new accounts"
         );
         assert!(
@@ -1361,7 +1363,7 @@ mod tests {
             .await
             .expect("Failed to fetch metadata from relays");
 
-        if let Some(published_metadata) = fetched_metadata {
+        if let Some((published_metadata, _timestamp)) = fetched_metadata {
             assert_eq!(published_metadata.name, new_metadata.name);
             assert_eq!(published_metadata.display_name, new_metadata.display_name);
             assert_eq!(published_metadata.about, new_metadata.about);

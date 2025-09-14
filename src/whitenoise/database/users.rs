@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
 
-use super::{relays::RelayRow, utils::parse_timestamp, Database, DatabaseError};
+use super::{relays::RelayRow, utils::{parse_timestamp, parse_optional_timestamp}, Database, DatabaseError};
 use crate::{
     whitenoise::{
         relays::{Relay, RelayType},
@@ -22,6 +22,8 @@ pub(crate) struct UserRow {
     pub created_at: DateTime<Utc>,
     // updated_at is the timestamp of the last update
     pub updated_at: DateTime<Utc>,
+    // event_created_at is the timestamp of the original metadata event (None for legacy data)
+    pub event_created_at: Option<DateTime<Utc>>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for UserRow
@@ -51,6 +53,7 @@ where
 
         let created_at = parse_timestamp(row, "created_at")?;
         let updated_at = parse_timestamp(row, "updated_at")?;
+        let event_created_at = parse_optional_timestamp(row, "event_created_at")?;
 
         Ok(UserRow {
             id,
@@ -58,6 +61,7 @@ where
             metadata,
             created_at,
             updated_at,
+            event_created_at,
         })
     }
 }
@@ -70,6 +74,7 @@ impl From<UserRow> for User {
             metadata: val.metadata,
             created_at: val.created_at,
             updated_at: val.updated_at,
+            event_created_at: val.event_created_at,
         }
     }
 }
@@ -111,6 +116,7 @@ impl User {
                     metadata: Metadata::new(),
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
+                    event_created_at: None,
                 };
                 user = user.save(database).await?;
                 Ok((user, true))
@@ -215,12 +221,13 @@ impl User {
 
         // Use INSERT ON CONFLICT to handle both insert and update cases without deleting/replacing rows
         sqlx::query(
-            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET metadata = excluded.metadata, updated_at = ?",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET metadata = excluded.metadata, updated_at = ?, event_created_at = excluded.event_created_at",
         )
         .bind(self.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
+        .bind(self.event_created_at.map(|dt| dt.timestamp_millis()))
         .bind(Utc::now().timestamp_millis())
         .execute(&mut *tx)
         .await
@@ -245,6 +252,7 @@ impl User {
     ///
     /// * `relay` - A reference to the `Relay` to add
     /// * `relay_type` - The type of relay association
+    /// * `event_created_at` - The timestamp of the original relay list event
     /// * `database` - A reference to the `Database` instance for database operations
     ///
     /// # Returns
@@ -258,19 +266,21 @@ impl User {
         &self,
         relay: &Relay,
         relay_type: RelayType,
+        event_created_at: Option<DateTime<Utc>>,
         database: &Database,
     ) -> Result<(), WhitenoiseError> {
         let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
         let relay_id = relay.id.expect("Relay should have ID after save");
 
         sqlx::query(
-            "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(user_id)
         .bind(relay_id)
         .bind(String::from(relay_type))
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
+        .bind(event_created_at.map(|dt| dt.timestamp_millis()))
         .execute(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)
@@ -615,6 +625,7 @@ mod tests {
             metadata: Metadata::new().name("User One"),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            event_created_at: None,
         };
         let user2 = User {
             id: None,
@@ -622,6 +633,7 @@ mod tests {
             metadata: Metadata::new().name("User Two"),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
+            event_created_at: None,
         };
 
         let saved1 = user1.save(&whitenoise.database).await.unwrap();
@@ -657,6 +669,7 @@ mod tests {
             metadata: test_metadata.clone(),
             created_at: test_created_at,
             updated_at: test_updated_at,
+            event_created_at: None,
         };
         let result = user.save(&whitenoise.database).await;
         assert!(result.is_ok());
@@ -697,6 +710,7 @@ mod tests {
             metadata: test_metadata.clone(),
             created_at: test_created_at,
             updated_at: test_updated_at,
+            event_created_at: None,
         };
 
         let result = user.save(&whitenoise.database).await;
@@ -759,6 +773,7 @@ mod tests {
             metadata: test_metadata.clone(),
             created_at: test_created_at,
             updated_at: test_updated_at,
+            event_created_at: None,
         };
 
         // Save the user
@@ -837,6 +852,7 @@ mod tests {
                 metadata: metadata.clone(),
                 created_at: test_timestamp,
                 updated_at: test_timestamp,
+                event_created_at: None,
             };
 
             // Save the user
@@ -903,6 +919,7 @@ mod tests {
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         // Save the user first
@@ -1027,6 +1044,7 @@ mod tests {
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         // Save the user first
@@ -1061,6 +1079,7 @@ mod tests {
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1122,6 +1141,7 @@ mod tests {
             metadata: Metadata::new().name("User 1"),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         let user2 = User {
@@ -1130,6 +1150,7 @@ mod tests {
             metadata: Metadata::new().name("User 2"),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user1.save(&whitenoise.database).await.unwrap();
@@ -1221,6 +1242,7 @@ mod tests {
             metadata: test_metadata,
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1237,7 +1259,12 @@ mod tests {
 
         // Add relay association - should work with existing relay
         let result = loaded_user
-            .add_relay(&saved_relay, RelayType::Nip65, &whitenoise.database)
+            .add_relay(
+                &saved_relay,
+                RelayType::Nip65,
+                None,
+                &whitenoise.database,
+            )
             .await;
         assert!(result.is_ok());
 
@@ -1267,6 +1294,7 @@ mod tests {
             metadata: test_metadata,
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1289,7 +1317,12 @@ mod tests {
 
         // Add relay association
         let result = loaded_user
-            .add_relay(&new_relay, RelayType::Inbox, &whitenoise.database)
+            .add_relay(
+                &new_relay,
+                RelayType::Inbox,
+                None,
+                &whitenoise.database,
+            )
             .await;
         assert!(result.is_ok());
 
@@ -1323,6 +1356,7 @@ mod tests {
             metadata: test_metadata,
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1337,7 +1371,12 @@ mod tests {
             .await
             .unwrap();
         loaded_user
-            .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+            .add_relay(
+                &relay,
+                RelayType::Nip65,
+                None,
+                &whitenoise.database,
+            )
             .await
             .unwrap();
 
@@ -1379,6 +1418,7 @@ mod tests {
             metadata: test_metadata,
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1419,6 +1459,7 @@ mod tests {
             metadata: test_metadata,
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1461,6 +1502,7 @@ mod tests {
             metadata: test_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();

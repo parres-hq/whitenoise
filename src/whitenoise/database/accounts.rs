@@ -197,7 +197,7 @@ impl Account {
     /// Returns a [`WhitenoiseError::AccountNotFound`] if the database query fails.
     pub(crate) async fn follows(&self, database: &Database) -> Result<Vec<User>, WhitenoiseError> {
         let user_rows = sqlx::query_as::<_, UserRow>(
-            "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at
+            "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at, u.event_created_at
              FROM account_follows af
              JOIN users u ON af.user_id = u.id
              WHERE af.account_id = ?",
@@ -215,6 +215,7 @@ impl Account {
                 metadata: row.metadata,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
+                event_created_at: row.event_created_at,
             })
             .collect();
 
@@ -856,6 +857,7 @@ mod tests {
                 metadata: metadata.clone(),
                 created_at: test_timestamp,
                 updated_at: test_timestamp,
+                event_created_at: None,
             };
 
             // Save user first
@@ -980,6 +982,7 @@ mod tests {
             metadata: user_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         // Save user
@@ -1057,6 +1060,7 @@ mod tests {
             metadata: user_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
+            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1154,6 +1158,7 @@ mod tests {
                 metadata: user_metadata,
                 created_at: test_timestamp,
                 updated_at: test_timestamp,
+                event_created_at: None,
             };
 
             user.save(&whitenoise.database).await.unwrap();

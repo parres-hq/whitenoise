@@ -1,3 +1,4 @@
+use chrono::DateTime;
 use nostr_sdk::prelude::*;
 
 use crate::whitenoise::{
@@ -15,8 +16,27 @@ impl Whitenoise {
                 // Only update metadata if this event is newer than our current data
                 // For newly created users, always accept the metadata
                 let event_timestamp = event.created_at.as_u64() as i64;
-                if newly_created || event_timestamp > user.updated_at.timestamp() {
+                let should_update = newly_created || match user.event_created_at {
+                    None => {
+                        // No stored event timestamp (legacy data), accept the new event
+                        tracing::debug!(
+                            target: "whitenoise::event_processor::handle_metadata",
+                            "No stored event timestamp for user {}, accepting new event",
+                            event.pubkey
+                        );
+                        true
+                    }
+                    Some(stored_timestamp) => {
+                        // Compare with the actual stored event timestamp
+                        event_timestamp > stored_timestamp.timestamp()
+                    }
+                };
+
+                if should_update {
                     user.metadata = metadata;
+                    // Update the event timestamp to the new event's timestamp
+                    user.event_created_at = Some(DateTime::from_timestamp(event_timestamp, 0)
+                        .unwrap_or_else(chrono::Utc::now));
                     let _ = user.save(&self.database).await?;
                     tracing::debug!(
                         target: "whitenoise::event_processor::handle_metadata",
@@ -25,12 +45,15 @@ impl Whitenoise {
                         event_timestamp
                     );
                 } else {
+                    let stored_timestamp = user.event_created_at
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0);
                     tracing::debug!(
                         target: "whitenoise::event_processor::handle_metadata",
-                        "Ignoring stale metadata event for user {} (event: {}, current: {})",
+                        "Ignoring stale metadata event for user {} (event: {}, stored: {})",
                         event.pubkey,
                         event_timestamp,
-                        user.updated_at.timestamp()
+                        stored_timestamp
                     );
                 }
                 Ok(())
