@@ -61,8 +61,7 @@ impl TestCase for UpdateMetadataTestCase {
         // Give events time to deliver and process
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-        // Verify the update worked by fetching the account metadata again
-        // Note: update_metadata() updates the database directly, so we should see the changes immediately
+        // Verify the update worked
         let updated_metadata = account.metadata(context.whitenoise).await?;
         assert_eq!(
             updated_metadata.name, self.metadata.name,
