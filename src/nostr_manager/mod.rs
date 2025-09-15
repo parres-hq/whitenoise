@@ -19,9 +19,6 @@ pub mod query;
 pub mod subscriptions;
 pub mod utils;
 
-// Re-export utility functions
-pub use utils::pubkeys_from_event;
-
 #[derive(Error, Debug)]
 pub enum NostrManagerError {
     #[error("Whitenoise Instance Error: {0}")]

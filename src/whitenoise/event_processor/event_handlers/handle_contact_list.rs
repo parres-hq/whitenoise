@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::{
-    nostr_manager::pubkeys_from_event,
+    nostr_manager::utils::pubkeys_from_event,
     whitenoise::{
         accounts::Account,
         database::processed_events::ProcessedEvent,

@@ -5,7 +5,7 @@ use nostr_sdk::prelude::*;
 use crate::nostr_manager::NostrManager;
 
 /// Extracts public keys from an event's tags.
-pub fn pubkeys_from_event(event: &Event) -> Vec<PublicKey> {
+pub(crate) fn pubkeys_from_event(event: &Event) -> Vec<PublicKey> {
     event
         .tags
         .iter()
