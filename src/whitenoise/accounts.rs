@@ -859,11 +859,7 @@ impl Whitenoise {
                 Ok(relays) => relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
                 Err(_) => {
                     // Fallback to default relays if user has no specific relays
-                    vec![
-                        RelayUrl::parse("wss://relay.damus.io").unwrap(),
-                        RelayUrl::parse("wss://nos.lol").unwrap(),
-                        RelayUrl::parse("wss://relay.nostr.band").unwrap(),
-                    ]
+                    Relay::defaults().into_iter().map(|r| r.url).collect::<Vec<_>>()
                 }
             };
 
