@@ -71,10 +71,7 @@ impl Whitenoise {
 
         // Use the new bulk update method and get the list of newly created users
         let newly_created_pubkeys = account
-            .update_follows_from_event(
-                contacts_from_event.clone(),
-                &self.database,
-            )
+            .update_follows_from_event(contacts_from_event.clone(), &self.database)
             .await?;
 
         // Store count for logging before consuming the vector

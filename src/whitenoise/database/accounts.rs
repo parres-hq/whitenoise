@@ -335,7 +335,11 @@ impl Account {
         database: &Database,
     ) -> Result<Vec<nostr_sdk::PublicKey>, WhitenoiseError> {
         // Deduplicate contacts to prevent unique constraint violations
-        let unique_contacts: Vec<_> = contacts.into_iter().collect::<HashSet<_>>().into_iter().collect();
+        let unique_contacts: Vec<_> = contacts
+            .into_iter()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
         let contacts_len = unique_contacts.len();
 
         // Start transaction for atomic operations
@@ -1357,9 +1361,7 @@ mod tests {
         // Test with empty contacts list
         let contacts = vec![];
 
-        let result = account
-            .update_follows_from_event(contacts, &database)
-            .await;
+        let result = account.update_follows_from_event(contacts, &database).await;
 
         assert!(result.is_ok());
         let newly_created = result.unwrap();
@@ -1715,9 +1717,7 @@ mod tests {
 
         let contacts = vec![nostr_sdk::Keys::generate().public_key()];
 
-        let result = account
-            .update_follows_from_event(contacts, &database)
-            .await;
+        let result = account.update_follows_from_event(contacts, &database).await;
 
         // Should fail due to closed database
         assert!(result.is_err());
