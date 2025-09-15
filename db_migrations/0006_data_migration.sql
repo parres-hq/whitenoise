@@ -26,15 +26,6 @@ FROM accounts
 WHERE pubkey IS NOT NULL
   AND TRIM(pubkey) != '';
 
--- Step 1.5: FIXES EDGE CASE - Create users for accounts that don't have corresponding contacts
--- This ensures every account will have a user record before Step 6
-INSERT INTO users (pubkey, metadata)
-SELECT
-    pubkey,
-    NULL as metadata  -- No metadata available for accounts without contacts
-FROM accounts
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.pubkey = accounts.pubkey);
-
 -- Step 2: Extract and insert unique relay URLs from contacts
 -- Extract from nip65_relays
 INSERT OR IGNORE INTO relays (url)
