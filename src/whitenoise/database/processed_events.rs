@@ -13,6 +13,7 @@ pub struct ProcessedEvent {
     pub created_at: DateTime<Utc>,
     pub event_created_at: Option<DateTime<Utc>>,
     pub event_kind: Option<u16>,
+    pub author: Option<PublicKey>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for ProcessedEvent
@@ -47,6 +48,14 @@ where
             .try_get::<Option<i64>, &str>("event_kind")?
             .map(|kind| kind as u16);
 
+        // Handle nullable author
+        let author = match row.try_get::<Option<String>, &str>("author")? {
+            Some(author_hex) => Some(PublicKey::from_hex(&author_hex).map_err(|e| {
+                sqlx::Error::Decode(format!("Invalid author public key: {}", e).into())
+            })?),
+            None => None,
+        };
+
         Ok(ProcessedEvent {
             id,
             event_id,
@@ -54,6 +63,7 @@ where
             created_at,
             event_created_at,
             event_kind,
+            author,
         })
     }
 }
@@ -65,18 +75,21 @@ impl ProcessedEvent {
         account_id: Option<i64>,
         event_created_at: Option<DateTime<Utc>>,
         event_kind: Option<u16>,
+        author: Option<&PublicKey>,
         database: &Database,
     ) -> Result<(), DatabaseError> {
         // Convert event_created_at to milliseconds if present
         let event_timestamp_ms = event_created_at.map(|dt| dt.timestamp_millis());
         let event_kind_i64 = event_kind.map(|k| k as i64);
+        let author_hex = author.map(|pk| pk.to_hex());
 
         // Use INSERT OR IGNORE to handle potential race conditions
-        sqlx::query("INSERT OR IGNORE INTO processed_events (event_id, account_id, event_created_at, event_kind) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT OR IGNORE INTO processed_events (event_id, account_id, event_created_at, event_kind, author) VALUES (?, ?, ?, ?, ?)")
             .bind(event_id.to_hex())
             .bind(account_id)
             .bind(event_timestamp_ms)
             .bind(event_kind_i64)
+            .bind(author_hex)
             .execute(&database.pool)
             .await?;
 
@@ -85,6 +98,7 @@ impl ProcessedEvent {
 
     /// Checks if we already processed a specific event
     /// - account_id: Some(id) for account-specific processing, None for global processing
+    /// - author: Optional event author for enhanced duplicate detection
     pub(crate) async fn exists(
         event_id: &EventId,
         account_id: Option<i64>,
@@ -106,6 +120,41 @@ impl ProcessedEvent {
         if let Some(id) = bind_account_id {
             query_builder = query_builder.bind(id);
         }
+
+        let result: Option<(bool,)> = query_builder.fetch_optional(&database.pool).await?;
+
+        Ok(result.map(|(exists,)| exists).unwrap_or(false))
+    }
+
+    /// Enhanced version that checks if we already processed a specific event with author consideration
+    /// - account_id: Some(id) for account-specific processing, None for global processing
+    /// - author: Event author for enhanced duplicate detection - avoids processing same event from same author multiple times
+    pub(crate) async fn exists_with_author(
+        event_id: &EventId,
+        account_id: Option<i64>,
+        author: Option<&PublicKey>,
+        database: &Database,
+    ) -> Result<bool, DatabaseError> {
+        let author_hex = author.map(|pk| pk.to_hex());
+
+        let (query, bind_account_id) = match account_id {
+            Some(id) => (
+                "SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = ? AND account_id = ? AND (author = ? OR author IS NULL))",
+                Some(id),
+            ),
+            None => (
+                "SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = ? AND account_id IS NULL AND (author = ? OR author IS NULL))",
+                None,
+            ),
+        };
+
+        let mut query_builder = sqlx::query_as(query).bind(event_id.to_hex());
+
+        if let Some(id) = bind_account_id {
+            query_builder = query_builder.bind(id);
+        }
+
+        query_builder = query_builder.bind(author_hex);
 
         let result: Option<(bool,)> = query_builder.fetch_optional(&database.pool).await?;
 
@@ -229,6 +278,7 @@ mod tests {
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 event_created_at INTEGER DEFAULT NULL,
                 event_kind INTEGER DEFAULT NULL,
+                author TEXT DEFAULT NULL,
                 FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
                 UNIQUE(event_id, account_id)
             )",
@@ -303,7 +353,7 @@ mod tests {
 
         // Fetch and verify
         let row: ProcessedEvent = sqlx::query_as(
-            "SELECT id, event_id, account_id, created_at, event_created_at, event_kind FROM processed_events WHERE account_id = ?",
+            "SELECT id, event_id, account_id, created_at, event_created_at, event_kind, author FROM processed_events WHERE account_id = ?",
         )
         .bind(account_id)
         .fetch_one(&pool)
@@ -335,6 +385,7 @@ mod tests {
             Some(account_id),
             event_timestamp,
             event_kind,
+            None, // No author for test
             &database,
         )
         .await;
@@ -368,6 +419,7 @@ mod tests {
             Some(account_id),
             event_timestamp,
             event_kind,
+            None, // No author for test
             &database,
         )
         .await;
@@ -376,6 +428,7 @@ mod tests {
             Some(account_id),
             event_timestamp,
             event_kind,
+            None, // No author for test
             &database,
         )
         .await;
@@ -409,6 +462,7 @@ mod tests {
             Some(account_id),
             Some(Utc::now()),
             Some(1),
+            None, // No author for test
             &database,
         )
         .await
@@ -451,6 +505,7 @@ mod tests {
             Some(account_id1),
             Some(Utc::now()),
             Some(1),
+            None, // No author for test
             &database,
         )
         .await
@@ -490,6 +545,7 @@ mod tests {
             Some(account_id1),
             Some(Utc::now()),
             Some(1),
+            None, // No author for test
             &database,
         )
         .await
@@ -499,6 +555,7 @@ mod tests {
             Some(account_id2),
             Some(Utc::now()),
             Some(1),
+            None, // No author for test
             &database,
         )
         .await
@@ -529,6 +586,7 @@ mod tests {
             created_at: now,
             event_created_at: Some(now),
             event_kind: Some(1),
+            author: None,
         };
 
         let event2 = event1.clone();
@@ -556,6 +614,7 @@ mod tests {
             Some(account_id),
             Some(older_timestamp),
             Some(3),
+            None, // No author for test
             &database,
         )
         .await
@@ -565,6 +624,7 @@ mod tests {
             Some(account_id),
             Some(newer_timestamp),
             Some(3),
+            None, // No author for test
             &database,
         )
         .await
@@ -612,6 +672,7 @@ mod tests {
             Some(account_id),
             Some(timestamp),
             Some(3),
+            None, // No author for test
             &database,
         )
         .await
@@ -645,9 +706,16 @@ mod tests {
         let timestamp = Utc::now();
 
         // Create a NIP-65 relay event (kind 10002) as global event
-        ProcessedEvent::create(&event_id, None, Some(timestamp), Some(10002), &database)
-            .await
-            .unwrap();
+        ProcessedEvent::create(
+            &event_id,
+            None,
+            Some(timestamp),
+            Some(10002),
+            None,
+            &database,
+        )
+        .await
+        .unwrap();
 
         // Test getting newest relay timestamp for NIP-65
         let result =

@@ -19,46 +19,26 @@ impl Whitenoise {
                 // Note: Nostr event timestamps are in seconds, but we store in milliseconds for consistency
                 let event_timestamp =
                     DateTime::from_timestamp_millis((event.created_at.as_u64() * 1000) as i64)
-                        .unwrap_or(DateTime::UNIX_EPOCH);
+                        .ok_or_else(|| {
+                            WhitenoiseError::EventProcessor(format!(
+                                "Invalid timestamp in metadata event: {}",
+                                event.created_at.as_u64()
+                            ))
+                        })?;
 
                 let should_update = newly_created
-                    || {
-                        // Check processed_events for newest metadata event
-                        let newest_processed_timestamp =
-                            ProcessedEvent::newest_event_timestamp_for_kinds(
-                                None, // Global events (user metadata)
-                                &[0], // Metadata events are kind 0
-                                &self.database,
-                            )
-                            .await?;
+                    || user.metadata == Metadata::default()
+                    || event_timestamp.timestamp_millis() > user.updated_at.timestamp_millis();
 
-                        match newest_processed_timestamp {
-                            None => {
-                                // No processed metadata events, accept the new event
-                                tracing::debug!(
-                                    target: "whitenoise::event_processor::handle_metadata",
-                                    "No processed metadata events for user {}, accepting new event",
-                                    event.pubkey
-                                );
-                                true
-                            }
-                            Some(stored_timestamp) => {
-                                // Compare with the stored processed event timestamp
-                                let is_newer = event_timestamp.timestamp_millis()
-                                    > stored_timestamp.timestamp_millis();
-                                if !is_newer {
-                                    tracing::debug!(
-                                        target: "whitenoise::event_processor::handle_metadata",
-                                        "Ignoring stale metadata event for user {} (event: {}, stored: {})",
-                                        event.pubkey,
-                                        event_timestamp.timestamp_millis(),
-                                        stored_timestamp.timestamp_millis()
-                                    );
-                                }
-                                is_newer
-                            }
-                        }
-                    };
+                if !should_update {
+                    tracing::debug!(
+                        target: "whitenoise::event_processor::handle_metadata",
+                        "Ignoring stale metadata event for user {} (event: {}, user_updated: {})",
+                        event.pubkey,
+                        event_timestamp.timestamp_millis(),
+                        user.updated_at.timestamp_millis()
+                    );
+                }
 
                 if should_update {
                     user.metadata = metadata;
@@ -70,7 +50,8 @@ impl Whitenoise {
                         &event.id,
                         None, // Global events (user metadata)
                         Some(event_timestamp),
-                        Some(0), // Metadata events are kind 0
+                        Some(0),             // Metadata events are kind 0
+                        Some(&event.pubkey), // Track the author
                         &self.database,
                     )
                     .await?;

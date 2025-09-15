@@ -174,22 +174,39 @@ impl Whitenoise {
         event: &Event,
         account: &Account,
     ) -> Result<Option<&'static str>> {
-        // Check if we already processed this event
+        // Check if we already processed this event (with author consideration)
         let already_processed = match self
             .nostr
             .event_tracker
-            .already_processed_account_event(&event.id, &account.pubkey)
+            .already_processed_account_event_with_author(&event.id, &account.pubkey, &event.pubkey)
             .await
         {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(
                     target: "whitenoise::event_processor::should_skip_account_event_processing",
-                    "Already processed check failed for {}: {}",
+                    "Already processed check with author failed for {}: {}",
                     event.id.to_hex(),
                     e
                 );
-                false
+                // Fallback to old method if new one fails
+                match self
+                    .nostr
+                    .event_tracker
+                    .already_processed_account_event(&event.id, &account.pubkey)
+                    .await
+                {
+                    Ok(v) => v,
+                    Err(e2) => {
+                        tracing::error!(
+                            target: "whitenoise::event_processor::should_skip_account_event_processing",
+                            "Fallback already processed check failed for {}: {}",
+                            event.id.to_hex(),
+                            e2
+                        );
+                        false
+                    }
+                }
             }
         };
 

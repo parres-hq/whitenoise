@@ -40,9 +40,15 @@ impl Whitenoise {
         // Check if this event is newer than what we already have using unified ProcessedEvent approach
         let account_id = account.id.ok_or_else(|| WhitenoiseError::AccountNotFound)?;
 
-        let event_timestamp =
-            DateTime::from_timestamp_millis((event.created_at.as_u64() * 1000) as i64)
-                .unwrap_or(DateTime::UNIX_EPOCH);
+        let event_timestamp = DateTime::from_timestamp_millis(
+            (event.created_at.as_u64() * 1000) as i64,
+        )
+        .ok_or_else(|| {
+            WhitenoiseError::EventProcessor(format!(
+                "Invalid timestamp in relay list event: {}",
+                event.created_at.as_u64()
+            ))
+        })?;
 
         let current_event_time =
             ProcessedEvent::newest_contact_list_timestamp(account_id, &self.database).await?;
@@ -89,7 +95,8 @@ impl Whitenoise {
             &event.id,
             Some(account_id), // Account-specific event
             Some(event_timestamp),
-            Some(3), // Contact list events are kind 3
+            Some(3),             // Contact list events are kind 3
+            Some(&event.pubkey), // Track the author
             &self.database,
         )
         .await?;

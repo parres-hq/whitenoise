@@ -44,7 +44,13 @@ impl User {
             if self.metadata != metadata {
                 let event_datetime =
                     DateTime::from_timestamp_millis((event_timestamp.as_u64() * 1000) as i64)
-                        .unwrap_or(DateTime::UNIX_EPOCH);
+                        .ok_or_else(|| {
+                            WhitenoiseError::Database(
+                                crate::whitenoise::database::DatabaseError::InvalidTimestamp {
+                                    timestamp: (event_timestamp.as_u64() * 1000) as i64,
+                                },
+                            )
+                        })?;
 
                 // Check if this event is newer than our most recent processed metadata event
                 let newest_processed_timestamp = ProcessedEvent::newest_event_timestamp_for_kinds(
@@ -65,11 +71,9 @@ impl User {
                         true
                     }
                     Some(stored_timestamp) => {
-                        // Accept events with same or newer timestamp (>= instead of >)
-                        // This handles the case where events are published rapidly with same timestamp
-                        let is_newer_or_equal = event_datetime.timestamp_millis()
-                            >= stored_timestamp.timestamp_millis();
-                        if !is_newer_or_equal {
+                        let is_newer =
+                            event_datetime.timestamp_millis() > stored_timestamp.timestamp_millis();
+                        if !is_newer {
                             tracing::debug!(
                                 target: "whitenoise::users::sync_metadata",
                                 "Ignoring stale metadata event for user {} (event: {}, stored: {})",
@@ -78,7 +82,7 @@ impl User {
                                 stored_timestamp.timestamp_millis()
                             );
                         }
-                        is_newer_or_equal
+                        is_newer
                     }
                 };
 
@@ -93,7 +97,8 @@ impl User {
                         &event_id,
                         None, // Global events (user metadata)
                         Some(event_datetime),
-                        Some(0), // Metadata events are kind 0
+                        Some(0),            // Metadata events are kind 0
+                        Some(&self.pubkey), // Track the author
                         &whitenoise.database,
                     )
                     .await
@@ -427,7 +432,13 @@ impl User {
                 // Convert Nostr timestamp to DateTime<Utc> (convert seconds to milliseconds)
                 let event_created_at = Some(
                     DateTime::from_timestamp_millis((event_timestamp.as_u64() * 1000) as i64)
-                        .unwrap_or(DateTime::UNIX_EPOCH),
+                        .ok_or_else(|| {
+                            WhitenoiseError::Database(
+                                crate::whitenoise::database::DatabaseError::InvalidTimestamp {
+                                    timestamp: (event_timestamp.as_u64() * 1000) as i64,
+                                },
+                            )
+                        })?,
                 );
 
                 let changed = self
@@ -446,6 +457,7 @@ impl User {
                         None, // Global events (user relay lists)
                         event_created_at,
                         Some(relay_type.into()),
+                        Some(&self.pubkey), // Track the author
                         &whitenoise.database,
                     )
                     .await?;
