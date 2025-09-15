@@ -261,6 +261,132 @@ impl User {
         Ok(updated_user.into())
     }
 
+    /// Transaction-aware version of find_by_pubkey that accepts a database transaction.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` to search for
+    /// * `tx` - A mutable reference to an active database transaction
+    ///
+    /// # Returns
+    ///
+    /// Returns the `User` associated with the provided public key on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::UserNotFound`] if no user with the given public key exists.
+    /// Returns other database errors if the query fails.
+    pub(crate) async fn find_by_pubkey_tx<'a>(
+        pubkey: &PublicKey,
+        tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    ) -> Result<User, WhitenoiseError> {
+        let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
+            .bind(pubkey.to_hex().as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| match err {
+                sqlx::Error::RowNotFound => WhitenoiseError::UserNotFound,
+                _ => WhitenoiseError::Database(DatabaseError::Sqlx(err)),
+            })?;
+
+        Ok(user_row.into())
+    }
+
+    /// Transaction-aware version of save that accepts a database transaction.
+    ///
+    /// This method saves or updates the user within an existing transaction,
+    /// avoiding nested transactions that could cause inconsistent state.
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - A mutable reference to an active database transaction
+    ///
+    /// # Returns
+    ///
+    /// Returns the saved/updated `User` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
+    pub(crate) async fn save_tx<'a>(
+        &self,
+        tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    ) -> Result<User, WhitenoiseError> {
+        // Use INSERT ON CONFLICT to handle both insert and update cases without deleting/replacing rows
+        sqlx::query(
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at, event_created_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(pubkey) DO UPDATE SET
+               metadata = excluded.metadata,
+               updated_at = ?,
+               event_created_at = CASE
+                 WHEN excluded.event_created_at IS NOT NULL
+                      AND (users.event_created_at IS NULL
+                           OR excluded.event_created_at > users.event_created_at)
+                 THEN excluded.event_created_at
+                 ELSE users.event_created_at
+               END",
+        )
+        .bind(self.pubkey.to_hex().as_str())
+        .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .bind(self.event_created_at.map(|dt| dt.timestamp_millis()))
+        .bind(Utc::now().timestamp_millis())
+        .execute(&mut **tx)
+        .await
+        .map_err(DatabaseError::Sqlx)
+        .map_err(WhitenoiseError::Database)?;
+
+        // Get the user by pubkey to return the updated record
+        let updated_user = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
+            .bind(self.pubkey.to_hex().as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        Ok(updated_user.into())
+    }
+
+    /// Transaction-aware version of find_or_create_by_pubkey that accepts a database transaction.
+    ///
+    /// This method finds an existing user by public key or creates a new one if not found,
+    /// all within the provided transaction to maintain consistency.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` to search for
+    /// * `tx` - A mutable reference to an active database transaction
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple containing the `User` and a boolean indicating if the user was newly created (true) or found (false).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operations fail.
+    pub(crate) async fn find_or_create_by_pubkey_tx<'a>(
+        pubkey: &PublicKey,
+        tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    ) -> Result<(User, bool), WhitenoiseError> {
+        match User::find_by_pubkey_tx(pubkey, tx).await {
+            Ok(user) => Ok((user, false)),
+            Err(WhitenoiseError::UserNotFound) => {
+                let mut user = User {
+                    id: None,
+                    pubkey: *pubkey,
+                    metadata: Metadata::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    event_created_at: None,
+                };
+                user = user.save_tx(tx).await?;
+                Ok((user, true))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Adds a relay association for this user.
     ///
     /// # Arguments
@@ -347,6 +473,29 @@ impl User {
         } else {
             Ok(())
         }
+    }
+
+    /// Gets the newest event timestamp among existing relays of the specified type
+    pub(crate) async fn newest_relay_event_timestamp(
+        &self,
+        relay_type: RelayType,
+        database: &Database,
+    ) -> Result<Option<DateTime<Utc>>, WhitenoiseError> {
+        let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
+        let relay_type_str = String::from(relay_type);
+
+        let result: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(event_created_at) FROM user_relays WHERE user_id = ? AND relay_type = ?",
+        )
+        .bind(user_id)
+        .bind(relay_type_str)
+        .fetch_optional(&database.pool)
+        .await
+        .map_err(|e| {
+            WhitenoiseError::Database(crate::whitenoise::database::DatabaseError::Sqlx(e))
+        })?;
+
+        Ok(crate::whitenoise::database::utils::parse_optional_scalar_timestamp(result))
     }
 }
 

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::{
-    nostr_manager::NostrManager,
-    whitenoise::{accounts::Account, error::Result, Whitenoise},
+    nostr_manager::pubkeys_from_event,
+    whitenoise::{accounts::Account, error::Result, users::User, Whitenoise},
 };
 
 impl Whitenoise {
@@ -56,7 +56,7 @@ impl Whitenoise {
             account.pubkey.to_hex()
         );
 
-        let contacts_from_event = NostrManager::pubkeys_from_event(&event);
+        let contacts_from_event = pubkeys_from_event(&event);
 
         // Use the new bulk update method and get the list of newly created users
         let newly_created_pubkeys = account
@@ -68,10 +68,7 @@ impl Whitenoise {
 
         // Background fetch user data for newly created users
         for pubkey in newly_created_pubkeys {
-            if let Ok((user, _)) =
-                crate::whitenoise::users::User::find_or_create_by_pubkey(&pubkey, &self.database)
-                    .await
-            {
+            if let Ok((user, _)) = User::find_or_create_by_pubkey(&pubkey, &self.database).await {
                 self.background_fetch_user_data(&user).await?;
             }
         }

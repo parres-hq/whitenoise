@@ -234,34 +234,6 @@ impl User {
     /// core synchronization logic used by both network-fetched updates and direct
     /// event processing.
     ///
-    /// Gets the newest event timestamp among existing relays of the specified type
-    async fn newest_relay_event_timestamp(
-        &self,
-        relay_type: RelayType,
-        database: &crate::whitenoise::database::Database,
-    ) -> Result<Option<DateTime<Utc>>> {
-        let user_id = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
-        let relay_type_str = String::from(relay_type);
-
-        let result: Option<i64> = sqlx::query_scalar(
-            "SELECT MAX(event_created_at) FROM user_relays WHERE user_id = ? AND relay_type = ?",
-        )
-        .bind(user_id)
-        .bind(relay_type_str)
-        .fetch_optional(&database.pool)
-        .await
-        .map_err(|e| {
-            WhitenoiseError::Database(crate::whitenoise::database::DatabaseError::Sqlx(e))
-        })?;
-
-        match result {
-            Some(timestamp_ms) => {
-                Ok(DateTime::from_timestamp_millis(timestamp_ms).or_else(|| Some(Utc::now())))
-            }
-            None => Ok(None),
-        }
-    }
-
     /// Returns `true` if changes were made, `false` if no changes needed
     pub(crate) async fn sync_relay_urls(
         &self,

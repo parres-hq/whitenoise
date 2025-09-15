@@ -61,29 +61,30 @@ where
     &'r str: sqlx::ColumnIndex<R>,
     i64: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
     String: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    Option<i64>: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+    Option<String>: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
 {
-    // Try INTEGER timestamp first (milliseconds)
-    if let Ok(timestamp_ms) = row.try_get::<Option<i64>, _>(column_name) {
-        return match timestamp_ms {
-            Some(ms) => DateTime::from_timestamp_millis(ms)
-                .map(Some)
-                .ok_or_else(|| create_column_decode_error(column_name, "Invalid timestamp value")),
-            None => Ok(None),
-        };
+    // Check if the column is NULL by trying both nullable types
+    if let Ok(None) = row.try_get::<Option<i64>, _>(column_name) {
+        return Ok(None);
+    }
+    if let Ok(None) = row.try_get::<Option<String>, _>(column_name) {
+        return Ok(None);
     }
 
-    // Fall back to TEXT datetime string
-    if let Ok(datetime_str) = row.try_get::<Option<String>, _>(column_name) {
-        return match datetime_str {
-            Some(s) => parse_datetime_string(&s, column_name).map(Some),
-            None => Ok(None),
-        };
-    }
+    // If not NULL, delegate to the existing function
+    parse_timestamp(row, column_name).map(Some)
+}
 
-    Err(create_column_decode_error(
-        column_name,
-        "Could not parse as INTEGER or DATETIME",
-    ))
+/// Parses an optional scalar timestamp value (e.g., from query_scalar)
+///
+/// This function handles the common pattern of getting an `Option<i64>` from
+/// `query_scalar` and converting it to an optional DateTime.
+pub(crate) fn parse_optional_scalar_timestamp(timestamp_ms: Option<i64>) -> Option<DateTime<Utc>> {
+    match timestamp_ms {
+        Some(ms) => DateTime::from_timestamp_millis(ms).or_else(|| Some(Utc::now())),
+        None => None,
+    }
 }
 
 fn parse_datetime_string(
@@ -594,5 +595,252 @@ mod tests {
         let parsed_time = result.unwrap();
         assert_eq!(parsed_time.timestamp_millis(), test_timestamp);
         assert!(parsed_time.year() > 2020); // Should be recent timestamp, not 2020
+    }
+
+    #[tokio::test]
+    async fn test_parse_optional_timestamp_null_values() {
+        let pool = setup_test_db().await;
+
+        // Test NULL integer timestamp
+        sqlx::query("INSERT INTO test_timestamps (id, int_timestamp) VALUES (1, NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_optional_timestamp(&row, "int_timestamp");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+
+        // Test NULL text timestamp
+        sqlx::query("INSERT INTO test_timestamps (id, text_timestamp) VALUES (2, NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 2")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_optional_timestamp(&row, "text_timestamp");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_optional_timestamp_valid_integer() {
+        let pool = setup_test_db().await;
+        let test_timestamp = chrono::Utc::now().timestamp_millis();
+
+        sqlx::query("INSERT INTO test_timestamps (id, int_timestamp) VALUES (1, ?)")
+            .bind(test_timestamp)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_optional_timestamp(&row, "int_timestamp");
+        assert!(result.is_ok());
+
+        let parsed_time = result.unwrap();
+        assert!(parsed_time.is_some());
+        assert_eq!(parsed_time.unwrap().timestamp_millis(), test_timestamp);
+    }
+
+    #[tokio::test]
+    async fn test_parse_optional_timestamp_valid_text() {
+        let pool = setup_test_db().await;
+
+        sqlx::query("INSERT INTO test_timestamps (id, text_timestamp) VALUES (1, ?)")
+            .bind("2025-08-16 11:34:29.123")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_optional_timestamp(&row, "text_timestamp");
+        assert!(result.is_ok());
+
+        let parsed_time = result.unwrap();
+        assert!(parsed_time.is_some());
+        let time = parsed_time.unwrap();
+        assert_eq!(time.year(), 2025);
+        assert_eq!(time.month(), 8);
+        assert_eq!(time.day(), 16);
+        assert_eq!(time.hour(), 11);
+        assert_eq!(time.minute(), 34);
+        assert_eq!(time.second(), 29);
+        assert_eq!(time.timestamp_subsec_millis(), 123);
+    }
+
+    #[tokio::test]
+    async fn test_parse_optional_timestamp_rfc3339_format() {
+        let pool = setup_test_db().await;
+
+        sqlx::query("INSERT INTO test_timestamps (id, text_timestamp) VALUES (1, ?)")
+            .bind("2025-08-16T11:34:29.123Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_optional_timestamp(&row, "text_timestamp");
+        assert!(result.is_ok());
+
+        let parsed_time = result.unwrap();
+        assert!(parsed_time.is_some());
+        let time = parsed_time.unwrap();
+        assert_eq!(time.year(), 2025);
+        assert_eq!(time.month(), 8);
+        assert_eq!(time.day(), 16);
+        assert_eq!(time.hour(), 11);
+        assert_eq!(time.minute(), 34);
+        assert_eq!(time.second(), 29);
+        assert_eq!(time.timestamp_subsec_millis(), 123);
+    }
+
+    #[tokio::test]
+    async fn test_parse_optional_timestamp_invalid_format() {
+        let pool = setup_test_db().await;
+
+        sqlx::query("INSERT INTO test_timestamps (id, text_timestamp) VALUES (1, ?)")
+            .bind("not a valid timestamp")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_optional_timestamp(&row, "text_timestamp");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_parse_optional_timestamp_nonexistent_column() {
+        let pool = setup_test_db().await;
+
+        sqlx::query("INSERT INTO test_timestamps (id) VALUES (1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let result = parse_optional_timestamp(&row, "nonexistent_column");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_parse_optional_timestamp_priority_integer_over_text() {
+        let pool = setup_test_db().await;
+        let test_timestamp = chrono::Utc::now().timestamp_millis();
+
+        // Insert both integer and text values - integer should take priority
+        sqlx::query(
+            "INSERT INTO test_timestamps (id, int_timestamp, text_timestamp) VALUES (1, ?, ?)",
+        )
+        .bind(test_timestamp)
+        .bind("2020-01-01 00:00:00") // Different date to verify integer is used
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row: SqliteRow = sqlx::query("SELECT * FROM test_timestamps WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        // When both are available, should parse as integer (the current timestamp, not 2020)
+        let result = parse_optional_timestamp(&row, "int_timestamp");
+        assert!(result.is_ok());
+
+        let parsed_time = result.unwrap();
+        assert!(parsed_time.is_some());
+        let time = parsed_time.unwrap();
+        assert_eq!(time.timestamp_millis(), test_timestamp);
+        assert!(time.year() > 2020); // Should be recent timestamp, not 2020
+    }
+
+    #[test]
+    fn test_parse_optional_scalar_timestamp_none() {
+        let result = parse_optional_scalar_timestamp(None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_optional_scalar_timestamp_valid() {
+        let test_timestamp = chrono::Utc::now().timestamp_millis();
+        let result = parse_optional_scalar_timestamp(Some(test_timestamp));
+
+        assert!(result.is_some());
+        let time = result.unwrap();
+        assert_eq!(time.timestamp_millis(), test_timestamp);
+    }
+
+    #[test]
+    fn test_parse_optional_scalar_timestamp_invalid_fallback() {
+        // Test with an invalid timestamp that would cause from_timestamp_millis to return None
+        // We use a very large timestamp that might be invalid
+        let invalid_timestamp = i64::MAX;
+        let result = parse_optional_scalar_timestamp(Some(invalid_timestamp));
+
+        // Should fall back to Utc::now()
+        assert!(result.is_some());
+        let time = result.unwrap();
+        // The time should be recent (within the last minute)
+        let now = chrono::Utc::now();
+        let diff = (now.timestamp_millis() - time.timestamp_millis()).abs();
+        assert!(diff < 60000); // Within 1 minute
+    }
+
+    #[test]
+    fn test_parse_optional_scalar_timestamp_zero() {
+        // Test with timestamp 0 (Unix epoch)
+        let result = parse_optional_scalar_timestamp(Some(0));
+
+        assert!(result.is_some());
+        let time = result.unwrap();
+        assert_eq!(time.timestamp_millis(), 0);
+        assert_eq!(time.year(), 1970);
+        assert_eq!(time.month(), 1);
+        assert_eq!(time.day(), 1);
+    }
+
+    #[test]
+    fn test_parse_optional_scalar_timestamp_negative() {
+        // Test with negative timestamp (before Unix epoch)
+        let negative_timestamp = -86400000; // -1 day in milliseconds
+        let result = parse_optional_scalar_timestamp(Some(negative_timestamp));
+
+        assert!(result.is_some());
+        let time = result.unwrap();
+        assert_eq!(time.timestamp_millis(), negative_timestamp);
+        // Should be December 31, 1969
+        assert_eq!(time.year(), 1969);
+        assert_eq!(time.month(), 12);
+        assert_eq!(time.day(), 31);
     }
 }

@@ -8,7 +8,7 @@ use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::nostr_manager::{NostrManager, NostrManagerError};
+use crate::nostr_manager::{pubkeys_from_event, NostrManagerError};
 use crate::types::ImageType;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
@@ -852,7 +852,17 @@ impl Whitenoise {
 
             let current_time = Utc::now().timestamp_millis();
 
-            let whitenoise = Whitenoise::get_instance().unwrap();
+            let whitenoise = match Whitenoise::get_instance() {
+                Ok(instance) => instance,
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::background_fetch_account_data",
+                        "Failed to get Whitenoise instance for background sync: {}",
+                        e
+                    );
+                    return;
+                }
+            };
 
             // Get user's relay information for contact list fetching
             let user_relays = match account_clone.nip65_relays(whitenoise).await {
@@ -866,6 +876,16 @@ impl Whitenoise {
                 }
             };
 
+            // Ensure user relays are connected before fetching contact list
+            if let Err(e) = whitenoise.nostr.ensure_relays_connected(&user_relays).await {
+                tracing::warn!(
+                    target: "whitenoise::background_fetch_account_data",
+                    "Failed to ensure relay connections for account {}: {}. Proceeding with fetch anyway.",
+                    account_clone.pubkey.to_hex(),
+                    e
+                );
+            }
+
             // Fetch the account's contact list
             let fetched_contact_list = whitenoise
                 .nostr
@@ -873,9 +893,7 @@ impl Whitenoise {
                 .await;
 
             let contact_list_pubkeys = match &fetched_contact_list {
-                Ok(Some(contact_list_event)) => {
-                    NostrManager::pubkeys_from_event(contact_list_event)
-                }
+                Ok(Some(contact_list_event)) => pubkeys_from_event(contact_list_event),
                 Ok(None) => Vec::new(),
                 Err(e) => {
                     tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to fetch contact list for account {}: {}", account_clone.pubkey.to_hex(), e);

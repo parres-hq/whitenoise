@@ -4,19 +4,17 @@ use nostr_sdk::prelude::*;
 
 use crate::nostr_manager::NostrManager;
 
-impl NostrManager {
-    /// Extracts public keys from an event's tags.
-    pub(crate) fn pubkeys_from_event(event: &Event) -> Vec<PublicKey> {
-        event
-            .tags
-            .iter()
-            .filter(|tag| {
-                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P))
-            })
-            .filter_map(|tag| tag.content().and_then(|c| c.parse::<PublicKey>().ok()))
-            .collect()
-    }
+/// Extracts public keys from an event's tags.
+pub fn pubkeys_from_event(event: &Event) -> Vec<PublicKey> {
+    event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)))
+        .filter_map(|tag| tag.content().and_then(|c| c.parse::<PublicKey>().ok()))
+        .collect()
+}
 
+impl NostrManager {
     /// Extracts relay URLs from an event's tags.
     pub(crate) fn relay_urls_from_event(event: Event) -> HashSet<RelayUrl> {
         event
@@ -236,7 +234,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = NostrManager::pubkeys_from_event(&event);
+        let result = pubkeys_from_event(&event);
 
         assert_eq!(result.len(), 2);
         assert!(result.contains(&pubkey1));
@@ -252,7 +250,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = NostrManager::pubkeys_from_event(&event);
+        let result = pubkeys_from_event(&event);
 
         assert_eq!(result.len(), 0);
     }
@@ -275,7 +273,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = NostrManager::pubkeys_from_event(&event);
+        let result = pubkeys_from_event(&event);
 
         assert_eq!(result.len(), 0);
     }
@@ -300,7 +298,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = NostrManager::pubkeys_from_event(&event);
+        let result = pubkeys_from_event(&event);
 
         assert_eq!(result.len(), 0);
     }
@@ -325,7 +323,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = NostrManager::pubkeys_from_event(&event);
+        let result = pubkeys_from_event(&event);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], valid_pubkey);
@@ -344,7 +342,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = NostrManager::pubkeys_from_event(&event);
+        let result = pubkeys_from_event(&event);
 
         // Should contain duplicates as the method doesn't deduplicate
         assert_eq!(result.len(), 2);
@@ -366,7 +364,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = NostrManager::pubkeys_from_event(&event);
+        let result = pubkeys_from_event(&event);
 
         assert_eq!(result.len(), 0);
     }
