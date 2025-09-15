@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::PublicKey;
 use sqlx::Row;
+use std::collections::HashSet;
 
 use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::{
@@ -313,13 +314,12 @@ impl Account {
     /// Updates this account's follow list from a ContactList event.
     ///
     /// This method atomically replaces all current follows with the follows from the
-    /// given ContactList event, tracking the event timestamp to prevent stale overwrites.
-    /// All operations are performed within a transaction to ensure data consistency.
+    /// given ContactList event. All operations are performed within a transaction to
+    /// ensure data consistency. Duplicate contacts are automatically deduplicated.
     ///
     /// # Arguments
     ///
     /// * `contacts` - Vector of public keys from the ContactList event
-    /// * `event_timestamp` - Timestamp of the ContactList event (as u64)
     /// * `database` - A reference to the `Database` instance for database operations
     ///
     /// # Returns
@@ -332,11 +332,11 @@ impl Account {
     pub(crate) async fn update_follows_from_event(
         &self,
         contacts: Vec<nostr_sdk::PublicKey>,
-        event_timestamp: u64,
         database: &Database,
     ) -> Result<Vec<nostr_sdk::PublicKey>, WhitenoiseError> {
-        use crate::whitenoise::users::User;
-        use chrono::Utc;
+        // Deduplicate contacts to prevent unique constraint violations
+        let unique_contacts: Vec<_> = contacts.into_iter().collect::<HashSet<_>>().into_iter().collect();
+        let contacts_len = unique_contacts.len();
 
         // Start transaction for atomic operations
         let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
@@ -348,12 +348,10 @@ impl Account {
             .await
             .map_err(DatabaseError::Sqlx)?;
 
-        // Store the length before consuming the vector
-        let contacts_len = contacts.len();
         let mut newly_created_users = Vec::new();
 
-        // Insert new follows with event timestamp
-        for pubkey in contacts {
+        // Insert new follows
+        for pubkey in unique_contacts {
             let (user, newly_created) = User::find_or_create_by_pubkey_tx(&pubkey, &mut tx).await?;
 
             if newly_created {
@@ -377,10 +375,9 @@ impl Account {
 
         tracing::debug!(
             target: "whitenoise::database::accounts::update_follows_from_event",
-            "Updated follows for account {} with {} contacts from event timestamp {}, {} newly created users",
+            "Updated follows for account {} with {} contacts, {} newly created users",
             self.pubkey.to_hex(),
             contacts_len,
-            event_timestamp,
             newly_created_users.len()
         );
 
@@ -1359,10 +1356,9 @@ mod tests {
 
         // Test with empty contacts list
         let contacts = vec![];
-        let event_timestamp = 1234567890u64;
 
         let result = account
-            .update_follows_from_event(contacts, event_timestamp, &database)
+            .update_follows_from_event(contacts, &database)
             .await;
 
         assert!(result.is_ok());
@@ -1417,10 +1413,9 @@ mod tests {
         let contact1 = nostr_sdk::Keys::generate().public_key();
         let contact2 = nostr_sdk::Keys::generate().public_key();
         let contacts = vec![contact1, contact2];
-        let event_timestamp = 1234567890u64;
 
         let result = account
-            .update_follows_from_event(contacts.clone(), event_timestamp, &database)
+            .update_follows_from_event(contacts.clone(), &database)
             .await;
 
         assert!(result.is_ok());
@@ -1525,10 +1520,9 @@ mod tests {
         let new_contact1 = old_contact1; // Keep one existing
         let new_contact2 = nostr_sdk::Keys::generate().public_key(); // New one
         let contacts = vec![new_contact1, new_contact2];
-        let event_timestamp = 2000u64; // Newer timestamp
 
         let result = account
-            .update_follows_from_event(contacts.clone(), event_timestamp, &database)
+            .update_follows_from_event(contacts.clone(), &database)
             .await;
 
         assert!(result.is_ok());
@@ -1610,23 +1604,25 @@ mod tests {
         let contact1 = nostr_sdk::Keys::generate().public_key();
         let contact2 = nostr_sdk::Keys::generate().public_key();
         let contacts = vec![contact1, contact2, contact1]; // contact1 appears twice
-        let event_timestamp = 1234567890u64;
 
         let result = account
-            .update_follows_from_event(contacts.clone(), event_timestamp, &database)
+            .update_follows_from_event(contacts.clone(), &database)
             .await;
 
-        // This should fail due to unique constraint
-        assert!(result.is_err());
+        // This should now succeed due to deduplication
+        assert!(result.is_ok());
 
-        // Verify no follows were created due to transaction rollback
+        // Verify correct number of follows were created (should be 2, not 3, due to deduplication)
+        let result_unwrapped = result.unwrap();
+        assert_eq!(result_unwrapped.len(), 2); // Both contacts should be newly created
+
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM account_follows WHERE account_id = ?")
                 .bind(account.id.unwrap())
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(count, 0);
+        assert_eq!(count, 2); // Only 2 follows due to deduplication
     }
 
     #[tokio::test]
@@ -1668,10 +1664,9 @@ mod tests {
         for _ in 0..100 {
             contacts.push(nostr_sdk::Keys::generate().public_key());
         }
-        let event_timestamp = 1234567890u64;
 
         let result = account
-            .update_follows_from_event(contacts.clone(), event_timestamp, &database)
+            .update_follows_from_event(contacts.clone(), &database)
             .await;
 
         assert!(result.is_ok());
@@ -1719,10 +1714,9 @@ mod tests {
         };
 
         let contacts = vec![nostr_sdk::Keys::generate().public_key()];
-        let event_timestamp = 1234567890u64;
 
         let result = account
-            .update_follows_from_event(contacts, event_timestamp, &database)
+            .update_follows_from_event(contacts, &database)
             .await;
 
         // Should fail due to closed database

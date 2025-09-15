@@ -73,7 +73,6 @@ impl Whitenoise {
         let newly_created_pubkeys = account
             .update_follows_from_event(
                 contacts_from_event.clone(),
-                event_timestamp.timestamp_millis() as u64,
                 &self.database,
             )
             .await?;
