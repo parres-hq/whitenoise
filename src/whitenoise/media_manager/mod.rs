@@ -98,7 +98,7 @@ impl MediaManager {
     ///
     /// * `Ok(())` - Success indicator
     /// * `Err(MediaError)` - Error if any step of the process fails
-    pub(crate) async fn upload_media_file(
+    async fn upload_media_file(
         &self,
         account: &Account,
         group_id: &GroupId,

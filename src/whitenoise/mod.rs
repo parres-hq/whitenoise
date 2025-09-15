@@ -101,7 +101,7 @@ pub struct Whitenoise {
     message_aggregator: message_aggregator::MessageAggregator,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
-    pub media: MediaManager,
+    media: MediaManager,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
     contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
 }
