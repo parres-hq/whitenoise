@@ -859,7 +859,10 @@ impl Whitenoise {
                 Ok(relays) => relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
                 Err(_) => {
                     // Fallback to default relays if user has no specific relays
-                    Relay::defaults().into_iter().map(|r| r.url).collect::<Vec<_>>()
+                    Relay::defaults()
+                        .into_iter()
+                        .map(|r| r.url)
+                        .collect::<Vec<_>>()
                 }
             };
 
