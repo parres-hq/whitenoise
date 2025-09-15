@@ -72,10 +72,20 @@ impl Whitenoise {
         match result {
             Ok(()) => {
                 // Record that we processed this event successfully
+                let event_timestamp = Some(
+                    chrono::DateTime::from_timestamp(event.created_at.as_u64() as i64, 0)
+                        .unwrap_or_default(),
+                );
+                let event_kind = Some(event.kind.as_u16());
                 if let Err(e) = self
                     .nostr
                     .event_tracker
-                    .track_processed_account_event(&event.id, &account.pubkey)
+                    .track_processed_account_event(
+                        &event.id,
+                        &account.pubkey,
+                        event_timestamp,
+                        event_kind,
+                    )
                     .await
                 {
                     tracing::warn!(

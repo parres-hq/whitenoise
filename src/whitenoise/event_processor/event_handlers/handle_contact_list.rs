@@ -1,10 +1,17 @@
+use chrono::DateTime;
 use nostr_sdk::prelude::*;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::{
     nostr_manager::pubkeys_from_event,
-    whitenoise::{accounts::Account, error::Result, users::User, Whitenoise},
+    whitenoise::{
+        accounts::Account,
+        database::processed_events::ProcessedEvent,
+        error::{Result, WhitenoiseError},
+        users::User,
+        Whitenoise,
+    },
 };
 
 impl Whitenoise {
@@ -30,19 +37,23 @@ impl Whitenoise {
             account.pubkey.to_hex()
         );
 
-        // Check if this event is newer than what we already have
-        let current_event_time = account
-            .get_latest_follow_list_timestamp(&self.database)
-            .await?;
-        let event_timestamp = event.created_at.as_u64() * 1000; // Convert seconds to milliseconds
+        // Check if this event is newer than what we already have using unified ProcessedEvent approach
+        let account_id = account.id.ok_or_else(|| WhitenoiseError::AccountNotFound)?;
+
+        let event_timestamp =
+            DateTime::from_timestamp_millis((event.created_at.as_u64() * 1000) as i64)
+                .unwrap_or(DateTime::UNIX_EPOCH);
+
+        let current_event_time =
+            ProcessedEvent::newest_contact_list_timestamp(account_id, &self.database).await?;
 
         if let Some(current_time) = current_event_time {
-            if event_timestamp <= current_time {
+            if event_timestamp.timestamp_millis() <= current_time.timestamp_millis() {
                 tracing::debug!(
                     target: "whitenoise::handle_contact_list",
                     "Ignoring older contact list event (event: {}, current: {}) for account {}",
-                    event_timestamp,
-                    current_time,
+                    event_timestamp.timestamp_millis(),
+                    current_time.timestamp_millis(),
                     account.pubkey.to_hex()
                 );
                 return Ok(());
@@ -52,7 +63,7 @@ impl Whitenoise {
         tracing::debug!(
             target: "whitenoise::handle_contact_list",
             "Processing contact list event (timestamp: {}) for account {}",
-            event_timestamp,
+            event_timestamp.timestamp_millis(),
             account.pubkey.to_hex()
         );
 
@@ -60,7 +71,11 @@ impl Whitenoise {
 
         // Use the new bulk update method and get the list of newly created users
         let newly_created_pubkeys = account
-            .update_follows_from_event(contacts_from_event.clone(), event_timestamp, &self.database)
+            .update_follows_from_event(
+                contacts_from_event.clone(),
+                event_timestamp.timestamp_millis() as u64,
+                &self.database,
+            )
             .await?;
 
         // Store count for logging before consuming the vector
@@ -72,6 +87,16 @@ impl Whitenoise {
                 self.background_fetch_user_data(&user).await?;
             }
         }
+
+        // Create ProcessedEvent entry to track this contact list event
+        ProcessedEvent::create(
+            &event.id,
+            Some(account_id), // Account-specific event
+            Some(event_timestamp),
+            Some(3), // Contact list events are kind 3
+            &self.database,
+        )
+        .await?;
 
         tracing::debug!(
             target: "whitenoise::handle_contact_list",

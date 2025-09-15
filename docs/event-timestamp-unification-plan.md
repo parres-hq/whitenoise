@@ -22,54 +22,25 @@ Migrate all event timestamp tracking to the `processed_events` table with enhanc
 ### Phase 1: Database Schema Migration
 
 #### 1.1 Replace Existing Migration
-**Delete** `db_migrations/0014_add_event_created_at_columns.sql` and **replace** it with enhanced `db_migrations/0014_enhance_processed_events.sql`:
+**Delete** `db_migrations/0014_add_event_created_at_columns.sql` and **replace** it with simplified `db_migrations/0014_enhance_processed_events.sql`:
 
 ```sql
 -- Enhance processed_events table with event timestamp and kind tracking
 -- This replaces the previous approach of adding event_created_at to individual tables
--- Following the official SQLite 12-step ALTER TABLE procedure
+-- Using simple ALTER TABLE ADD COLUMN approach
 
-PRAGMA foreign_keys=OFF;
+-- Add original Nostr event timestamp (milliseconds since Unix epoch)
+-- NULL for legacy data where we don't have the original timestamp
+ALTER TABLE processed_events ADD COLUMN event_created_at INTEGER DEFAULT NULL;
 
--- Create new table with enhanced schema
-CREATE TABLE processed_events_new (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id TEXT NOT NULL
-        CHECK (length(event_id) = 64 AND event_id GLOB '[0-9a-fA-F]*'), -- 64-char hex
-    account_id INTEGER,                   -- NULL for global events, account ID for account-specific
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- When we processed it
-    event_created_at INTEGER NOT NULL,   -- Original Nostr event timestamp (milliseconds)
-    event_kind INTEGER,                  -- Nostr event kind (0, 3, 10002, etc.) - NULL for legacy data
+-- Add Nostr event kind (0, 3, 10002, etc.)
+-- NULL for legacy data where we don't know the kind
+ALTER TABLE processed_events ADD COLUMN event_kind INTEGER DEFAULT NULL;
 
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
-    UNIQUE(event_id, account_id)          -- Each account can only process a specific event once
-);
-
--- Transfer existing data (set placeholder values for new fields)
-INSERT INTO processed_events_new (id, event_id, account_id, created_at, event_created_at, event_kind)
-SELECT id, event_id, account_id, created_at,
-       COALESCE(strftime('%s', created_at) * 1000, 0) as event_created_at, -- Use processing time as fallback
-       NULL as event_kind  -- NULL for existing data where we don't know the kind
-FROM processed_events;
-
--- Drop old table and rename
-DROP TABLE processed_events;
-ALTER TABLE processed_events_new RENAME TO processed_events;
-
--- Create indexes
-CREATE INDEX idx_processed_events_lookup ON processed_events(event_id);
-CREATE INDEX idx_processed_events_account_id ON processed_events(account_id);
+-- Create indexes for efficient querying
 CREATE INDEX idx_processed_events_event_kind ON processed_events(event_kind);
 CREATE INDEX idx_processed_events_event_created_at ON processed_events(event_created_at);
 CREATE INDEX idx_processed_events_kind_timestamp ON processed_events(event_kind, event_created_at);
-
--- Partial unique index for global events
-CREATE UNIQUE INDEX idx_processed_events_global_unique
-ON processed_events(event_id)
-WHERE account_id IS NULL;
-
-PRAGMA foreign_key_check;
-PRAGMA foreign_keys=ON;
 ```
 
 ### Phase 2: Update ProcessedEvent Model
@@ -84,8 +55,8 @@ pub struct ProcessedEvent {
     pub event_id: EventId,
     pub account_id: Option<i64>,
     pub created_at: DateTime<Utc>,
-    pub event_created_at: DateTime<Utc>,  // NEW
-    pub event_kind: Option<u16>,          // NEW - nullable for legacy data
+    pub event_created_at: Option<DateTime<Utc>>,  // NEW - nullable for legacy data
+    pub event_kind: Option<u16>,                  // NEW - nullable for legacy data
 }
 ```
 
@@ -235,7 +206,7 @@ Since the `event_created_at` columns only exist in this branch and we're replaci
 
 Each phase can be implemented and tested independently, allowing for safe incremental deployment.
 
-**Simplified Migration**: Since we're replacing the existing migration rather than adding new ones, the rollout is cleaner with no additional database migrations required.
+**Simplified Migration**: Using SQLite's native `ALTER TABLE ADD COLUMN` instead of complex table recreation makes the migration much simpler, safer, and faster.
 
 ## Risk Mitigation
 
@@ -247,7 +218,7 @@ Each phase can be implemented and tested independently, allowing for safe increm
 
 ## Timeline Estimate
 
-- **Phase 1**: 1 day (replace migration 0014)
+- **Phase 1**: 0.5 day (simplified migration with ADD COLUMN)
 - **Phase 2**: 1-2 days (update ProcessedEvent model with nullable kind)
 - **Phase 3**: 2-3 days (unified functions)
 - **Phase 4**: 3-4 days (update all processing paths)
@@ -256,4 +227,4 @@ Each phase can be implemented and tested independently, allowing for safe increm
 
 **Total**: ~2-3 weeks with proper testing and validation
 
-**Simplified Timeline**: The migration replacement approach reduces complexity and eliminates the need for additional cleanup migrations.
+**Simplified Timeline**: Using simple `ALTER TABLE ADD COLUMN` significantly reduces migration complexity and risk.

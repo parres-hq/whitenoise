@@ -137,7 +137,7 @@ impl Account {
         whitenoise: &Whitenoise,
     ) -> Result<()> {
         let user = self.user(&whitenoise.database).await?;
-        user.add_relay(relay, relay_type, Some(Utc::now()), &whitenoise.database)
+        user.add_relay(relay, relay_type, &whitenoise.database)
             .await?;
         whitenoise
             .background_publish_account_relay_list(self, relay_type)
@@ -209,8 +209,6 @@ impl Account {
         tracing::debug!(target: "whitenoise::accounts::update_metadata", "Updating metadata for account: {:?}", self.pubkey);
         let mut user = self.user(&whitenoise.database).await?;
         user.metadata = metadata.clone();
-        // Update the event timestamp to current time to ensure this update takes precedence over older events
-        user.event_created_at = Some(chrono::Utc::now());
         user.save(&whitenoise.database).await?;
         whitenoise.background_publish_account_metadata(self).await?;
         Ok(())
@@ -718,7 +716,7 @@ impl Whitenoise {
             .await?;
 
         let mut relays = Vec::new();
-        if let Some((relay_urls, _timestamp)) = relay_result {
+        if let Some((relay_urls, _timestamp, _event_id)) = relay_result {
             for url in relay_urls {
                 let relay = self.find_or_create_relay_by_url(&url).await?;
                 relays.push(relay);
@@ -1534,7 +1532,7 @@ mod tests {
             .await
             .expect("Failed to fetch metadata from relays");
 
-        if let Some((published_metadata, _timestamp)) = fetched_metadata {
+        if let Some((published_metadata, _timestamp, _event_id)) = fetched_metadata {
             assert_eq!(published_metadata.name, new_metadata.name);
             assert_eq!(published_metadata.display_name, new_metadata.display_name);
             assert_eq!(published_metadata.about, new_metadata.about);

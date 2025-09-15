@@ -61,10 +61,15 @@ impl Whitenoise {
 
         match result {
             Ok(()) => {
+                let event_timestamp = Some(
+                    chrono::DateTime::from_timestamp(event.created_at.as_u64() as i64, 0)
+                        .unwrap_or_default(),
+                );
+                let event_kind = Some(event.kind.as_u16());
                 if let Err(e) = self
                     .nostr
                     .event_tracker
-                    .track_processed_global_event(&event.id)
+                    .track_processed_global_event(&event.id, event_timestamp, event_kind)
                     .await
                 {
                     tracing::error!(target: "whitenoise::event_processor::process_global_event", "Failed to track processed global event: {}", e);
@@ -119,22 +124,26 @@ impl Whitenoise {
         }
 
         // For global events, check if WE published this event
-        let should_skip = match self
-            .nostr
-            .event_tracker
-            .global_published_event(&event.id)
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!(
-                    target: "whitenoise::event_processor::should_skip_global_event_processing",
-                    "Global published check failed for {}: {}",
-                    event.id.to_hex(),
-                    e
-                );
-                false
-            }
+        // We don't skip metadata events because we need them to update local database
+        let should_skip = match event.kind {
+            Kind::Metadata => false, // Always process metadata events to update local database
+            _ => match self
+                .nostr
+                .event_tracker
+                .global_published_event(&event.id)
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::event_processor::should_skip_global_event_processing",
+                        "Global published check failed for {}: {}",
+                        event.id.to_hex(),
+                        e
+                    );
+                    false
+                }
+            },
         };
         if should_skip {
             return Some("self-published event");

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use super::utils::{parse_optional_timestamp, parse_timestamp};
+use super::utils::parse_timestamp;
 use crate::whitenoise::relays::RelayType;
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -15,8 +15,6 @@ pub struct UserRelayRow {
     pub created_at: DateTime<Utc>,
     // updated_at is the timestamp of the last update
     pub updated_at: DateTime<Utc>,
-    // event_created_at is the timestamp of the original relay list event (None for legacy data)
-    pub event_created_at: Option<DateTime<Utc>>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for UserRelayRow
@@ -39,7 +37,6 @@ where
             })?;
         let created_at = parse_timestamp(row, "created_at")?;
         let updated_at = parse_timestamp(row, "updated_at")?;
-        let event_created_at = parse_optional_timestamp(row, "event_created_at")?;
 
         Ok(UserRelayRow {
             user_id,
@@ -47,7 +44,6 @@ where
             relay_type,
             created_at,
             updated_at,
-            event_created_at,
         })
     }
 }
@@ -73,7 +69,6 @@ mod tests {
                 relay_type TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                event_created_at INTEGER DEFAULT NULL,
                 PRIMARY KEY (user_id, relay_id, relay_type)
             )",
         )
@@ -95,12 +90,11 @@ mod tests {
 
         // Insert test data
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(test_relay_type)
-        .bind(test_timestamp)
         .bind(test_timestamp)
         .bind(test_timestamp)
         .execute(&pool)
@@ -145,14 +139,13 @@ mod tests {
 
             // Insert test data
             sqlx::query(
-                "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             )
             .bind(test_user_id)
             .bind(test_relay_id)
             .bind(relay_type_str)
             .bind(test_timestamp)
             .bind(test_timestamp)
-            .bind(None::<i64>) // NULL event_created_at for legacy test data
             .execute(&pool)
             .await
             .unwrap();
@@ -188,14 +181,13 @@ mod tests {
 
         // Test invalid created_at timestamp
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(test_relay_type)
         .bind(invalid_timestamp)
         .bind(valid_timestamp)
-        .bind(None::<i64>) // NULL event_created_at
         .execute(&pool)
         .await
         .unwrap();
@@ -226,14 +218,13 @@ mod tests {
             .unwrap();
 
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(test_relay_type)
         .bind(valid_timestamp)
         .bind(invalid_timestamp)
-        .bind(None::<i64>) // NULL event_created_at
         .execute(&pool)
         .await
         .unwrap();
@@ -266,14 +257,13 @@ mod tests {
 
         // Test with timestamp 0 (Unix epoch)
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(test_relay_type)
         .bind(0i64)
         .bind(0i64)
-        .bind(Some(0i64)) // Valid event_created_at
         .execute(&pool)
         .await
         .unwrap();
@@ -298,14 +288,13 @@ mod tests {
         let future_timestamp =
             (chrono::Utc::now() + chrono::Duration::days(365)).timestamp_millis();
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(test_relay_type)
         .bind(future_timestamp)
         .bind(future_timestamp)
-        .bind(Some(future_timestamp)) // Valid event_created_at
         .execute(&pool)
         .await
         .unwrap();
@@ -338,12 +327,11 @@ mod tests {
 
         // Test with very large IDs
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(test_relay_type)
-        .bind(test_timestamp)
         .bind(test_timestamp)
         .bind(test_timestamp)
         .execute(&pool)
@@ -378,12 +366,11 @@ mod tests {
 
         // Test with negative IDs (should work as they're just i64 values)
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(test_relay_type)
-        .bind(test_timestamp)
         .bind(test_timestamp)
         .bind(test_timestamp)
         .execute(&pool)
@@ -416,7 +403,6 @@ mod tests {
             relay_type: RelayType::Inbox,
             created_at: timestamp,
             updated_at: timestamp,
-            event_created_at: Some(timestamp),
         };
 
         // Test debug formatting doesn't panic
@@ -445,12 +431,11 @@ mod tests {
         let test_timestamp = chrono::Utc::now().timestamp_millis();
 
         sqlx::query(
-            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(test_user_id)
         .bind(test_relay_id)
         .bind(invalid_relay_type)
-        .bind(test_timestamp)
         .bind(test_timestamp)
         .bind(test_timestamp)
         .execute(&pool)

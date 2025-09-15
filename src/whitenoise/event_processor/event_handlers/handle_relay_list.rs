@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use nostr_sdk::prelude::*;
 
 use crate::{
@@ -15,7 +15,7 @@ impl Whitenoise {
         let relay_urls = NostrManager::relay_urls_from_event(event.clone());
         let event_created_at = Some(
             DateTime::from_timestamp_millis((event.created_at.as_u64() * 1000) as i64)
-                .unwrap_or_else(Utc::now),
+                .unwrap_or(DateTime::UNIX_EPOCH),
         );
         let relays_changed = user
             .sync_relay_urls(self, relay_type, &relay_urls, event_created_at)

@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
-use nostr_sdk::EventId;
+use nostr_sdk::{EventId, PublicKey};
 
 use super::{utils::parse_timestamp, Database, DatabaseError};
+use crate::whitenoise::{error::WhitenoiseError, relays::RelayType};
 
 /// Row structure for processed_events table
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -10,6 +11,8 @@ pub struct ProcessedEvent {
     pub event_id: EventId,
     pub account_id: Option<i64>,
     pub created_at: DateTime<Utc>,
+    pub event_created_at: Option<DateTime<Utc>>,
+    pub event_kind: Option<u16>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for ProcessedEvent
@@ -29,11 +32,28 @@ where
 
         let created_at = parse_timestamp(row, "created_at")?;
 
+        // Handle nullable event_created_at
+        let event_created_at = match row.try_get::<Option<i64>, &str>("event_created_at")? {
+            Some(timestamp) => {
+                Some(DateTime::from_timestamp_millis(timestamp).ok_or_else(|| {
+                    sqlx::Error::Decode("Invalid event_created_at timestamp".into())
+                })?)
+            }
+            None => None,
+        };
+
+        // Handle nullable event_kind
+        let event_kind = row
+            .try_get::<Option<i64>, &str>("event_kind")?
+            .map(|kind| kind as u16);
+
         Ok(ProcessedEvent {
             id,
             event_id,
             account_id,
             created_at,
+            event_created_at,
+            event_kind,
         })
     }
 }
@@ -43,12 +63,20 @@ impl ProcessedEvent {
     pub(crate) async fn create(
         event_id: &EventId,
         account_id: Option<i64>,
+        event_created_at: Option<DateTime<Utc>>,
+        event_kind: Option<u16>,
         database: &Database,
     ) -> Result<(), DatabaseError> {
+        // Convert event_created_at to milliseconds if present
+        let event_timestamp_ms = event_created_at.map(|dt| dt.timestamp_millis());
+        let event_kind_i64 = event_kind.map(|k| k as i64);
+
         // Use INSERT OR IGNORE to handle potential race conditions
-        sqlx::query("INSERT OR IGNORE INTO processed_events (event_id, account_id) VALUES (?, ?)")
+        sqlx::query("INSERT OR IGNORE INTO processed_events (event_id, account_id, event_created_at, event_kind) VALUES (?, ?, ?, ?)")
             .bind(event_id.to_hex())
             .bind(account_id)
+            .bind(event_timestamp_ms)
+            .bind(event_kind_i64)
             .execute(&database.pool)
             .await?;
 
@@ -82,6 +110,81 @@ impl ProcessedEvent {
         let result: Option<(bool,)> = query_builder.fetch_optional(&database.pool).await?;
 
         Ok(result.map(|(exists,)| exists).unwrap_or(false))
+    }
+
+    /// Gets the newest event timestamp for specific event kinds and account
+    pub(crate) async fn newest_event_timestamp_for_kinds(
+        account_id: Option<i64>,
+        event_kinds: &[u16],
+        database: &Database,
+    ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
+        if event_kinds.is_empty() {
+            return Ok(None);
+        }
+
+        // Build query with placeholders for event kinds
+        let mut query = String::from("SELECT MAX(event_created_at) FROM processed_events WHERE ");
+
+        // Add account_id filter
+        if account_id.is_some() {
+            query.push_str("account_id = ? AND ");
+        } else {
+            query.push_str("account_id IS NULL AND ");
+        }
+
+        // Add event_kind filter
+        query.push_str("event_kind IN (");
+        let placeholders: Vec<&str> = event_kinds.iter().map(|_| "?").collect();
+        query.push_str(&placeholders.join(", "));
+        query.push(')');
+
+        let mut query_builder = sqlx::query_scalar::<_, Option<i64>>(&query);
+
+        // Bind account_id if present
+        if let Some(id) = account_id {
+            query_builder = query_builder.bind(id);
+        }
+
+        // Bind event kinds
+        for &kind in event_kinds {
+            query_builder = query_builder.bind(kind as i64);
+        }
+
+        let result: Option<Option<i64>> = query_builder.fetch_optional(&database.pool).await?;
+
+        Ok(result.flatten().and_then(DateTime::from_timestamp_millis))
+    }
+
+    /// Gets the newest relay event timestamp for a user
+    pub(crate) async fn newest_relay_event_timestamp(
+        _user_pubkey: &PublicKey,
+        relay_type: RelayType,
+        database: &Database,
+    ) -> Result<Option<DateTime<Utc>>, WhitenoiseError> {
+        // Map relay types to their corresponding event kinds
+        let kinds = match relay_type {
+            RelayType::Nip65 => vec![10002],
+            RelayType::Inbox => vec![10050],
+            RelayType::KeyPackage => vec![10051],
+        };
+
+        // Note: For global events (user data), account_id will be NULL
+        // This queries for events processed globally, not tied to a specific account
+        Self::newest_event_timestamp_for_kinds(None, &kinds, database)
+            .await
+            .map_err(WhitenoiseError::Database)
+    }
+
+    /// Gets the newest contact list event timestamp for an account
+    pub(crate) async fn newest_contact_list_timestamp(
+        account_id: i64,
+        database: &Database,
+    ) -> Result<Option<DateTime<Utc>>, WhitenoiseError> {
+        // Query processed_events for kind 3 events with specific account_id
+        let kinds = vec![3];
+        Self::newest_event_timestamp_for_kinds(Some(account_id), &kinds, database)
+            .await
+            .map_err(WhitenoiseError::Database)
     }
 }
 
@@ -124,6 +227,8 @@ mod tests {
                     CHECK (length(event_id) = 64 AND event_id GLOB '[0-9a-fA-F]*'),
                 account_id INTEGER,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                event_created_at INTEGER DEFAULT NULL,
+                event_kind INTEGER DEFAULT NULL,
                 FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
                 UNIQUE(event_id, account_id)
             )",
@@ -185,18 +290,20 @@ mod tests {
 
         // Insert a test record
         sqlx::query(
-            "INSERT INTO processed_events (event_id, account_id, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO processed_events (event_id, account_id, created_at, event_created_at, event_kind) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(event_id.to_hex())
         .bind(account_id)
         .bind(timestamp)
+        .bind(Some(timestamp + 1000)) // Different event timestamp
+        .bind(Some(1i64)) // Kind 1 (text note)
         .execute(&pool)
         .await
         .unwrap();
 
         // Fetch and verify
         let row: ProcessedEvent = sqlx::query_as(
-            "SELECT id, event_id, account_id, created_at FROM processed_events WHERE account_id = ?",
+            "SELECT id, event_id, account_id, created_at, event_created_at, event_kind FROM processed_events WHERE account_id = ?",
         )
         .bind(account_id)
         .fetch_one(&pool)
@@ -206,6 +313,11 @@ mod tests {
         assert_eq!(row.event_id, event_id);
         assert_eq!(row.account_id, Some(account_id));
         assert_eq!(row.created_at.timestamp_millis(), timestamp);
+        assert_eq!(
+            row.event_created_at.unwrap().timestamp_millis(),
+            timestamp + 1000
+        );
+        assert_eq!(row.event_kind, Some(1));
     }
 
     #[tokio::test]
@@ -214,9 +326,18 @@ mod tests {
         let database = wrap_pool_in_database(pool);
         let event_id = create_test_event_id();
         let account_id = 1i64;
+        let event_timestamp = Some(Utc::now());
+        let event_kind = Some(1);
 
         // Create a processed event
-        let result = ProcessedEvent::create(&event_id, Some(account_id), &database).await;
+        let result = ProcessedEvent::create(
+            &event_id,
+            Some(account_id),
+            event_timestamp,
+            event_kind,
+            &database,
+        )
+        .await;
         assert!(result.is_ok());
 
         // Verify it was inserted
@@ -238,10 +359,26 @@ mod tests {
         let database = wrap_pool_in_database(pool);
         let event_id = create_test_event_id();
         let account_id = 1i64;
+        let event_timestamp = Some(Utc::now());
+        let event_kind = Some(1);
 
         // Create the same processed event twice
-        let result1 = ProcessedEvent::create(&event_id, Some(account_id), &database).await;
-        let result2 = ProcessedEvent::create(&event_id, Some(account_id), &database).await;
+        let result1 = ProcessedEvent::create(
+            &event_id,
+            Some(account_id),
+            event_timestamp,
+            event_kind,
+            &database,
+        )
+        .await;
+        let result2 = ProcessedEvent::create(
+            &event_id,
+            Some(account_id),
+            event_timestamp,
+            event_kind,
+            &database,
+        )
+        .await;
 
         assert!(result1.is_ok());
         assert!(result2.is_ok());
@@ -267,9 +404,15 @@ mod tests {
         let account_id = 1i64;
 
         // Create a processed event
-        ProcessedEvent::create(&event_id, Some(account_id), &database)
-            .await
-            .unwrap();
+        ProcessedEvent::create(
+            &event_id,
+            Some(account_id),
+            Some(Utc::now()),
+            Some(1),
+            &database,
+        )
+        .await
+        .unwrap();
 
         // Check if it exists
         let exists = ProcessedEvent::exists(&event_id, Some(account_id), &database)
@@ -303,9 +446,15 @@ mod tests {
         let account_id2 = 999i64; // Non-existent account
 
         // Create a processed event for account 1
-        ProcessedEvent::create(&event_id, Some(account_id1), &database)
-            .await
-            .unwrap();
+        ProcessedEvent::create(
+            &event_id,
+            Some(account_id1),
+            Some(Utc::now()),
+            Some(1),
+            &database,
+        )
+        .await
+        .unwrap();
 
         // Check if it exists for account 2 (should be false)
         let exists = ProcessedEvent::exists(&event_id, Some(account_id2), &database)
@@ -336,12 +485,24 @@ mod tests {
         let account_id1 = 1i64;
         let account_id2 = 2i64;
 
-        ProcessedEvent::create(&event_id, Some(account_id1), &database)
-            .await
-            .unwrap();
-        ProcessedEvent::create(&event_id, Some(account_id2), &database)
-            .await
-            .unwrap();
+        ProcessedEvent::create(
+            &event_id,
+            Some(account_id1),
+            Some(Utc::now()),
+            Some(1),
+            &database,
+        )
+        .await
+        .unwrap();
+        ProcessedEvent::create(
+            &event_id,
+            Some(account_id2),
+            Some(Utc::now()),
+            Some(1),
+            &database,
+        )
+        .await
+        .unwrap();
 
         // Verify both accounts have their records
         assert!(
@@ -366,6 +527,8 @@ mod tests {
             event_id,
             account_id: Some(123),
             created_at: now,
+            event_created_at: Some(now),
+            event_kind: Some(1),
         };
 
         let event2 = event1.clone();
@@ -375,5 +538,135 @@ mod tests {
         let debug_str = format!("{:?}", event1);
         assert!(debug_str.contains("ProcessedEvent"));
         assert!(debug_str.contains(&event_id.to_hex()));
+    }
+
+    #[tokio::test]
+    async fn test_newest_event_timestamp_for_kinds() {
+        let pool = setup_test_db().await;
+        let database = wrap_pool_in_database(pool);
+        let event_id1 = create_test_event_id();
+        let event_id2 = create_test_event_id();
+        let account_id = 1i64;
+        let older_timestamp = Utc::now();
+        let newer_timestamp = older_timestamp + chrono::Duration::milliseconds(1000);
+
+        // Create two events with different timestamps
+        ProcessedEvent::create(
+            &event_id1,
+            Some(account_id),
+            Some(older_timestamp),
+            Some(3),
+            &database,
+        )
+        .await
+        .unwrap();
+        ProcessedEvent::create(
+            &event_id2,
+            Some(account_id),
+            Some(newer_timestamp),
+            Some(3),
+            &database,
+        )
+        .await
+        .unwrap();
+
+        // Test getting newest timestamp for kind 3
+        let result =
+            ProcessedEvent::newest_event_timestamp_for_kinds(Some(account_id), &[3], &database)
+                .await
+                .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().timestamp_millis(),
+            newer_timestamp.timestamp_millis()
+        );
+
+        // Test with different kind (should return None)
+        let result =
+            ProcessedEvent::newest_event_timestamp_for_kinds(Some(account_id), &[1], &database)
+                .await
+                .unwrap();
+
+        assert!(result.is_none());
+
+        // Test with different account (should return None)
+        let result = ProcessedEvent::newest_event_timestamp_for_kinds(Some(999), &[3], &database)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_newest_contact_list_timestamp() {
+        let pool = setup_test_db().await;
+        let database = wrap_pool_in_database(pool);
+        let event_id = create_test_event_id();
+        let account_id = 1i64;
+        let timestamp = Utc::now();
+
+        // Create a contact list event (kind 3)
+        ProcessedEvent::create(
+            &event_id,
+            Some(account_id),
+            Some(timestamp),
+            Some(3),
+            &database,
+        )
+        .await
+        .unwrap();
+
+        // Test getting newest contact list timestamp
+        let result = ProcessedEvent::newest_contact_list_timestamp(account_id, &database)
+            .await
+            .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().timestamp_millis(),
+            timestamp.timestamp_millis()
+        );
+
+        // Test with different account (should return None)
+        let result = ProcessedEvent::newest_contact_list_timestamp(999, &database)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_newest_relay_event_timestamp() {
+        let pool = setup_test_db().await;
+        let database = wrap_pool_in_database(pool);
+        let event_id = create_test_event_id();
+        let user_pubkey = nostr_sdk::Keys::generate().public_key();
+        let timestamp = Utc::now();
+
+        // Create a NIP-65 relay event (kind 10002) as global event
+        ProcessedEvent::create(&event_id, None, Some(timestamp), Some(10002), &database)
+            .await
+            .unwrap();
+
+        // Test getting newest relay timestamp for NIP-65
+        let result =
+            ProcessedEvent::newest_relay_event_timestamp(&user_pubkey, RelayType::Nip65, &database)
+                .await
+                .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().timestamp_millis(),
+            timestamp.timestamp_millis()
+        );
+
+        // Test with different relay type (should return None)
+        let result =
+            ProcessedEvent::newest_relay_event_timestamp(&user_pubkey, RelayType::Inbox, &database)
+                .await
+                .unwrap();
+
+        assert!(result.is_none());
     }
 }

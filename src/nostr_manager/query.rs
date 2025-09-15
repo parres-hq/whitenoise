@@ -18,7 +18,7 @@ impl NostrManager {
         &self,
         nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
         pubkey: PublicKey,
-    ) -> Result<Option<(Metadata, Timestamp)>> {
+    ) -> Result<Option<(Metadata, Timestamp, EventId)>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata);
         let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let events: Events = self
@@ -33,7 +33,11 @@ impl NostrManager {
             .filter(|e| e.created_at <= cutoff)
             .max_by_key(|e| (e.created_at, e.id));
         match latest {
-            Some(event) => Ok(Some((Metadata::try_from(&event)?, event.created_at))),
+            Some(event) => Ok(Some((
+                Metadata::try_from(&event)?,
+                event.created_at,
+                event.id,
+            ))),
             None => Ok(None),
         }
     }
@@ -43,7 +47,7 @@ impl NostrManager {
         pubkey: PublicKey,
         relay_type: RelayType,
         nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
-    ) -> Result<Option<(HashSet<RelayUrl>, Timestamp)>> {
+    ) -> Result<Option<(HashSet<RelayUrl>, Timestamp, EventId)>> {
         let filter = Filter::new().author(pubkey).kind(relay_type.into());
         let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let relay_events = self
@@ -67,7 +71,7 @@ impl NostrManager {
             None => Ok(None),
             Some(event) => {
                 let relay_urls = Self::relay_urls_from_event(event.clone());
-                Ok(Some((relay_urls, event.created_at)))
+                Ok(Some((relay_urls, event.created_at, event.id)))
             }
         }
     }

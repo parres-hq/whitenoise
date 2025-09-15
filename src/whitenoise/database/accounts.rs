@@ -197,7 +197,7 @@ impl Account {
     /// Returns a [`WhitenoiseError::AccountNotFound`] if the database query fails.
     pub(crate) async fn follows(&self, database: &Database) -> Result<Vec<User>, WhitenoiseError> {
         let user_rows = sqlx::query_as::<_, UserRow>(
-            "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at, u.event_created_at
+            "SELECT u.id, u.pubkey, u.metadata, u.created_at, u.updated_at
              FROM account_follows af
              JOIN users u ON af.user_id = u.id
              WHERE af.account_id = ?",
@@ -215,7 +215,6 @@ impl Account {
                 metadata: row.metadata,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
-                event_created_at: row.event_created_at,
             })
             .collect();
 
@@ -363,10 +362,9 @@ impl Account {
                 tracing::debug!("Created new user for follow: {}", pubkey.to_hex());
             }
 
-            sqlx::query("INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
                 .bind(self.id)
                 .bind(user.id)
-                .bind(event_timestamp as i64)
                 .bind(Utc::now().timestamp_millis())
                 .bind(Utc::now().timestamp_millis())
                 .execute(&mut *tx)
@@ -387,39 +385,6 @@ impl Account {
         );
 
         Ok(newly_created_users)
-    }
-
-    /// Gets the newest event timestamp among existing follows for this account.
-    ///
-    /// This method queries the account_follows table to find the latest event_created_at
-    /// timestamp among all follows for this account. This is used to determine if a
-    /// ContactList event is newer than what we already have stored.
-    ///
-    /// # Arguments
-    ///
-    /// * `database` - A reference to the `Database` instance for database operations
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(Some(timestamp))` if follows exist and have event timestamps,
-    /// `Ok(None)` if no follows exist or all follows have NULL event_created_at.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`WhitenoiseError`] if the database query fails.
-    pub(crate) async fn get_latest_follow_list_timestamp(
-        &self,
-        database: &Database,
-    ) -> Result<Option<u64>, WhitenoiseError> {
-        let result = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT MAX(event_created_at) FROM account_follows WHERE account_id = ?",
-        )
-        .bind(self.id)
-        .fetch_one(&database.pool)
-        .await
-        .map_err(DatabaseError::Sqlx)?;
-
-        Ok(result.map(|ts| ts as u64))
     }
 
     /// Saves this account to the database.
@@ -512,7 +477,6 @@ mod tests {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pubkey TEXT NOT NULL UNIQUE,
                 metadata TEXT NOT NULL,
-                event_created_at INTEGER DEFAULT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
@@ -527,7 +491,6 @@ mod tests {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
-                event_created_at INTEGER DEFAULT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (account_id) REFERENCES accounts (id),
@@ -979,7 +942,6 @@ mod tests {
                 metadata: metadata.clone(),
                 created_at: test_timestamp,
                 updated_at: test_timestamp,
-                event_created_at: None,
             };
 
             // Save user first
@@ -1104,7 +1066,6 @@ mod tests {
             metadata: user_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
-            event_created_at: None,
         };
 
         // Save user
@@ -1182,7 +1143,6 @@ mod tests {
             metadata: user_metadata.clone(),
             created_at: test_timestamp,
             updated_at: test_timestamp,
-            event_created_at: None,
         };
 
         user.save(&whitenoise.database).await.unwrap();
@@ -1280,7 +1240,6 @@ mod tests {
                 metadata: user_metadata,
                 created_at: test_timestamp,
                 updated_at: test_timestamp,
-                event_created_at: None,
             };
 
             user.save(&whitenoise.database).await.unwrap();
@@ -1486,17 +1445,14 @@ mod tests {
             .unwrap();
         assert_eq!(user_count, 2);
 
-        // Verify event timestamp was stored
-        let stored_timestamps: Vec<i64> = sqlx::query_scalar(
-            "SELECT event_created_at FROM account_follows WHERE account_id = ? ORDER BY id",
-        )
-        .bind(account.id)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-        assert_eq!(stored_timestamps.len(), 2);
-        assert_eq!(stored_timestamps[0], event_timestamp as i64);
-        assert_eq!(stored_timestamps[1], event_timestamp as i64);
+        // Check that follows were created
+        let follow_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM account_follows WHERE account_id = ?")
+                .bind(account.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(follow_count, 2);
     }
 
     #[tokio::test]
@@ -1554,11 +1510,10 @@ mod tests {
         // Insert initial follows
         for (i, _pubkey) in [&old_contact1, &old_contact2].iter().enumerate() {
             sqlx::query(
-                "INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
             )
             .bind(account.id.unwrap())
             .bind((i + 1) as i64) // user_id starts from 1
-            .bind(1000i64) // old event timestamp
             .bind(test_timestamp)
             .bind(test_timestamp)
             .execute(&pool)
@@ -1591,17 +1546,14 @@ mod tests {
                 .unwrap();
         assert_eq!(count, 2);
 
-        // Verify new event timestamp was stored
-        let stored_timestamps: Vec<i64> = sqlx::query_scalar(
-            "SELECT event_created_at FROM account_follows WHERE account_id = ? ORDER BY id",
-        )
-        .bind(account.id)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-        assert_eq!(stored_timestamps.len(), 2);
-        assert_eq!(stored_timestamps[0], event_timestamp as i64);
-        assert_eq!(stored_timestamps[1], event_timestamp as i64);
+        // Check that follows were updated
+        let final_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM account_follows WHERE account_id = ?")
+                .bind(account.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(final_count, 2);
 
         // Verify the followed pubkeys are correct
         let followed_pubkeys: Vec<String> = sqlx::query_scalar(
@@ -1775,448 +1727,5 @@ mod tests {
 
         // Should fail due to closed database
         assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_follow_list_timestamp_no_follows() {
-        let pool = setup_test_db().await;
-        let database = crate::whitenoise::database::Database {
-            pool: pool.clone(),
-            path: std::path::PathBuf::from(":memory:"),
-            last_connected: std::time::SystemTime::now(),
-        };
-
-        // Create test account
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let test_user_id = 1i64;
-        let test_timestamp = chrono::Utc::now().timestamp_millis();
-
-        sqlx::query(
-            "INSERT INTO accounts (pubkey, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(test_pubkey.to_hex())
-        .bind(test_user_id)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let account = Account {
-            id: Some(1),
-            pubkey: test_pubkey,
-            user_id: test_user_id,
-            last_synced_at: None,
-            created_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-            updated_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-        };
-
-        // Test with no follows - should return None
-        let result = account.get_latest_follow_list_timestamp(&database).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_follow_list_timestamp_single_follow() {
-        let pool = setup_test_db().await;
-        let database = crate::whitenoise::database::Database {
-            pool: pool.clone(),
-            path: std::path::PathBuf::from(":memory:"),
-            last_connected: std::time::SystemTime::now(),
-        };
-
-        // Create test account
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let test_user_id = 1i64;
-        let test_timestamp = chrono::Utc::now().timestamp_millis();
-
-        sqlx::query(
-            "INSERT INTO accounts (pubkey, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(test_pubkey.to_hex())
-        .bind(test_user_id)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let account = Account {
-            id: Some(1),
-            pubkey: test_pubkey,
-            user_id: test_user_id,
-            last_synced_at: None,
-            created_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-            updated_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-        };
-
-        // Create a test user
-        let contact_pubkey = nostr_sdk::Keys::generate().public_key();
-        sqlx::query(
-            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(contact_pubkey.to_hex())
-        .bind("{}")
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Create a follow with a specific event timestamp
-        let event_timestamp = 1234567890i64;
-        sqlx::query(
-            "INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(account.id.unwrap())
-        .bind(1i64) // user_id
-        .bind(event_timestamp)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Test with single follow - should return the event timestamp
-        let result = account.get_latest_follow_list_timestamp(&database).await;
-        assert!(result.is_ok());
-        let timestamp = result.unwrap();
-        assert!(timestamp.is_some());
-        assert_eq!(timestamp.unwrap(), event_timestamp as u64);
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_follow_list_timestamp_multiple_follows() {
-        let pool = setup_test_db().await;
-        let database = crate::whitenoise::database::Database {
-            pool: pool.clone(),
-            path: std::path::PathBuf::from(":memory:"),
-            last_connected: std::time::SystemTime::now(),
-        };
-
-        // Create test account
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let test_user_id = 1i64;
-        let test_timestamp = chrono::Utc::now().timestamp_millis();
-
-        sqlx::query(
-            "INSERT INTO accounts (pubkey, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(test_pubkey.to_hex())
-        .bind(test_user_id)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let account = Account {
-            id: Some(1),
-            pubkey: test_pubkey,
-            user_id: test_user_id,
-            last_synced_at: None,
-            created_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-            updated_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-        };
-
-        // Create multiple test users
-        let contact1 = nostr_sdk::Keys::generate().public_key();
-        let contact2 = nostr_sdk::Keys::generate().public_key();
-        let contact3 = nostr_sdk::Keys::generate().public_key();
-
-        for (i, pubkey) in [&contact1, &contact2, &contact3].iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            )
-            .bind(pubkey.to_hex())
-            .bind("{}")
-            .bind(test_timestamp)
-            .bind(test_timestamp)
-            .execute(&pool)
-            .await
-            .unwrap();
-
-            // Create follows with different event timestamps
-            let event_timestamp = 1000i64 + (i as i64 * 1000); // 1000, 2000, 3000
-            sqlx::query(
-                "INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(account.id.unwrap())
-            .bind((i + 1) as i64) // user_id starts from 1
-            .bind(event_timestamp)
-            .bind(test_timestamp)
-            .bind(test_timestamp)
-            .execute(&pool)
-            .await
-            .unwrap();
-        }
-
-        // Test with multiple follows - should return the maximum timestamp (3000)
-        let result = account.get_latest_follow_list_timestamp(&database).await;
-        assert!(result.is_ok());
-        let timestamp = result.unwrap();
-        assert!(timestamp.is_some());
-        assert_eq!(timestamp.unwrap(), 3000u64);
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_follow_list_timestamp_null_timestamps() {
-        let pool = setup_test_db().await;
-        let database = crate::whitenoise::database::Database {
-            pool: pool.clone(),
-            path: std::path::PathBuf::from(":memory:"),
-            last_connected: std::time::SystemTime::now(),
-        };
-
-        // Create test account
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let test_user_id = 1i64;
-        let test_timestamp = chrono::Utc::now().timestamp_millis();
-
-        sqlx::query(
-            "INSERT INTO accounts (pubkey, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(test_pubkey.to_hex())
-        .bind(test_user_id)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let account = Account {
-            id: Some(1),
-            pubkey: test_pubkey,
-            user_id: test_user_id,
-            last_synced_at: None,
-            created_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-            updated_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-        };
-
-        // Create test users
-        let contact1 = nostr_sdk::Keys::generate().public_key();
-        let contact2 = nostr_sdk::Keys::generate().public_key();
-
-        for (i, pubkey) in [&contact1, &contact2].iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            )
-            .bind(pubkey.to_hex())
-            .bind("{}")
-            .bind(test_timestamp)
-            .bind(test_timestamp)
-            .execute(&pool)
-            .await
-            .unwrap();
-
-            // Create follows with NULL event_created_at
-            sqlx::query(
-                "INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(account.id.unwrap())
-            .bind((i + 1) as i64) // user_id starts from 1
-            .bind(None::<i64>) // NULL event_created_at
-            .bind(test_timestamp)
-            .bind(test_timestamp)
-            .execute(&pool)
-            .await
-            .unwrap();
-        }
-
-        // Test with NULL timestamps - should return None
-        let result = account.get_latest_follow_list_timestamp(&database).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_follow_list_timestamp_mixed_timestamps() {
-        let pool = setup_test_db().await;
-        let database = crate::whitenoise::database::Database {
-            pool: pool.clone(),
-            path: std::path::PathBuf::from(":memory:"),
-            last_connected: std::time::SystemTime::now(),
-        };
-
-        // Create test account
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let test_user_id = 1i64;
-        let test_timestamp = chrono::Utc::now().timestamp_millis();
-
-        sqlx::query(
-            "INSERT INTO accounts (pubkey, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(test_pubkey.to_hex())
-        .bind(test_user_id)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let account = Account {
-            id: Some(1),
-            pubkey: test_pubkey,
-            user_id: test_user_id,
-            last_synced_at: None,
-            created_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-            updated_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-        };
-
-        // Create test users
-        let contact1 = nostr_sdk::Keys::generate().public_key();
-        let contact2 = nostr_sdk::Keys::generate().public_key();
-        let contact3 = nostr_sdk::Keys::generate().public_key();
-
-        for (i, pubkey) in [&contact1, &contact2, &contact3].iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            )
-            .bind(pubkey.to_hex())
-            .bind("{}")
-            .bind(test_timestamp)
-            .bind(test_timestamp)
-            .execute(&pool)
-            .await
-            .unwrap();
-
-            // Create follows with mixed timestamps: one NULL, one valid, one valid
-            let event_timestamp = match i {
-                0 => None::<i64>,   // NULL
-                1 => Some(2000i64), // Valid timestamp
-                2 => Some(5000i64), // Valid timestamp (should be the max)
-                _ => unreachable!(),
-            };
-
-            sqlx::query(
-                "INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(account.id.unwrap())
-            .bind((i + 1) as i64) // user_id starts from 1
-            .bind(event_timestamp)
-            .bind(test_timestamp)
-            .bind(test_timestamp)
-            .execute(&pool)
-            .await
-            .unwrap();
-        }
-
-        // Test with mixed timestamps - should return the maximum valid timestamp (5000)
-        let result = account.get_latest_follow_list_timestamp(&database).await;
-        assert!(result.is_ok());
-        let timestamp = result.unwrap();
-        assert!(timestamp.is_some());
-        assert_eq!(timestamp.unwrap(), 5000u64);
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_follow_list_timestamp_different_accounts() {
-        let pool = setup_test_db().await;
-        let database = crate::whitenoise::database::Database {
-            pool: pool.clone(),
-            path: std::path::PathBuf::from(":memory:"),
-            last_connected: std::time::SystemTime::now(),
-        };
-
-        // Create two test accounts
-        let test_pubkey1 = nostr_sdk::Keys::generate().public_key();
-        let test_pubkey2 = nostr_sdk::Keys::generate().public_key();
-        let test_timestamp = chrono::Utc::now().timestamp_millis();
-
-        // Insert both accounts
-        sqlx::query(
-            "INSERT INTO accounts (pubkey, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(test_pubkey1.to_hex())
-        .bind(1i64)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "INSERT INTO accounts (pubkey, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(test_pubkey2.to_hex())
-        .bind(2i64)
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let account1 = Account {
-            id: Some(1),
-            pubkey: test_pubkey1,
-            user_id: 1,
-            last_synced_at: None,
-            created_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-            updated_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-        };
-
-        let account2 = Account {
-            id: Some(2),
-            pubkey: test_pubkey2,
-            user_id: 2,
-            last_synced_at: None,
-            created_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-            updated_at: chrono::DateTime::from_timestamp_millis(test_timestamp).unwrap(),
-        };
-
-        // Create a shared test user
-        let contact_pubkey = nostr_sdk::Keys::generate().public_key();
-        sqlx::query(
-            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind(contact_pubkey.to_hex())
-        .bind("{}")
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Create follows for both accounts with different timestamps
-        sqlx::query(
-            "INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(account1.id.unwrap())
-        .bind(1i64) // user_id
-        .bind(1000i64) // event timestamp for account1
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            "INSERT INTO account_follows (account_id, user_id, event_created_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(account2.id.unwrap())
-        .bind(1i64) // same user_id
-        .bind(2000i64) // different event timestamp for account2
-        .bind(test_timestamp)
-        .bind(test_timestamp)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        // Test that each account gets its own latest timestamp
-        let result1 = account1.get_latest_follow_list_timestamp(&database).await;
-        assert!(result1.is_ok());
-        let timestamp1 = result1.unwrap();
-        assert!(timestamp1.is_some());
-        assert_eq!(timestamp1.unwrap(), 1000u64);
-
-        let result2 = account2.get_latest_follow_list_timestamp(&database).await;
-        assert!(result2.is_ok());
-        let timestamp2 = result2.unwrap();
-        assert!(timestamp2.is_some());
-        assert_eq!(timestamp2.unwrap(), 2000u64);
-
-        // Verify they are different
-        assert_ne!(timestamp1.unwrap(), timestamp2.unwrap());
     }
 }
