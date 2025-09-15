@@ -15,6 +15,15 @@ SELECT
 FROM contacts
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.pubkey = contacts.pubkey);
 
+-- Step 1.5: FIXES EDGE CASE - Create users for accounts that don't have corresponding contacts
+-- This ensures every account will have a user record before Step 6
+INSERT INTO users (pubkey, metadata)
+SELECT
+    pubkey,
+    NULL as metadata  -- No metadata available for accounts without contacts
+FROM accounts
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.pubkey = accounts.pubkey);
+
 -- Step 2: Extract and insert unique relay URLs from contacts
 -- Extract from nip65_relays
 INSERT OR IGNORE INTO relays (url)
@@ -164,6 +173,7 @@ WHERE json_valid(a.key_package_relays)
   AND relay_value.value != '';
 
 -- Step 6: Migrate accounts to accounts_new table
+-- Now this INNER JOIN is safe because we ensured every account has a user record in Step 1.5
 INSERT INTO accounts_new (pubkey, user_id, settings, last_synced_at)
 SELECT
     a.pubkey,
