@@ -8,7 +8,7 @@ use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::nostr_manager::NostrManagerError;
+use crate::nostr_manager::{NostrManager, NostrManagerError};
 use crate::types::ImageType;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
@@ -279,6 +279,75 @@ impl Account {
             whitenoise.nostr.client.add_relay(url).await?;
         }
         whitenoise.nostr.client.connect().await;
+        Ok(())
+    }
+
+    /// Processes user event streams fetched from the Nostr network.
+    ///
+    /// This method takes the event streams returned by `fetch_user_event_streams` and
+    /// processes each stream through the appropriate Whitenoise event handlers.
+    /// This provides separation of concerns between data fetching and event processing.
+    ///
+    /// # Arguments
+    ///
+    /// * `streams` - The `UserEventStreams` containing different types of event streams
+    /// * `whitenoise` - The Whitenoise instance for accessing event handlers
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if all events are processed successfully, even if individual
+    /// events fail to process (errors are logged but don't halt the overall processing).
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if:
+    /// - Critical event processing errors occur
+    /// - Whitenoise instance is not available for processing
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let streams = nostr_manager.fetch_user_event_streams(signer, &account, group_ids).await?;
+    /// account.process_user_event_streams(streams, &whitenoise).await?;
+    /// ```
+    pub(crate) async fn process_user_event_streams(
+        &self,
+        mut streams: crate::nostr_manager::UserEventStreams,
+        whitenoise: &Whitenoise,
+    ) -> Result<()> {
+        use futures::StreamExt;
+
+        // Process metadata events
+        while let Some(event) = streams.metadata_events.next().await {
+            whitenoise.handle_metadata(event).await.map_err(|e| {
+                WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
+            })?;
+        }
+
+        // Process relay events
+        while let Some(event) = streams.relay_events.next().await {
+            whitenoise.handle_relay_list(event).await.map_err(|e| {
+                WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
+            })?;
+        }
+
+        // Process gift wrap events
+        while let Some(event) = streams.giftwrap_events.next().await {
+            whitenoise.handle_giftwrap(self, event).await.map_err(|e| {
+                WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
+            })?;
+        }
+
+        // Process group messages
+        while let Some(event) = streams.group_messages.next().await {
+            whitenoise
+                .handle_mls_message(self, event)
+                .await
+                .map_err(|e| {
+                    WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
+                })?;
+        }
+
         Ok(())
     }
 }
@@ -782,11 +851,94 @@ impl Whitenoise {
             );
 
             let current_time = Utc::now().timestamp_millis();
+
+            let whitenoise = Whitenoise::get_instance().unwrap();
+
+            // Get user's relay information for contact list fetching
+            let user_relays = match account_clone.nip65_relays(whitenoise).await {
+                Ok(relays) => relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
+                Err(_) => {
+                    // Fallback to default relays if user has no specific relays
+                    vec![
+                        RelayUrl::parse("wss://relay.damus.io").unwrap(),
+                        RelayUrl::parse("wss://nos.lol").unwrap(),
+                        RelayUrl::parse("wss://relay.nostr.band").unwrap(),
+                    ]
+                }
+            };
+
+            // Fetch the account's contact list
+            let fetched_contact_list = whitenoise
+                .nostr
+                .fetch_contact_list_events(account_clone.pubkey, &user_relays)
+                .await;
+
+            let contact_list_pubkeys = match &fetched_contact_list {
+                Ok(Some(contact_list_event)) => {
+                    NostrManager::pubkeys_from_event(contact_list_event)
+                }
+                Ok(None) => Vec::new(),
+                Err(e) => {
+                    tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to fetch contact list for account {}: {}", account_clone.pubkey.to_hex(), e);
+                    Vec::new()
+                }
+            };
+
+            // Process the fetched contact list first (if it exists)
+            // This ensures existing contact lists are processed during login even if no new events are streamed
+            if let Ok(Some(contact_list_event)) = fetched_contact_list {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::sync_all_user_data",
+                    "Processing fetched contact list for account {}",
+                    account_clone.pubkey.to_hex()
+                );
+                if let Err(e) = whitenoise
+                    .handle_contact_list(&account_clone, contact_list_event)
+                    .await
+                {
+                    tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to process contact list for account {}: {}", account_clone.pubkey.to_hex(), e);
+                }
+            }
+
             match nostr
-                .sync_all_user_data(signer, &account_clone, group_ids)
+                .fetch_user_event_streams(
+                    signer,
+                    account_clone.pubkey,
+                    contact_list_pubkeys,
+                    Timestamp::from(
+                        account_clone.last_synced_at.unwrap_or_default().timestamp() as u64
+                    ),
+                    group_ids,
+                )
                 .await
             {
-                Ok(_) => {
+                Ok(streams) => {
+                    // Process the event streams
+                    let whitenoise = match Whitenoise::get_instance() {
+                        Ok(instance) => instance,
+                        Err(e) => {
+                            tracing::error!(
+                                target: "whitenoise::background_fetch_account_data",
+                                "Failed to get Whitenoise instance for processing events: {}",
+                                e
+                            );
+                            return;
+                        }
+                    };
+
+                    if let Err(e) = account_clone
+                        .process_user_event_streams(streams, whitenoise)
+                        .await
+                    {
+                        tracing::error!(
+                            target: "whitenoise::background_fetch_account_data",
+                            "Failed to process event streams for account {}: {}",
+                            account_clone.pubkey.to_hex(),
+                            e
+                        );
+                        return;
+                    }
+
                     // Update the last_synced timestamp in the database
                     if let Err(e) =
                         sqlx::query("UPDATE accounts SET last_synced_at = ? WHERE pubkey = ?")
@@ -812,7 +964,7 @@ impl Whitenoise {
                 Err(e) => {
                     tracing::error!(
                         target: "whitenoise::background_fetch_account_data",
-                        "Failed to fetch user data for account {}: {}",
+                        "Failed to fetch user event streams for account {}: {}",
                         account_clone.pubkey.to_hex(),
                         e
                     );
