@@ -3,8 +3,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_relays_unique
 ON user_relays (user_id, relay_id, relay_type);
 
 -- Step 1: Migrate contacts to users table
-INSERT INTO users (pubkey, metadata)
-SELECT
+INSERT OR IGNORE INTO users (pubkey, metadata)
+SELECT DISTINCT
     pubkey,
     CASE
         WHEN json_valid(NULLIF(TRIM(metadata), ''))
@@ -13,7 +13,18 @@ SELECT
         ELSE NULL
     END AS metadata
 FROM contacts
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE users.pubkey = contacts.pubkey);
+WHERE pubkey IS NOT NULL
+  AND TRIM(pubkey) != '';
+
+-- Step 1.5: CRITICAL FIX - Create users for accounts that don't have corresponding contacts
+-- This ensures every account will have a user record before Step 6
+INSERT OR IGNORE INTO users (pubkey, metadata)
+SELECT DISTINCT
+    pubkey,
+    NULL as metadata  -- No metadata available for accounts without contacts
+FROM accounts
+WHERE pubkey IS NOT NULL
+  AND TRIM(pubkey) != '';
 
 -- Step 1.5: FIXES EDGE CASE - Create users for accounts that don't have corresponding contacts
 -- This ensures every account will have a user record before Step 6
