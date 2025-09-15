@@ -28,7 +28,7 @@ impl Whitenoise {
 
                 let should_update = newly_created
                     || user.metadata == Metadata::default()
-                    || event_timestamp.timestamp_millis() > user.updated_at.timestamp_millis();
+                    || event_timestamp.timestamp_millis() >= user.updated_at.timestamp_millis();
 
                 if !should_update {
                     tracing::debug!(

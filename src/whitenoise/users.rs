@@ -71,9 +71,9 @@ impl User {
                         true
                     }
                     Some(stored_timestamp) => {
-                        let is_newer =
-                            event_datetime.timestamp_millis() > stored_timestamp.timestamp_millis();
-                        if !is_newer {
+                        let is_newer_or_equal =
+                            event_datetime.timestamp_millis() >= stored_timestamp.timestamp_millis();
+                        if !is_newer_or_equal {
                             tracing::debug!(
                                 target: "whitenoise::users::sync_metadata",
                                 "Ignoring stale metadata event for user {} (event: {}, stored: {})",
@@ -82,7 +82,7 @@ impl User {
                                 stored_timestamp.timestamp_millis()
                             );
                         }
-                        is_newer
+                        is_newer_or_equal
                     }
                 };
 
