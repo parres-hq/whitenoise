@@ -80,11 +80,8 @@ where
 ///
 /// This function handles the common pattern of getting an `Option<i64>` from
 /// `query_scalar` and converting it to an optional DateTime.
-pub(crate) fn parse_optional_scalar_timestamp(timestamp_ms: Option<i64>) -> Option<DateTime<Utc>> {
-    match timestamp_ms {
-        Some(ms) => DateTime::from_timestamp_millis(ms).or_else(|| Some(Utc::now())),
-        None => None,
-    }
+pub(crate) fn parse_optional_scalar_timestamp(ts_ms: Option<i64>) -> Option<DateTime<Utc>> {
+    ts_ms.and_then(chrono::DateTime::from_timestamp_millis)
 }
 
 fn parse_datetime_string(
@@ -807,13 +804,8 @@ mod tests {
         let invalid_timestamp = i64::MAX;
         let result = parse_optional_scalar_timestamp(Some(invalid_timestamp));
 
-        // Should fall back to Utc::now()
-        assert!(result.is_some());
-        let time = result.unwrap();
-        // The time should be recent (within the last minute)
-        let now = chrono::Utc::now();
-        let diff = (now.timestamp_millis() - time.timestamp_millis()).abs();
-        assert!(diff < 60000); // Within 1 minute
+        // Should return None for invalid timestamps
+        assert!(result.is_none());
     }
 
     #[test]

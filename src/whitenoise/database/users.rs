@@ -228,8 +228,22 @@ impl User {
             "INSERT INTO users (pubkey, metadata, created_at, updated_at, event_created_at)
              VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
-               metadata = excluded.metadata,
-               updated_at = ?,
+               metadata = CASE
+                 WHEN excluded.metadata IS NOT NULL
+                      AND (users.metadata IS NULL OR excluded.metadata <> users.metadata)
+                 THEN excluded.metadata
+                 ELSE users.metadata
+               END,
+               updated_at = CASE
+                 WHEN excluded.metadata IS NOT NULL
+                      AND (users.metadata IS NULL OR excluded.metadata <> users.metadata)
+                 THEN excluded.updated_at
+                 WHEN excluded.event_created_at IS NOT NULL
+                      AND (users.event_created_at IS NULL
+                           OR excluded.event_created_at > users.event_created_at)
+                 THEN excluded.updated_at
+                 ELSE users.updated_at
+               END,
                event_created_at = CASE
                  WHEN excluded.event_created_at IS NOT NULL
                       AND (users.event_created_at IS NULL
@@ -243,7 +257,6 @@ impl User {
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
         .bind(self.event_created_at.map(|dt| dt.timestamp_millis()))
-        .bind(Utc::now().timestamp_millis())
         .execute(&mut *tx)
         .await
         .map_err(DatabaseError::Sqlx)
@@ -317,8 +330,22 @@ impl User {
             "INSERT INTO users (pubkey, metadata, created_at, updated_at, event_created_at)
              VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
-               metadata = excluded.metadata,
-               updated_at = ?,
+               metadata = CASE
+                 WHEN excluded.metadata IS NOT NULL
+                      AND (users.metadata IS NULL OR excluded.metadata <> users.metadata)
+                 THEN excluded.metadata
+                 ELSE users.metadata
+               END,
+               updated_at = CASE
+                 WHEN excluded.metadata IS NOT NULL
+                      AND (users.metadata IS NULL OR excluded.metadata <> users.metadata)
+                 THEN excluded.updated_at
+                 WHEN excluded.event_created_at IS NOT NULL
+                      AND (users.event_created_at IS NULL
+                           OR excluded.event_created_at > users.event_created_at)
+                 THEN excluded.updated_at
+                 ELSE users.updated_at
+               END,
                event_created_at = CASE
                  WHEN excluded.event_created_at IS NOT NULL
                       AND (users.event_created_at IS NULL
@@ -332,7 +359,6 @@ impl User {
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
         .bind(self.event_created_at.map(|dt| dt.timestamp_millis()))
-        .bind(Utc::now().timestamp_millis())
         .execute(&mut **tx)
         .await
         .map_err(DatabaseError::Sqlx)
@@ -414,7 +440,7 @@ impl User {
         let relay_id = relay.id.expect("Relay should have ID after save");
 
         sqlx::query(
-            "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at, event_created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, relay_id, relay_type) DO UPDATE SET event_created_at = excluded.event_created_at, updated_at = excluded.updated_at WHERE (excluded.event_created_at IS NOT NULL AND (user_relays.event_created_at IS NULL OR excluded.event_created_at > user_relays.event_created_at))",
         )
         .bind(user_id)
         .bind(relay_id)
