@@ -24,7 +24,7 @@ use sqlx::{Decode, Encode, Type};
 
 use super::{errors::MediaError, types::FileDetails};
 
-#[derive(Debug, Serialize, Deserialize, Type, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize, Type, Encode, Decode, PartialEq)]
 #[sqlx(type_name = "jsonb")]
 pub struct SafeMediaMetadata {
     // Common fields
@@ -338,9 +338,8 @@ mod tests {
         buffer
     }
 
-    fn create_test_file(filename: &str, mime_type: &str, data: &[u8]) -> FileDetails {
+    fn create_test_file(mime_type: &str, data: &[u8]) -> FileDetails {
         FileDetails {
-            filename: filename.to_string(),
             mime_type: mime_type.to_string(),
             data: data.to_vec(),
         }
@@ -475,7 +474,7 @@ mod tests {
     fn test_sanitize_media() {
         // Test image sanitization
         let jpeg_data = create_test_image(100, 100, ImageOutputFormat::Jpeg(85));
-        let file = create_test_file("test.jpg", "image/jpeg", &jpeg_data);
+        let file = create_test_file("image/jpeg", &jpeg_data);
         let result = sanitize_media(&file).unwrap();
         assert!(image::load_from_memory(&result.data).is_ok());
         assert_eq!(result._metadata.dimensions, Some((100, 100)));
@@ -483,14 +482,14 @@ mod tests {
 
         // Test video sanitization
         let video_data = b"not a real video file";
-        let file = create_test_file("test.mp4", "video/mp4", video_data);
+        let file = create_test_file("video/mp4", video_data);
         let result = sanitize_media(&file).unwrap();
         assert_eq!(result._metadata.mime_type, "video/mp4");
         assert_eq!(result._metadata.format, Some("mp4".to_string()));
 
         // Test non-media file handling
         let test_data = b"not a media file";
-        let file = create_test_file("test.txt", "text/plain", test_data);
+        let file = create_test_file("text/plain", test_data);
         let result = sanitize_media(&file).unwrap();
         assert_eq!(result.data, test_data);
         assert!(result._metadata.dimensions.is_none());

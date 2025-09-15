@@ -1,6 +1,7 @@
 //! This module contains functions for managing cached media files.
 
-use std::{fs, path::Path};
+use std::path::Path;
+use tokio::fs;
 
 use anyhow::anyhow;
 use nostr_mls::prelude::*;
@@ -33,14 +34,18 @@ impl Whitenoise {
         account_pubkey: &PublicKey,
         encrypted_file_hash: &[u8],
     ) -> Result<MediaFile> {
-        let file_path = self.file_path_from_hash(group_id, &encrypted_file_hash)?;
+        let file_path = self.file_path_from_hash(group_id, encrypted_file_hash)?;
         // Ensure directory exists
         if let Some(parent) = Path::new(&file_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| MediaError::Cache(e.to_string()))?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| MediaError::Cache(e.to_string()))?;
         }
 
         // Write file to disk
-        fs::write(&file_path, data).map_err(|e| MediaError::Cache(e.to_string()))?;
+        fs::write(&file_path, data)
+            .await
+            .map_err(|e| MediaError::Cache(e.to_string()))?;
 
         // Get current timestamp
         let created_at = SystemTime::now()
@@ -53,8 +58,8 @@ impl Whitenoise {
             "
         INSERT INTO media_files (
             mls_group_id, account_pubkey,
-            file_hash, created_at, file_metadata
-        ) VALUES (?, ?, ?, ?, ?) RETURNING *",
+            file_hash, created_at
+        ) VALUES (?, ?, ?, ?) RETURNING *",
         )
         .bind(group_id.as_slice())
         .bind(account_pubkey.to_string())
@@ -86,14 +91,16 @@ impl Whitenoise {
             "SELECT * FROM media_files WHERE mls_group_id = ? AND file_hash = ?",
         )
         .bind(group_id.as_slice())
-        .bind(file_hash)
+        .bind(hex::encode(file_hash))
         .fetch_optional(&whitenoise.database.pool)
         .await
         .map_err(|e| MediaError::Cache(e.to_string()))?;
 
         if let Some(media_file) = media_file {
             let file_path = whitenoise.file_path_from_hash(group_id, file_hash)?;
-            let file_data = fs::read(file_path).map_err(|e| MediaError::Cache(e.to_string()))?;
+            let file_data = fs::read(file_path)
+                .await
+                .map_err(|e| MediaError::Cache(e.to_string()))?;
             Ok(Some(CachedMediaFile {
                 media_file,
                 file_data,
@@ -122,6 +129,31 @@ impl Whitenoise {
 
 #[cfg(test)]
 mod tests {
+    use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+    use super::*;
+
     #[tokio::test]
-    async fn test_add_to_cache() {}
+    async fn test_cache() {
+        let data = b"Some test data";
+        let group_id = GroupId::from_slice(b"securely generated 32 bytes in random");
+        let encrypted_file_hash = b"32 byte hash of the encrypted data";
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+
+        let media_file = whitenoise
+            .add_to_cache(data, &group_id, &account.pubkey, encrypted_file_hash)
+            .await
+            .unwrap();
+
+        // Fetch the cached data
+        let some_cached_data = whitenoise
+            .fetch_cached_file(&group_id, encrypted_file_hash, &whitenoise)
+            .await
+            .unwrap();
+        let cached_data = some_cached_data.expect("Some data should be there");
+
+        assert_eq!(cached_data.file_data, data);
+        assert_eq!(media_file, cached_data.media_file);
+    }
 }

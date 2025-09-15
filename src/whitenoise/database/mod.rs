@@ -297,7 +297,7 @@ mod tests {
             .await
             .expect("Failed to insert test account");
 
-        sqlx::query("INSERT INTO media_files (mls_group_id, account_pubkey, file_path, file_hash, created_at, file_metadata) VALUES (x'deadbeef', 'test-pubkey', '/path/test.jpg', 'test-hash', 1234567890, '{}')")
+        sqlx::query("INSERT INTO media_files (mls_group_id, account_pubkey, file_hash, created_at) VALUES (x'deadbeef', 'test-pubkey', 'test-hash', 1234567890)")
             .execute(&db.pool)
             .await
             .expect("Failed to insert test media file");

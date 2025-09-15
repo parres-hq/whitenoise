@@ -63,6 +63,12 @@ pub struct MediaManager {
     blossom: BlossomClient,
 }
 
+impl Default for MediaManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MediaManager {
     pub fn new() -> Self {
         let blossom = if cfg!(debug_assertions) {
@@ -147,34 +153,36 @@ impl Whitenoise {
         let mut nonce: Option<Vec<u8>> = None;
 
         for tag in message.tags {
-            match tag.kind() {
-                TagKind::SingleLetter(letter) => {
-                    if letter == SingleLetterTag::lowercase(Alphabet::M) {
-                        mime = tag.content().map(|s| s.to_string());
-                    }
-
-                    if letter == SingleLetterTag::lowercase(Alphabet::X) {
-                        sha256 = tag.content().map(|s| s.to_string());
-                    }
-
-                    if letter == SingleLetterTag::lowercase(Alphabet::N) {
-                        nonce = tag
-                            .content()
-                            .map(|s| hex::decode(s).map_err(MediaError::from))
-                            .transpose()?;
-                    }
+            if let TagKind::SingleLetter(letter) = tag.kind() {
+                if letter == SingleLetterTag::lowercase(Alphabet::M) {
+                    mime = tag.content().map(|s| s.to_string());
                 }
-                _ => {}
+
+                if letter == SingleLetterTag::lowercase(Alphabet::X) {
+                    sha256 = tag.content().map(|s| s.to_string());
+                }
+
+                if letter == SingleLetterTag::lowercase(Alphabet::N) {
+                    nonce = tag
+                        .content()
+                        .map(|s| hex::decode(s).map_err(MediaError::from))
+                        .transpose()?;
+                }
             }
         }
         match (mime, sha256, nonce) {
             (Some(_mime), Some(sha256), Some(nonce)) => {
-                let encrypted_file_hash = hex::decode(&sha256).map_err(|_| BlossomError::InvalidSha256)?;
-                match self.fetch_cached_file(group_id, &encrypted_file_hash, self).await? {
+                let encrypted_file_hash =
+                    hex::decode(&sha256).map_err(|_| BlossomError::InvalidSha256)?;
+                match self
+                    .fetch_cached_file(group_id, &encrypted_file_hash, self)
+                    .await?
+                {
                     Some(cached_file) => Ok(cached_file),
                     None => {
                         // Download media from blossom
-                        let hash_bytes: [u8; 32] = encrypted_file_hash.clone()
+                        let hash_bytes: [u8; 32] = encrypted_file_hash
+                            .clone()
                             .try_into()
                             .map_err(|_| BlossomError::InvalidSha256)?;
                         let sha256 = Sha256Hash::from_byte_array(hash_bytes);
@@ -188,9 +196,20 @@ impl Whitenoise {
                         let nostr_mls =
                             Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
                         let exporter_secret = nostr_mls.exporter_secret(group_id)?;
-                        let decrypted_bytes = decrypt_file(&encrypted_bytes, &exporter_secret.secret, &nonce)?;
-                        let media_file = self.add_to_cache(&decrypted_bytes, group_id, &account.pubkey, &encrypted_file_hash).await?;
-                        Ok(CachedMediaFile { media_file, file_data: decrypted_bytes })
+                        let decrypted_bytes =
+                            decrypt_file(&encrypted_bytes, &exporter_secret.secret, &nonce)?;
+                        let media_file = self
+                            .add_to_cache(
+                                &decrypted_bytes,
+                                group_id,
+                                &account.pubkey,
+                                &encrypted_file_hash,
+                            )
+                            .await?;
+                        Ok(CachedMediaFile {
+                            media_file,
+                            file_data: decrypted_bytes,
+                        })
                     }
                 }
             }
@@ -221,22 +240,18 @@ impl Whitenoise {
         // Upload media file to blossom if necessary
         let mime = file.mime_type.clone();
         self.media
-            .upload_media_file(
-                account,
-                group_id,
-                file, &encrypted_file_data, self,
-            )
+            .upload_media_file(account, group_id, file, &encrypted_file_data, self)
             .await?;
         // Calculate file hash of the encrypted data uploaded to blossom
         let mut hasher = Sha256::new();
         hasher.update(encrypted_file_data);
-        let encrypted_file_hash = hex::encode(&hasher.finalize());
+        let encrypted_file_hash = hex::encode(hasher.finalize());
 
         let tags = vec![
             Tag::parse(["url", "default"])?,
             Tag::parse(["m", &mime])?,
             Tag::parse(["x", &encrypted_file_hash])?,
-            Tag::parse(["n", &hex::encode(&nonce)])?,
+            Tag::parse(["n", &hex::encode(nonce)])?,
         ];
         self.send_message_to_group(
             account,
@@ -246,5 +261,96 @@ impl Whitenoise {
             Some(tags),
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        whitenoise::{
+            media_manager::encryption::encrypt_file,
+            test_utils::{create_mock_whitenoise, create_nostr_group_config_data},
+        },
+        GroupType,
+    };
+
+    use super::*;
+    use nostr_sdk::hashes::sha256::Hash as Sha256Hash;
+
+    #[tokio::test]
+    async fn test_upload_media() {
+        let data = b"Some test data";
+        let group_id = GroupId::from_slice(b"securely generated 32 bytes in random");
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+
+        // Upload test data to blossom
+        let file = FileDetails {
+            mime_type: "text/txt".to_owned(),
+            data: data.to_vec(),
+        };
+
+        let secret_key = [1u8; 32];
+        let (encrypted_data, _nonce) = encrypt_file(data, &secret_key).unwrap();
+
+        whitenoise
+            .media
+            .upload_media_file(&account, &group_id, file, &encrypted_data, &whitenoise)
+            .await
+            .unwrap();
+
+        let mut hasher = Sha256::new();
+        hasher.update(encrypted_data);
+        let encrypted_file_hash = hasher.finalize();
+        // test the local cache
+        let some_cached_data = whitenoise
+            .fetch_cached_file(&group_id, &encrypted_file_hash, &whitenoise)
+            .await
+            .unwrap();
+        let cached_data = some_cached_data.expect("Some data should be there");
+        assert_eq!(cached_data.file_data, data); // Cached data should match decrypted plain data
+
+        // Test that encrypted data is uploaded to blossom
+        let sha256 = Sha256Hash::from_slice(&encrypted_file_hash).unwrap();
+        assert!(whitenoise
+            .media
+            .blossom
+            .has_blob(sha256, None, Option::<&Keys>::None)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_media_message() {
+        let data = b"Some test data";
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+        let member = whitenoise.create_identity().await.unwrap();
+        let group = whitenoise
+            .create_group(
+                &account,
+                vec![member.pubkey],
+                create_nostr_group_config_data(vec![account.pubkey]),
+                Some(GroupType::Group),
+            )
+            .await
+            .unwrap();
+
+        // Upload test data to blossom
+        let file = FileDetails {
+            mime_type: "text/txt".to_owned(),
+            data: data.to_vec(),
+        };
+
+        let message_tokens = whitenoise
+            .send_media_message(&account, &group.mls_group_id, file, "Caption".to_owned())
+            .await
+            .unwrap();
+
+        let cached_data = whitenoise
+            .decode_media_message(&account, &group.mls_group_id, message_tokens.message)
+            .await
+            .unwrap();
+        assert_eq!(cached_data.file_data, data);
     }
 }
