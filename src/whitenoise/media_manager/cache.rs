@@ -111,19 +111,15 @@ impl Whitenoise {
     }
 
     fn file_path_from_hash(&self, group_id: &GroupId, file_hash: &[u8]) -> Result<String> {
-        // Create file path
-        Ok(format!(
-            "{}/{}/{}/{}",
-            self.config
-                .data_dir
-                .to_str()
-                .ok_or(WhitenoiseError::Other(anyhow!(
-                    "Unable to convert PathBuf to string"
-                )))?,
-            MEDIA_CACHE_DIR,
-            hex::encode(group_id.as_slice()),
-            hex::encode(file_hash)
-        ))
+        let dir = self
+            .config
+            .data_dir
+            .join(MEDIA_CACHE_DIR)
+            .join(hex::encode(group_id.as_slice()));
+        let path = dir.join(hex::encode(file_hash));
+        path.to_str()
+            .map(|s| s.to_owned())
+            .ok_or(WhitenoiseError::InvalidInput("Invalid data_dir path".into()))
     }
 }
 
