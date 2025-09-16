@@ -119,7 +119,9 @@ impl Whitenoise {
         let path = dir.join(hex::encode(file_hash));
         path.to_str()
             .map(|s| s.to_owned())
-            .ok_or(WhitenoiseError::InvalidInput("Invalid data_dir path".into()))
+            .ok_or(WhitenoiseError::InvalidInput(
+                "Invalid data_dir path".into(),
+            ))
     }
 }
 
