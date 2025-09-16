@@ -74,7 +74,7 @@ impl Whitenoise {
     /// Fetches a cached file by its MLS group ID and file hash.
     ///
     /// # Arguments
-    /// * `mls_group_id` - The MLS group ID
+    /// * `group_id` - The MLS group ID
     /// * `file_hash` - The hash of the file
     /// * `db` - Database connection
     ///

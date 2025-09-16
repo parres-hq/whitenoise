@@ -122,7 +122,7 @@ impl Whitenoise {
     }
 
     /// Creates an unsigned nostr event with the given parameters
-    pub(crate) fn create_unsigned_nostr_event(
+    pub fn create_unsigned_nostr_event(
         &self,
         pubkey: &PublicKey,
         message: &String,

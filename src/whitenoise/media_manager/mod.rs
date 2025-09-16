@@ -4,8 +4,6 @@
 //! - File encryption and decryption using ChaCha20-Poly1305
 //! - File upload to the Blossom server
 //! - Local caching of media files
-//! - Generation of IMETA tags for Nostr events
-//! - Image processing and metadata extraction
 //! - Media sanitization and security checks
 //!
 //! The module is designed to work with the following workflow:
@@ -13,7 +11,6 @@
 //! 2. Files are encrypted before upload
 //! 3. Encrypted files are uploaded to Blossom
 //! 4. Original files are cached locally
-//! 5. IMETA tags are generated for Nostr events
 //!
 //! # Security
 //!
@@ -26,16 +23,6 @@
 //!
 //! Files are cached locally to improve performance and reduce bandwidth usage.
 //! The cache is organized by MLS group ID and uses SHA256 hashes for file identification.
-//!
-//! # IMETA Tags
-//!
-//! IMETA tags are generated for Nostr events containing:
-//! - File URL
-//! - MIME type
-//! - Original filename
-//! - For images: dimensions and blurhash
-//! - SHA256 hash of the original file
-//! - Decryption information (nonce and algorithm)
 
 mod cache;
 mod encryption;
@@ -136,9 +123,69 @@ impl MediaManager {
 
         Ok(())
     }
+
+    /// Downloads the media file, decrypts it and stores it in the local cache
+    ///
+    /// #Arguments
+    ///
+    /// * `account` - The account of the user
+    /// * `group_id` - The MLS group_id that the media file belongs to
+    /// * `encrypted_file_hash` - Encrypted file hash that is used to locate the encrypted data in blossom
+    /// * `nonce` - The nonce that was used in encryption
+    /// * `whitenoise` - The Whitenoise state
+    ///
+    /// # Returns
+    ///
+    /// Ok(CachedMediaFile) - If all steps are successful
+    /// Err(err) - When an error is encountered
+    async fn download_media_file(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        encrypted_file_hash: Vec<u8>,
+        nonce: &[u8],
+        whitenoise: &Whitenoise,
+    ) -> Result<CachedMediaFile> {
+        // Download media from blossom
+        let hash_bytes: [u8; 32] = encrypted_file_hash
+            .clone()
+            .try_into()
+            .map_err(|_| BlossomError::InvalidSha256)?;
+        let sha256 = Sha256Hash::from_byte_array(hash_bytes);
+        let encrypted_bytes = self
+            .blossom
+            .get_blob(sha256, None, None, Option::<&Keys>::None)
+            .await
+            .map_err(BlossomError::from)?;
+        // Get the raw secret key bytes
+        let nostr_mls = Account::create_nostr_mls(account.pubkey, &whitenoise.config.data_dir)?;
+        let exporter_secret = nostr_mls.exporter_secret(group_id)?;
+        let decrypted_bytes = decrypt_file(&encrypted_bytes, &exporter_secret.secret, nonce)?;
+        let media_file = whitenoise
+            .add_to_cache(
+                &decrypted_bytes,
+                group_id,
+                &account.pubkey,
+                &encrypted_file_hash,
+            )
+            .await?;
+        Ok(CachedMediaFile {
+            media_file,
+            file_data: decrypted_bytes,
+        })
+    }
 }
 
 impl Whitenoise {
+    /// Processes the nostr-mls FileMetadata message
+    ///
+    /// 1. This method extracts FileMetadata for nostr event tags
+    /// 2. Downloads the associated encrypted media from blossom
+    /// 3. Decrypts the media and stores in locally in the cache
+    ///
+    /// # Returns
+    /// Ok(CachedMedia) - If all methods are successful
+    /// Err(err) - In case of any error
     pub async fn decode_media_message(
         &self,
         account: &Account,
@@ -180,36 +227,15 @@ impl Whitenoise {
                 {
                     Some(cached_file) => Ok(cached_file),
                     None => {
-                        // Download media from blossom
-                        let hash_bytes: [u8; 32] = encrypted_file_hash
-                            .clone()
-                            .try_into()
-                            .map_err(|_| BlossomError::InvalidSha256)?;
-                        let sha256 = Sha256Hash::from_byte_array(hash_bytes);
-                        let encrypted_bytes = self
-                            .media
-                            .blossom
-                            .get_blob(sha256, None, None, Option::<&Keys>::None)
-                            .await
-                            .map_err(BlossomError::from)?;
-                        // Get the raw secret key bytes
-                        let nostr_mls =
-                            Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-                        let exporter_secret = nostr_mls.exporter_secret(group_id)?;
-                        let decrypted_bytes =
-                            decrypt_file(&encrypted_bytes, &exporter_secret.secret, &nonce)?;
-                        let media_file = self
-                            .add_to_cache(
-                                &decrypted_bytes,
+                        self.media
+                            .download_media_file(
+                                account,
                                 group_id,
-                                &account.pubkey,
-                                &encrypted_file_hash,
+                                encrypted_file_hash,
+                                &nonce,
+                                self,
                             )
-                            .await?;
-                        Ok(CachedMediaFile {
-                            media_file,
-                            file_data: decrypted_bytes,
-                        })
+                            .await
                     }
                 }
             }
@@ -219,6 +245,18 @@ impl Whitenoise {
         }
     }
 
+    /// Function to send media as a message to a group
+    ///
+    /// 1. This method encrypts the media using the exporter secre
+    /// 2. Uploads the ecrypted file to blossom
+    /// 3. Stores the unencrypted file locally in cache
+    /// 4. Sends a nostr-mls message to the group
+    ///
+    /// # Arguments
+    /// `account`
+    /// `group_id`
+    /// `file` - Unencrypted file
+    /// `caption` - Caption to be send along with the media
     pub async fn send_media_message(
         &self,
         account: &Account,
