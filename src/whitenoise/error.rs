@@ -118,6 +118,9 @@ pub enum WhitenoiseError {
 
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+
+    #[error("Invalid timestamp")]
+    InvalidTimestamp,
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {

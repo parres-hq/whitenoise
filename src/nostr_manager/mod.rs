@@ -47,6 +47,8 @@ pub enum NostrManagerError {
     EventProcessingError(String),
     #[error("Failed to track published event: {0}")]
     FailedToTrackPublishedEvent(String),
+    #[error("Invalid timestamp")]
+    InvalidTimestamp,
 }
 
 #[derive(Clone)]
