@@ -48,14 +48,6 @@ pub trait EventTracker: Send + Sync {
         pubkey: &PublicKey,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Check if we already processed a specific event for an account with author consideration
-    async fn already_processed_account_event_with_author(
-        &self,
-        event_id: &EventId,
-        pubkey: &PublicKey,
-        author: &PublicKey,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-
     /// Track that we processed a specific global event
     async fn track_processed_global_event(
         &self,
@@ -68,13 +60,6 @@ pub trait EventTracker: Send + Sync {
     async fn already_processed_global_event(
         &self,
         event_id: &EventId,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Check if we already processed a specific global event with author consideration
-    async fn already_processed_global_event_with_author(
-        &self,
-        event_id: &EventId,
-        author: &PublicKey,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
 }
 
@@ -136,23 +121,6 @@ impl EventTracker for NoEventTracker {
     async fn already_processed_global_event(
         &self,
         _event_id: &EventId,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(false) // Do nothing
-    }
-
-    async fn already_processed_account_event_with_author(
-        &self,
-        _event_id: &EventId,
-        _pubkey: &PublicKey,
-        _author: &PublicKey,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(false) // Do nothing
-    }
-
-    async fn already_processed_global_event_with_author(
-        &self,
-        _event_id: &EventId,
-        _author: &PublicKey,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         Ok(false) // Do nothing
     }
@@ -278,38 +246,6 @@ impl EventTracker for WhitenoiseEventTracker {
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
-
-    async fn already_processed_account_event_with_author(
-        &self,
-        event_id: &EventId,
-        pubkey: &PublicKey,
-        author: &PublicKey,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let whitenoise = Whitenoise::get_instance()?;
-        let account = Account::find_by_pubkey(pubkey, &whitenoise.database).await?;
-        let account_id = account
-            .id
-            .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        ProcessedEvent::exists_with_author(
-            event_id,
-            Some(account_id),
-            Some(author),
-            &whitenoise.database,
-        )
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    }
-
-    async fn already_processed_global_event_with_author(
-        &self,
-        event_id: &EventId,
-        author: &PublicKey,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let whitenoise = Whitenoise::get_instance()?;
-        ProcessedEvent::exists_with_author(event_id, None, Some(author), &whitenoise.database)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    }
 }
 
 /// Test-specific event tracker that uses a provided database instance
@@ -423,31 +359,6 @@ impl EventTracker for TestEventTracker {
         event_id: &EventId,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         ProcessedEvent::exists(event_id, None, &self.database)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    }
-
-    async fn already_processed_account_event_with_author(
-        &self,
-        event_id: &EventId,
-        pubkey: &PublicKey,
-        author: &PublicKey,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        let account_id = account
-            .id
-            .ok_or_else(|| std::io::Error::other("Account missing id"))?;
-        ProcessedEvent::exists_with_author(event_id, Some(account_id), Some(author), &self.database)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    }
-
-    async fn already_processed_global_event_with_author(
-        &self,
-        event_id: &EventId,
-        author: &PublicKey,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        ProcessedEvent::exists_with_author(event_id, None, Some(author), &self.database)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
