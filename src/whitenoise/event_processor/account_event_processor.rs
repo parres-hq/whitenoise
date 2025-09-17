@@ -6,6 +6,7 @@ use crate::{
     whitenoise::{
         accounts::Account,
         error::{Result, WhitenoiseError},
+        utils::timestamp_to_datetime,
         Whitenoise,
     },
 };
@@ -72,10 +73,8 @@ impl Whitenoise {
         match result {
             Ok(()) => {
                 // Record that we processed this event successfully
-                let event_timestamp = Some(
-                    chrono::DateTime::from_timestamp(event.created_at.as_u64() as i64, 0)
-                        .unwrap_or_default(),
-                );
+                let event_timestamp =
+                    Some(timestamp_to_datetime(event.created_at).unwrap_or_default());
                 let event_kind = Some(event.kind.as_u16());
                 if let Err(e) = self
                     .nostr
@@ -178,35 +177,18 @@ impl Whitenoise {
         let already_processed = match self
             .nostr
             .event_tracker
-            .already_processed_account_event_with_author(&event.id, &account.pubkey, &event.pubkey)
+            .already_processed_account_event(&event.id, &account.pubkey)
             .await
         {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(
                     target: "whitenoise::event_processor::should_skip_account_event_processing",
-                    "Already processed check with author failed for {}: {}",
+                    "Already processed check failed for {}: {}",
                     event.id.to_hex(),
                     e
                 );
-                // Fallback to old method if new one fails
-                match self
-                    .nostr
-                    .event_tracker
-                    .already_processed_account_event(&event.id, &account.pubkey)
-                    .await
-                {
-                    Ok(v) => v,
-                    Err(e2) => {
-                        tracing::error!(
-                            target: "whitenoise::event_processor::should_skip_account_event_processing",
-                            "Fallback already processed check failed for {}: {}",
-                            event.id.to_hex(),
-                            e2
-                        );
-                        false
-                    }
-                }
+                false
             }
         };
 

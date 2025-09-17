@@ -308,7 +308,7 @@ mod publish_tests {
             .await
             .expect("Failed to fetch metadata from relays");
 
-        if let Some((fetched_metadata, _timestamp, _event_id)) = fetch_result {
+        if let Some((fetched_metadata, _datetime, _event_id)) = fetch_result {
             assert_eq!(fetched_metadata.name, metadata.name);
             assert_eq!(fetched_metadata.display_name, metadata.display_name);
             assert_eq!(fetched_metadata.about, metadata.about);

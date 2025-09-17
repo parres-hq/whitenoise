@@ -4,7 +4,7 @@ use crate::{
     types::RetryInfo,
     whitenoise::{
         error::{Result, WhitenoiseError},
-        users::User,
+        utils::timestamp_to_datetime,
         Whitenoise,
     },
 };
@@ -27,19 +27,8 @@ impl Whitenoise {
             return;
         }
 
-        let user = match User::find_by_pubkey(&event.pubkey, &self.database).await {
-            Ok(user) => user,
-            Err(e) => {
-                tracing::error!(
-                    target: "whitenoise::event_processor::process_global_event",
-                    "Failed to get user {} from subscription ID: {}", event.pubkey.to_hex(), e
-                );
-                return;
-            }
-        };
-
         match self
-            .should_skip_global_event_processing(&event, &user)
+            .should_skip_global_event_processing(&event)
             .await
         {
             Some(skip_reason) => {
@@ -61,10 +50,8 @@ impl Whitenoise {
 
         match result {
             Ok(()) => {
-                let event_timestamp = Some(
-                    chrono::DateTime::from_timestamp(event.created_at.as_u64() as i64, 0)
-                        .unwrap_or_default(),
-                );
+                let event_timestamp =
+                    Some(timestamp_to_datetime(event.created_at).unwrap_or_default());
                 let event_kind = Some(event.kind.as_u16());
                 if let Err(e) = self
                     .nostr
@@ -96,71 +83,45 @@ impl Whitenoise {
     async fn should_skip_global_event_processing(
         &self,
         event: &Event,
-        user: &User,
     ) -> Option<&'static str> {
         let already_processed = match self
             .nostr
             .event_tracker
-            .already_processed_global_event_with_author(&event.id, &event.pubkey)
+            .already_processed_global_event(&event.id)
             .await
         {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(
                     target: "whitenoise::event_processor::should_skip_global_event_processing",
-                    "Already processed check with author failed for {}: {}",
+                    "Already processed check failed for {}: {}",
                     event.id.to_hex(),
                     e
                 );
-                // Fallback to old method if new one fails
-                match self
-                    .nostr
-                    .event_tracker
-                    .already_processed_global_event(&event.id)
-                    .await
-                {
-                    Ok(v) => v,
-                    Err(e2) => {
-                        tracing::error!(
-                            target: "whitenoise::event_processor::should_skip_global_event_processing",
-                            "Fallback already processed check failed for {}: {}",
-                            event.id.to_hex(),
-                            e2
-                        );
-                        false
-                    }
-                }
+                false
             }
         };
         if already_processed {
             return Some("already processed");
         }
 
-        if user.pubkey != event.pubkey {
-            return Some("event does not match user");
-        }
-
         // For global events, check if WE published this event
-        // We don't skip metadata events because we need them to update local database
-        let should_skip = match event.kind {
-            Kind::Metadata => false, // Always process metadata events to update local database
-            _ => match self
-                .nostr
-                .event_tracker
-                .global_published_event(&event.id)
-                .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::error!(
-                        target: "whitenoise::event_processor::should_skip_global_event_processing",
-                        "Global published check failed for {}: {}",
-                        event.id.to_hex(),
-                        e
-                    );
-                    false
-                }
-            },
+        let should_skip = match self
+            .nostr
+            .event_tracker
+            .global_published_event(&event.id)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(
+                    target: "whitenoise::event_processor::should_skip_global_event_processing",
+                    "Global published check failed for {}: {}",
+                    event.id.to_hex(),
+                    e
+                );
+                false
+            }
         };
         if should_skip {
             return Some("self-published event");

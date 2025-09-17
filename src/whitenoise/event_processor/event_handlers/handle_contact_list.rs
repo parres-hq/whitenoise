@@ -1,4 +1,3 @@
-use chrono::DateTime;
 use nostr_sdk::prelude::*;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -10,6 +9,7 @@ use crate::{
         database::processed_events::ProcessedEvent,
         error::{Result, WhitenoiseError},
         users::User,
+        utils::timestamp_to_datetime,
         Whitenoise,
     },
 };
@@ -37,19 +37,23 @@ impl Whitenoise {
             account.pubkey.to_hex()
         );
 
-        // Check if this event is newer than what we already have using unified ProcessedEvent approach
         let account_id = account.id.ok_or_else(|| WhitenoiseError::AccountNotFound)?;
 
-        let event_timestamp = DateTime::from_timestamp_millis(
-            (event.created_at.as_u64() * 1000) as i64,
-        )
-        .ok_or_else(|| {
-            WhitenoiseError::EventProcessor(format!(
-                "Invalid timestamp in relay list event: {}",
-                event.created_at.as_u64()
-            ))
-        })?;
+        // Check if we've already processed this specific event from this author
+        let already_processed =
+            ProcessedEvent::exists(&event.id, Some(account_id), &self.database).await?;
 
+        if already_processed {
+            tracing::debug!(
+                target: "whitenoise::handle_contact_list",
+                "Skipping already processed contact list event {} from author {}",
+                event.id.to_hex(),
+                event.pubkey.to_hex()
+            );
+            return Ok(());
+        }
+
+        let event_timestamp = timestamp_to_datetime(event.created_at)?;
         let current_event_time =
             ProcessedEvent::newest_contact_list_timestamp(account_id, &self.database).await?;
 

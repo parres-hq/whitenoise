@@ -716,7 +716,7 @@ impl Whitenoise {
             .await?;
 
         let mut relays = Vec::new();
-        if let Some((relay_urls, _timestamp, _event_id)) = relay_result {
+        if let Some((relay_urls, _datetime, _event_id)) = relay_result {
             for url in relay_urls {
                 let relay = self.find_or_create_relay_by_url(&url).await?;
                 relays.push(relay);
@@ -1532,7 +1532,7 @@ mod tests {
             .await
             .expect("Failed to fetch metadata from relays");
 
-        if let Some((published_metadata, _timestamp, _event_id)) = fetched_metadata {
+        if let Some((published_metadata, _datetime, _event_id)) = fetched_metadata {
             assert_eq!(published_metadata.name, new_metadata.name);
             assert_eq!(published_metadata.display_name, new_metadata.display_name);
             assert_eq!(published_metadata.about, new_metadata.about);

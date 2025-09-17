@@ -40,51 +40,11 @@ impl User {
             .nostr
             .fetch_metadata_from(&relays_to_query, self.pubkey)
             .await?;
-        if let Some((metadata, event_timestamp, event_id)) = metadata_result {
+        if let Some((metadata, event_datetime, event_id)) = metadata_result {
             if self.metadata != metadata {
-                let event_datetime =
-                    DateTime::from_timestamp_millis((event_timestamp.as_u64() * 1000) as i64)
-                        .ok_or_else(|| {
-                            WhitenoiseError::Database(
-                                crate::whitenoise::database::DatabaseError::InvalidTimestamp {
-                                    timestamp: (event_timestamp.as_u64() * 1000) as i64,
-                                },
-                            )
-                        })?;
-
-                // Check if this event is newer than our most recent processed metadata event
-                let newest_processed_timestamp = ProcessedEvent::newest_event_timestamp_for_kinds(
-                    None, // Global events (user metadata)
-                    &[0], // Metadata events are kind 0
-                    &whitenoise.database,
-                )
-                .await
-                .map_err(WhitenoiseError::Database)?;
-
-                let should_update = match newest_processed_timestamp {
-                    None => {
-                        tracing::debug!(
-                            target: "whitenoise::users::sync_metadata",
-                            "No processed metadata events for user {}, accepting new event",
-                            self.pubkey
-                        );
-                        true
-                    }
-                    Some(stored_timestamp) => {
-                        let is_newer_or_equal = event_datetime.timestamp_millis()
-                            >= stored_timestamp.timestamp_millis();
-                        if !is_newer_or_equal {
-                            tracing::debug!(
-                                target: "whitenoise::users::sync_metadata",
-                                "Ignoring stale metadata event for user {} (event: {}, stored: {})",
-                                self.pubkey,
-                                event_datetime.timestamp_millis(),
-                                stored_timestamp.timestamp_millis()
-                            );
-                        }
-                        is_newer_or_equal
-                    }
-                };
+                let should_update = self
+                    .should_update_metadata(&event_id, &event_datetime, false, &whitenoise.database)
+                    .await?;
 
                 if should_update {
                     self.metadata = metadata;
@@ -428,18 +388,8 @@ impl User {
             })?;
 
         match network_relay_result {
-            Some((network_relay_urls, event_timestamp, event_id)) => {
-                // Convert Nostr timestamp to DateTime<Utc> (convert seconds to milliseconds)
-                let event_created_at = Some(
-                    DateTime::from_timestamp_millis((event_timestamp.as_u64() * 1000) as i64)
-                        .ok_or_else(|| {
-                            WhitenoiseError::Database(
-                                crate::whitenoise::database::DatabaseError::InvalidTimestamp {
-                                    timestamp: (event_timestamp.as_u64() * 1000) as i64,
-                                },
-                            )
-                        })?,
-                );
+            Some((network_relay_urls, event_datetime, event_id)) => {
+                let event_created_at = Some(event_datetime);
 
                 let changed = self
                     .sync_relay_urls(
@@ -495,6 +445,106 @@ impl User {
         }
 
         Ok(users_with_relays)
+    }
+
+    /// Determines whether metadata should be updated based on comprehensive event processing logic.
+    ///
+    /// This method implements the complete logic for deciding whether to process a metadata event:
+    /// 1. Check if we've already processed this specific event (avoid double processing)
+    /// 2. If user is newly created, always accept the event
+    /// 3. If user has default metadata, always accept the event
+    /// 4. Otherwise, check if the event timestamp is newer than or equal to stored timestamp
+    ///
+    /// # Arguments
+    /// * `event_id` - The ID of the metadata event being considered
+    /// * `event_datetime` - The datetime of the metadata event being considered
+    /// * `newly_created` - Whether this user was just created
+    /// * `database` - Database connection for checking processed events
+    ///
+    /// # Returns
+    /// * `Ok(true)` if metadata should be updated
+    /// * `Ok(false)` if the event should be ignored
+    pub(crate) async fn should_update_metadata(
+        &self,
+        event_id: &EventId,
+        event_datetime: &DateTime<Utc>,
+        newly_created: bool,
+        database: &crate::whitenoise::database::Database,
+    ) -> Result<bool> {
+        // 1. Check if we've already processed this specific event from this author
+        let already_processed = ProcessedEvent::exists(
+            event_id, None, // Global events (user metadata)
+            database,
+        )
+        .await
+        .map_err(WhitenoiseError::Database)?;
+
+        if already_processed {
+            tracing::debug!(
+                target: "whitenoise::users::should_update_metadata",
+                "Skipping already processed metadata event {} from author {}",
+                event_id.to_hex(),
+                self.pubkey.to_hex()
+            );
+            return Ok(false);
+        }
+
+        // 2. If user is newly created, always accept the metadata
+        if newly_created {
+            tracing::debug!(
+                target: "whitenoise::users::should_update_metadata",
+                "Accepting metadata event for newly created user {}",
+                self.pubkey
+            );
+            return Ok(true);
+        }
+
+        // 3. If user has default metadata, always accept the event
+        if self.metadata == Metadata::default() {
+            tracing::debug!(
+                target: "whitenoise::users::should_update_metadata",
+                "Accepting metadata event for user {} with default metadata",
+                self.pubkey
+            );
+            return Ok(true);
+        }
+
+        // 4. Check timestamp against most recent processed metadata event for this specific user
+        let newest_processed_timestamp = ProcessedEvent::newest_event_timestamp_for_kind(
+            None,               // Global events (user metadata)
+            0,                  // Metadata events are kind 0
+            Some(&self.pubkey), // Filter by this user's pubkey
+            database,
+        )
+        .await
+        .map_err(WhitenoiseError::Database)?;
+
+        let should_update = match newest_processed_timestamp {
+            None => {
+                tracing::debug!(
+                    target: "whitenoise::users::should_update_metadata",
+                    "No processed metadata events for user {}, accepting new event",
+                    self.pubkey
+                );
+                true
+            }
+            Some(stored_timestamp) => {
+                let is_newer_or_equal =
+                    event_datetime.timestamp_millis() >= stored_timestamp.timestamp_millis();
+                if !is_newer_or_equal {
+                    tracing::debug!(
+                        target: "whitenoise::users::should_update_metadata",
+                        "Ignoring stale metadata event for user {} (event: {}, stored: {})",
+                        self.pubkey,
+                        event_datetime.timestamp_millis(),
+                        stored_timestamp.timestamp_millis()
+                    );
+                }
+                is_newer_or_equal
+            }
+        };
+
+        Ok(should_update)
     }
 }
 
@@ -1032,5 +1082,291 @@ mod tests {
         let result = saved_user.key_package_event(&whitenoise).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
+    }
+
+    mod should_update_metadata_tests {
+        use super::*;
+        use crate::whitenoise::database::processed_events::ProcessedEvent;
+
+        async fn create_test_user(whitenoise: &Whitenoise) -> User {
+            let keys = Keys::generate();
+            User::find_or_create_by_pubkey(&keys.public_key(), &whitenoise.database)
+                .await
+                .unwrap()
+                .0
+        }
+
+        fn create_test_event_id() -> EventId {
+            use std::str::FromStr;
+            let keys = Keys::generate();
+            EventId::from_str(&keys.public_key().to_string()).unwrap_or_else(|_| {
+                // Fallback to a valid hex string
+                EventId::from_hex(
+                    "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                )
+                .unwrap()
+            })
+        }
+
+        async fn create_test_event_and_datetime() -> (EventId, DateTime<Utc>) {
+            let event_id = create_test_event_id();
+            let event_datetime = Utc::now();
+            (event_id, event_datetime)
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_already_processed() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let user = create_test_user(&whitenoise).await;
+            let (event_id, event_datetime) = create_test_event_and_datetime().await;
+
+            // First, create a processed event entry
+            ProcessedEvent::create(
+                &event_id,
+                None, // Global events
+                Some(event_datetime),
+                Some(0), // Metadata kind
+                Some(&user.pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            // Test that already processed event returns false
+            let result = user
+                .should_update_metadata(&event_id, &event_datetime, false, &whitenoise.database)
+                .await
+                .unwrap();
+
+            assert!(!result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_newly_created_user() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let user = create_test_user(&whitenoise).await;
+            let (event_id, event_datetime) = create_test_event_and_datetime().await;
+
+            // Test that newly created user always returns true
+            let result = user
+                .should_update_metadata(&event_id, &event_datetime, true, &whitenoise.database)
+                .await
+                .unwrap();
+
+            assert!(result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_default_metadata() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let mut user = create_test_user(&whitenoise).await;
+            let (event_id, event_datetime) = create_test_event_and_datetime().await;
+
+            // Ensure user has default metadata
+            user.metadata = Metadata::default();
+            user.save(&whitenoise.database).await.unwrap();
+
+            // Test that user with default metadata returns true
+            let result = user
+                .should_update_metadata(&event_id, &event_datetime, false, &whitenoise.database)
+                .await
+                .unwrap();
+
+            assert!(result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_no_processed_events() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let mut user = create_test_user(&whitenoise).await;
+            let (event_id, event_datetime) = create_test_event_and_datetime().await;
+
+            // Give user some non-default metadata
+            user.metadata = Metadata::new().name("Test User");
+            user.save(&whitenoise.database).await.unwrap();
+
+            // Test that with no processed events, returns true
+            let result = user
+                .should_update_metadata(&event_id, &event_datetime, false, &whitenoise.database)
+                .await
+                .unwrap();
+
+            assert!(result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_newer_event() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let mut user = create_test_user(&whitenoise).await;
+            let (old_event_id, old_event_datetime) = create_test_event_and_datetime().await;
+
+            // Give user some non-default metadata
+            user.metadata = Metadata::new().name("Test User");
+            user.save(&whitenoise.database).await.unwrap();
+
+            // Create an older processed event
+            ProcessedEvent::create(
+                &old_event_id,
+                None, // Global events
+                Some(old_event_datetime),
+                Some(0), // Metadata kind
+                Some(&user.pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            // Create a newer event
+            let (new_event_id, new_event_datetime) = (
+                create_test_event_id(),
+                old_event_datetime + chrono::Duration::hours(1), // 1 hour later
+            );
+
+            // Test that newer event returns true
+            let result = user
+                .should_update_metadata(
+                    &new_event_id,
+                    &new_event_datetime,
+                    false,
+                    &whitenoise.database,
+                )
+                .await
+                .unwrap();
+
+            assert!(result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_equal_timestamp() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let mut user = create_test_user(&whitenoise).await;
+            let (old_event_id, old_event_datetime) = create_test_event_and_datetime().await;
+
+            // Give user some non-default metadata
+            user.metadata = Metadata::new().name("Test User");
+            user.save(&whitenoise.database).await.unwrap();
+
+            // Create a processed event
+            ProcessedEvent::create(
+                &old_event_id,
+                None, // Global events
+                Some(old_event_datetime),
+                Some(0), // Metadata kind
+                Some(&user.pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            // Create an event with the same timestamp but different ID
+            let new_event_id = create_test_event_id();
+
+            // Test that equal timestamp returns true (newer or equal)
+            let result = user
+                .should_update_metadata(
+                    &new_event_id,
+                    &old_event_datetime,
+                    false,
+                    &whitenoise.database,
+                )
+                .await
+                .unwrap();
+
+            assert!(result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_older_event() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let mut user = create_test_user(&whitenoise).await;
+            let (newer_event_id, newer_event_datetime) = create_test_event_and_datetime().await;
+
+            // Give user some non-default metadata
+            user.metadata = Metadata::new().name("Test User");
+            user.save(&whitenoise.database).await.unwrap();
+
+            // Create a newer processed event
+            ProcessedEvent::create(
+                &newer_event_id,
+                None, // Global events
+                Some(newer_event_datetime),
+                Some(0), // Metadata kind
+                Some(&user.pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            // Create an older event
+            let (old_event_id, old_event_datetime) = (
+                create_test_event_id(),
+                newer_event_datetime - chrono::Duration::hours(1), // 1 hour earlier
+            );
+
+            // Test that older event returns false
+            let result = user
+                .should_update_metadata(
+                    &old_event_id,
+                    &old_event_datetime,
+                    false,
+                    &whitenoise.database,
+                )
+                .await
+                .unwrap();
+
+            assert!(!result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_priority_order() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let mut user = create_test_user(&whitenoise).await;
+            let (event_id, event_datetime) = create_test_event_and_datetime().await;
+
+            // Give user some non-default metadata
+            user.metadata = Metadata::new().name("Test User");
+            user.save(&whitenoise.database).await.unwrap();
+
+            // Create a processed event entry for this exact event
+            ProcessedEvent::create(
+                &event_id,
+                None, // Global events
+                Some(event_datetime),
+                Some(0), // Metadata kind
+                Some(&user.pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            // Test that already processed takes priority over newly_created
+            // Even though newly_created=true, it should return false because event is already processed
+            let result = user
+                .should_update_metadata(&event_id, &event_datetime, true, &whitenoise.database)
+                .await
+                .unwrap();
+
+            assert!(!result);
+        }
+
+        #[tokio::test]
+        async fn test_should_update_metadata_newly_created_with_default_metadata() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let mut user = create_test_user(&whitenoise).await;
+            let (event_id, event_datetime) = create_test_event_and_datetime().await;
+
+            // Ensure user has default metadata (redundant but explicit)
+            user.metadata = Metadata::default();
+            user.save(&whitenoise.database).await.unwrap();
+
+            // Test that newly created user with default metadata returns true
+            // (both conditions would return true, but newly_created takes priority)
+            let result = user
+                .should_update_metadata(&event_id, &event_datetime, true, &whitenoise.database)
+                .await
+                .unwrap();
+
+            assert!(result);
+        }
     }
 }

@@ -2,11 +2,12 @@
 
 use std::{collections::HashSet, time::Duration};
 
+use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 
 use crate::{
-    nostr_manager::{NostrManager, Result},
-    whitenoise::relays::Relay,
+    nostr_manager::{NostrManager, NostrManagerError, Result},
+    whitenoise::{relays::Relay, utils::timestamp_to_datetime},
     RelayType,
 };
 
@@ -18,7 +19,7 @@ impl NostrManager {
         &self,
         nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
         pubkey: PublicKey,
-    ) -> Result<Option<(Metadata, Timestamp, EventId)>> {
+    ) -> Result<Option<(Metadata, DateTime<Utc>, EventId)>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata);
         let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let events: Events = self
@@ -33,11 +34,15 @@ impl NostrManager {
             .filter(|e| e.created_at <= cutoff)
             .max_by_key(|e| (e.created_at, e.id));
         match latest {
-            Some(event) => Ok(Some((
-                Metadata::try_from(&event)?,
-                event.created_at,
-                event.id,
-            ))),
+            Some(event) => {
+                let event_datetime = timestamp_to_datetime(event.created_at)
+                    .map_err(|_e| NostrManagerError::InvalidTimestamp)?;
+                Ok(Some((
+                    Metadata::try_from(&event)?,
+                    event_datetime,
+                    event.id,
+                )))
+            }
             None => Ok(None),
         }
     }
@@ -47,7 +52,7 @@ impl NostrManager {
         pubkey: PublicKey,
         relay_type: RelayType,
         nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
-    ) -> Result<Option<(HashSet<RelayUrl>, Timestamp, EventId)>> {
+    ) -> Result<Option<(HashSet<RelayUrl>, DateTime<Utc>, EventId)>> {
         let filter = Filter::new().author(pubkey).kind(relay_type.into());
         let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let relay_events = self
@@ -70,8 +75,10 @@ impl NostrManager {
         match latest {
             None => Ok(None),
             Some(event) => {
+                let event_datetime = timestamp_to_datetime(event.created_at)
+                    .map_err(|_e| NostrManagerError::InvalidTimestamp)?;
                 let relay_urls = Self::relay_urls_from_event(event.clone());
-                Ok(Some((relay_urls, event.created_at, event.id)))
+                Ok(Some((relay_urls, event_datetime, event.id)))
             }
         }
     }

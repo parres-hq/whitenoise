@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use nostr_sdk::{EventId, PublicKey};
+use nostr_sdk::{EventId, Kind, PublicKey};
 
 use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::whitenoise::{error::WhitenoiseError, relays::RelayType};
@@ -12,7 +12,7 @@ pub struct ProcessedEvent {
     pub account_id: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub event_created_at: Option<DateTime<Utc>>,
-    pub event_kind: Option<u16>,
+    pub event_kind: Option<Kind>,
     pub author: Option<PublicKey>,
 }
 
@@ -46,7 +46,7 @@ where
         // Handle nullable event_kind
         let event_kind = row
             .try_get::<Option<i64>, &str>("event_kind")?
-            .map(|kind| kind as u16);
+            .map(|kind| Kind::from(kind as u16));
 
         // Handle nullable author
         let author = match row.try_get::<Option<String>, &str>("author")? {
@@ -98,7 +98,6 @@ impl ProcessedEvent {
 
     /// Checks if we already processed a specific event
     /// - account_id: Some(id) for account-specific processing, None for global processing
-    /// - author: Optional event author for enhanced duplicate detection
     pub(crate) async fn exists(
         event_id: &EventId,
         account_id: Option<i64>,
@@ -126,77 +125,41 @@ impl ProcessedEvent {
         Ok(result.map(|(exists,)| exists).unwrap_or(false))
     }
 
-    /// Enhanced version that checks if we already processed a specific event with author consideration
-    /// - account_id: Some(id) for account-specific processing, None for global processing
-    /// - author: Event author for enhanced duplicate detection - avoids processing same event from same author multiple times
-    pub(crate) async fn exists_with_author(
-        event_id: &EventId,
+    /// Gets the newest event timestamp for specific event kind and account
+    /// Optionally filters by author for global events (when account_id is None)
+    pub(crate) async fn newest_event_timestamp_for_kind(
         account_id: Option<i64>,
-        author: Option<&PublicKey>,
-        database: &Database,
-    ) -> Result<bool, DatabaseError> {
-        let author_hex = author.map(|pk| pk.to_hex());
-
-        let (query, bind_account_id) = match account_id {
-            Some(id) => (
-                "SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = ? AND account_id = ? AND (author = ? OR author IS NULL))",
-                Some(id),
-            ),
-            None => (
-                "SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = ? AND account_id IS NULL AND (author = ? OR author IS NULL))",
-                None,
-            ),
-        };
-
-        let mut query_builder = sqlx::query_as(query).bind(event_id.to_hex());
-
-        if let Some(id) = bind_account_id {
-            query_builder = query_builder.bind(id);
-        }
-
-        query_builder = query_builder.bind(author_hex);
-
-        let result: Option<(bool,)> = query_builder.fetch_optional(&database.pool).await?;
-
-        Ok(result.map(|(exists,)| exists).unwrap_or(false))
-    }
-
-    /// Gets the newest event timestamp for specific event kinds and account
-    pub(crate) async fn newest_event_timestamp_for_kinds(
-        account_id: Option<i64>,
-        event_kinds: &[u16],
+        event_kind: u16,
+        author_pubkey: Option<&PublicKey>,
         database: &Database,
     ) -> Result<Option<DateTime<Utc>>, DatabaseError> {
-        if event_kinds.is_empty() {
-            return Ok(None);
-        }
+        // Build query based on parameters
+        let query = match (account_id.is_some(), author_pubkey.is_some()) {
+            (true, _) => {
+                // Account-specific events (author filter not applicable)
+                "SELECT MAX(event_created_at) FROM processed_events WHERE account_id = ? AND event_kind = ?"
+            }
+            (false, true) => {
+                // Global events with author filter
+                "SELECT MAX(event_created_at) FROM processed_events WHERE account_id IS NULL AND event_kind = ? AND author = ?"
+            }
+            (false, false) => {
+                // Global events without author filter
+                "SELECT MAX(event_created_at) FROM processed_events WHERE account_id IS NULL AND event_kind = ?"
+            }
+        };
 
-        // Build query with placeholders for event kinds
-        let mut query = String::from("SELECT MAX(event_created_at) FROM processed_events WHERE ");
+        let mut query_builder = sqlx::query_scalar::<_, Option<i64>>(query);
 
-        // Add account_id filter
-        if account_id.is_some() {
-            query.push_str("account_id = ? AND ");
-        } else {
-            query.push_str("account_id IS NULL AND ");
-        }
-
-        // Add event_kind filter
-        query.push_str("event_kind IN (");
-        let placeholders: Vec<&str> = event_kinds.iter().map(|_| "?").collect();
-        query.push_str(&placeholders.join(", "));
-        query.push(')');
-
-        let mut query_builder = sqlx::query_scalar::<_, Option<i64>>(&query);
-
-        // Bind account_id if present
+        // Bind parameters based on query type
         if let Some(id) = account_id {
             query_builder = query_builder.bind(id);
-        }
-
-        // Bind event kinds
-        for &kind in event_kinds {
-            query_builder = query_builder.bind(kind as i64);
+            query_builder = query_builder.bind(event_kind as i64);
+        } else {
+            query_builder = query_builder.bind(event_kind as i64);
+            if let Some(author) = author_pubkey {
+                query_builder = query_builder.bind(author.to_hex());
+            }
         }
 
         let result: Option<Option<i64>> = query_builder.fetch_optional(&database.pool).await?;
@@ -206,20 +169,20 @@ impl ProcessedEvent {
 
     /// Gets the newest relay event timestamp for a user
     pub(crate) async fn newest_relay_event_timestamp(
-        _user_pubkey: &PublicKey,
+        user_pubkey: &PublicKey,
         relay_type: RelayType,
         database: &Database,
     ) -> Result<Option<DateTime<Utc>>, WhitenoiseError> {
         // Map relay types to their corresponding event kinds
-        let kinds = match relay_type {
-            RelayType::Nip65 => vec![10002],
-            RelayType::Inbox => vec![10050],
-            RelayType::KeyPackage => vec![10051],
+        let kind = match relay_type {
+            RelayType::Nip65 => 10002,
+            RelayType::Inbox => 10050,
+            RelayType::KeyPackage => 10051,
         };
 
         // Note: For global events (user data), account_id will be NULL
-        // This queries for events processed globally, not tied to a specific account
-        Self::newest_event_timestamp_for_kinds(None, &kinds, database)
+        // Filter by user pubkey to get the newest timestamp for this specific user
+        Self::newest_event_timestamp_for_kind(None, kind, Some(user_pubkey), database)
             .await
             .map_err(WhitenoiseError::Database)
     }
@@ -230,8 +193,7 @@ impl ProcessedEvent {
         database: &Database,
     ) -> Result<Option<DateTime<Utc>>, WhitenoiseError> {
         // Query processed_events for kind 3 events with specific account_id
-        let kinds = vec![3];
-        Self::newest_event_timestamp_for_kinds(Some(account_id), &kinds, database)
+        Self::newest_event_timestamp_for_kind(Some(account_id), 3, None, database)
             .await
             .map_err(WhitenoiseError::Database)
     }
@@ -367,7 +329,7 @@ mod tests {
             row.event_created_at.unwrap().timestamp_millis(),
             timestamp + 1000
         );
-        assert_eq!(row.event_kind, Some(1));
+        assert_eq!(row.event_kind, Some(Kind::TextNote));
     }
 
     #[tokio::test]
@@ -585,7 +547,7 @@ mod tests {
             account_id: Some(123),
             created_at: now,
             event_created_at: Some(now),
-            event_kind: Some(1),
+            event_kind: Some(Kind::TextNote),
             author: None,
         };
 
@@ -599,7 +561,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_newest_event_timestamp_for_kinds() {
+    async fn test_newest_event_timestamp_for_kind() {
         let pool = setup_test_db().await;
         let database = wrap_pool_in_database(pool);
         let event_id1 = create_test_event_id();
@@ -632,7 +594,7 @@ mod tests {
 
         // Test getting newest timestamp for kind 3
         let result =
-            ProcessedEvent::newest_event_timestamp_for_kinds(Some(account_id), &[3], &database)
+            ProcessedEvent::newest_event_timestamp_for_kind(Some(account_id), 3, None, &database)
                 .await
                 .unwrap();
 
@@ -644,14 +606,14 @@ mod tests {
 
         // Test with different kind (should return None)
         let result =
-            ProcessedEvent::newest_event_timestamp_for_kinds(Some(account_id), &[1], &database)
+            ProcessedEvent::newest_event_timestamp_for_kind(Some(account_id), 1, None, &database)
                 .await
                 .unwrap();
 
         assert!(result.is_none());
 
         // Test with different account (should return None)
-        let result = ProcessedEvent::newest_event_timestamp_for_kinds(Some(999), &[3], &database)
+        let result = ProcessedEvent::newest_event_timestamp_for_kind(Some(999), 3, None, &database)
             .await
             .unwrap();
 
@@ -734,6 +696,92 @@ mod tests {
             ProcessedEvent::newest_relay_event_timestamp(&user_pubkey, RelayType::Inbox, &database)
                 .await
                 .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_newest_event_timestamp_for_kind_with_author_filter() {
+        let pool = setup_test_db().await;
+        let database = wrap_pool_in_database(pool);
+        let event_id1 = create_test_event_id();
+        let event_id2 = create_test_event_id();
+
+        // Create test authors
+        let author1 = Keys::generate().public_key();
+        let author2 = Keys::generate().public_key();
+
+        let older_timestamp = Utc::now() - chrono::Duration::minutes(10);
+        let newer_timestamp = Utc::now();
+
+        // Create metadata events (kind 0) from different authors
+        ProcessedEvent::create(
+            &event_id1,
+            None, // Global event
+            Some(older_timestamp),
+            Some(0), // Metadata kind
+            Some(&author1),
+            &database,
+        )
+        .await
+        .unwrap();
+
+        ProcessedEvent::create(
+            &event_id2,
+            None, // Global event
+            Some(newer_timestamp),
+            Some(0), // Metadata kind
+            Some(&author2),
+            &database,
+        )
+        .await
+        .unwrap();
+
+        // Test getting newest timestamp for kind 0 with author1 filter
+        let result =
+            ProcessedEvent::newest_event_timestamp_for_kind(None, 0, Some(&author1), &database)
+                .await
+                .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().timestamp_millis(),
+            older_timestamp.timestamp_millis()
+        );
+
+        // Test getting newest timestamp for kind 0 with author2 filter
+        let result =
+            ProcessedEvent::newest_event_timestamp_for_kind(None, 0, Some(&author2), &database)
+                .await
+                .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().timestamp_millis(),
+            newer_timestamp.timestamp_millis()
+        );
+
+        // Test getting newest timestamp for kind 0 without author filter (should get the newer one)
+        let result = ProcessedEvent::newest_event_timestamp_for_kind(None, 0, None, &database)
+            .await
+            .unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().timestamp_millis(),
+            newer_timestamp.timestamp_millis()
+        );
+
+        // Test with non-existent author
+        let non_existent_author = Keys::generate().public_key();
+        let result = ProcessedEvent::newest_event_timestamp_for_kind(
+            None,
+            0,
+            Some(&non_existent_author),
+            &database,
+        )
+        .await
+        .unwrap();
 
         assert!(result.is_none());
     }
