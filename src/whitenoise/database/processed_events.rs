@@ -673,7 +673,7 @@ mod tests {
             None,
             Some(timestamp),
             Some(10002),
-            None,
+            Some(&user_pubkey),
             &database,
         )
         .await
