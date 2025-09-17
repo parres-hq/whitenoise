@@ -27,10 +27,7 @@ impl Whitenoise {
             return;
         }
 
-        match self
-            .should_skip_global_event_processing(&event)
-            .await
-        {
+        match self.should_skip_global_event_processing(&event).await {
             Some(skip_reason) => {
                 tracing::debug!(
                     target: "whitenoise::event_processor::process_global_event",
@@ -80,10 +77,7 @@ impl Whitenoise {
 
     /// Check if a global event should be skipped (not processed)
     /// Returns Some(reason) if should skip, None if should process
-    async fn should_skip_global_event_processing(
-        &self,
-        event: &Event,
-    ) -> Option<&'static str> {
+    async fn should_skip_global_event_processing(&self, event: &Event) -> Option<&'static str> {
         let already_processed = match self
             .nostr
             .event_tracker

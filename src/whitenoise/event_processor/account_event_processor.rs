@@ -173,7 +173,6 @@ impl Whitenoise {
         event: &Event,
         account: &Account,
     ) -> Result<Option<&'static str>> {
-        // Check if we already processed this event (with author consideration)
         let already_processed = match self
             .nostr
             .event_tracker
