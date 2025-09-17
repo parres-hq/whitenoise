@@ -57,8 +57,6 @@ impl FindOrCreateUserTestCase {
         }
 
         test_client.disconnect().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
         Ok(())
     }
 
@@ -70,8 +68,6 @@ impl FindOrCreateUserTestCase {
         publish_relay_lists(&test_client, relay_urls).await?;
 
         test_client.disconnect().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
         Ok(())
     }
 }
@@ -100,6 +96,9 @@ impl TestCase for FindOrCreateUserTestCase {
         if self.should_have_relays {
             self.publish_relays_data(context).await?;
         }
+
+        // Wait for events to be processed
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
 
         let user = context
             .whitenoise
