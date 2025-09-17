@@ -48,18 +48,13 @@ impl TestCase for UpdateMetadataTestCase {
     async fn run(&self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError> {
         tracing::info!("Updating metadata for account: {}", self.account_name);
 
-        // Wait a moment to ensure any initial metadata events are fully processed
-        // This prevents race conditions where the initial petname metadata and
-        // test metadata events have the same timestamp
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
         let account = context.get_account(&self.account_name)?;
         account
             .update_metadata(&self.metadata, context.whitenoise)
             .await?;
 
         // Give events time to deliver and process
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         // Verify the update worked
         let updated_metadata = account.metadata(context.whitenoise).await?;
