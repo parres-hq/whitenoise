@@ -14,10 +14,16 @@ ALTER TABLE processed_events ADD COLUMN event_kind INTEGER DEFAULT NULL;
 -- NULL for legacy data where we don't have the author information
 ALTER TABLE processed_events ADD COLUMN author TEXT DEFAULT NULL;
 
--- Create indexes for efficient querying
-CREATE INDEX idx_processed_events_event_kind ON processed_events(event_kind);
-CREATE INDEX idx_processed_events_event_created_at ON processed_events(event_created_at);
-CREATE INDEX idx_processed_events_kind_timestamp ON processed_events(event_kind, event_created_at);
-CREATE INDEX idx_processed_events_author ON processed_events(author);
-CREATE INDEX idx_processed_events_author_kind ON processed_events(author, event_kind);
+-- Create indexes for efficient querying based on actual query patterns
+
+-- 1. Primary lookup for idempotency checks (event_id + account_id combinations)
+CREATE INDEX idx_processed_events_event_account ON processed_events(event_id, account_id);
+
+-- 2. Account-specific timestamp queries (account_id + event_kind for MAX queries)
+CREATE INDEX idx_processed_events_account_kind_timestamp ON processed_events(account_id, event_kind, event_created_at);
+
+-- 3. Global events with author filtering (author + event_kind for MAX queries)
 CREATE INDEX idx_processed_events_author_kind_timestamp ON processed_events(author, event_kind, event_created_at);
+
+-- 4. Global events without author filtering (account_id IS NULL + event_kind for MAX queries)
+CREATE INDEX idx_processed_events_null_account_kind_timestamp ON processed_events(event_kind, event_created_at) WHERE account_id IS NULL;
