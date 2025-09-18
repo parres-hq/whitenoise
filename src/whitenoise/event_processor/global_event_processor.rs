@@ -4,7 +4,6 @@ use crate::{
     types::RetryInfo,
     whitenoise::{
         error::{Result, WhitenoiseError},
-        users::User,
         Whitenoise,
     },
 };
@@ -27,21 +26,7 @@ impl Whitenoise {
             return;
         }
 
-        let user = match User::find_by_pubkey(&event.pubkey, &self.database).await {
-            Ok(user) => user,
-            Err(e) => {
-                tracing::error!(
-                    target: "whitenoise::event_processor::process_global_event",
-                    "Failed to get user {} from subscription ID: {}", event.pubkey.to_hex(), e
-                );
-                return;
-            }
-        };
-
-        match self
-            .should_skip_global_event_processing(&event, &user)
-            .await
-        {
+        match self.should_skip_global_event_processing(&event).await {
             Some(skip_reason) => {
                 tracing::debug!(
                     target: "whitenoise::event_processor::process_global_event",
@@ -64,7 +49,7 @@ impl Whitenoise {
                 if let Err(e) = self
                     .nostr
                     .event_tracker
-                    .track_processed_global_event(&event.id)
+                    .track_processed_global_event(&event)
                     .await
                 {
                     tracing::error!(target: "whitenoise::event_processor::process_global_event", "Failed to track processed global event: {}", e);
@@ -76,7 +61,7 @@ impl Whitenoise {
                     self.schedule_retry(event, subscription_id, retry_info, e);
                 } else {
                     tracing::error!(
-                        target: "whitenoise::event_processor::process_account_event",
+                        target: "whitenoise::event_processor::process_global_event",
                         "Event processing failed after {} attempts, giving up: {}",
                         retry_info.max_attempts,
                         e
@@ -88,11 +73,7 @@ impl Whitenoise {
 
     /// Check if a global event should be skipped (not processed)
     /// Returns Some(reason) if should skip, None if should process
-    async fn should_skip_global_event_processing(
-        &self,
-        event: &Event,
-        user: &User,
-    ) -> Option<&'static str> {
+    async fn should_skip_global_event_processing(&self, event: &Event) -> Option<&'static str> {
         let already_processed = match self
             .nostr
             .event_tracker
@@ -112,10 +93,6 @@ impl Whitenoise {
         };
         if already_processed {
             return Some("already processed");
-        }
-
-        if user.pubkey != event.pubkey {
-            return Some("event does not match user");
         }
 
         // For global events, check if WE published this event

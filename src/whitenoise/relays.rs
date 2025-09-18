@@ -34,6 +34,16 @@ impl FromStr for RelayType {
     }
 }
 
+impl From<RelayType> for u16 {
+    fn from(relay_type: RelayType) -> Self {
+        match relay_type {
+            RelayType::Nip65 => 10002,
+            RelayType::Inbox => 10050,
+            RelayType::KeyPackage => 10051,
+        }
+    }
+}
+
 impl From<RelayType> for String {
     fn from(relay_type: RelayType) -> Self {
         match relay_type {

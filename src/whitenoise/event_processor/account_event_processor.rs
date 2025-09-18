@@ -75,7 +75,7 @@ impl Whitenoise {
                 if let Err(e) = self
                     .nostr
                     .event_tracker
-                    .track_processed_account_event(&event.id, &account.pubkey)
+                    .track_processed_account_event(&event, &account.pubkey)
                     .await
                 {
                     tracing::warn!(
@@ -164,7 +164,6 @@ impl Whitenoise {
         event: &Event,
         account: &Account,
     ) -> Result<Option<&'static str>> {
-        // Check if we already processed this event
         let already_processed = match self
             .nostr
             .event_tracker

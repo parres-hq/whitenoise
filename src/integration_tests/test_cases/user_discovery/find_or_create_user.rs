@@ -57,8 +57,6 @@ impl FindOrCreateUserTestCase {
         }
 
         test_client.disconnect().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
         Ok(())
     }
 
@@ -70,8 +68,6 @@ impl FindOrCreateUserTestCase {
         publish_relay_lists(&test_client, relay_urls).await?;
 
         test_client.disconnect().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
         Ok(())
     }
 }
@@ -101,7 +97,7 @@ impl TestCase for FindOrCreateUserTestCase {
             self.publish_relays_data(context).await?;
         }
 
-        let user = context
+        let mut user = context
             .whitenoise
             .find_or_create_user_by_pubkey(&test_pubkey)
             .await?;
@@ -120,6 +116,20 @@ impl TestCase for FindOrCreateUserTestCase {
         assert_eq!(found_user.id, user.id, "Found user ID should match");
 
         tracing::info!("✓ User can be found by pubkey after creation");
+
+        // If we expect metadata, poll until it arrives (for CI timing issues)
+        if self.should_have_metadata && user.metadata == nostr_sdk::Metadata::default() {
+            tracing::info!("Metadata not yet available, polling for updates...");
+            for attempt in 1..=10 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                user = context.whitenoise.find_user_by_pubkey(&test_pubkey).await?;
+                if user.metadata != nostr_sdk::Metadata::default() {
+                    tracing::info!("✓ Metadata received after {} attempts", attempt);
+                    break;
+                }
+                tracing::debug!("Attempt {}: Still waiting for metadata...", attempt);
+            }
+        }
 
         if self.should_have_metadata {
             if let Some(expected_metadata) = &self.test_metadata {

@@ -47,6 +47,8 @@ pub enum NostrManagerError {
     EventProcessingError(String),
     #[error("Failed to track published event: {0}")]
     FailedToTrackPublishedEvent(String),
+    #[error("Invalid timestamp")]
+    InvalidTimestamp,
 }
 
 #[derive(Clone)]
@@ -68,8 +70,6 @@ pub struct UserEventStreams {
     pub metadata_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
     /// Stream of relay list events (kinds 10002, 10050, 10051)
     pub relay_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
-    /// Stream of contact list events (kind 3) for the account
-    pub contact_list_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
     /// Stream of gift wrap events (kind 1059) directed to the account
     pub giftwrap_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
     /// Stream of group message events (kind 444) for specified groups
@@ -434,7 +434,6 @@ impl NostrManager {
     /// # Data Types Fetched
     ///
     /// - **Metadata events** (kind 0): User profile information for the account and contacts
-    /// - **Contact list events** (kind 3): Account's contact/follow list
     /// - **Relay list events** (kinds 10002, 10050, 10051): NIP-65 relay lists, inbox relays, and MLS key package relays
     /// - **Gift wrap events** (kind 1059): Private messages directed to the account
     /// - **Group messages** (kind 444): MLS group messages for specified groups since last sync
@@ -473,23 +472,15 @@ impl NostrManager {
         &self,
         signer: impl NostrSigner + 'static,
         pubkey: PublicKey,
+        contact_list_pubkeys: Vec<PublicKey>,
         since: Timestamp,
         group_ids: Vec<String>,
     ) -> Result<UserEventStreams> {
-        let (metadata_events, relay_events, contact_list_events, giftwrap_events, group_messages) =
-            self.with_signer(signer, || async {
-                let mut contacts_and_self =
-                    match self.client.get_contact_list_public_keys(self.timeout).await {
-                        Ok(contacts) => contacts,
-                        Err(e) => {
-                            tracing::error!(
-                                target: "whitenoise::nostr_manager::fetch_user_event_streams",
-                                "Failed to get contact list public keys: {}",
-                                e
-                            );
-                            return Err(NostrManagerError::Client(e));
-                        }
-                    };
+        let (metadata_events, relay_events, giftwrap_events, group_messages) =
+            self
+            .with_signer(signer, || async {
+
+                let mut contacts_and_self = contact_list_pubkeys;
                 contacts_and_self.push(pubkey);
 
                 let metadata_filter = Filter::new()
@@ -503,10 +494,6 @@ impl NostrManager {
                         Kind::InboxRelays,
                         Kind::MlsKeyPackageRelays,
                     ])
-                    .since(since);
-                let contact_list_filter = Filter::new()
-                    .author(pubkey)
-                    .kind(Kind::ContactList)
                     .since(since);
                 let giftwrap_filter = Filter::new()
                     .kind(Kind::GiftWrap)
@@ -522,14 +509,11 @@ impl NostrManager {
                 let (
                     metadata_events,
                     relay_events,
-                    contact_list_events,
                     giftwrap_events,
                     group_messages,
                 ) = tokio::try_join!(
                     self.client.stream_events(metadata_filter, timeout_duration),
                     self.client.stream_events(relay_filter, timeout_duration),
-                    self.client
-                        .stream_events(contact_list_filter, timeout_duration),
                     self.client.stream_events(giftwrap_filter, timeout_duration),
                     self.client
                         .stream_events(group_messages_filter, timeout_duration)
@@ -537,7 +521,6 @@ impl NostrManager {
                 Ok((
                     metadata_events,
                     relay_events,
-                    contact_list_events,
                     giftwrap_events,
                     group_messages,
                 ))
@@ -547,7 +530,6 @@ impl NostrManager {
         Ok(UserEventStreams {
             metadata_events: Box::pin(metadata_events),
             relay_events: Box::pin(relay_events),
-            contact_list_events: Box::pin(contact_list_events),
             giftwrap_events: Box::pin(giftwrap_events),
             group_messages: Box::pin(group_messages),
         })

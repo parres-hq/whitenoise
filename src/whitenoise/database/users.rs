@@ -213,15 +213,20 @@ impl User {
     pub(crate) async fn save(&self, database: &Database) -> Result<User, WhitenoiseError> {
         let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
 
-        // Use INSERT ON CONFLICT to handle both insert and update cases without deleting/replacing rows
+        // Use INSERT ON CONFLICT to handle both insert and update cases
+        let current_time = Utc::now().timestamp_millis();
         sqlx::query(
-            "INSERT INTO users (pubkey, metadata, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET metadata = excluded.metadata, updated_at = ?",
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(pubkey) DO UPDATE SET
+               metadata = excluded.metadata,
+               updated_at = ?",
         )
         .bind(self.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
-        .bind(Utc::now().timestamp_millis())
+        .bind(current_time)
         .execute(&mut *tx)
         .await
         .map_err(DatabaseError::Sqlx)
@@ -237,6 +242,124 @@ impl User {
         tx.commit().await.map_err(DatabaseError::Sqlx)?;
 
         Ok(updated_user.into())
+    }
+
+    /// Transaction-aware version of find_by_pubkey that accepts a database transaction.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` to search for
+    /// * `tx` - A mutable reference to an active database transaction
+    ///
+    /// # Returns
+    ///
+    /// Returns the `User` associated with the provided public key on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError::UserNotFound`] if no user with the given public key exists.
+    /// Returns other database errors if the query fails.
+    pub(crate) async fn find_by_pubkey_tx<'a>(
+        pubkey: &PublicKey,
+        tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    ) -> Result<User, WhitenoiseError> {
+        let user_row = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
+            .bind(pubkey.to_hex().as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| match err {
+                sqlx::Error::RowNotFound => WhitenoiseError::UserNotFound,
+                _ => WhitenoiseError::Database(DatabaseError::Sqlx(err)),
+            })?;
+
+        Ok(user_row.into())
+    }
+
+    /// Transaction-aware version of save that accepts a database transaction.
+    ///
+    /// This method saves or updates the user within an existing transaction,
+    /// avoiding nested transactions that could cause inconsistent state.
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - A mutable reference to an active database transaction
+    ///
+    /// # Returns
+    ///
+    /// Returns the saved/updated `User` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
+    pub(crate) async fn save_tx<'a>(
+        &self,
+        tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    ) -> Result<User, WhitenoiseError> {
+        // Use INSERT ON CONFLICT to handle both insert and update cases
+        let current_time = Utc::now().timestamp_millis();
+        sqlx::query(
+            "INSERT INTO users (pubkey, metadata, created_at, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(pubkey) DO UPDATE SET
+               metadata = excluded.metadata,
+               updated_at = ?",
+        )
+        .bind(self.pubkey.to_hex().as_str())
+        .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .bind(current_time)
+        .execute(&mut **tx)
+        .await
+        .map_err(DatabaseError::Sqlx)
+        .map_err(WhitenoiseError::Database)?;
+
+        // Get the user by pubkey to return the updated record
+        let updated_user = sqlx::query_as::<_, UserRow>("SELECT * FROM users WHERE pubkey = ?")
+            .bind(self.pubkey.to_hex().as_str())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        Ok(updated_user.into())
+    }
+
+    /// Transaction-aware version of find_or_create_by_pubkey that accepts a database transaction.
+    ///
+    /// This method finds an existing user by public key or creates a new one if not found,
+    /// all within the provided transaction to maintain consistency.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - A reference to the `PublicKey` to search for
+    /// * `tx` - A mutable reference to an active database transaction
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple containing the `User` and a boolean indicating if the user was newly created (true) or found (false).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operations fail.
+    pub(crate) async fn find_or_create_by_pubkey_tx<'a>(
+        pubkey: &PublicKey,
+        tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    ) -> Result<(User, bool), WhitenoiseError> {
+        match User::find_by_pubkey_tx(pubkey, tx).await {
+            Ok(user) => Ok((user, false)),
+            Err(WhitenoiseError::UserNotFound) => {
+                let mut user = User {
+                    id: None,
+                    pubkey: *pubkey,
+                    metadata: Metadata::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                };
+                user = user.save_tx(tx).await?;
+                Ok((user, true))
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Adds a relay association for this user.
@@ -264,7 +387,7 @@ impl User {
         let relay_id = relay.id.expect("Relay should have ID after save");
 
         sqlx::query(
-            "INSERT OR IGNORE INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, relay_id, relay_type) DO UPDATE SET updated_at = excluded.updated_at",
         )
         .bind(user_id)
         .bind(relay_id)

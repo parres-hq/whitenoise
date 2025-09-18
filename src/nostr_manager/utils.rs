@@ -18,10 +18,10 @@ impl NostrManager {
     }
 
     /// Extracts relay URLs from an event's tags.
-    pub(crate) fn relay_urls_from_event(event: Event) -> HashSet<RelayUrl> {
+    pub(crate) fn relay_urls_from_event(event: &Event) -> HashSet<RelayUrl> {
         event
             .tags
-            .into_iter()
+            .iter()
             .filter(|tag| Self::is_relay_list_tag_for_event_kind(tag, event.kind))
             .filter_map(|tag| {
                 tag.content()
@@ -77,7 +77,7 @@ mod tests {
             .await
             .unwrap();
 
-        let parsed_relays = NostrManager::relay_urls_from_event(event);
+        let parsed_relays = NostrManager::relay_urls_from_event(&event);
 
         assert_eq!(parsed_relays.len(), 2);
         assert!(parsed_relays.contains(&RelayUrl::parse("wss://relay1.example.com").unwrap()));
@@ -105,7 +105,7 @@ mod tests {
             .await
             .unwrap();
 
-        let parsed_relays = NostrManager::relay_urls_from_event(event);
+        let parsed_relays = NostrManager::relay_urls_from_event(&event);
 
         assert_eq!(parsed_relays.len(), 2);
         assert!(parsed_relays.contains(&RelayUrl::parse("wss://inbox1.example.com").unwrap()));
@@ -133,7 +133,7 @@ mod tests {
             .await
             .unwrap();
 
-        let parsed_relays = NostrManager::relay_urls_from_event(event);
+        let parsed_relays = NostrManager::relay_urls_from_event(&event);
 
         assert_eq!(parsed_relays.len(), 2);
         assert!(parsed_relays.contains(&RelayUrl::parse("wss://keypackage1.example.com").unwrap()));
@@ -159,7 +159,7 @@ mod tests {
             .await
             .unwrap();
 
-        let parsed_relays = NostrManager::relay_urls_from_event(event);
+        let parsed_relays = NostrManager::relay_urls_from_event(&event);
 
         assert_eq!(parsed_relays.len(), 2);
         assert!(parsed_relays.contains(&RelayUrl::parse("wss://r-tag-relay.example.com").unwrap()));
@@ -187,7 +187,7 @@ mod tests {
             .await
             .unwrap();
 
-        let parsed_relays = NostrManager::relay_urls_from_event(event);
+        let parsed_relays = NostrManager::relay_urls_from_event(&event);
 
         assert_eq!(parsed_relays.len(), 2);
         assert!(parsed_relays.contains(&RelayUrl::parse("wss://valid-relay.example.com").unwrap()));
@@ -214,7 +214,7 @@ mod tests {
             .await
             .unwrap();
 
-        let parsed_relays = NostrManager::relay_urls_from_event(event);
+        let parsed_relays = NostrManager::relay_urls_from_event(&event);
         assert!(parsed_relays.is_empty());
     }
 

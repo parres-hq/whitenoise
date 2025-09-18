@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::PublicKey;
 use sqlx::Row;
+use std::collections::HashSet;
 
 use super::{utils::parse_timestamp, Database, DatabaseError};
 use crate::{
@@ -310,6 +311,84 @@ impl Account {
         Ok(())
     }
 
+    /// Updates this account's follow list from a ContactList event.
+    ///
+    /// This method atomically replaces all current follows with the follows from the
+    /// given ContactList event. All operations are performed within a transaction to
+    /// ensure data consistency. Duplicate contacts are automatically deduplicated.
+    ///
+    /// # Arguments
+    ///
+    /// * `contacts` - Vector of public keys from the ContactList event
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Vec<PublicKey>)` containing the public keys of newly created users.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operations fail.
+    pub(crate) async fn update_follows_from_event(
+        &self,
+        contacts: Vec<nostr_sdk::PublicKey>,
+        database: &Database,
+    ) -> Result<Vec<nostr_sdk::PublicKey>, WhitenoiseError> {
+        // Deduplicate contacts to prevent unique constraint violations
+        let unique_contacts: Vec<_> = contacts
+            .into_iter()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let contacts_len = unique_contacts.len();
+
+        // Start transaction for atomic operations
+        let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
+
+        // Remove all current follows for this account
+        sqlx::query("DELETE FROM account_follows WHERE account_id = ?")
+            .bind(self.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(DatabaseError::Sqlx)?;
+
+        let mut newly_created_users = Vec::new();
+
+        // Insert new follows
+        for pubkey in unique_contacts {
+            let (user, newly_created) = User::find_or_create_by_pubkey_tx(&pubkey, &mut tx).await?;
+
+            if newly_created {
+                // Track newly created users so the caller can fetch their metadata
+                newly_created_users.push(pubkey);
+                tracing::debug!("Created new user for follow: {}", pubkey.to_hex());
+            }
+
+            let now = Utc::now().timestamp_millis();
+            sqlx::query("INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)")
+                .bind(self.id)
+                .bind(user.id)
+                .bind(now)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .map_err(DatabaseError::Sqlx)?;
+        }
+
+        // Commit transaction
+        tx.commit().await.map_err(DatabaseError::Sqlx)?;
+
+        tracing::debug!(
+            target: "whitenoise::database::accounts::update_follows_from_event",
+            "Updated follows for account {} with {} contacts, {} newly created users",
+            self.pubkey.to_hex(),
+            contacts_len,
+            newly_created_users.len()
+        );
+
+        Ok(newly_created_users)
+    }
+
     /// Saves this account to the database.
     ///
     /// # Arguments
@@ -419,6 +498,15 @@ mod tests {
                 FOREIGN KEY (account_id) REFERENCES accounts (id),
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Add unique constraint to prevent duplicate follows
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_account_follows_unique
+             ON account_follows(account_id, user_id)",
         )
         .execute(&pool)
         .await
@@ -875,17 +963,11 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Insert into account_follows table
-            sqlx::query(
-                "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
-            )
-            .bind(saved_account.id)
-            .bind(saved_user.id)
-            .bind(test_timestamp.timestamp_millis())
-            .bind(test_timestamp.timestamp_millis())
-            .execute(&whitenoise.database.pool)
-            .await
-            .unwrap();
+            // Create follower relationship using the proper API
+            saved_account
+                .follow_user(&saved_user, &whitenoise.database)
+                .await
+                .unwrap();
         }
 
         // Test follows
@@ -993,17 +1075,11 @@ mod tests {
             .await
             .unwrap();
 
-        // Insert the follower relationship
-        sqlx::query(
-            "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
-        )
-        .bind(saved_account.id)
-        .bind(saved_user.id)
-        .bind(test_timestamp.timestamp_millis())
-        .bind(test_timestamp.timestamp_millis())
-        .execute(&whitenoise.database.pool)
-        .await
-        .unwrap();
+        // Create the follower relationship using the proper API
+        saved_account
+            .follow_user(&saved_user, &whitenoise.database)
+            .await
+            .unwrap();
 
         // Test follows
         let followers = saved_account.follows(&whitenoise.database).await.unwrap();
@@ -1069,16 +1145,11 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query(
-            "INSERT INTO account_follows (account_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
-        )
-        .bind(saved_account.id)
-        .bind(saved_user.id)
-        .bind(test_timestamp.timestamp_millis())
-        .bind(test_timestamp.timestamp_millis())
-        .execute(&whitenoise.database.pool)
-        .await
-        .unwrap();
+        // Create the follower relationship using the proper API
+        saved_account
+            .follow_user(&saved_user, &whitenoise.database)
+            .await
+            .unwrap();
 
         // Test follows
         let followers = saved_account.follows(&whitenoise.database).await.unwrap();
@@ -1235,5 +1306,234 @@ mod tests {
         test_account2.delete(&whitenoise.database).await.unwrap();
         let account4 = Account::first(&whitenoise.database).await.unwrap();
         assert!(account4.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_follows_from_event_empty_list() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = crate::whitenoise::test_utils::create_test_account(&whitenoise).await;
+        account.save(&whitenoise.database).await.unwrap();
+
+        // Get the account with database ID populated
+        let account = Account::find_by_pubkey(&keys.public_key(), &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Test with empty contacts list
+        let contacts = vec![];
+
+        let result = account
+            .update_follows_from_event(contacts, &whitenoise.database)
+            .await;
+
+        assert!(result.is_ok());
+        let newly_created = result.unwrap();
+        assert!(newly_created.is_empty());
+
+        // Verify no follows exist
+        let follows = account.follows(&whitenoise.database).await.unwrap();
+        assert!(follows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_update_follows_from_event_new_follows() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = crate::whitenoise::test_utils::create_test_account(&whitenoise).await;
+        account.save(&whitenoise.database).await.unwrap();
+
+        // Get the account with database ID populated
+        let account = Account::find_by_pubkey(&keys.public_key(), &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Create test contacts
+        let contact1 = nostr_sdk::Keys::generate().public_key();
+        let contact2 = nostr_sdk::Keys::generate().public_key();
+        let contacts = vec![contact1, contact2];
+
+        let result = account
+            .update_follows_from_event(contacts.clone(), &whitenoise.database)
+            .await;
+
+        assert!(result.is_ok());
+        let newly_created = result.unwrap();
+        assert_eq!(newly_created.len(), 2);
+        assert!(newly_created.contains(&contact1));
+        assert!(newly_created.contains(&contact2));
+
+        // Verify follows were created
+        let follows = account.follows(&whitenoise.database).await.unwrap();
+        assert_eq!(follows.len(), 2);
+
+        // Verify the correct users are being followed
+        let followed_pubkeys: Vec<_> = follows.iter().map(|user| user.pubkey).collect();
+        assert!(followed_pubkeys.contains(&contact1));
+        assert!(followed_pubkeys.contains(&contact2));
+
+        // Verify users were created (2 contacts + 1 account user = 3 total)
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&whitenoise.database.pool)
+            .await
+            .unwrap();
+        assert_eq!(user_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_update_follows_from_event_replace_existing() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = crate::whitenoise::test_utils::create_test_account(&whitenoise).await;
+        account.save(&whitenoise.database).await.unwrap();
+
+        // Get the account with database ID populated
+        let account = Account::find_by_pubkey(&keys.public_key(), &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Create initial users and follows using proper APIs
+        let old_contact1 = nostr_sdk::Keys::generate().public_key();
+        let old_contact2 = nostr_sdk::Keys::generate().public_key();
+
+        // Create users and follow them using proper APIs
+        for pubkey in [&old_contact1, &old_contact2] {
+            let (user, _) = crate::whitenoise::users::User::find_or_create_by_pubkey(
+                pubkey,
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+            account
+                .follow_user(&user, &whitenoise.database)
+                .await
+                .unwrap();
+        }
+
+        // Create new contacts (one overlaps with old, one is new)
+        let new_contact1 = old_contact1; // Keep one existing
+        let new_contact2 = nostr_sdk::Keys::generate().public_key(); // New one
+        let contacts = vec![new_contact1, new_contact2];
+
+        let result = account
+            .update_follows_from_event(contacts.clone(), &whitenoise.database)
+            .await;
+
+        assert!(result.is_ok());
+        let newly_created = result.unwrap();
+        assert_eq!(newly_created.len(), 1); // Only one new user created
+        assert!(newly_created.contains(&new_contact2));
+        assert!(!newly_created.contains(&new_contact1)); // This user already existed
+
+        // Verify follows were replaced using proper API
+        let follows = account.follows(&whitenoise.database).await.unwrap();
+        assert_eq!(follows.len(), 2);
+
+        // Verify the correct users are being followed
+        let followed_pubkeys: Vec<_> = follows.iter().map(|user| user.pubkey).collect();
+        assert!(followed_pubkeys.contains(&new_contact1));
+        assert!(followed_pubkeys.contains(&new_contact2));
+    }
+
+    #[tokio::test]
+    async fn test_update_follows_from_event_duplicate_contacts() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = crate::whitenoise::test_utils::create_test_account(&whitenoise).await;
+        account.save(&whitenoise.database).await.unwrap();
+
+        // Get the account with database ID populated
+        let account = Account::find_by_pubkey(&keys.public_key(), &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Create contacts with duplicates
+        let contact1 = nostr_sdk::Keys::generate().public_key();
+        let contact2 = nostr_sdk::Keys::generate().public_key();
+        let contacts = vec![contact1, contact2, contact1]; // contact1 appears twice
+
+        let result = account
+            .update_follows_from_event(contacts.clone(), &whitenoise.database)
+            .await;
+
+        // This should now succeed due to deduplication
+        assert!(result.is_ok());
+
+        // Verify correct number of follows were created (should be 2, not 3, due to deduplication)
+        let result_unwrapped = result.unwrap();
+        assert_eq!(result_unwrapped.len(), 2); // Both contacts should be newly created
+
+        // Verify follows using proper API
+        let follows = account.follows(&whitenoise.database).await.unwrap();
+        assert_eq!(follows.len(), 2); // Only 2 follows due to deduplication
+
+        // Verify the correct users are being followed
+        let followed_pubkeys: Vec<_> = follows.iter().map(|user| user.pubkey).collect();
+        assert!(followed_pubkeys.contains(&contact1));
+        assert!(followed_pubkeys.contains(&contact2));
+    }
+
+    #[tokio::test]
+    async fn test_update_follows_from_event_large_contact_list() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let (account, keys) = crate::whitenoise::test_utils::create_test_account(&whitenoise).await;
+        account.save(&whitenoise.database).await.unwrap();
+
+        // Get the account with database ID populated
+        let account = Account::find_by_pubkey(&keys.public_key(), &whitenoise.database)
+            .await
+            .unwrap();
+
+        // Create large contact list (100 contacts)
+        let mut contacts = Vec::new();
+        for _ in 0..100 {
+            contacts.push(nostr_sdk::Keys::generate().public_key());
+        }
+
+        let result = account
+            .update_follows_from_event(contacts.clone(), &whitenoise.database)
+            .await;
+
+        assert!(result.is_ok());
+        let newly_created = result.unwrap();
+        assert_eq!(newly_created.len(), 100);
+
+        // Verify all follows were created using proper API
+        let follows = account.follows(&whitenoise.database).await.unwrap();
+        assert_eq!(follows.len(), 100);
+
+        // Verify all users were created (100 contacts + 1 account user = 101 total)
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&whitenoise.database.pool)
+            .await
+            .unwrap();
+        assert_eq!(user_count, 101);
+    }
+
+    #[tokio::test]
+    async fn test_update_follows_from_event_transaction_rollback_on_error() {
+        let pool = setup_test_db().await;
+
+        // Manually close the pool to simulate database error
+        pool.close().await;
+
+        let database = crate::whitenoise::database::Database {
+            pool: pool.clone(),
+            path: std::path::PathBuf::from(":memory:"),
+            last_connected: std::time::SystemTime::now(),
+        };
+
+        let test_pubkey = nostr_sdk::Keys::generate().public_key();
+        let account = Account {
+            id: Some(1),
+            pubkey: test_pubkey,
+            user_id: 1,
+            last_synced_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let contacts = vec![nostr_sdk::Keys::generate().public_key()];
+
+        let result = account.update_follows_from_event(contacts, &database).await;
+
+        // Should fail due to closed database
+        assert!(result.is_err());
     }
 }

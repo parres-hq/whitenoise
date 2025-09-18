@@ -8,7 +8,7 @@ use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::nostr_manager::NostrManagerError;
+use crate::nostr_manager::{NostrManager, NostrManagerError};
 use crate::types::ImageType;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
@@ -327,16 +327,6 @@ impl Account {
             whitenoise.handle_relay_list(event).await.map_err(|e| {
                 WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
             })?;
-        }
-
-        // Process follow list events
-        while let Some(event) = streams.contact_list_events.next().await {
-            whitenoise
-                .handle_contact_list(self, event)
-                .await
-                .map_err(|e| {
-                    WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
-                })?;
         }
 
         // Process gift wrap events
@@ -720,15 +710,22 @@ impl Whitenoise {
         relay_type: RelayType,
         source_relays: &[Relay],
     ) -> Result<Vec<Relay>> {
-        let relay_urls = self
+        let source_relay_urls = source_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
+        let relay_event = self
             .nostr
-            .fetch_user_relays(pubkey, relay_type, source_relays)
+            .fetch_user_relays(pubkey, relay_type, &source_relay_urls)
             .await?;
 
         let mut relays = Vec::new();
-        for url in relay_urls {
-            let relay = self.find_or_create_relay_by_url(&url).await?;
-            relays.push(relay);
+        if let Some(event) = relay_event {
+            let relay_urls = NostrManager::relay_urls_from_event(&event);
+            for url in relay_urls {
+                let relay = self.find_or_create_relay_by_url(&url).await?;
+                relays.push(relay);
+            }
         }
 
         Ok(relays)
@@ -857,10 +854,79 @@ impl Whitenoise {
             );
 
             let current_time = Utc::now().timestamp_millis();
+
+            let whitenoise = match Whitenoise::get_instance() {
+                Ok(instance) => instance,
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::background_fetch_account_data",
+                        "Failed to get Whitenoise instance for background sync: {}",
+                        e
+                    );
+                    return;
+                }
+            };
+
+            // Get user's relay information for contact list fetching
+            let user_relays = match account_clone.nip65_relays(whitenoise).await {
+                Ok(relays) => relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
+                Err(_) => {
+                    // Fallback to default relays if user has no specific relays
+                    Relay::defaults()
+                        .into_iter()
+                        .map(|r| r.url)
+                        .collect::<Vec<_>>()
+                }
+            };
+
+            // Ensure user relays are connected before fetching contact list
+            if let Err(e) = whitenoise.nostr.ensure_relays_connected(&user_relays).await {
+                tracing::warn!(
+                    target: "whitenoise::background_fetch_account_data",
+                    "Failed to ensure relay connections for account {}: {}. Proceeding with fetch anyway.",
+                    account_clone.pubkey.to_hex(),
+                    e
+                );
+            }
+
+            // Fetch the account's contact list
+            let fetched_contact_list = whitenoise
+                .nostr
+                .fetch_contact_list_events(account_clone.pubkey, &user_relays)
+                .await;
+
+            let contact_list_pubkeys = match &fetched_contact_list {
+                Ok(Some(contact_list_event)) => {
+                    NostrManager::pubkeys_from_event(contact_list_event)
+                }
+                Ok(None) => Vec::new(),
+                Err(e) => {
+                    tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to fetch contact list for account {}: {}", account_clone.pubkey.to_hex(), e);
+                    Vec::new()
+                }
+            };
+
+            // Process the fetched contact list first (if it exists)
+            // This ensures existing contact lists are processed during login even if no new events are streamed
+            if let Ok(Some(contact_list_event)) = fetched_contact_list {
+                tracing::debug!(
+                    target: "whitenoise::nostr_manager::sync_all_user_data",
+                    "Processing fetched contact list for account {}",
+                    account_clone.pubkey.to_hex()
+                );
+                if let Err(e) = whitenoise
+                    .handle_contact_list(&account_clone, contact_list_event)
+                    .await
+                {
+                    tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to process contact list for account {}: {}", account_clone.pubkey.to_hex(), e);
+                }
+            }
+
             match nostr
                 .fetch_user_event_streams(
                     signer,
                     account_clone.pubkey,
+                    contact_list_pubkeys,
                     Timestamp::from(
                         account_clone.last_synced_at.unwrap_or_default().timestamp() as u64
                     ),
@@ -1154,24 +1220,21 @@ mod tests {
         // Give the events time to be published and processed
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
+        let nip65_relays = account.nip65_relays(&whitenoise).await.unwrap();
+        let nip65_relay_urls = nip65_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         // Check that all three event types were published
         let inbox_events = whitenoise
             .nostr
-            .fetch_user_relays(
-                account.pubkey,
-                RelayType::Inbox,
-                &account.nip65_relays(&whitenoise).await.unwrap(),
-            )
+            .fetch_user_relays(account.pubkey, RelayType::Inbox, &nip65_relay_urls)
             .await
             .unwrap();
 
         let key_package_relays_events = whitenoise
             .nostr
-            .fetch_user_relays(
-                account.pubkey,
-                RelayType::KeyPackage,
-                &account.nip65_relays(&whitenoise).await.unwrap(),
-            )
+            .fetch_user_relays(account.pubkey, RelayType::KeyPackage, &nip65_relay_urls)
             .await
             .unwrap();
 
@@ -1192,11 +1255,11 @@ mod tests {
 
         // Verify that the relay list events were published
         assert!(
-            !inbox_events.is_empty(),
+            inbox_events.is_some(),
             "Inbox relays list (kind 10050) should be published for new accounts"
         );
         assert!(
-            !key_package_relays_events.is_empty(),
+            key_package_relays_events.is_some(),
             "Key package relays list (kind 10051) should be published for new accounts"
         );
         assert!(
@@ -1467,13 +1530,18 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
         let nip65_relays = account.nip65_relays(&whitenoise).await.unwrap();
+        let nip65_relay_urls = nip65_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         let fetched_metadata = whitenoise
             .nostr
-            .fetch_metadata_from(&nip65_relays, account.pubkey)
+            .fetch_metadata_from(&nip65_relay_urls, account.pubkey)
             .await
             .expect("Failed to fetch metadata from relays");
 
-        if let Some(published_metadata) = fetched_metadata {
+        if let Some(event) = fetched_metadata {
+            let published_metadata = Metadata::from_json(&event.content).unwrap();
             assert_eq!(published_metadata.name, new_metadata.name);
             assert_eq!(published_metadata.display_name, new_metadata.display_name);
             assert_eq!(published_metadata.about, new_metadata.about);
