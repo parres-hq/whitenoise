@@ -181,10 +181,7 @@ SELECT
     a.pubkey,
     u.id as user_id,
     a.settings,
-    CASE
-        WHEN a.last_synced IS NOT NULL THEN datetime(a.last_synced, 'unixepoch')
-        ELSE NULL
-    END as last_synced_at
+    NULL as last_synced_at  -- Set to NULL to ensure fresh sync from beginning
 FROM accounts a
 JOIN users u ON u.pubkey = a.pubkey
 WHERE NOT EXISTS (SELECT 1 FROM accounts_new WHERE accounts_new.pubkey = a.pubkey);
