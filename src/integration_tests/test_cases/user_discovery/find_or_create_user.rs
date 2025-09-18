@@ -36,10 +36,18 @@ impl FindOrCreateUserTestCase {
     }
 
     pub fn with_relays(mut self) -> Self {
-        let test_relays = vec![
-            RelayUrl::parse("ws://localhost:8080").unwrap(),
-            RelayUrl::parse("ws://localhost:7777").unwrap(),
-        ];
+        let test_relays = if cfg!(debug_assertions) {
+            vec![
+                RelayUrl::parse("ws://localhost:8080").unwrap(),
+                RelayUrl::parse("ws://localhost:7777").unwrap(),
+            ]
+        } else {
+            vec![
+                RelayUrl::parse("wss://relay.damus.io").unwrap(),
+                RelayUrl::parse("wss://relay.primal.net").unwrap(),
+                RelayUrl::parse("wss://nos.lol").unwrap(),
+            ]
+        };
 
         self.should_have_relays = true;
         self.test_relays = test_relays;

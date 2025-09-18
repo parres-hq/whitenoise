@@ -23,6 +23,22 @@ int-test:
     integration_test=debug \
     cargo run --bin integration_test --features integration-tests -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
+# Run integration_test binary with flamegraph to analyze performance
+int-test-flamegraph:
+    rm -rf ./dev/data/integration_test/ cargo-flamegraph.trace flamegraph.svg
+    RUST_LOG=debug,\
+    sqlx=info,\
+    refinery_core=error,\
+    keyring=info,\
+    nostr_relay_pool=error,\
+    nostr_mls_sqlite_storage=error,\
+    tungstenite=error,\
+    integration_test=debug \
+    CARGO_PROFILE_RELEASE_DEBUG=true \
+    CARGO_PROFILE_RELEASE_LTO=false \
+    CARGO_PROFILE_RELEASE_STRIP=false \
+    cargo flamegraph --release --bin integration_test --features integration-tests --deterministic -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+
 # Run all tests (unit tests, integration tests, and doc tests)
 test:
     cargo test --all-features --all-targets

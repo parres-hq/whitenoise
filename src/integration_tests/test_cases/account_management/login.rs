@@ -12,11 +12,20 @@ pub struct LoginTestCase {
 
 impl LoginTestCase {
     pub fn new(account_name: &str) -> Self {
+        let relays = if cfg!(debug_assertions) {
+            vec!["ws://localhost:8080"]
+        } else {
+            vec![
+                "wss://relay.damus.io",
+                "wss://relay.primal.net",
+                "wss://nos.lol",
+            ]
+        };
         Self {
             account_name: account_name.to_string(),
             metadata_name: None,
             metadata_about: None,
-            relays: vec!["ws://localhost:8080"],
+            relays,
         }
     }
 

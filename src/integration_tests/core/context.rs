@@ -15,9 +15,18 @@ pub struct ScenarioContext {
 
 impl ScenarioContext {
     pub fn new(whitenoise: &'static Whitenoise) -> Self {
+        let relays = if cfg!(debug_assertions) {
+            vec!["ws://localhost:8080", "ws://localhost:7777"]
+        } else {
+            vec![
+                "wss://relay.damus.io",
+                "wss://relay.primal.net",
+                "wss://nos.lol",
+            ]
+        };
         Self {
             whitenoise,
-            dev_relays: vec!["ws://localhost:8080", "ws://localhost:7777"],
+            dev_relays: relays,
             accounts: HashMap::new(),
             groups: HashMap::new(),
             messages_ids: HashMap::new(),
