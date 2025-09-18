@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::{
-    nostr_manager::utils::pubkeys_from_event,
+    nostr_manager::NostrManager,
     whitenoise::{
         accounts::Account,
         database::processed_events::ProcessedEvent,
@@ -77,7 +77,7 @@ impl Whitenoise {
             account.pubkey.to_hex()
         );
 
-        let contacts_from_event = pubkeys_from_event(&event);
+        let contacts_from_event = NostrManager::pubkeys_from_event(&event);
 
         // Use the new bulk update method and get the list of newly created users
         let newly_created_pubkeys = account

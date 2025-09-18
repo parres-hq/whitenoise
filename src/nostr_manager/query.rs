@@ -80,7 +80,6 @@ impl NostrManager {
 #[cfg(test)]
 mod contact_list_logic_tests {
     use super::*;
-    use crate::nostr_manager::utils::pubkeys_from_event;
     use std::collections::HashMap;
 
     // Test data for problematic contact list
@@ -137,7 +136,7 @@ mod contact_list_logic_tests {
         assert_eq!(alt_tags, 1);
 
         // Now extract contacts
-        let contacts = pubkeys_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
 
         // Verify we only get the p tags as contacts
         assert_eq!(contacts.len(), 8);
@@ -153,7 +152,7 @@ mod contact_list_logic_tests {
         assert!(event.content.contains("write"));
 
         // Extract contacts - should work despite complex content
-        let contacts = pubkeys_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts.len(), 8);
 
         // Check specific contacts
@@ -176,7 +175,7 @@ mod contact_list_logic_tests {
 
         // Check that we can parse and process events with timestamps from the far future
         // Regardless of whether that time has now passed
-        let contacts = pubkeys_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts.len(), 8);
 
         // Verify we extracted the correct timestamp from the event
@@ -186,7 +185,7 @@ mod contact_list_logic_tests {
     #[tokio::test]
     async fn test_create_contact_list_hashmap() {
         let event = get_test_contact_list_event();
-        let contacts_pubkeys = pubkeys_from_event(&event);
+        let contacts_pubkeys = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts_pubkeys.len(), 8);
 
         // Create the HashMap as done in fetch_user_contact_list
@@ -276,7 +275,7 @@ mod contact_list_logic_tests {
         let event: Event = serde_json::from_str(&event_json).unwrap();
 
         // Extract contacts
-        let contacts = pubkeys_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
 
         // Check for duplicate contacts
         let unique_contacts: std::collections::HashSet<_> = contacts.iter().cloned().collect();
@@ -338,7 +337,7 @@ mod contact_list_logic_tests {
         assert_eq!(event.tags.len(), 5);
 
         // Extract contacts
-        let contacts = pubkeys_from_event(&event);
+        let contacts = NostrManager::pubkeys_from_event(&event);
         assert_eq!(contacts.len(), 2);
     }
 

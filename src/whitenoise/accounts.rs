@@ -8,7 +8,7 @@ use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::nostr_manager::{utils::pubkeys_from_event, NostrManager, NostrManagerError};
+use crate::nostr_manager::{NostrManager, NostrManagerError};
 use crate::types::ImageType;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
@@ -896,7 +896,7 @@ impl Whitenoise {
                 .await;
 
             let contact_list_pubkeys = match &fetched_contact_list {
-                Ok(Some(contact_list_event)) => pubkeys_from_event(contact_list_event),
+                Ok(Some(contact_list_event)) => NostrManager::pubkeys_from_event(contact_list_event),
                 Ok(None) => Vec::new(),
                 Err(e) => {
                     tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to fetch contact list for account {}: {}", account_clone.pubkey.to_hex(), e);
