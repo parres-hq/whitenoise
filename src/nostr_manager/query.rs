@@ -1,13 +1,11 @@
 //! This module contains functions for querying Nostr events from relays.
 
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 
 use crate::{
-    nostr_manager::{NostrManager, NostrManagerError, Result},
-    whitenoise::{relays::Relay, utils::timestamp_to_datetime},
+    nostr_manager::{NostrManager, Result},
     RelayType,
 };
 
@@ -17,70 +15,29 @@ const MAX_FUTURE_SKEW: Duration = Duration::from_secs(60 * 60);
 impl NostrManager {
     pub(crate) async fn fetch_metadata_from(
         &self,
-        nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
+        nip65_relay_urls: &[RelayUrl],
         pubkey: PublicKey,
-    ) -> Result<Option<(Metadata, DateTime<Utc>, EventId)>> {
+    ) -> Result<Option<Event>> {
         let filter: Filter = Filter::new().author(pubkey).kind(Kind::Metadata);
-        let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
         let events: Events = self
             .client
-            .fetch_events_from(urls, filter, self.timeout)
+            .fetch_events_from(nip65_relay_urls, filter, self.timeout)
             .await?;
-
-        // Filter out events with timestamps too far in the future
-        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
-        let latest = events
-            .into_iter()
-            .filter(|e| e.created_at <= cutoff)
-            .max_by_key(|e| (e.created_at, e.id));
-        match latest {
-            Some(event) => {
-                let event_datetime = timestamp_to_datetime(event.created_at)
-                    .map_err(|_e| NostrManagerError::InvalidTimestamp)?;
-                Ok(Some((
-                    Metadata::try_from(&event)?,
-                    event_datetime,
-                    event.id,
-                )))
-            }
-            None => Ok(None),
-        }
+        Self::latest_from_events(events)
     }
 
     pub(crate) async fn fetch_user_relays(
         &self,
         pubkey: PublicKey,
         relay_type: RelayType,
-        nip65_relays: &[Relay], // TODO: Replace with &[RelayUrl]
-    ) -> Result<Option<(HashSet<RelayUrl>, DateTime<Utc>, EventId)>> {
+        nip65_relay_urls: &[RelayUrl],
+    ) -> Result<Option<Event>> {
         let filter = Filter::new().author(pubkey).kind(relay_type.into());
-        let urls: Vec<RelayUrl> = nip65_relays.iter().map(|r| r.url.clone()).collect();
-        let relay_events = self
+        let events = self
             .client
-            .fetch_events_from(urls, filter, self.timeout)
+            .fetch_events_from(nip65_relay_urls, filter, self.timeout)
             .await?;
-
-        // Filter out events with timestamps too far in the future
-        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
-        let latest = relay_events
-            .into_iter()
-            .filter(|e| e.created_at <= cutoff)
-            .max_by_key(|e| (e.created_at, e.id));
-
-        tracing::debug!(
-            "Fetched relay events, using latest: {:?}",
-            latest.as_ref().map(|e| e.created_at)
-        );
-
-        match latest {
-            None => Ok(None),
-            Some(event) => {
-                let event_datetime = timestamp_to_datetime(event.created_at)
-                    .map_err(|_e| NostrManagerError::InvalidTimestamp)?;
-                let relay_urls = Self::relay_urls_from_event(event.clone());
-                Ok(Some((relay_urls, event_datetime, event.id)))
-            }
-        }
+        Self::latest_from_events(events)
     }
 
     pub(crate) async fn fetch_user_key_package(
@@ -93,14 +50,7 @@ impl NostrManager {
             .client
             .fetch_events_from(relays, filter, self.timeout)
             .await?;
-
-        // Filter out events with timestamps too far in the future
-        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
-        let latest = events
-            .into_iter()
-            .filter(|e| e.created_at <= cutoff)
-            .max_by_key(|e| (e.created_at, e.id));
-        Ok(latest)
+        Self::latest_from_events(events)
     }
 
     pub(crate) async fn fetch_contact_list_events(
@@ -113,20 +63,16 @@ impl NostrManager {
             .client
             .fetch_events_from(relays, filter, self.timeout)
             .await?;
+        Self::latest_from_events(events)
+    }
 
+    fn latest_from_events(events: Events) -> Result<Option<Event>> {
         // Filter out events with timestamps too far in the future
         let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
         let latest = events
             .into_iter()
             .filter(|e| e.created_at <= cutoff)
             .max_by_key(|e| (e.created_at, e.id));
-
-        tracing::debug!(
-            "Fetched contact list events for {}, using latest: {:?}",
-            pubkey.to_hex(),
-            latest.as_ref().map(|e| e.created_at)
-        );
-
         Ok(latest)
     }
 }

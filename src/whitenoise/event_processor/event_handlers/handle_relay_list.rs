@@ -32,7 +32,7 @@ impl Whitenoise {
             User::find_or_create_by_pubkey(&event.pubkey, &self.database).await?;
 
         let relay_type = event.kind.into();
-        let relay_urls = NostrManager::relay_urls_from_event(event.clone());
+        let relay_urls = NostrManager::relay_urls_from_event(&event);
         let event_created_at = Some(timestamp_to_datetime(event.created_at)?);
         let relays_changed = user
             .sync_relay_urls(self, relay_type, &relay_urls, event_created_at)
@@ -47,7 +47,7 @@ impl Whitenoise {
             &event.id,
             None, // Global events (relay lists)
             event_created_at,
-            Some(event.kind.as_u16()),
+            Some(event.kind),
             Some(&event.pubkey),
             &self.database,
         )

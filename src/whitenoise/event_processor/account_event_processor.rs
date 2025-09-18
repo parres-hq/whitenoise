@@ -6,7 +6,6 @@ use crate::{
     whitenoise::{
         accounts::Account,
         error::{Result, WhitenoiseError},
-        utils::timestamp_to_datetime,
         Whitenoise,
     },
 };
@@ -73,18 +72,10 @@ impl Whitenoise {
         match result {
             Ok(()) => {
                 // Record that we processed this event successfully
-                let event_timestamp =
-                    Some(timestamp_to_datetime(event.created_at).unwrap_or_default());
-                let event_kind = Some(event.kind.as_u16());
                 if let Err(e) = self
                     .nostr
                     .event_tracker
-                    .track_processed_account_event(
-                        &event.id,
-                        &account.pubkey,
-                        event_timestamp,
-                        event_kind,
-                    )
+                    .track_processed_account_event(&event, &account.pubkey)
                     .await
                 {
                     tracing::warn!(

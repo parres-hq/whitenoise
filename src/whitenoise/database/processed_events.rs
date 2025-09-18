@@ -35,11 +35,14 @@ where
 
         // Handle nullable event_created_at
         let event_created_at = match row.try_get::<Option<i64>, &str>("event_created_at")? {
-            Some(timestamp) => {
-                Some(DateTime::from_timestamp_millis(timestamp).ok_or_else(|| {
-                    sqlx::Error::Decode("Invalid event_created_at timestamp".into())
-                })?)
-            }
+            Some(timestamp_ms) => Some(DateTime::from_timestamp_millis(timestamp_ms).ok_or_else(
+                || {
+                    sqlx::Error::Decode(
+                        format!("Invalid event_created_at timestamp value: {}", timestamp_ms)
+                            .into(),
+                    )
+                },
+            )?),
             None => None,
         };
 
@@ -74,13 +77,13 @@ impl ProcessedEvent {
         event_id: &EventId,
         account_id: Option<i64>,
         event_created_at: Option<DateTime<Utc>>,
-        event_kind: Option<u16>,
+        event_kind: Option<Kind>,
         author: Option<&PublicKey>,
         database: &Database,
     ) -> Result<(), DatabaseError> {
         // Convert event_created_at to milliseconds if present
         let event_timestamp_ms = event_created_at.map(|dt| dt.timestamp_millis());
-        let event_kind_i64 = event_kind.map(|k| k as i64);
+        let event_kind_i64 = event_kind.map(|k| k.as_u16() as i64);
         let author_hex = author.map(|pk| pk.to_hex());
 
         // Use INSERT OR IGNORE to handle potential race conditions
@@ -339,7 +342,7 @@ mod tests {
         let event_id = create_test_event_id();
         let account_id = 1i64;
         let event_timestamp = Some(Utc::now());
-        let event_kind = Some(1);
+        let event_kind = Some(Kind::TextNote);
 
         // Create a processed event
         let result = ProcessedEvent::create(
@@ -373,7 +376,7 @@ mod tests {
         let event_id = create_test_event_id();
         let account_id = 1i64;
         let event_timestamp = Some(Utc::now());
-        let event_kind = Some(1);
+        let event_kind = Some(Kind::TextNote);
 
         // Create the same processed event twice
         let result1 = ProcessedEvent::create(
@@ -423,7 +426,7 @@ mod tests {
             &event_id,
             Some(account_id),
             Some(Utc::now()),
-            Some(1),
+            Some(Kind::TextNote),
             None, // No author for test
             &database,
         )
@@ -466,7 +469,7 @@ mod tests {
             &event_id,
             Some(account_id1),
             Some(Utc::now()),
-            Some(1),
+            Some(Kind::TextNote),
             None, // No author for test
             &database,
         )
@@ -506,7 +509,7 @@ mod tests {
             &event_id,
             Some(account_id1),
             Some(Utc::now()),
-            Some(1),
+            Some(Kind::TextNote),
             None, // No author for test
             &database,
         )
@@ -516,7 +519,7 @@ mod tests {
             &event_id,
             Some(account_id2),
             Some(Utc::now()),
-            Some(1),
+            Some(Kind::TextNote),
             None, // No author for test
             &database,
         )
@@ -575,7 +578,7 @@ mod tests {
             &event_id1,
             Some(account_id),
             Some(older_timestamp),
-            Some(3),
+            Some(Kind::ContactList),
             None, // No author for test
             &database,
         )
@@ -585,7 +588,7 @@ mod tests {
             &event_id2,
             Some(account_id),
             Some(newer_timestamp),
-            Some(3),
+            Some(Kind::ContactList),
             None, // No author for test
             &database,
         )
@@ -633,7 +636,7 @@ mod tests {
             &event_id,
             Some(account_id),
             Some(timestamp),
-            Some(3),
+            Some(Kind::ContactList),
             None, // No author for test
             &database,
         )
@@ -672,7 +675,7 @@ mod tests {
             &event_id,
             None,
             Some(timestamp),
-            Some(10002),
+            Some(Kind::RelayList),
             Some(&user_pubkey),
             &database,
         )
@@ -719,7 +722,7 @@ mod tests {
             &event_id1,
             None, // Global event
             Some(older_timestamp),
-            Some(0), // Metadata kind
+            Some(Kind::Metadata), // Metadata kind
             Some(&author1),
             &database,
         )
@@ -730,7 +733,7 @@ mod tests {
             &event_id2,
             None, // Global event
             Some(newer_timestamp),
-            Some(0), // Metadata kind
+            Some(Kind::Metadata), // Metadata kind
             Some(&author2),
             &database,
         )

@@ -8,7 +8,7 @@ use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::nostr_manager::{utils::pubkeys_from_event, NostrManagerError};
+use crate::nostr_manager::{utils::pubkeys_from_event, NostrManager, NostrManagerError};
 use crate::types::ImageType;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
@@ -710,13 +710,18 @@ impl Whitenoise {
         relay_type: RelayType,
         source_relays: &[Relay],
     ) -> Result<Vec<Relay>> {
-        let relay_result = self
+        let source_relay_urls = source_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
+        let relay_event = self
             .nostr
-            .fetch_user_relays(pubkey, relay_type, source_relays)
+            .fetch_user_relays(pubkey, relay_type, &source_relay_urls)
             .await?;
 
         let mut relays = Vec::new();
-        if let Some((relay_urls, _datetime, _event_id)) = relay_result {
+        if let Some(event) = relay_event {
+            let relay_urls = NostrManager::relay_urls_from_event(&event);
             for url in relay_urls {
                 let relay = self.find_or_create_relay_by_url(&url).await?;
                 relays.push(relay);
@@ -1213,24 +1218,21 @@ mod tests {
         // Give the events time to be published and processed
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
+        let nip65_relays = account.nip65_relays(&whitenoise).await.unwrap();
+        let nip65_relay_urls = nip65_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         // Check that all three event types were published
         let inbox_events = whitenoise
             .nostr
-            .fetch_user_relays(
-                account.pubkey,
-                RelayType::Inbox,
-                &account.nip65_relays(&whitenoise).await.unwrap(),
-            )
+            .fetch_user_relays(account.pubkey, RelayType::Inbox, &nip65_relay_urls)
             .await
             .unwrap();
 
         let key_package_relays_events = whitenoise
             .nostr
-            .fetch_user_relays(
-                account.pubkey,
-                RelayType::KeyPackage,
-                &account.nip65_relays(&whitenoise).await.unwrap(),
-            )
+            .fetch_user_relays(account.pubkey, RelayType::KeyPackage, &nip65_relay_urls)
             .await
             .unwrap();
 
@@ -1251,11 +1253,11 @@ mod tests {
 
         // Verify that the relay list events were published
         assert!(
-            inbox_events.is_some() && !inbox_events.unwrap().0.is_empty(),
+            inbox_events.is_some(),
             "Inbox relays list (kind 10050) should be published for new accounts"
         );
         assert!(
-            key_package_relays_events.is_some() && !key_package_relays_events.unwrap().0.is_empty(),
+            key_package_relays_events.is_some(),
             "Key package relays list (kind 10051) should be published for new accounts"
         );
         assert!(
@@ -1526,13 +1528,18 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
         let nip65_relays = account.nip65_relays(&whitenoise).await.unwrap();
+        let nip65_relay_urls = nip65_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         let fetched_metadata = whitenoise
             .nostr
-            .fetch_metadata_from(&nip65_relays, account.pubkey)
+            .fetch_metadata_from(&nip65_relay_urls, account.pubkey)
             .await
             .expect("Failed to fetch metadata from relays");
 
-        if let Some((published_metadata, _datetime, _event_id)) = fetched_metadata {
+        if let Some(event) = fetched_metadata {
+            let published_metadata = Metadata::from_json(&event.content).unwrap();
             assert_eq!(published_metadata.name, new_metadata.name);
             assert_eq!(published_metadata.display_name, new_metadata.display_name);
             assert_eq!(published_metadata.about, new_metadata.about);

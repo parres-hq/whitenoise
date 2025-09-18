@@ -4,7 +4,6 @@ use crate::{
     types::RetryInfo,
     whitenoise::{
         error::{Result, WhitenoiseError},
-        utils::timestamp_to_datetime,
         Whitenoise,
     },
 };
@@ -47,13 +46,10 @@ impl Whitenoise {
 
         match result {
             Ok(()) => {
-                let event_timestamp =
-                    Some(timestamp_to_datetime(event.created_at).unwrap_or_default());
-                let event_kind = Some(event.kind.as_u16());
                 if let Err(e) = self
                     .nostr
                     .event_tracker
-                    .track_processed_global_event(&event.id, event_timestamp, event_kind)
+                    .track_processed_global_event(&event)
                     .await
                 {
                     tracing::error!(target: "whitenoise::event_processor::process_global_event", "Failed to track processed global event: {}", e);
@@ -65,7 +61,7 @@ impl Whitenoise {
                     self.schedule_retry(event, subscription_id, retry_info, e);
                 } else {
                     tracing::error!(
-                        target: "whitenoise::event_processor::process_account_event",
+                        target: "whitenoise::event_processor::process_global_event",
                         "Event processing failed after {} attempts, giving up: {}",
                         retry_info.max_attempts,
                         e

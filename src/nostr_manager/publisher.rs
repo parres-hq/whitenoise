@@ -303,15 +303,17 @@ mod publish_tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
+        let test_relay_urls: Vec<RelayUrl> = test_relays.iter().map(|r| r.url.clone()).collect();
         let fetch_result = nostr_manager
-            .fetch_metadata_from(&test_relays, keys.public_key())
+            .fetch_metadata_from(&test_relay_urls, keys.public_key())
             .await
             .expect("Failed to fetch metadata from relays");
 
-        if let Some((fetched_metadata, _datetime, _event_id)) = fetch_result {
-            assert_eq!(fetched_metadata.name, metadata.name);
-            assert_eq!(fetched_metadata.display_name, metadata.display_name);
-            assert_eq!(fetched_metadata.about, metadata.about);
+        if let Some(event) = fetch_result {
+            let event_metadata = Metadata::from_json(&event.content).unwrap();
+            assert_eq!(event_metadata.name, metadata.name);
+            assert_eq!(event_metadata.display_name, metadata.display_name);
+            assert_eq!(event_metadata.about, metadata.about);
         }
     }
 

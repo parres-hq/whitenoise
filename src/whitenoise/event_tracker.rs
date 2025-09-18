@@ -1,18 +1,19 @@
-use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use nostr_sdk::{EventId, PublicKey};
 use std::sync::Arc;
+
+use async_trait::async_trait;
+use nostr_sdk::prelude::*;
 
 use crate::whitenoise::{
     accounts::Account,
     database::{processed_events::ProcessedEvent, published_events::PublishedEvent},
+    utils::timestamp_to_datetime,
     Whitenoise,
 };
 
 /// Trait for handling event tracking operations
 #[async_trait]
 pub trait EventTracker: Send + Sync {
-    /// Track that we published a specific event
+    /// Track that an account published a specific event
     async fn track_published_event(
         &self,
         event_id: &EventId,
@@ -35,10 +36,8 @@ pub trait EventTracker: Send + Sync {
     /// Track that we processed a specific event for an account
     async fn track_processed_account_event(
         &self,
-        event_id: &EventId,
+        event: &Event,
         pubkey: &PublicKey,
-        event_created_at: Option<DateTime<Utc>>,
-        event_kind: Option<u16>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Check if we already processed a specific event for an account
@@ -51,9 +50,7 @@ pub trait EventTracker: Send + Sync {
     /// Track that we processed a specific global event
     async fn track_processed_global_event(
         &self,
-        event_id: &EventId,
-        event_created_at: Option<DateTime<Utc>>,
-        event_kind: Option<u16>,
+        event: &Event,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Check if we already processed a specific global event
@@ -93,10 +90,8 @@ impl EventTracker for NoEventTracker {
 
     async fn track_processed_account_event(
         &self,
-        _event_id: &EventId,
+        _event: &Event,
         _pubkey: &PublicKey,
-        _event_created_at: Option<DateTime<Utc>>,
-        _event_kind: Option<u16>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(()) // Do nothing
     }
@@ -111,9 +106,7 @@ impl EventTracker for NoEventTracker {
 
     async fn track_processed_global_event(
         &self,
-        _event_id: &EventId,
-        _event_created_at: Option<DateTime<Utc>>,
-        _event_kind: Option<u16>,
+        _event: &Event,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(()) // Do nothing
     }
@@ -181,10 +174,8 @@ impl EventTracker for WhitenoiseEventTracker {
 
     async fn track_processed_account_event(
         &self,
-        event_id: &EventId,
+        event: &Event,
         pubkey: &PublicKey,
-        event_created_at: Option<DateTime<Utc>>,
-        event_kind: Option<u16>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let whitenoise = Whitenoise::get_instance()?;
         let account = Account::find_by_pubkey(pubkey, &whitenoise.database).await?;
@@ -192,11 +183,11 @@ impl EventTracker for WhitenoiseEventTracker {
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
         ProcessedEvent::create(
-            event_id,
+            &event.id,
             Some(account_id),
-            event_created_at,
-            event_kind,
-            Some(pubkey), // Pass the event author
+            Some(timestamp_to_datetime(event.created_at)?),
+            Some(event.kind),
+            Some(&event.pubkey),
             &whitenoise.database,
         )
         .await
@@ -220,17 +211,15 @@ impl EventTracker for WhitenoiseEventTracker {
 
     async fn track_processed_global_event(
         &self,
-        event_id: &EventId,
-        event_created_at: Option<DateTime<Utc>>,
-        event_kind: Option<u16>,
+        event: &Event,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let whitenoise = Whitenoise::get_instance()?;
         ProcessedEvent::create(
-            event_id,
+            &event.id,
             None,
-            event_created_at,
-            event_kind,
-            None, // No specific author for global events
+            Some(timestamp_to_datetime(event.created_at)?),
+            Some(event.kind),
+            Some(&event.pubkey),
             &whitenoise.database,
         )
         .await
@@ -301,21 +290,19 @@ impl EventTracker for TestEventTracker {
 
     async fn track_processed_account_event(
         &self,
-        event_id: &EventId,
+        event: &Event,
         pubkey: &PublicKey,
-        event_created_at: Option<DateTime<Utc>>,
-        event_kind: Option<u16>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
         let account_id = account
             .id
             .ok_or_else(|| std::io::Error::other("Account missing id"))?;
         ProcessedEvent::create(
-            event_id,
+            &event.id,
             Some(account_id),
-            event_created_at,
-            event_kind,
-            Some(pubkey), // Pass the event author
+            Some(timestamp_to_datetime(event.created_at)?),
+            Some(event.kind),
+            Some(&event.pubkey),
             &self.database,
         )
         .await
@@ -338,16 +325,14 @@ impl EventTracker for TestEventTracker {
 
     async fn track_processed_global_event(
         &self,
-        event_id: &EventId,
-        event_created_at: Option<DateTime<Utc>>,
-        event_kind: Option<u16>,
+        event: &Event,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ProcessedEvent::create(
-            event_id,
+            &event.id,
             None,
-            event_created_at,
-            event_kind,
-            None,
+            Some(timestamp_to_datetime(event.created_at)?),
+            Some(event.kind),
+            Some(&event.pubkey),
             &self.database,
         )
         .await

@@ -94,16 +94,10 @@ impl Whitenoise {
             }
         }
 
-        // Create ProcessedEvent entry to track this contact list event
-        ProcessedEvent::create(
-            &event.id,
-            Some(account_id), // Account-specific event
-            Some(event_timestamp),
-            Some(3),             // Contact list events are kind 3
-            Some(&event.pubkey), // Track the author
-            &self.database,
-        )
-        .await?;
+        self.nostr
+            .event_tracker
+            .track_processed_account_event(&event, &account.pubkey)
+            .await?;
 
         tracing::debug!(
             target: "whitenoise::handle_contact_list",

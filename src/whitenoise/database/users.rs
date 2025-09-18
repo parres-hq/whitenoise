@@ -214,17 +214,19 @@ impl User {
         let mut tx = database.pool.begin().await.map_err(DatabaseError::Sqlx)?;
 
         // Use INSERT ON CONFLICT to handle both insert and update cases
+        let current_time = Utc::now().timestamp_millis();
         sqlx::query(
             "INSERT INTO users (pubkey, metadata, created_at, updated_at)
              VALUES (?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
                metadata = excluded.metadata,
-               updated_at = excluded.updated_at",
+               updated_at = ?",
         )
         .bind(self.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
+        .bind(current_time)
         .execute(&mut *tx)
         .await
         .map_err(DatabaseError::Sqlx)
@@ -294,17 +296,19 @@ impl User {
         tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
     ) -> Result<User, WhitenoiseError> {
         // Use INSERT ON CONFLICT to handle both insert and update cases
+        let current_time = Utc::now().timestamp_millis();
         sqlx::query(
             "INSERT INTO users (pubkey, metadata, created_at, updated_at)
              VALUES (?, ?, ?, ?)
              ON CONFLICT(pubkey) DO UPDATE SET
                metadata = excluded.metadata,
-               updated_at = excluded.updated_at",
+               updated_at = ?",
         )
         .bind(self.pubkey.to_hex().as_str())
         .bind(serde_json::to_string(&self.metadata).map_err(DatabaseError::Serialization)?)
         .bind(self.created_at.timestamp_millis())
         .bind(self.updated_at.timestamp_millis())
+        .bind(current_time)
         .execute(&mut **tx)
         .await
         .map_err(DatabaseError::Sqlx)
