@@ -896,7 +896,9 @@ impl Whitenoise {
                 .await;
 
             let contact_list_pubkeys = match &fetched_contact_list {
-                Ok(Some(contact_list_event)) => NostrManager::pubkeys_from_event(contact_list_event),
+                Ok(Some(contact_list_event)) => {
+                    NostrManager::pubkeys_from_event(contact_list_event)
+                }
                 Ok(None) => Vec::new(),
                 Err(e) => {
                     tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to fetch contact list for account {}: {}", account_clone.pubkey.to_hex(), e);

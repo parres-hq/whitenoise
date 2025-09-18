@@ -10,7 +10,9 @@ impl NostrManager {
         event
             .tags
             .iter()
-            .filter(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)))
+            .filter(|tag| {
+                tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P))
+            })
             .filter_map(|tag| tag.content().and_then(|c| c.parse::<PublicKey>().ok()))
             .collect()
     }
