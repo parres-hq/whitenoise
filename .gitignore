@@ -13,3 +13,6 @@ vibe-tools.config.json
 
 # Docker and Rust
 /target
+
+# Flamegraph
+flamegraph.svg

@@ -45,6 +45,12 @@ impl TestCase for CreateGroupTestCase {
             .collect::<Result<Vec<_>, _>>()?;
         let admin_pubkeys = vec![creator.pubkey];
 
+        let test_relay = if cfg!(debug_assertions) {
+            vec![RelayUrl::parse("ws://localhost:8080").unwrap()]
+        } else {
+            vec![RelayUrl::parse("wss://relay.primal.net").unwrap()]
+        };
+
         let test_group = context
             .whitenoise
             .create_group(
@@ -56,7 +62,7 @@ impl TestCase for CreateGroupTestCase {
                     None, // image_hash
                     None, // image_key
                     None, // image_nonce
-                    vec![RelayUrl::parse("ws://localhost:8080").unwrap()],
+                    test_relay,
                     admin_pubkeys,
                 ),
                 None,
