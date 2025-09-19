@@ -57,7 +57,6 @@ impl TestCase for LoginTestCase {
         publish_relay_lists(&test_client, relay_urls).await?;
 
         test_client.disconnect().await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
         // Login with the keys
         let account = context

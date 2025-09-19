@@ -81,9 +81,6 @@ impl Scenario for AdvancedMessagingScenario {
             .execute(&mut self.context)
             .await?;
 
-        // Wait a bit more after successful message
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
         // Now send reactions to different messages
         SendMessageTestCase::basic()
             .with_sender("adv_msg_reactor")

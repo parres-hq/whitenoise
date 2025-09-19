@@ -31,79 +31,59 @@ impl TestCase for AggregateMessagesTestCase {
         let group = context.get_group(&self.group_name)?;
 
         // Wait for message processing with retry logic
-        let mut retry_count = 0;
-        const MAX_RETRIES: usize = 10;
-        const RETRY_DELAY_MS: u64 = 500;
+        let aggregated_messages = match retry(
+            15,                                    // max retries
+            std::time::Duration::from_millis(100), // delay
+            || async {
+                let messages = context
+                    .whitenoise
+                    .fetch_aggregated_messages_for_group(&account.pubkey, &group.mls_group_id)
+                    .await?;
 
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+                if messages.len() >= self.expected_min_messages {
+                    Ok(messages)
+                } else {
+                    Err(WhitenoiseError::Other(anyhow::anyhow!(
+                        "Found {} messages, need at least {}",
+                        messages.len(),
+                        self.expected_min_messages
+                    )))
+                }
+            },
+            &format!(
+                "fetch {} messages for group {}",
+                self.expected_min_messages, self.group_name
+            ),
+        )
+        .await
+        {
+            Ok(messages) => messages,
+            Err(retry_error) => {
+                // Perform one final fetch for rich diagnostics
+                let final_messages = context
+                    .whitenoise
+                    .fetch_aggregated_messages_for_group(&account.pubkey, &group.mls_group_id)
+                    .await
+                    .unwrap_or_default();
 
-            let messages = context
-                .whitenoise
-                .fetch_aggregated_messages_for_group(&account.pubkey, &group.mls_group_id)
-                .await?;
+                tracing::error!("Message aggregation failure details:");
+                tracing::error!("  Expected at least: {}", self.expected_min_messages);
+                tracing::error!("  Actually got: {}", final_messages.len());
+                tracing::error!("  Messages found:");
+                for (i, msg) in final_messages.iter().enumerate() {
+                    tracing::error!(
+                        "    {}: {} from {} (deleted: {}, kind: {})",
+                        i,
+                        msg.content,
+                        &msg.author.to_hex()[..8],
+                        msg.is_deleted,
+                        msg.kind
+                    );
+                }
 
-            if messages.len() >= self.expected_min_messages {
-                tracing::info!(
-                    "Found expected {} messages after {} retries",
-                    messages.len(),
-                    retry_count
-                );
-                break;
+                return Err(retry_error);
             }
-
-            retry_count += 1;
-            if retry_count >= MAX_RETRIES {
-                tracing::warn!(
-                    "Only found {} messages after {} retries, continuing with test",
-                    messages.len(),
-                    retry_count
-                );
-                break;
-            }
-
-            tracing::debug!(
-                "Retry {}/{}: Found {} messages, waiting for {}",
-                retry_count,
-                MAX_RETRIES,
-                messages.len(),
-                self.expected_min_messages
-            );
-        }
-
-        // Fetch aggregated messages
-        let aggregated_messages = context
-            .whitenoise
-            .fetch_aggregated_messages_for_group(&account.pubkey, &group.mls_group_id)
-            .await?;
-
-        tracing::info!(
-            "Fetched {} aggregated messages (expected at least {})",
-            aggregated_messages.len(),
-            self.expected_min_messages
-        );
-
-        // Verify we have at least the expected number of messages
-        if aggregated_messages.len() < self.expected_min_messages {
-            tracing::error!("Message aggregation failure details:");
-            tracing::error!("  Expected at least: {}", self.expected_min_messages);
-            tracing::error!("  Actually got: {}", aggregated_messages.len());
-            tracing::error!("  Messages found:");
-            for (i, msg) in aggregated_messages.iter().enumerate() {
-                tracing::error!(
-                    "    {}: {} from {} (deleted: {}, kind: {})",
-                    i,
-                    msg.content,
-                    &msg.author.to_hex()[..8],
-                    msg.is_deleted,
-                    msg.kind
-                );
-            }
-
-            return Err(WhitenoiseError::Other(anyhow::anyhow!(
-                "Failed to find all messages after retries"
-            )));
-        }
+        };
 
         // Analyze message statistics
         let mut deleted_count = 0;
