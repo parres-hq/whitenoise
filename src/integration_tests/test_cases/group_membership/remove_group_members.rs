@@ -82,31 +82,40 @@ impl TestCase for RemoveGroupMembersTestCase {
         }
 
         // Wait for MLS processing and event propagation
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // Verify members were removed
-        let updated_members = context
-            .whitenoise
-            .group_members(admin_account, &self.group_id)
-            .await?;
         let expected_count = initial_members.len() - self.member_pubkeys_to_remove.len();
 
-        assert_eq!(
-            updated_members.len(),
-            expected_count,
-            "Expected {} members after removal, found {}",
-            expected_count,
-            updated_members.len()
-        );
+        let updated_members = retry_default(
+            || async {
+                let members = context
+                    .whitenoise
+                    .group_members(admin_account, &self.group_id)
+                    .await?;
 
-        // Verify each removed member is no longer in the group
-        for pubkey in &self.member_pubkeys_to_remove {
-            assert!(
-                !updated_members.contains(pubkey),
-                "Removed member {} should not be in the group after removal",
-                &pubkey.to_hex()[..8]
-            );
-        }
+                if members.len() == expected_count {
+                    // Verify each removed member is no longer in the group
+                    for pubkey in &self.member_pubkeys_to_remove {
+                        if members.contains(pubkey) {
+                            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                                "Removed member {} still in group",
+                                &pubkey.to_hex()[..8]
+                            )));
+                        }
+                    }
+                    Ok(members)
+                } else {
+                    Err(WhitenoiseError::Other(anyhow::anyhow!(
+                        "Expected {} members, found {}",
+                        expected_count,
+                        members.len()
+                    )))
+                }
+            },
+            &format!(
+                "verify {} members removed from group",
+                self.member_pubkeys_to_remove.len()
+            ),
+        )
+        .await?;
 
         tracing::info!(
             "✓ All {} members verified removed from group (remaining members: {})",

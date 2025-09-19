@@ -81,30 +81,40 @@ impl TestCase for AddGroupMembersTestCase {
         }
 
         // Wait for MLS processing and event propagation
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        let updated_members = context
-            .whitenoise
-            .group_members(admin_account, &self.group_id)
-            .await?;
         let expected_count = initial_members.len() + self.new_member_pubkeys.len();
 
-        assert_eq!(
-            updated_members.len(),
-            expected_count,
-            "Expected {} members after addition, found {}",
-            expected_count,
-            updated_members.len()
-        );
+        let updated_members = retry_default(
+            || async {
+                let members = context
+                    .whitenoise
+                    .group_members(admin_account, &self.group_id)
+                    .await?;
 
-        // Verify each new member is in the group
-        for pubkey in &self.new_member_pubkeys {
-            assert!(
-                updated_members.contains(pubkey),
-                "New member {} should be in the group after addition",
-                &pubkey.to_hex()[..8]
-            );
-        }
+                if members.len() == expected_count {
+                    // Verify each new member is in the group
+                    for pubkey in &self.new_member_pubkeys {
+                        if !members.contains(pubkey) {
+                            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                                "New member {} not yet in group",
+                                &pubkey.to_hex()[..8]
+                            )));
+                        }
+                    }
+                    Ok(members)
+                } else {
+                    Err(WhitenoiseError::Other(anyhow::anyhow!(
+                        "Expected {} members, found {}",
+                        expected_count,
+                        members.len()
+                    )))
+                }
+            },
+            &format!(
+                "verify {} members added to group",
+                self.new_member_pubkeys.len()
+            ),
+        )
+        .await?;
 
         tracing::info!(
             "✓ All {} new members verified in group (total members: {})",

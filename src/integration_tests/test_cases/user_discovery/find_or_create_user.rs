@@ -125,18 +125,23 @@ impl TestCase for FindOrCreateUserTestCase {
 
         tracing::info!("✓ User can be found by pubkey after creation");
 
-        // If we expect metadata, poll until it arrives (for CI timing issues)
+        // If we expect metadata, wait until it arrives (for CI timing issues)
         if self.should_have_metadata && user.metadata == nostr_sdk::Metadata::default() {
-            tracing::info!("Metadata not yet available, polling for updates...");
-            for attempt in 1..=10 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                user = context.whitenoise.find_user_by_pubkey(&test_pubkey).await?;
-                if user.metadata != nostr_sdk::Metadata::default() {
-                    tracing::info!("✓ Metadata received after {} attempts", attempt);
-                    break;
-                }
-                tracing::debug!("Attempt {}: Still waiting for metadata...", attempt);
-            }
+            tracing::info!("Metadata not yet available, waiting for updates...");
+            user = retry_default(
+                || async {
+                    let updated_user = context.whitenoise.find_user_by_pubkey(&test_pubkey).await?;
+                    if updated_user.metadata != nostr_sdk::Metadata::default() {
+                        Ok(updated_user)
+                    } else {
+                        Err(WhitenoiseError::Other(anyhow::anyhow!(
+                            "Metadata not yet available"
+                        )))
+                    }
+                },
+                &format!("wait for metadata for user {}", &test_pubkey.to_hex()[..8]),
+            )
+            .await?;
         }
 
         if self.should_have_metadata {

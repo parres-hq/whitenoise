@@ -1,6 +1,5 @@
 use crate::WhitenoiseError;
 use nostr_sdk::prelude::*;
-use std::time::Duration;
 
 pub async fn create_test_client(relays: &[&str], keys: Keys) -> Result<Client, WhitenoiseError> {
     let client = Client::default();
@@ -10,7 +9,6 @@ pub async fn create_test_client(relays: &[&str], keys: Keys) -> Result<Client, W
 
     client.connect().await;
     client.set_signer(keys).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
 
     Ok(client)
 }

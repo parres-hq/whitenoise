@@ -34,19 +34,28 @@ impl TestCase for UnfollowUserTestCase {
             .unfollow_user(account, &self.target_pubkey)
             .await?;
 
-        // Add small delay for async operations
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Wait for unfollow operation to be reflected in the system
+        retry_default(
+            || async {
+                let is_following = context
+                    .whitenoise
+                    .is_following_user(account, &self.target_pubkey)
+                    .await?;
 
-        let is_following = context
-            .whitenoise
-            .is_following_user(account, &self.target_pubkey)
-            .await?;
-        assert!(
-            !is_following,
-            "Account {} should not be following user {} after unfollow",
-            self.follower_account_name,
-            &self.target_pubkey.to_hex()[..8]
-        );
+                if !is_following {
+                    Ok(())
+                } else {
+                    Err(WhitenoiseError::Other(anyhow::anyhow!(
+                        "Follow relationship still exists after unfollow"
+                    )))
+                }
+            },
+            &format!(
+                "verify unfollow for user {}",
+                &self.target_pubkey.to_hex()[..8]
+            ),
+        )
+        .await?;
 
         tracing::info!(
             "✓ Account {} is no longer following user {}",
