@@ -29,8 +29,8 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-# mdk-core = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "419cd03e41d9efe1c5bbf4d349d04b6d3a1f38b6" }
-# mdk-sqlite-storage = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "419cd03e41d9efe1c5bbf4d349d04b6d3a1f38b6" }
+mdk-core = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "e20d4cf34edcd8592b6218ec20086e453860bf1d" }
+mdk-sqlite-storage = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "e20d4cf34edcd8592b6218ec20086e453860bf1d" }
 
 nwc = "0.43"
 nostr-blossom = "0.43"
@@ -43,8 +43,8 @@ nostr-sdk = { version = "0.43", features = [
 ] }
 
 # LOCAL MDK FOR DEVELOPMENT
-mdk-core = { version = "0.5.0", path="../mdk/crates/mdk-core" }
-mdk-sqlite-storage = { version = "0.5.0", path="../mdk/crates/mdk-sqlite-storage" }
+# mdk-core = { version = "0.5.0", path="../mdk/crates/mdk-core" }
+# mdk-sqlite-storage = { version = "0.5.0", path="../mdk/crates/mdk-sqlite-storage" }
 
 # LOCAL RUST_NOSTR FOR DEVELOPMENT
 # nwc = { version = "0.43", path="../rust-nostr/crates/nwc" }

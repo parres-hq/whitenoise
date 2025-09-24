@@ -73,7 +73,7 @@ MLS errors are wrapped in our custom error type:
 ```rust
 #[derive(Debug, thiserror::Error)]
 pub enum WhitenoiseError {
-    #[error("Nostr MLS error: {0}")]
+    #[error("MDK error: {0}")]
     MdkCoreError(#[from] mdk_core::Error),
     // ... other error types
 }

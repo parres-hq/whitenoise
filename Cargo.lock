@@ -2309,6 +2309,7 @@ dependencies = [
 [[package]]
 name = "mdk-core"
 version = "0.5.0"
+source = "git+https://github.com/parres-hq/mdk?rev=e20d4cf34edcd8592b6218ec20086e453860bf1d#e20d4cf34edcd8592b6218ec20086e453860bf1d"
 dependencies = [
  "hex",
  "mdk-storage-traits",
@@ -2325,6 +2326,7 @@ dependencies = [
 [[package]]
 name = "mdk-sqlite-storage"
 version = "0.5.0"
+source = "git+https://github.com/parres-hq/mdk?rev=e20d4cf34edcd8592b6218ec20086e453860bf1d#e20d4cf34edcd8592b6218ec20086e453860bf1d"
 dependencies = [
  "mdk-storage-traits",
  "nostr",
@@ -2340,6 +2342,7 @@ dependencies = [
 [[package]]
 name = "mdk-storage-traits"
 version = "0.5.0"
+source = "git+https://github.com/parres-hq/mdk?rev=e20d4cf34edcd8592b6218ec20086e453860bf1d#e20d4cf34edcd8592b6218ec20086e453860bf1d"
 dependencies = [
  "nostr",
  "openmls",
