@@ -2308,6 +2308,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "mdk-core"
+version = "0.5.0"
+source = "git+https://github.com/parres-hq/mdk?rev=4ffa08cf5a6dc80ee0b0c6c2035a47186d6c520d#4ffa08cf5a6dc80ee0b0c6c2035a47186d6c520d"
+dependencies = [
+ "hex",
+ "mdk-storage-traits",
+ "nostr 0.43.1",
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "tls_codec",
+ "tracing",
+]
+
+[[package]]
+name = "mdk-sqlite-storage"
+version = "0.5.0"
+source = "git+https://github.com/parres-hq/mdk?rev=4ffa08cf5a6dc80ee0b0c6c2035a47186d6c520d#4ffa08cf5a6dc80ee0b0c6c2035a47186d6c520d"
+dependencies = [
+ "mdk-storage-traits",
+ "nostr 0.43.1",
+ "openmls",
+ "openmls_sqlite_storage",
+ "refinery",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "mdk-storage-traits"
+version = "0.5.0"
+source = "git+https://github.com/parres-hq/mdk?rev=4ffa08cf5a6dc80ee0b0c6c2035a47186d6c520d#4ffa08cf5a6dc80ee0b0c6c2035a47186d6c520d"
+dependencies = [
+ "nostr 0.43.1",
+ "openmls",
+ "openmls_traits",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,12 +2458,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "nostr"
+version = "0.43.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62a97d745f1bd8d5e05a978632bbb87b0614567d5142906fe7c86fb2440faac6"
+dependencies = [
+ "base64 0.22.1",
+ "bech32",
+ "bip39",
+ "bitcoin_hashes 0.14.0",
+ "cbc",
+ "chacha20",
+ "chacha20poly1305",
+ "getrandom 0.2.16",
+ "instant",
+ "scrypt",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+ "url",
+]
+
+[[package]]
 name = "nostr-blossom"
 version = "0.43.0"
 source = "git+https://github.com/rust-nostr/nostr?rev=fadf1a6b3d8c5457e5a66d95d6c1677b4353e653#fadf1a6b3d8c5457e5a66d95d6c1677b4353e653"
 dependencies = [
  "base64 0.22.1",
- "nostr",
+ "nostr 0.43.0",
  "reqwest 0.12.15",
  "serde",
 ]
@@ -2431,7 +2498,7 @@ source = "git+https://github.com/rust-nostr/nostr?rev=fadf1a6b3d8c5457e5a66d95d6
 dependencies = [
  "flatbuffers",
  "lru",
- "nostr",
+ "nostr 0.43.0",
  "tokio",
 ]
 
@@ -2443,54 +2510,10 @@ dependencies = [
  "async-utility",
  "flume",
  "heed",
- "nostr",
+ "nostr 0.43.0",
  "nostr-database",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "nostr-mls"
-version = "0.43.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=fadf1a6b3d8c5457e5a66d95d6c1677b4353e653#fadf1a6b3d8c5457e5a66d95d6c1677b4353e653"
-dependencies = [
- "hex",
- "nostr",
- "nostr-mls-storage",
- "openmls",
- "openmls_basic_credential",
- "openmls_rust_crypto",
- "openmls_traits",
- "tls_codec",
- "tracing",
-]
-
-[[package]]
-name = "nostr-mls-sqlite-storage"
-version = "0.43.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=fadf1a6b3d8c5457e5a66d95d6c1677b4353e653#fadf1a6b3d8c5457e5a66d95d6c1677b4353e653"
-dependencies = [
- "nostr",
- "nostr-mls-storage",
- "openmls",
- "openmls_sqlite_storage",
- "refinery",
- "rusqlite",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "nostr-mls-storage"
-version = "0.43.0"
-source = "git+https://github.com/rust-nostr/nostr?rev=fadf1a6b3d8c5457e5a66d95d6c1677b4353e653#fadf1a6b3d8c5457e5a66d95d6c1677b4353e653"
-dependencies = [
- "nostr",
- "openmls",
- "openmls_traits",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2504,7 +2527,7 @@ dependencies = [
  "hex",
  "lru",
  "negentropy",
- "nostr",
+ "nostr 0.43.0",
  "nostr-database",
  "tokio",
  "tracing",
@@ -2516,7 +2539,7 @@ version = "0.43.0"
 source = "git+https://github.com/rust-nostr/nostr?rev=fadf1a6b3d8c5457e5a66d95d6c1677b4353e653#fadf1a6b3d8c5457e5a66d95d6c1677b4353e653"
 dependencies = [
  "async-utility",
- "nostr",
+ "nostr 0.43.0",
  "nostr-database",
  "nostr-lmdb",
  "nostr-relay-pool",
@@ -2601,7 +2624,7 @@ version = "0.43.0"
 source = "git+https://github.com/rust-nostr/nostr?rev=fadf1a6b3d8c5457e5a66d95d6c1677b4353e653#fadf1a6b3d8c5457e5a66d95d6c1677b4353e653"
 dependencies = [
  "async-utility",
- "nostr",
+ "nostr 0.43.0",
  "nostr-relay-pool",
  "tracing",
 ]
@@ -4845,10 +4868,10 @@ dependencies = [
  "image",
  "keyring",
  "lightning-invoice",
+ "mdk-core",
+ "mdk-sqlite-storage",
  "mockito",
  "nostr-blossom",
- "nostr-mls",
- "nostr-mls-sqlite-storage",
  "nostr-sdk",
  "nwc",
  "petname",
