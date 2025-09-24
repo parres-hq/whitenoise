@@ -14,8 +14,8 @@ impl Whitenoise {
           account.pubkey.to_hex()
         );
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        match nostr_mls.process_message(&event) {
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        match mdk.process_message(&event) {
             Ok(result) => {
                 tracing::debug!(
                   target: "whitenoise::event_handlers::handle_mls_message",
@@ -31,7 +31,7 @@ impl Whitenoise {
                     account.pubkey.to_hex(),
                     e
                 );
-                Err(WhitenoiseError::NostrMlsError(e))
+                Err(WhitenoiseError::MdkCoreError(e))
             }
         }
     }
@@ -67,9 +67,8 @@ mod tests {
             .unwrap();
 
         // Build a valid MLS group message event for the new group
-        let nostr_mls =
-            Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
-        let groups = nostr_mls.get_groups().unwrap();
+        let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let groups = mdk.get_groups().unwrap();
         let group_id = groups
             .first()
             .expect("group must exist")
@@ -84,7 +83,7 @@ mod tests {
             "hello from test".to_string(),
         );
         inner.ensure_id();
-        let message_event = nostr_mls.create_message(&group_id, inner).unwrap();
+        let message_event = mdk.create_message(&group_id, inner).unwrap();
 
         // Act
         let result = whitenoise
@@ -116,9 +115,8 @@ mod tests {
             .unwrap();
 
         // Create a valid MLS message event for that group
-        let nostr_mls =
-            Account::create_nostr_mls(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
-        let groups = nostr_mls.get_groups().unwrap();
+        let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let groups = mdk.get_groups().unwrap();
         let group_id = groups
             .first()
             .expect("group must exist")
@@ -132,7 +130,7 @@ mod tests {
             "msg".to_string(),
         );
         inner.ensure_id();
-        let valid_event = nostr_mls.create_message(&group_id, inner).unwrap();
+        let valid_event = mdk.create_message(&group_id, inner).unwrap();
 
         // Corrupt it by changing the kind so MLS processing fails
         let mut bad_event = valid_event.clone();
@@ -146,8 +144,8 @@ mod tests {
         // Assert
         assert!(result.is_err());
         match result.err().unwrap() {
-            WhitenoiseError::NostrMlsError(_) => {}
-            other => panic!("Expected NostrMlsError, got: {:?}", other),
+            WhitenoiseError::MdkCoreError(_) => {}
+            other => panic!("Expected MdkCoreError, got: {:?}", other),
         }
     }
 }

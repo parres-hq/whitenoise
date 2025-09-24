@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use nostr_mls::prelude::GroupId;
+use mdk_core::prelude::GroupId;
 
 use super::{utils::parse_timestamp, Database};
 use crate::whitenoise::{
@@ -203,7 +203,7 @@ impl GroupInformation {
 mod tests {
     use super::*;
     use crate::whitenoise::test_utils::create_mock_whitenoise;
-    use nostr_mls::prelude::GroupId;
+    use mdk_core::prelude::GroupId;
 
     #[tokio::test]
     async fn test_find_by_mls_group_id_not_found() {

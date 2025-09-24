@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
-use nostr_mls::prelude::*;
+use mdk_core::prelude::*;
+use nostr_sdk::prelude::*;
 
 use crate::whitenoise::{
     accounts::Account,
@@ -30,8 +31,8 @@ impl Whitenoise {
             WhitenoiseError::InvalidEvent("Couldn't parse welcome event ID".to_string())
         })?;
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let welcome = nostr_mls
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        let welcome = mdk
             .get_welcome(&welcome_event_id)?
             .ok_or(WhitenoiseError::WelcomeNotFound)?;
         Ok(welcome)
@@ -52,8 +53,8 @@ impl Whitenoise {
     ) -> Result<Vec<welcome_types::Welcome>> {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let welcomes = nostr_mls.get_pending_welcomes()?;
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        let welcomes = mdk.get_pending_welcomes()?;
         Ok(welcomes)
     }
 
@@ -76,11 +77,11 @@ impl Whitenoise {
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
         let keys = self.secrets_store.get_nostr_keys_for_pubkey(pubkey)?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
 
-        let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
+        let welcome = mdk.get_welcome(&welcome_event_id)?;
         let result = if let Some(welcome) = welcome {
-            nostr_mls.accept_welcome(&welcome)?;
+            mdk.accept_welcome(&welcome)?;
 
             // Create group information with GroupType inferred from group name
             GroupInformation::create_for_group(
@@ -91,7 +92,7 @@ impl Whitenoise {
             )
             .await?;
 
-            let groups = nostr_mls.get_groups()?;
+            let groups = mdk.get_groups()?;
             let mut group_relays_set = BTreeSet::new();
             let group_ids = groups
                 .iter()
@@ -100,7 +101,7 @@ impl Whitenoise {
 
             // Collect all relays from all groups into a single vector
             for group in &groups {
-                let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+                let relays = mdk.get_relays(&group.mls_group_id)?;
                 group_relays_set.extend(relays);
             }
 
@@ -150,10 +151,10 @@ impl Whitenoise {
         })?;
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let welcome = nostr_mls.get_welcome(&welcome_event_id)?;
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        let welcome = mdk.get_welcome(&welcome_event_id)?;
         if let Some(welcome) = welcome {
-            nostr_mls.decline_welcome(&welcome)?;
+            mdk.decline_welcome(&welcome)?;
         } else {
             return Err(WhitenoiseError::WelcomeNotFound);
         }

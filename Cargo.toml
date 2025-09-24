@@ -29,11 +29,12 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-nostr-mls = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "fadf1a6b3d8c5457e5a66d95d6c1677b4353e653" }
-nostr-mls-sqlite-storage = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "fadf1a6b3d8c5457e5a66d95d6c1677b4353e653" }
-nwc = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "fadf1a6b3d8c5457e5a66d95d6c1677b4353e653" }
-nostr-blossom = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "fadf1a6b3d8c5457e5a66d95d6c1677b4353e653" }
-nostr-sdk = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev = "fadf1a6b3d8c5457e5a66d95d6c1677b4353e653", features = [
+mdk-core = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "e20d4cf34edcd8592b6218ec20086e453860bf1d" }
+mdk-sqlite-storage = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "e20d4cf34edcd8592b6218ec20086e453860bf1d" }
+
+nwc = "0.43"
+nostr-blossom = "0.43"
+nostr-sdk = { version = "0.43", features = [
     "lmdb",
     "nip04",
     "nip44",
@@ -41,9 +42,11 @@ nostr-sdk = { version = "0.43.0", git="https://github.com/rust-nostr/nostr", rev
     "nip59",
 ] }
 
+# LOCAL MDK FOR DEVELOPMENT
+# mdk-core = { version = "0.5.0", path="../mdk/crates/mdk-core" }
+# mdk-sqlite-storage = { version = "0.5.0", path="../mdk/crates/mdk-sqlite-storage" }
+
 # LOCAL RUST_NOSTR FOR DEVELOPMENT
-# nostr-mls = { version = "0.43", path="../rust-nostr/mls/nostr-mls" }
-# nostr-mls-sqlite-storage = { version = "0.43", path="../rust-nostr/mls/nostr-mls-sqlite-storage" }
 # nwc = { version = "0.43", path="../rust-nostr/crates/nwc" }
 # nostr-blossom = { version = "0.43", path="../rust-nostr/rfs/nostr-blossom" }
 # nostr-sdk = { version = "0.43", path="../rust-nostr/crates/nostr-sdk", features = [

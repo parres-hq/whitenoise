@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use dashmap::DashMap;
-use nostr_mls::prelude::*;
+use nostr_sdk::{PublicKey, RelayUrl, ToBech32};
 use tokio::sync::{
     mpsc::{self, Sender},
     OnceCell, Semaphore,
@@ -109,10 +109,13 @@ impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Whitenoise")
             .field("config", &self.config)
-            .field("nostr_mls_map", &"<REDACTED>")
             .field("database", &"<REDACTED>")
             .field("nostr", &"<REDACTED>")
             .field("secrets_store", &"<REDACTED>")
+            .field("message_aggregator", &"<REDACTED>")
+            .field("event_sender", &"<REDACTED>")
+            .field("shutdown_sender", &"<REDACTED>")
+            .field("contact_list_guards", &"<REDACTED>")
             .finish()
     }
 }
@@ -416,7 +419,11 @@ impl Whitenoise {
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
+    use crate::whitenoise::relays::Relay;
+    use mdk_core::prelude::*;
+    use nostr_sdk::{Keys, PublicKey, RelayUrl};
     use tempfile::TempDir;
+
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
         let data_temp_dir = TempDir::new().expect("Failed to create temp data dir");
@@ -603,15 +610,15 @@ pub mod test_utils {
     }
 
     pub(crate) fn create_nostr_group_config_data(admins: Vec<PublicKey>) -> NostrGroupConfigData {
-        NostrGroupConfigData {
-            name: "Test group".to_owned(),
-            description: "test description".to_owned(),
-            image_hash: Some([0u8; 32]),  // 32-byte hash for fake image
-            image_key: Some([1u8; 32]),   // 32-byte encryption key
-            image_nonce: Some([2u8; 12]), // 12-byte nonce
-            relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+        NostrGroupConfigData::new(
+            "Test group".to_owned(),
+            "test description".to_owned(),
+            Some([0u8; 32]), // 32-byte hash for fake image
+            Some([1u8; 32]), // 32-byte encryption key
+            Some([2u8; 12]), // 12-byte nonce
+            vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
             admins,
-        }
+        )
     }
 
     pub(crate) async fn setup_multiple_test_accounts(
@@ -796,6 +803,7 @@ mod tests {
     // For complete isolation, implement the trait-based mocking described above
     mod api_tests {
         use super::*;
+        use mdk_core::prelude::GroupId;
 
         #[tokio::test]
         async fn test_message_aggregator_access() {
@@ -819,13 +827,13 @@ mod tests {
             // Mock group ID for testing
             let group_id = GroupId::from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
-            // Since create_identity initializes nostr_mls, we should get a different error
-            // The error should be about the group not existing, not nostr_mls not being initialized
+            // Since create_identity initializes mdk, we should get a different error
+            // The error should be about the group not existing, not mdk not being initialized
             let result = whitenoise
                 .fetch_aggregated_messages_for_group(&account.pubkey, &group_id)
                 .await;
 
-            // Should return an error (group not found or similar), but not NostrMlsNotInitialized
+            // Should return an error (group not found or similar), but not MdkCoreNotInitialized
             assert!(result.is_err());
             // The specific error will be about the group not being found since we're using a fake group ID
         }

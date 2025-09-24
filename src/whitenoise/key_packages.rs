@@ -10,7 +10,7 @@ impl Whitenoise {
         &self,
         account: &Account,
     ) -> Result<(String, [Tag; 4])> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
         let key_package_relays = account.key_package_relays(self).await?;
 
         if key_package_relays.is_empty() {
@@ -21,7 +21,7 @@ impl Whitenoise {
             .iter()
             .map(|r| r.url.clone())
             .collect::<Vec<RelayUrl>>();
-        let result = nostr_mls
+        let result = mdk
             .create_key_package_for_event(&account.pubkey, key_package_relay_urls)
             .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
 
@@ -80,9 +80,9 @@ impl Whitenoise {
 
         if let Some(event) = key_package_events.first() {
             if delete_mls_stored_keys {
-                let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-                let key_package = nostr_mls.parse_key_package(event)?;
-                nostr_mls.delete_key_package_from_storage(&key_package)?;
+                let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+                let key_package = mdk.parse_key_package(event)?;
+                mdk.delete_key_package_from_storage(&key_package)?;
             }
 
             let key_package_relays = account.key_package_relays(self).await?;
@@ -208,13 +208,13 @@ impl Whitenoise {
 
         if delete_mls_stored_keys {
             // Create NostrMls instance once for MLS storage deletion
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
+            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
 
             for event in &key_package_events {
                 // Delete from MLS storage
-                match nostr_mls.parse_key_package(event) {
+                match mdk.parse_key_package(event) {
                     Ok(key_package) => {
-                        if let Err(e) = nostr_mls.delete_key_package_from_storage(&key_package) {
+                        if let Err(e) = mdk.delete_key_package_from_storage(&key_package) {
                             tracing::warn!(
                                 target: "whitenoise::delete_all_key_packages_for_account",
                                 "Failed to delete key package from storage for event {}: {}",

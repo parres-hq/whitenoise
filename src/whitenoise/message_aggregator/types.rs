@@ -1,9 +1,9 @@
-use nostr_mls::prelude::*;
+use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::nostr_manager::parser::SerializableToken;
-pub type MlsMessage = nostr_mls::prelude::message_types::Message;
+pub type MlsMessage = mdk_core::prelude::message_types::Message;
 
 /// Represents an aggregated chat message ready for frontend display
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -144,7 +144,7 @@ pub enum ProcessingError {
     #[error("Invalid timestamp")]
     InvalidTimestamp,
 
-    #[error("Failed to fetch messages from nostr_mls: {0}")]
+    #[error("Failed to fetch messages from mdk: {0}")]
     FetchFailed(String),
 
     #[error("Internal processing error: {0}")]

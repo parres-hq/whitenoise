@@ -2,9 +2,10 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use mdk_core::prelude::*;
+use mdk_sqlite_storage::MdkSqliteStorage;
 use nostr_blossom::client::BlossomClient;
-use nostr_mls::prelude::*;
-use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -25,10 +26,10 @@ pub enum AccountError {
     NostrManagerError(#[from] NostrManagerError),
 
     #[error("Nostr MLS error: {0}")]
-    NostrMlsError(#[from] nostr_mls::Error),
+    NostrMlsError(#[from] mdk_core::Error),
 
     #[error("Nostr MLS SQLite storage error: {0}")]
-    NostrMlsSqliteStorageError(#[from] nostr_mls_sqlite_storage::error::Error),
+    NostrMlsSqliteStorageError(#[from] mdk_sqlite_storage::error::Error),
 
     #[error("Nostr MLS not initialized")]
     NostrMlsNotInitialized,
@@ -247,21 +248,21 @@ impl Account {
         Ok(descriptor.url.to_string())
     }
 
-    pub(crate) fn create_nostr_mls(
+    pub(crate) fn create_mdk(
         pubkey: PublicKey,
         data_dir: &Path,
-    ) -> core::result::Result<NostrMls<NostrMlsSqliteStorage>, AccountError> {
+    ) -> core::result::Result<MDK<MdkSqliteStorage>, AccountError> {
         let mls_storage_dir = data_dir.join("mls").join(pubkey.to_hex());
-        let storage = NostrMlsSqliteStorage::new(mls_storage_dir)?;
-        Ok(NostrMls::new(storage))
+        let storage = MdkSqliteStorage::new(mls_storage_dir)?;
+        Ok(MDK::new(storage))
     }
 
     pub(crate) fn load_nostr_group_ids(
         &self,
         whitenoise: &Whitenoise,
     ) -> core::result::Result<Vec<String>, AccountError> {
-        let nostr_mls = Account::create_nostr_mls(self.pubkey, &whitenoise.config.data_dir)?;
-        let groups = nostr_mls.get_groups()?;
+        let mdk = Account::create_mdk(self.pubkey, &whitenoise.config.data_dir)?;
+        let groups = mdk.get_groups()?;
         Ok(groups
             .iter()
             .map(|g| hex::encode(g.nostr_group_id))
@@ -1002,13 +1003,13 @@ impl Whitenoise {
         &self,
         account: &Account,
     ) -> Result<(Vec<RelayUrl>, Vec<String>)> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        let groups = nostr_mls.get_groups()?;
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        let groups = mdk.get_groups()?;
         let mut group_relays_set = HashSet::new();
         let mut group_ids = vec![];
 
         for group in &groups {
-            let relays = nostr_mls.get_relays(&group.mls_group_id)?;
+            let relays = mdk.get_relays(&group.mls_group_id)?;
             group_relays_set.extend(relays);
             group_ids.push(hex::encode(group.nostr_group_id));
         }
@@ -1122,8 +1123,8 @@ impl Whitenoise {
 
 #[cfg(test)]
 pub mod test_utils {
-    use nostr_mls::NostrMls;
-    use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+    use mdk_core::MDK;
+    use mdk_sqlite_storage::MdkSqliteStorage;
     use nostr_sdk::PublicKey;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1132,8 +1133,8 @@ pub mod test_utils {
         TempDir::new().unwrap().path().to_path_buf()
     }
 
-    pub fn create_nostr_mls(pubkey: PublicKey) -> NostrMls<NostrMlsSqliteStorage> {
-        super::Account::create_nostr_mls(pubkey, &data_dir()).unwrap()
+    pub fn create_mdk(pubkey: PublicKey) -> MDK<MdkSqliteStorage> {
+        super::Account::create_mdk(pubkey, &data_dir()).unwrap()
     }
 }
 

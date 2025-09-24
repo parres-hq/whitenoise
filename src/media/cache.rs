@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use nostr_mls::prelude::*;
+use mdk_core::prelude::*;
 use sha2::{Digest, Sha256};
 
 use super::sanitizer::SafeMediaMetadata;

@@ -18,8 +18,8 @@ pub use types::{
     ReactionSummary, UserReaction,
 };
 
-use nostr_mls::prelude::message_types::Message;
-use nostr_mls::prelude::*;
+use mdk_core::prelude::message_types::Message;
+use mdk_core::prelude::*;
 use nostr_sdk::PublicKey;
 
 use crate::nostr_manager::parser::Parser;
@@ -50,7 +50,7 @@ impl MessageAggregator {
 
     /// Fetch and aggregate messages for a specific group
     /// This is the main entry point that handles the complete pipeline:
-    /// 1. Fetch raw messages from nostr_mls
+    /// 1. Fetch raw messages from mdk
     /// 2. Parse content tokens for each message
     /// 3. Aggregate reactions, replies, and deletions
     /// 4. Return structured ChatMessage objects
@@ -58,7 +58,7 @@ impl MessageAggregator {
     /// # Arguments
     /// * `pubkey` - The public key of the user requesting messages (for account access)
     /// * `group_id` - The group to fetch and aggregate messages for
-    /// * `messages` - The raw messages to process (from nostr_mls.get_messages())
+    /// * `messages` - The raw messages to process (from mdk.get_messages())
     /// * `parser` - Reference to the nostr parser for tokenizing message content
     pub async fn aggregate_messages_for_group(
         &self,

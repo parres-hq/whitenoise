@@ -1,5 +1,5 @@
 use crate::{Account, Whitenoise, WhitenoiseError};
-use nostr_mls::prelude::group_types::Group;
+use mdk_core::prelude::group_types::Group;
 use std::collections::HashMap;
 
 #[derive(Clone)]

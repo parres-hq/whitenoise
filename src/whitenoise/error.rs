@@ -26,8 +26,8 @@ pub enum WhitenoiseError {
     #[error("Contact list error: {0}")]
     ContactList(String),
 
-    #[error("Nostr MLS SQLite storage error: {0}")]
-    NostrMlsSqliteStorage(#[from] nostr_mls_sqlite_storage::error::Error),
+    #[error("MDK SQLite storage error: {0}")]
+    MdkSqliteStorage(#[from] mdk_sqlite_storage::error::Error),
 
     #[error("Group not found")]
     GroupNotFound,
@@ -59,8 +59,8 @@ pub enum WhitenoiseError {
     #[error("Account not authorized")]
     AccountNotAuthorized,
 
-    #[error("Nostr MLS error: {0}")]
-    NostrMlsError(#[from] nostr_mls::Error),
+    #[error("MDK error: {0}")]
+    MdkCoreError(#[from] mdk_core::Error),
 
     #[error("Invalid event: {0}")]
     InvalidEvent(String),

@@ -11,7 +11,7 @@ use super::types::{
     AggregatorConfig, ChatMessage, ProcessingError, UnresolvedMessage, UnresolvedReason,
 };
 use crate::nostr_manager::parser::Parser;
-use nostr_mls::prelude::message_types::Message;
+use mdk_core::prelude::message_types::Message;
 
 /// Process raw messages into aggregated chat messages
 /// This implements the Phase 1 stateless algorithm from the plan
