@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::time::SystemTime;
-use nostr_mls::prelude::*;
+use mdk_core::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::types::{ChatMessage, GroupStatistics, AggregatorConfig};

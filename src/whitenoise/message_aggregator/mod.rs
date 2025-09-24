@@ -18,8 +18,8 @@ pub use types::{
     ReactionSummary, UserReaction,
 };
 
-use nostr_mls::prelude::message_types::Message;
-use nostr_mls::prelude::*;
+use mdk_core::prelude::message_types::Message;
+use mdk_core::prelude::*;
 use nostr_sdk::PublicKey;
 
 use crate::nostr_manager::parser::Parser;
@@ -58,7 +58,7 @@ impl MessageAggregator {
     /// # Arguments
     /// * `pubkey` - The public key of the user requesting messages (for account access)
     /// * `group_id` - The group to fetch and aggregate messages for
-    /// * `messages` - The raw messages to process (from nostr_mls.get_messages())
+    /// * `messages` - The raw messages to process (from mdk.get_messages())
     /// * `parser` - Reference to the nostr parser for tokenizing message content
     pub async fn aggregate_messages_for_group(
         &self,

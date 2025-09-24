@@ -1,7 +1,8 @@
 use crate::integration_tests::core::*;
 use crate::WhitenoiseError;
 use async_trait::async_trait;
-use nostr_mls::prelude::*;
+use mdk_core::prelude::*;
+use nostr_sdk::prelude::*;
 
 pub struct CreateGroupTestCase {
     group_name: String,

@@ -1,7 +1,7 @@
 use std::{fmt, str::FromStr};
 
 use chrono::{DateTime, Utc};
-use nostr_mls::prelude::GroupId;
+use mdk_core::prelude::GroupId;
 use nostr_sdk::PublicKey;
 use serde::{Deserialize, Serialize};
 
@@ -86,8 +86,8 @@ impl GroupInformation {
         mls_group_id: &GroupId,
         whitenoise: &Whitenoise,
     ) -> Result<GroupInformation, WhitenoiseError> {
-        let nostr_mls = Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)?;
-        let group = nostr_mls
+        let mdk = Account::create_mdk(account_pubkey, &whitenoise.config.data_dir)?;
+        let group = mdk
             .get_group(mls_group_id)?
             .ok_or(WhitenoiseError::GroupNotFound)?;
         let (group_info, _was_created) = GroupInformation::find_or_create_by_mls_group_id(
@@ -116,7 +116,7 @@ impl GroupInformation {
             .map(|gi| (gi.mls_group_id.clone(), gi))
             .collect();
 
-        let nostr_mls = Account::create_nostr_mls(account_pubkey, &whitenoise.config.data_dir)?;
+        let mdk = Account::create_mdk(account_pubkey, &whitenoise.config.data_dir)?;
 
         let mut results = Vec::new();
         for mls_group_id in mls_group_ids {
@@ -124,7 +124,7 @@ impl GroupInformation {
                 results.push(existing_info);
             } else {
                 // Create missing record with a type inferred from the group name
-                let group = nostr_mls
+                let group = mdk
                     .get_group(mls_group_id)?
                     .ok_or(WhitenoiseError::GroupNotFound)?;
                 let group_type = Self::infer_group_type_from_group_name(&group.name);
@@ -404,7 +404,7 @@ mod tests {
         // Create both groups first
         let _info1 = GroupInformation::create_for_group(
             &whitenoise,
-            &group_id1,
+            &group_id1.clone(),
             Some(GroupType::Group),
             "test",
         )
@@ -413,7 +413,7 @@ mod tests {
 
         let _info2 = GroupInformation::create_for_group(
             &whitenoise,
-            &group_id2,
+            &group_id2.clone(),
             Some(GroupType::DirectMessage),
             "",
         )

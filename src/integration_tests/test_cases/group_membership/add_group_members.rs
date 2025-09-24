@@ -1,7 +1,7 @@
 use crate::integration_tests::core::*;
 use crate::WhitenoiseError;
 use async_trait::async_trait;
-use nostr_mls::prelude::GroupId;
+use mdk_core::prelude::GroupId;
 use nostr_sdk::PublicKey;
 
 pub struct AddGroupMembersTestCase {

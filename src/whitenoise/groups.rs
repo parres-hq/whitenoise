@@ -1,7 +1,8 @@
 use std::{collections::HashSet, time::Duration};
 
-use nostr_mls::prelude::*;
-use nostr_mls_sqlite_storage::NostrMlsSqliteStorage;
+use mdk_core::prelude::*;
+use mdk_sqlite_storage::MdkSqliteStorage;
+use nostr_sdk::prelude::*;
 
 use crate::{
     whitenoise::{
@@ -20,17 +21,17 @@ impl Whitenoise {
     /// Returns the validated relay URLs.
     ///
     /// # Arguments
-    /// * `nostr_mls` - The NostrMls instance to get relays from
+    /// * `mdk` - The NostrMls instance to get relays from
     /// * `group_id` - The ID of the group
     ///
     /// # Returns
     /// * `Ok(Vec<nostr_sdk::RelayUrl>)` - Vector of relay URLs
     /// * `Err(WhitenoiseError::GroupMissingRelays)` - If no relays are configured
     fn ensure_group_relays(
-        nostr_mls: &NostrMls<NostrMlsSqliteStorage>,
+        mdk: &MDK<MdkSqliteStorage>,
         group_id: &GroupId,
     ) -> Result<Vec<nostr_sdk::RelayUrl>> {
-        let group_relays = nostr_mls.get_relays(group_id)?;
+        let group_relays = mdk.get_relays(group_id)?;
 
         if group_relays.is_empty() {
             return Err(WhitenoiseError::GroupMissingRelays);
@@ -111,8 +112,8 @@ impl Whitenoise {
                 .nostr
                 .fetch_user_key_package(*pk, &kp_relays_urls)
                 .await?;
-            let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
-                nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
+            let event = some_event.ok_or(WhitenoiseError::MdkCoreError(
+                mdk_core::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
             key_package_events.push(event);
             members.push(user);
@@ -123,11 +124,11 @@ impl Whitenoise {
         let group_relays = config.relays.clone();
         let group_name = config.name.clone();
 
-        let nostr_mls = Account::create_nostr_mls(creator_account.pubkey, &self.config.data_dir)?;
+        let mdk = Account::create_mdk(creator_account.pubkey, &self.config.data_dir)?;
         let create_group_result =
-            nostr_mls.create_group(&creator_account.pubkey, key_package_events.clone(), config)?;
+            mdk.create_group(&creator_account.pubkey, key_package_events.clone(), config)?;
 
-        let group_ids = nostr_mls
+        let group_ids = mdk
             .get_groups()?
             .into_iter()
             .map(|g| hex::encode(g.nostr_group_id))
@@ -201,8 +202,13 @@ impl Whitenoise {
             .await
             .map_err(WhitenoiseError::from)?;
 
-        GroupInformation::create_for_group(self, &group.mls_group_id, group_type, &group_name)
-            .await?;
+        GroupInformation::create_for_group(
+            self,
+            &group.mls_group_id.clone(),
+            group_type,
+            &group_name,
+        )
+        .await?;
 
         Ok(group)
     }
@@ -212,8 +218,8 @@ impl Whitenoise {
         account: &Account,
         active_filter: bool,
     ) -> Result<Vec<group_types::Group>> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        Ok(nostr_mls
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        Ok(mdk
             .get_groups()
             .map_err(WhitenoiseError::from)?
             .into_iter()
@@ -226,8 +232,8 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        Ok(nostr_mls
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        Ok(mdk
             .get_members(group_id)
             .map_err(WhitenoiseError::from)?
             .into_iter()
@@ -239,8 +245,8 @@ impl Whitenoise {
         account: &Account,
         group_id: &GroupId,
     ) -> Result<Vec<PublicKey>> {
-        let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-        Ok(nostr_mls
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        Ok(mdk
             .get_group(group_id)
             .map_err(WhitenoiseError::from)?
             .ok_or(WhitenoiseError::GroupNotFound)?
@@ -299,21 +305,21 @@ impl Whitenoise {
                 .nostr
                 .fetch_user_key_package(*pk, &relays_to_use_urls)
                 .await?;
-            let event = some_event.ok_or(WhitenoiseError::NostrMlsError(
-                nostr_mls::Error::KeyPackage("Does not exist".to_owned()),
+            let event = some_event.ok_or(WhitenoiseError::MdkCoreError(
+                mdk_core::Error::KeyPackage("Does not exist".to_owned()),
             ))?;
             key_package_events.push(event);
             users.push(user);
         }
 
         let (relay_urls, evolution_event, welcome_rumors) = {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
+            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&mdk, group_id)?;
 
-            let update_result = nostr_mls.add_members(group_id, &key_package_events)?;
+            let update_result = mdk.add_members(group_id, &key_package_events)?;
             // Merge the pending commit immediately after creating it
             // This ensures our local state is correct before publishing
-            nostr_mls.merge_pending_commit(group_id)?;
+            mdk.merge_pending_commit(group_id)?;
 
             (
                 relay_urls,
@@ -326,7 +332,7 @@ impl Whitenoise {
 
         let welcome_rumors = match welcome_rumors {
             None => {
-                return Err(WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(
+                return Err(WhitenoiseError::MdkCoreError(mdk_core::Error::Group(
                     "Missing welcome message".to_owned(),
                 )))
             }
@@ -409,11 +415,11 @@ impl Whitenoise {
         members: Vec<PublicKey>,
     ) -> Result<()> {
         let (relay_urls, evolution_event) = {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
+            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&mdk, group_id)?;
 
-            let update_result = nostr_mls.remove_members(group_id, &members)?;
-            nostr_mls.merge_pending_commit(group_id)?;
+            let update_result = mdk.remove_members(group_id, &members)?;
+            mdk.merge_pending_commit(group_id)?;
 
             (relay_urls, update_result.evolution_event)
         };
@@ -441,11 +447,11 @@ impl Whitenoise {
         group_data: NostrGroupDataUpdate,
     ) -> Result<()> {
         let (relay_urls, evolution_event) = {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
+            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&mdk, group_id)?;
 
-            let update_result = nostr_mls.update_group_data(group_id, group_data)?;
-            nostr_mls.merge_pending_commit(group_id)?;
+            let update_result = mdk.update_group_data(group_id, group_data)?;
+            mdk.merge_pending_commit(group_id)?;
 
             (relay_urls, update_result.evolution_event)
         };
@@ -473,11 +479,11 @@ impl Whitenoise {
     /// * `Err(WhitenoiseError)` if the operation failed
     pub async fn leave_group(&self, account: &Account, group_id: &GroupId) -> Result<()> {
         let (relay_urls, evolution_event) = {
-            let nostr_mls = Account::create_nostr_mls(account.pubkey, &self.config.data_dir)?;
-            let relay_urls = Self::ensure_group_relays(&nostr_mls, group_id)?;
+            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+            let relay_urls = Self::ensure_group_relays(&mdk, group_id)?;
 
             // Create a self-removal proposal
-            let update_result = nostr_mls.leave_group(group_id)?;
+            let update_result = mdk.leave_group(group_id)?;
 
             (relay_urls, update_result.evolution_event)
         };
@@ -665,7 +671,7 @@ mod tests {
         // Should fail because groups need at least one admin
         assert!(result.is_err());
         match result.unwrap_err() {
-            WhitenoiseError::NostrMlsError(_) => {
+            WhitenoiseError::MdkCoreError(_) => {
                 // Expected - invalid group configuration
             }
             other => panic!(
@@ -706,7 +712,7 @@ mod tests {
         // Should fail because admin must be a member
         assert!(result.is_err());
         match result.unwrap_err() {
-            WhitenoiseError::NostrMlsError(nostr_mls::Error::Group(msg)) => {
+            WhitenoiseError::MdkCoreError(mdk_core::Error::Group(msg)) => {
                 assert!(
                     msg.contains("Admin must be a member"),
                     "Expected 'Admin must be a member' error, got: {}",
@@ -905,7 +911,7 @@ mod tests {
             .unwrap();
 
         // Update group data
-        let new_group_data = nostr_mls::groups::NostrGroupDataUpdate {
+        let new_group_data = NostrGroupDataUpdate {
             name: Some("Updated Group Name".to_string()),
             description: Some("Updated description".to_string()),
             image_hash: Some(Some([3u8; 32])), // 32-byte hash for new image

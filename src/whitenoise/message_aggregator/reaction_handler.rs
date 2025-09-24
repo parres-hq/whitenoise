@@ -11,7 +11,7 @@ use super::types::{
     AggregatorConfig, ChatMessage, EmojiReaction, ProcessingError, UnresolvedMessage,
     UnresolvedReason, UserReaction,
 };
-use nostr_mls::prelude::message_types::Message;
+use mdk_core::prelude::message_types::Message;
 
 /// Process a reaction message and update the target message's reaction summary
 pub fn process_reaction(

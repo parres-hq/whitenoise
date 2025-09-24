@@ -49,7 +49,7 @@ pub use sanitizer::sanitize_media;
 pub use types::*;
 
 use ::image::GenericImageView;
-use nostr_mls::prelude::*;
+use mdk_core::prelude::*;
 
 use crate::accounts::Account;
 use crate::database::Database;
@@ -83,7 +83,7 @@ pub async fn add_media_file(
 
     // Get the raw secret key bytes
     let exporter_secret: group_types::GroupExporterSecret;
-    let nostr_mls_guard = wn.nostr_mls.lock().unwrap();
+    let mdk_guard = wn.mdk.lock().unwrap();
     if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
         exporter_secret = nostr_mls
             .exporter_secret(&group.mls_group_id)

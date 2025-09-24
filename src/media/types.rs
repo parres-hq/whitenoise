@@ -1,4 +1,4 @@
-use nostr_mls::prelude::*;
+use mdk_core::prelude::*;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row};
 

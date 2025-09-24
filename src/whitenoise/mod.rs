@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use dashmap::DashMap;
-use nostr_mls::prelude::*;
+use nostr_sdk::{PublicKey, RelayUrl, ToBech32};
 use tokio::sync::{
     mpsc::{self, Sender},
     OnceCell, Semaphore,
@@ -416,7 +416,11 @@ impl Whitenoise {
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
+    use crate::whitenoise::relays::Relay;
+    use mdk_core::prelude::*;
+    use nostr_sdk::{Keys, PublicKey, RelayUrl};
     use tempfile::TempDir;
+
     // Test configuration and setup helpers
     pub(crate) fn create_test_config() -> (WhitenoiseConfig, TempDir, TempDir) {
         let data_temp_dir = TempDir::new().expect("Failed to create temp data dir");
@@ -603,15 +607,15 @@ pub mod test_utils {
     }
 
     pub(crate) fn create_nostr_group_config_data(admins: Vec<PublicKey>) -> NostrGroupConfigData {
-        NostrGroupConfigData {
-            name: "Test group".to_owned(),
-            description: "test description".to_owned(),
-            image_hash: Some([0u8; 32]),  // 32-byte hash for fake image
-            image_key: Some([1u8; 32]),   // 32-byte encryption key
-            image_nonce: Some([2u8; 12]), // 12-byte nonce
-            relays: vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
+        NostrGroupConfigData::new(
+            "Test group".to_owned(),
+            "test description".to_owned(),
+            Some([0u8; 32]), // 32-byte hash for fake image
+            Some([1u8; 32]), // 32-byte encryption key
+            Some([2u8; 12]), // 12-byte nonce
+            vec![RelayUrl::parse("ws://localhost:8080/").unwrap()],
             admins,
-        }
+        )
     }
 
     pub(crate) async fn setup_multiple_test_accounts(
@@ -796,6 +800,7 @@ mod tests {
     // For complete isolation, implement the trait-based mocking described above
     mod api_tests {
         use super::*;
+        use mdk_core::prelude::GroupId;
 
         #[tokio::test]
         async fn test_message_aggregator_access() {
