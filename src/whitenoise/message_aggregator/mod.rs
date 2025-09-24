@@ -50,7 +50,7 @@ impl MessageAggregator {
 
     /// Fetch and aggregate messages for a specific group
     /// This is the main entry point that handles the complete pipeline:
-    /// 1. Fetch raw messages from nostr_mls
+    /// 1. Fetch raw messages from mdk
     /// 2. Parse content tokens for each message
     /// 3. Aggregate reactions, replies, and deletions
     /// 4. Return structured ChatMessage objects

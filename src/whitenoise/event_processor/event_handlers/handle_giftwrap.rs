@@ -51,7 +51,7 @@ impl Whitenoise {
             mdk.process_welcome(&event.id, &rumor)
                 .map_err(WhitenoiseError::MdkCoreError)?;
             tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Processed welcome event");
-        } // nostr_mls lock released here
+        } // mdk lock released here
 
         let key_package_event_id: Option<EventId> = rumor
             .tags
@@ -112,7 +112,7 @@ mod tests {
             .unwrap()
             .expect("member must have a published key package");
 
-        // Create the group via nostr_mls directly to obtain welcome rumor
+        // Create the group via mdk directly to obtain welcome rumor
         let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
         let create_group_result = mdk
             .create_group(

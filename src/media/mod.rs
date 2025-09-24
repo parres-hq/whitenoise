@@ -84,8 +84,8 @@ pub async fn add_media_file(
     // Get the raw secret key bytes
     let exporter_secret: group_types::GroupExporterSecret;
     let mdk_guard = wn.mdk.lock().unwrap();
-    if let Some(nostr_mls) = nostr_mls_guard.as_ref() {
-        exporter_secret = nostr_mls
+    if let Some(mdk) = mdk_guard.as_ref() {
+        exporter_secret = mdk
             .exporter_secret(&group.mls_group_id)
             .map_err(|e| MediaError::NostrMLS(e.to_string()))?;
     } else {

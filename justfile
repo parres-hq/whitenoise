@@ -18,7 +18,7 @@ int-test:
     refinery_core=error,\
     keyring=info,\
     nostr_relay_pool=error,\
-    nostr_mls_sqlite_storage=error,\
+    mdk_sqlite_storage=error,\
     tungstenite=error,\
     integration_test=debug \
     cargo run --bin integration_test --features integration-tests -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
@@ -31,7 +31,7 @@ int-test-flamegraph:
     refinery_core=error,\
     keyring=info,\
     nostr_relay_pool=error,\
-    nostr_mls_sqlite_storage=error,\
+    mdk_sqlite_storage=error,\
     tungstenite=error,\
     integration_test=debug \
     CARGO_PROFILE_RELEASE_DEBUG=true \

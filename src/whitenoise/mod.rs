@@ -109,10 +109,13 @@ impl std::fmt::Debug for Whitenoise {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Whitenoise")
             .field("config", &self.config)
-            .field("nostr_mls_map", &"<REDACTED>")
             .field("database", &"<REDACTED>")
             .field("nostr", &"<REDACTED>")
             .field("secrets_store", &"<REDACTED>")
+            .field("message_aggregator", &"<REDACTED>")
+            .field("event_sender", &"<REDACTED>")
+            .field("shutdown_sender", &"<REDACTED>")
+            .field("contact_list_guards", &"<REDACTED>")
             .finish()
     }
 }
@@ -824,13 +827,13 @@ mod tests {
             // Mock group ID for testing
             let group_id = GroupId::from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
-            // Since create_identity initializes nostr_mls, we should get a different error
-            // The error should be about the group not existing, not nostr_mls not being initialized
+            // Since create_identity initializes mdk, we should get a different error
+            // The error should be about the group not existing, not mdk not being initialized
             let result = whitenoise
                 .fetch_aggregated_messages_for_group(&account.pubkey, &group_id)
                 .await;
 
-            // Should return an error (group not found or similar), but not NostrMlsNotInitialized
+            // Should return an error (group not found or similar), but not MdkCoreNotInitialized
             assert!(result.is_err());
             // The specific error will be about the group not being found since we're using a fake group ID
         }

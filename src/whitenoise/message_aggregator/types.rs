@@ -144,7 +144,7 @@ pub enum ProcessingError {
     #[error("Invalid timestamp")]
     InvalidTimestamp,
 
-    #[error("Failed to fetch messages from nostr_mls: {0}")]
+    #[error("Failed to fetch messages from mdk: {0}")]
     FetchFailed(String),
 
     #[error("Internal processing error: {0}")]

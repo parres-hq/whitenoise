@@ -102,7 +102,7 @@ impl Whitenoise {
         pubkey: &PublicKey,
         group_id: &GroupId,
     ) -> Result<Vec<crate::whitenoise::message_aggregator::ChatMessage>> {
-        // Get account to access nostr_mls instance
+        // Get account to access mdk instance
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
         let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
