@@ -60,8 +60,14 @@ impl Scenario for SubscriptionProcessingScenario {
 
         // Test 4: External user relay list update
         let alice_relay_url = "wss://alice-relay.example.com".to_string();
-        PublishSubscriptionUpdateTestCase::for_external_user(alice_keys)
+        PublishSubscriptionUpdateTestCase::for_external_user(alice_keys.clone())
             .with_relay_update(alice_relay_url)
+            .execute(&mut self.context)
+            .await?;
+
+        // Test 5: Publish a follow list (as a TestCase with assertion)
+        PublishSubscriptionUpdateTestCase::for_account("subscription_test_account")
+            .with_follow_list(vec![alice_keys.public_key()])
             .execute(&mut self.context)
             .await?;
 
