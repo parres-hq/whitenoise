@@ -285,30 +285,25 @@ impl Whitenoise {
             return Ok(None);
         }
 
-        let min_dt = accounts
+        const BUFFER_SECS: u64 = 10;
+        let since = accounts
             .iter()
-            .filter_map(|a| a.last_synced_at.as_ref())
-            .min()
-            .cloned();
-        let Some(min_dt) = min_dt else {
-            // Should not happen because we returned early when any were None,
-            // but guard anyway to avoid panics.
+            .filter_map(|a| a.since_timestamp(BUFFER_SECS))
+            .min_by_key(|t| t.as_u64());
+
+        if let Some(ts) = since {
+            tracing::info!(
+                target: "whitenoise::setup_global_users_subscriptions",
+                "Global subscriptions using since={} ({}s buffer)",
+                ts.as_u64(), BUFFER_SECS
+            );
+        } else {
             tracing::warn!(
                 target: "whitenoise::setup_global_users_subscriptions",
                 "No minimum last_synced_at found; defaulting to since=None"
             );
-            return Ok(None);
-        };
-
-        const BUFFER_SECS: u64 = 10;
-        let secs = (min_dt.timestamp().max(0) as u64).saturating_sub(BUFFER_SECS);
-
-        tracing::info!(
-            target: "whitenoise::setup_global_users_subscriptions",
-            "Global subscriptions using since={} ({}s buffer)",
-            secs, BUFFER_SECS
-        );
-        Ok(Some(nostr_sdk::Timestamp::from(secs)))
+        }
+        Ok(since)
     }
 
     async fn setup_accounts_sync_and_subscriptions(
