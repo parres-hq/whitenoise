@@ -1059,6 +1059,7 @@ impl Whitenoise {
                 &inbox_relays,
                 &group_relays_urls,
                 &nostr_group_ids,
+                None,
                 keys,
             )
             .await?;
