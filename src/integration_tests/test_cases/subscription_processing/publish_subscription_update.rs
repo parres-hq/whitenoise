@@ -2,6 +2,7 @@ use crate::integration_tests::core::*;
 use crate::{RelayType, WhitenoiseError};
 use async_trait::async_trait;
 use nostr_sdk::prelude::*;
+use std::collections::HashSet;
 
 /// Test case for subscription-driven updates using builder pattern
 pub struct PublishSubscriptionUpdateTestCase {
@@ -9,6 +10,7 @@ pub struct PublishSubscriptionUpdateTestCase {
     account_name: Option<String>,
     metadata: Option<Metadata>,
     new_relay_url: Option<String>,
+    follow_pubkeys: Option<Vec<PublicKey>>,
 }
 
 impl PublishSubscriptionUpdateTestCase {
@@ -19,6 +21,7 @@ impl PublishSubscriptionUpdateTestCase {
             account_name: Some(account_name.to_string()),
             metadata: None,
             new_relay_url: None,
+            follow_pubkeys: None,
         }
     }
 
@@ -29,6 +32,7 @@ impl PublishSubscriptionUpdateTestCase {
             account_name: None,
             metadata: None,
             new_relay_url: None,
+            follow_pubkeys: None,
         }
     }
 
@@ -41,6 +45,12 @@ impl PublishSubscriptionUpdateTestCase {
     /// Add relay list update to the test
     pub fn with_relay_update(mut self, new_relay_url: String) -> Self {
         self.new_relay_url = Some(new_relay_url);
+        self
+    }
+
+    /// Add follow list update to the test (account-based only)
+    pub fn with_follow_list(mut self, follows: Vec<PublicKey>) -> Self {
+        self.follow_pubkeys = Some(follows);
         self
     }
 
@@ -149,6 +159,18 @@ impl PublishSubscriptionUpdateTestCase {
         Ok(())
     }
 
+    /// Publish follow list update (account-based)
+    async fn publish_follow_list_update(
+        &self,
+        test_client: &Client,
+        follows: &[PublicKey],
+    ) -> Result<(), WhitenoiseError> {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        publish_follow_list(test_client, follows).await?;
+        tracing::info!("✓ Follow list published via test client");
+        Ok(())
+    }
+
     /// Verify metadata update
     async fn verify_metadata(
         &self,
@@ -238,6 +260,35 @@ impl PublishSubscriptionUpdateTestCase {
         );
         Ok(())
     }
+
+    /// Verify follow list processed into follows (account-based)
+    async fn verify_follow_list(
+        &self,
+        context: &mut ScenarioContext,
+        expected_follows: &[PublicKey],
+    ) -> Result<(), WhitenoiseError> {
+        let Some(account_name) = &self.account_name else {
+            return Err(WhitenoiseError::InvalidInput(
+                "Contact list verification only supported for accounts".to_string(),
+            ));
+        };
+
+        let account = context.get_account(account_name)?;
+        let follows = context.whitenoise.follows(account).await?;
+
+        let expected: HashSet<PublicKey> = expected_follows.iter().copied().collect();
+        let actual: HashSet<PublicKey> = follows.iter().map(|u| u.pubkey).collect();
+
+        assert!(
+            actual == expected,
+            "Account follows do not match expected follows. Missing: {:?}, Extra: {:?}",
+            expected.difference(&actual).collect::<Vec<_>>(),
+            actual.difference(&expected).collect::<Vec<_>>()
+        );
+
+        tracing::info!("✓ Account follow list exactly matches expected set");
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -245,17 +296,26 @@ impl TestCase for PublishSubscriptionUpdateTestCase {
     async fn run(&self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError> {
         let has_metadata = self.metadata.is_some();
         let has_relay = self.new_relay_url.is_some();
+        let has_follows = self.follow_pubkeys.is_some();
 
-        let updates = match (has_metadata, has_relay) {
-            (true, true) => "metadata and relay list",
-            (true, false) => "metadata",
-            (false, true) => "relay list",
-            (false, false) => {
-                return Err(WhitenoiseError::InvalidInput(
-                    "No updates specified".to_string(),
-                ))
-            }
-        };
+        let mut updates_parts = Vec::new();
+        if has_metadata {
+            updates_parts.push("metadata");
+        }
+        if has_relay {
+            updates_parts.push("relay list");
+        }
+        if has_follows {
+            updates_parts.push("follows");
+        }
+
+        if updates_parts.is_empty() {
+            return Err(WhitenoiseError::InvalidInput(
+                "No updates specified".to_string(),
+            ));
+        }
+
+        let updates = updates_parts.join(", ");
 
         // Get appropriate keys first
         let test_keys = self.get_keys(context).await?;
@@ -289,6 +349,11 @@ impl TestCase for PublishSubscriptionUpdateTestCase {
                 .await?;
         }
 
+        if let Some(follows) = &self.follow_pubkeys {
+            self.publish_follow_list_update(&test_client, follows)
+                .await?;
+        }
+
         // Wait for processing and disconnect
         tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
         test_client.disconnect().await;
@@ -301,6 +366,10 @@ impl TestCase for PublishSubscriptionUpdateTestCase {
         if let Some(relay_url) = &self.new_relay_url {
             self.verify_relay_update(context, relay_url, &test_keys)
                 .await?;
+        }
+
+        if let Some(follows) = &self.follow_pubkeys {
+            self.verify_follow_list(context, follows).await?;
         }
 
         Ok(())

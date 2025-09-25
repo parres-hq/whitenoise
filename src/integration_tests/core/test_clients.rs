@@ -64,3 +64,18 @@ pub async fn publish_relay_lists(
 
     Ok(())
 }
+
+pub async fn publish_follow_list(
+    client: &Client,
+    contacts: &[PublicKey],
+) -> Result<(), WhitenoiseError> {
+    let tags: Vec<Tag> = contacts
+        .iter()
+        .map(|pk| Tag::custom(TagKind::p(), [pk.to_hex()]))
+        .collect();
+
+    client
+        .send_event_builder(EventBuilder::new(Kind::ContactList, "").tags(tags))
+        .await?;
+    Ok(())
+}
