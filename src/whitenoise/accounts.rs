@@ -814,6 +814,19 @@ impl Whitenoise {
 
         // Compute per-account since with a 10s lookback buffer when available
         let since = account.since_timestamp(10);
+        match since {
+            Some(ts) => tracing::debug!(
+                target: "whitenoise::setup_subscriptions",
+                "Computed per-account since={}s (10s buffer) for {}",
+                ts.as_u64(),
+                account.pubkey.to_hex()
+            ),
+            None => tracing::debug!(
+                target: "whitenoise::setup_subscriptions",
+                "Computed per-account since=None (unsynced) for {}",
+                account.pubkey.to_hex()
+            ),
+        }
 
         let keys = self
             .secrets_store

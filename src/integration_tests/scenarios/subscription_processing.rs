@@ -71,6 +71,14 @@ impl Scenario for SubscriptionProcessingScenario {
             .execute(&mut self.context)
             .await?;
 
+        // Test 6: Verify timestamp policy using a single builder-style test case
+        VerifyLastSyncedTimestampTestCase::for_account_follow_event()
+            .execute(&mut self.context)
+            .await?;
+        VerifyLastSyncedTimestampTestCase::for_global_metadata_event()
+            .execute(&mut self.context)
+            .await?;
+
         Ok(())
     }
 }
