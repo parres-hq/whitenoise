@@ -70,6 +70,14 @@ impl Account {
         Ok((account, keys))
     }
 
+    /// Convert last_synced_at to a Timestamp applying a lookback buffer.
+    /// Returns None if the account has never synced.
+    pub(crate) fn since_timestamp(&self, buffer_secs: u64) -> Option<nostr_sdk::Timestamp> {
+        let ts = self.last_synced_at?;
+        let secs = (ts.timestamp().max(0) as u64).saturating_sub(buffer_secs);
+        Some(nostr_sdk::Timestamp::from(secs))
+    }
+
     /// Retrieves the account's configured relays for a specific relay type.
     ///
     /// This method fetches the locally cached relays associated with this account
@@ -1048,6 +1056,9 @@ impl Whitenoise {
             Relay::find_or_create_by_url(relay_url, &self.database).await?;
         }
 
+        // Compute per-account since with a 10s lookback buffer when available
+        let since = account.since_timestamp(10);
+
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
@@ -1059,7 +1070,7 @@ impl Whitenoise {
                 &inbox_relays,
                 &group_relays_urls,
                 &nostr_group_ids,
-                None,
+                since,
                 keys,
             )
             .await?;
@@ -1144,6 +1155,7 @@ mod tests {
     use super::*;
     use crate::whitenoise::accounts::Account;
     use crate::whitenoise::test_utils::*;
+    use chrono::{TimeDelta, Utc};
 
     #[tokio::test]
     #[ignore]
@@ -1493,6 +1505,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_since_timestamp_none_when_never_synced() {
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert!(account.since_timestamp(10).is_none());
+    }
+
+    #[test]
+    fn test_since_timestamp_applies_buffer() {
+        let now = Utc::now();
+        let last = now - TimeDelta::seconds(100);
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: Some(last),
+            created_at: now,
+            updated_at: now,
+        };
+        let ts = account.since_timestamp(10).unwrap();
+        let expected_secs = (last.timestamp().max(0) as u64).saturating_sub(10);
+        assert_eq!(ts.as_u64(), expected_secs);
+    }
+
+    #[test]
+    fn test_since_timestamp_floors_at_zero() {
+        // Choose a timestamp very close to the epoch so that buffer would underflow
+        let epochish = chrono::DateTime::<Utc>::from_timestamp(5, 0).unwrap();
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: Some(epochish),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let ts = account.since_timestamp(10).unwrap();
+        assert_eq!(ts.as_u64(), 0);
     }
 
     #[tokio::test]
