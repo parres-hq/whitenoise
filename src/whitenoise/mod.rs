@@ -249,16 +249,66 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&signer_account.pubkey)?;
 
+        // Compute shared since for global user subscriptions with 10s lookback buffer
+        let since = Self::compute_global_since_timestamp(whitenoise_ref).await?;
+
         whitenoise_ref
             .nostr
             .setup_batched_relay_subscriptions_with_signer(
                 users_with_relays,
                 &default_relays,
                 keys,
-                None,
+                since,
             )
             .await?;
         Ok(())
+    }
+
+    // Compute a shared since timestamp for global user subscriptions.
+    // - Assumes at least one account exists (caller checked signer presence)
+    // - If any account is unsynced (last_synced_at = None), return None
+    // - Otherwise, use min(last_synced_at) minus a 10s buffer, floored at 0
+    async fn compute_global_since_timestamp(
+        whitenoise_ref: &'static Whitenoise,
+    ) -> Result<Option<nostr_sdk::Timestamp>> {
+        let accounts = Account::all(&whitenoise_ref.database).await?;
+        if accounts.iter().any(|a| a.last_synced_at.is_none()) {
+            let unsynced = accounts
+                .iter()
+                .filter(|a| a.last_synced_at.is_none())
+                .count();
+            tracing::info!(
+                target: "whitenoise::setup_global_users_subscriptions",
+                "Global subscriptions using since=None due to {} unsynced accounts",
+                unsynced
+            );
+            return Ok(None);
+        }
+
+        let min_dt = accounts
+            .iter()
+            .filter_map(|a| a.last_synced_at.as_ref())
+            .min()
+            .cloned();
+        let Some(min_dt) = min_dt else {
+            // Should not happen because we returned early when any were None,
+            // but guard anyway to avoid panics.
+            tracing::warn!(
+                target: "whitenoise::setup_global_users_subscriptions",
+                "No minimum last_synced_at found; defaulting to since=None"
+            );
+            return Ok(None);
+        };
+
+        const BUFFER_SECS: u64 = 10;
+        let secs = (min_dt.timestamp().max(0) as u64).saturating_sub(BUFFER_SECS);
+
+        tracing::info!(
+            target: "whitenoise::setup_global_users_subscriptions",
+            "Global subscriptions using since={} ({}s buffer)",
+            secs, BUFFER_SECS
+        );
+        Ok(Some(nostr_sdk::Timestamp::from(secs)))
     }
 
     async fn setup_accounts_sync_and_subscriptions(
