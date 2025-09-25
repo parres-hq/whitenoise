@@ -251,7 +251,12 @@ impl Whitenoise {
 
         whitenoise_ref
             .nostr
-            .setup_batched_relay_subscriptions_with_signer(users_with_relays, &default_relays, keys)
+            .setup_batched_relay_subscriptions_with_signer(
+                users_with_relays,
+                &default_relays,
+                keys,
+                None,
+            )
             .await?;
         Ok(())
     }
