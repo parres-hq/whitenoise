@@ -85,6 +85,36 @@ impl Whitenoise {
                         e
                     );
                 }
+
+                // Advance account sync timestamp only for account-scoped events
+                match event.kind {
+                    Kind::ContactList | Kind::GiftWrap | Kind::MlsGroupMessage => {
+                        let created_ms = (event.created_at.as_u64() as i64) * 1000;
+                        if let Err(e) = Account::update_last_synced_max(
+                            &account.pubkey,
+                            created_ms,
+                            &self.database,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                target: "whitenoise::event_processor::process_account_event",
+                                "Failed to advance last_synced_at for {} on event {}: {}",
+                                account.pubkey.to_hex(),
+                                event.id.to_hex(),
+                                e
+                            );
+                        } else {
+                            tracing::debug!(
+                                target: "whitenoise::event_processor::process_account_event",
+                                "Updated last_synced_at (if older) for {} with candidate {} (ms)",
+                                account.pubkey.to_hex(),
+                                created_ms
+                            );
+                        }
+                    }
+                    _ => {}
+                }
             }
             Err(e) => {
                 // Handle retry logic for actual processing errors
