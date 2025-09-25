@@ -228,7 +228,7 @@ impl Whitenoise {
 
     pub async fn setup_all_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
         Self::setup_global_users_subscriptions(whitenoise_ref).await?;
-        Self::setup_accounts_sync_and_subscriptions(whitenoise_ref).await?;
+        Self::setup_accounts_subscriptions(whitenoise_ref).await?;
         Ok(())
     }
 
@@ -306,21 +306,9 @@ impl Whitenoise {
         Ok(since)
     }
 
-    async fn setup_accounts_sync_and_subscriptions(
-        whitenoise_ref: &'static Whitenoise,
-    ) -> Result<()> {
+    async fn setup_accounts_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
         let accounts = Account::all(&whitenoise_ref.database).await?;
         for account in accounts {
-            // Trigger background data fetch for each account (non-critical)
-            if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
-                tracing::warn!(
-                    target: "whitenoise::load_accounts",
-                    "Failed to trigger background fetch for account {}: {}",
-                    account.pubkey.to_hex(),
-                    e
-                );
-                // Continue - background fetch failure should not prevent account loading
-            }
             // Setup subscriptions for this account
             match whitenoise_ref.setup_subscriptions(&account).await {
                 Ok(()) => {
