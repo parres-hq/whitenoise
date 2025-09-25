@@ -53,19 +53,6 @@ impl NostrManager {
         Self::latest_from_events(events)
     }
 
-    pub(crate) async fn fetch_contact_list_events(
-        &self,
-        pubkey: PublicKey,
-        relays: &[RelayUrl],
-    ) -> Result<Option<Event>> {
-        let filter = Filter::new().author(pubkey).kind(Kind::ContactList);
-        let events = self
-            .client
-            .fetch_events_from(relays, filter, self.timeout)
-            .await?;
-        Self::latest_from_events(events)
-    }
-
     fn latest_from_events(events: Events) -> Result<Option<Event>> {
         // Filter out events with timestamps too far in the future
         let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;

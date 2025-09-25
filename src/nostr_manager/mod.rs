@@ -1,8 +1,6 @@
-use std::pin::Pin;
 use std::time::Duration;
 
 use ::rand::RngCore;
-use futures::Stream;
 use nostr_sdk::prelude::*;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -62,19 +60,6 @@ pub struct NostrManager {
 }
 
 pub type Result<T> = std::result::Result<T, NostrManagerError>;
-
-/// Container for different types of event streams fetched during user data synchronization.
-/// Each stream contains events of a specific type that need to be processed separately.
-pub struct UserEventStreams {
-    /// Stream of metadata events (kind 0) for the account and contacts
-    pub metadata_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
-    /// Stream of relay list events (kinds 10002, 10050, 10051)
-    pub relay_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
-    /// Stream of gift wrap events (kind 1059) directed to the account
-    pub giftwrap_events: Pin<Box<dyn Stream<Item = Event> + Send>>,
-    /// Stream of group message events (kind 444) for specified groups
-    pub group_messages: Pin<Box<dyn Stream<Item = Event> + Send>>,
-}
 
 impl NostrManager {
     /// Default timeout for client requests
@@ -424,115 +409,5 @@ impl NostrManager {
                 }
             }
         }
-    }
-
-    /// Fetches event streams for all user data types from the Nostr network.
-    ///
-    /// This method creates and returns streams for different types of events related to
-    /// an account and their contacts. The streams can then be processed separately,
-    /// allowing for better separation of concerns between data fetching and processing.
-    ///
-    /// # Data Types Fetched
-    ///
-    /// - **Metadata events** (kind 0): User profile information for the account and contacts
-    /// - **Relay list events** (kinds 10002, 10050, 10051): NIP-65 relay lists, inbox relays, and MLS key package relays
-    /// - **Gift wrap events** (kind 1059): Private messages directed to the account
-    /// - **Group messages** (kind 444): MLS group messages for specified groups since last sync
-    ///
-    /// # Arguments
-    ///
-    /// * `signer` - A Nostr signer implementation for authenticating with relays
-    /// * `account` - The account to fetch data for (includes contact list lookup)
-    /// * `group_ids` - Vector of hex-encoded group IDs to fetch group messages for
-    ///
-    /// # Returns
-    ///
-    /// Returns `UserEventStreams` containing separate streams for each event type.
-    /// These streams can be processed independently.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - Failed to get contact list public keys from the network
-    /// - Failed to create event streams
-    /// - Authentication with the signer fails
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use nostr_sdk::Keys;
-    /// use whitenoise::accounts::Account;
-    ///
-    /// let keys = Keys::generate();
-    /// let group_ids = vec!["abc123".to_string(), "def456".to_string()];
-    ///
-    /// let streams = nostr_manager.fetch_user_event_streams(keys, &account, group_ids).await?;
-    /// // Process the streams separately...
-    /// ```
-    pub(crate) async fn fetch_user_event_streams(
-        &self,
-        signer: impl NostrSigner + 'static,
-        pubkey: PublicKey,
-        contact_list_pubkeys: Vec<PublicKey>,
-        since: Timestamp,
-        group_ids: Vec<String>,
-    ) -> Result<UserEventStreams> {
-        let (metadata_events, relay_events, giftwrap_events, group_messages) =
-            self
-            .with_signer(signer, || async {
-
-                let mut contacts_and_self = contact_list_pubkeys;
-                contacts_and_self.push(pubkey);
-
-                let metadata_filter = Filter::new()
-                    .authors(contacts_and_self.clone())
-                    .kinds(vec![Kind::Metadata])
-                    .since(since);
-                let relay_filter = Filter::new()
-                    .authors(contacts_and_self.clone())
-                    .kinds(vec![
-                        Kind::RelayList,
-                        Kind::InboxRelays,
-                        Kind::MlsKeyPackageRelays,
-                    ])
-                    .since(since);
-                let giftwrap_filter = Filter::new()
-                    .kind(Kind::GiftWrap)
-                    .pubkey(pubkey)
-                    .since(since);
-                let group_messages_filter = Filter::new()
-                    .kind(Kind::MlsGroupMessage)
-                    .custom_tags(SingleLetterTag::lowercase(Alphabet::H), group_ids)
-                    .since(since);
-
-                let timeout_duration = Duration::from_secs(10);
-
-                let (
-                    metadata_events,
-                    relay_events,
-                    giftwrap_events,
-                    group_messages,
-                ) = tokio::try_join!(
-                    self.client.stream_events(metadata_filter, timeout_duration),
-                    self.client.stream_events(relay_filter, timeout_duration),
-                    self.client.stream_events(giftwrap_filter, timeout_duration),
-                    self.client
-                        .stream_events(group_messages_filter, timeout_duration)
-                )?;
-                Ok((
-                    metadata_events,
-                    relay_events,
-                    giftwrap_events,
-                    group_messages,
-                ))
-            })
-            .await?;
-
-        Ok(UserEventStreams {
-            metadata_events: Box::pin(metadata_events),
-            relay_events: Box::pin(relay_events),
-            giftwrap_events: Box::pin(giftwrap_events),
-            group_messages: Box::pin(group_messages),
-        })
     }
 }
