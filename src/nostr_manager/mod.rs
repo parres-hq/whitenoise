@@ -228,6 +228,7 @@ impl NostrManager {
         inbox_relays: &[RelayUrl],
         group_relays: &[RelayUrl],
         nostr_group_ids: &[String],
+        since: Option<Timestamp>,
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         tracing::debug!(
@@ -241,7 +242,7 @@ impl NostrManager {
                 inbox_relays,
                 group_relays,
                 nostr_group_ids,
-                None,
+                since,
             )
             .await
         })
