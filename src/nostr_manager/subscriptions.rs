@@ -28,6 +28,7 @@ impl NostrManager {
         users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)>,
         default_relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
+        since: Option<Timestamp>,
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_batched_relay_subscriptions_with_signer",
@@ -43,7 +44,7 @@ impl NostrManager {
         self.with_signer(signer, || async {
             let futures = relay_user_map.into_iter().map(|(relay_url, users)| async move {
                 match self
-                    .create_deterministic_batches_for_relay(relay_url.clone(), users)
+                    .create_deterministic_batches_for_relay(relay_url.clone(), users, since)
                     .await
                 {
                     Ok(_) => true,
@@ -72,6 +73,7 @@ impl NostrManager {
         &self,
         relay_url: RelayUrl,
         users: Vec<PublicKey>,
+        since: Option<Timestamp>,
     ) -> Result<()> {
         let batch_count = self.calculate_batch_count(users.len());
 
@@ -99,7 +101,7 @@ impl NostrManager {
                                     relay_url_clone,
                                     batch_users,
                                     subscription_id,
-                                    None,
+                                    since,
                                 )
                                 .await;
                             (batch_id, res)
