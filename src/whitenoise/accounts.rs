@@ -71,10 +71,14 @@ impl Account {
     }
 
     /// Convert last_synced_at to a Timestamp applying a lookback buffer.
+    /// Clamps future timestamps to now to avoid empty subscriptions.
     /// Returns None if the account has never synced.
     pub(crate) fn since_timestamp(&self, buffer_secs: u64) -> Option<nostr_sdk::Timestamp> {
         let ts = self.last_synced_at?;
-        let secs = (ts.timestamp().max(0) as u64).saturating_sub(buffer_secs);
+        // Clamp to now, then apply buffer
+        let now_secs = Utc::now().timestamp().max(0) as u64;
+        let last_secs = (ts.timestamp().max(0) as u64).min(now_secs);
+        let secs = last_secs.saturating_sub(buffer_secs);
         Some(nostr_sdk::Timestamp::from(secs))
     }
 
@@ -1320,6 +1324,34 @@ mod tests {
         };
         let ts = account.since_timestamp(10).unwrap();
         assert_eq!(ts.as_u64(), 0);
+    }
+
+    #[test]
+    fn test_since_timestamp_clamps_future_to_now_minus_buffer() {
+        let now = Utc::now();
+        let future = now + chrono::TimeDelta::seconds(3600 * 24); // 24h in the future
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: Some(future),
+            created_at: now,
+            updated_at: now,
+        };
+        let buffer = 10u64;
+        // Capture time before and after to bound the internal now() used by the function
+        let before = Utc::now();
+        let ts = account.since_timestamp(buffer).unwrap();
+        let after = Utc::now();
+
+        let before_secs = before.timestamp().max(0) as u64;
+        let after_secs = after.timestamp().max(0) as u64;
+
+        let min_expected = before_secs.saturating_sub(buffer);
+        let max_expected = after_secs.saturating_sub(buffer);
+
+        let actual = ts.as_u64();
+        assert!(actual >= min_expected && actual <= max_expected);
     }
 
     #[tokio::test]
