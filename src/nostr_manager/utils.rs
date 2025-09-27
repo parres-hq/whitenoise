@@ -1,8 +1,42 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use nostr_sdk::prelude::*;
 
 use crate::nostr_manager::NostrManager;
+
+/// Maximum allowed skew for event timestamps in the future (1 hour)
+pub(crate) const MAX_FUTURE_SKEW: Duration = Duration::from_secs(60 * 60);
+
+/// Additional lookback buffer for giftwrap subscriptions to account for NIP-59 backdating
+/// NIP-59 recommends tweaking timestamps (usually to the past) to prevent timing analysis
+pub(crate) const GIFTWRAP_LOOKBACK_BUFFER: Duration = Duration::from_secs(7 * 24 * 60 * 60); // 7 days
+
+/// Checks if an event's timestamp is not too far in the future
+pub(crate) fn is_event_timestamp_valid(event: &Event) -> bool {
+    let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
+    event.created_at <= cutoff
+}
+
+/// Adjusts a since timestamp for giftwrap subscriptions by subtracting the lookback buffer
+/// to account for NIP-59 backdated timestamps
+pub(crate) fn adjust_since_for_giftwrap(since: Option<Timestamp>) -> Option<Timestamp> {
+    since.map(|ts| {
+        let secs = ts.as_u64();
+        let lookback = GIFTWRAP_LOOKBACK_BUFFER.as_secs();
+        let adjusted = secs.saturating_sub(lookback);
+        Timestamp::from(adjusted)
+    })
+}
+
+/// Caps an event timestamp to the current time to prevent future timestamp corruption
+pub(crate) fn cap_timestamp_to_now(event_timestamp: Timestamp) -> Timestamp {
+    let now = Timestamp::now();
+    if event_timestamp > now {
+        now
+    } else {
+        event_timestamp
+    }
+}
 
 impl NostrManager {
     /// Extracts public keys from an event's tags.
@@ -369,5 +403,157 @@ mod tests {
         let result = NostrManager::pubkeys_from_event(&event);
 
         assert_eq!(result.len(), 0);
+    }
+
+    // Tests for timestamp utility functions
+
+    #[test]
+    fn test_is_event_timestamp_valid_with_current_time() {
+        use nostr_sdk::prelude::*;
+
+        let keys = Keys::generate();
+        let event = EventBuilder::text_note("test")
+            .custom_created_at(Timestamp::now())
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert!(is_event_timestamp_valid(&event));
+    }
+
+    #[test]
+    fn test_is_event_timestamp_valid_with_past_time() {
+        use nostr_sdk::prelude::*;
+
+        let keys = Keys::generate();
+        let past_timestamp = Timestamp::now() - Duration::from_secs(3600); // 1 hour ago
+        let event = EventBuilder::text_note("test")
+            .custom_created_at(past_timestamp)
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert!(is_event_timestamp_valid(&event));
+    }
+
+    #[test]
+    fn test_is_event_timestamp_valid_with_near_future() {
+        use nostr_sdk::prelude::*;
+
+        let keys = Keys::generate();
+        let near_future = Timestamp::now() + Duration::from_secs(1800); // 30 minutes in future
+        let event = EventBuilder::text_note("test")
+            .custom_created_at(near_future)
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert!(is_event_timestamp_valid(&event));
+    }
+
+    #[test]
+    fn test_is_event_timestamp_valid_with_far_future() {
+        use nostr_sdk::prelude::*;
+
+        let keys = Keys::generate();
+        let far_future = Timestamp::now() + Duration::from_secs(7200); // 2 hours in future (exceeds 1 hour limit)
+        let event = EventBuilder::text_note("test")
+            .custom_created_at(far_future)
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert!(!is_event_timestamp_valid(&event));
+    }
+
+    #[test]
+    fn test_is_event_timestamp_valid_at_boundary() {
+        use nostr_sdk::prelude::*;
+
+        let keys = Keys::generate();
+        let boundary_timestamp = Timestamp::now() + MAX_FUTURE_SKEW; // Exactly at the boundary
+        let event = EventBuilder::text_note("test")
+            .custom_created_at(boundary_timestamp)
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert!(is_event_timestamp_valid(&event));
+    }
+
+    #[test]
+    fn test_adjust_since_for_giftwrap_with_none() {
+        let result = adjust_since_for_giftwrap(None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_adjust_since_for_giftwrap_with_some() {
+        let original_timestamp = Timestamp::now();
+        let result = adjust_since_for_giftwrap(Some(original_timestamp));
+
+        assert!(result.is_some());
+        let adjusted = result.unwrap();
+
+        // Should be exactly GIFTWRAP_LOOKBACK_BUFFER earlier
+        assert_eq!(adjusted, original_timestamp - GIFTWRAP_LOOKBACK_BUFFER);
+    }
+
+    #[test]
+    fn test_adjust_since_for_giftwrap_with_old_timestamp() {
+        // Test with a timestamp that's already old
+        let old_timestamp = Timestamp::now() - Duration::from_secs(30 * 24 * 60 * 60); // 30 days ago
+        let result = adjust_since_for_giftwrap(Some(old_timestamp));
+
+        assert!(result.is_some());
+        let adjusted = result.unwrap();
+
+        // Should be GIFTWRAP_LOOKBACK_BUFFER earlier than the old timestamp
+        assert_eq!(adjusted, old_timestamp - GIFTWRAP_LOOKBACK_BUFFER);
+
+        // The adjusted timestamp should be even older
+        assert!(adjusted < old_timestamp);
+    }
+
+    #[test]
+    fn test_cap_timestamp_to_now_with_past() {
+        let past_timestamp = Timestamp::now() - Duration::from_secs(3600); // 1 hour ago
+        let result = cap_timestamp_to_now(past_timestamp);
+
+        // Past timestamp should be returned unchanged
+        assert_eq!(result, past_timestamp);
+    }
+
+    #[test]
+    fn test_cap_timestamp_to_now_with_current() {
+        let now = Timestamp::now();
+        let result = cap_timestamp_to_now(now);
+
+        // Current timestamp should be returned (may be slightly different due to timing)
+        // Allow for small timing differences
+        let diff = if result >= now {
+            result.as_u64() - now.as_u64()
+        } else {
+            now.as_u64() - result.as_u64()
+        };
+        assert!(diff <= 1); // Allow 1 second difference
+    }
+
+    #[test]
+    fn test_cap_timestamp_to_now_with_future() {
+        let future_timestamp = Timestamp::now() + Duration::from_secs(3600); // 1 hour in future
+        let before_call = Timestamp::now();
+        let result = cap_timestamp_to_now(future_timestamp);
+        let after_call = Timestamp::now();
+
+        // Future timestamp should be capped to now (somewhere between before_call and after_call)
+        assert!(result >= before_call);
+        assert!(result <= after_call);
+        assert!(result < future_timestamp);
+    }
+
+    #[test]
+    fn test_constants_are_reasonable() {
+        // Test that the constants have reasonable values
+        assert_eq!(MAX_FUTURE_SKEW, Duration::from_secs(60 * 60)); // 1 hour
+        assert_eq!(
+            GIFTWRAP_LOOKBACK_BUFFER,
+            Duration::from_secs(7 * 24 * 60 * 60)
+        ); // 7 days
     }
 }

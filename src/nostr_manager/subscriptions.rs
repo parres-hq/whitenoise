@@ -9,7 +9,9 @@ use sha2::{Digest, Sha256};
 
 const MAX_USERS_PER_GLOBAL_SUBSCRIPTION: usize = 1000;
 
-use crate::nostr_manager::{NostrManager, NostrManagerError, Result};
+use crate::nostr_manager::{
+    utils::adjust_since_for_giftwrap, NostrManager, NostrManagerError, Result,
+};
 
 impl NostrManager {
     /// Create a short hash from a pubkey for use in subscription IDs
@@ -372,7 +374,9 @@ impl NostrManager {
     ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_user_follow_list_subscription",
-            "Setting up user follow list subscription"
+            "Setting up subscription for pubkey {} on {} relays",
+            pubkey.to_hex(),
+            user_relays.len()
         );
         let pubkey_hash = self.create_pubkey_hash(&pubkey);
         let subscription_id = SubscriptionId::new(format!("{}_user_follow_list", pubkey_hash));
@@ -383,12 +387,19 @@ impl NostrManager {
         }
 
         self.client
-            .subscribe_with_id_to(user_relays, subscription_id, user_follow_list_filter, None)
+            .subscribe_with_id_to(
+                user_relays,
+                subscription_id.clone(),
+                user_follow_list_filter,
+                None,
+            )
             .await?;
 
         tracing::debug!(
             target: "whitenoise::nostr_manager::setup_user_follow_list_subscription",
-            "User follow list subscription set up"
+            "FollowList subscription '{}' set up successfully for {}",
+            subscription_id,
+            pubkey.to_hex()
         );
         Ok(())
     }
@@ -408,7 +419,12 @@ impl NostrManager {
 
         let mut giftwrap_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pubkey);
         if let Some(since) = since {
-            giftwrap_filter = giftwrap_filter.since(since);
+            // Account for NIP-59 backdated timestamps - giftwrap events may be timestamped
+            // in the past for privacy, so we look back further than last_synced_at
+            let adjusted_since = adjust_since_for_giftwrap(Some(since));
+            if let Some(adjusted) = adjusted_since {
+                giftwrap_filter = giftwrap_filter.since(adjusted);
+            }
         }
 
         self.client
@@ -506,5 +522,31 @@ mod tests {
         // Same pubkey should produce same hash with same session salt
         assert_eq!(hash1, hash2);
         assert_eq!(hash1.len(), 12); // Should be 12 characters as specified
+    }
+
+    #[tokio::test]
+    async fn test_giftwrap_subscription_lookback_buffer() {
+        use crate::nostr_manager::utils::GIFTWRAP_LOOKBACK_BUFFER;
+        use std::time::Duration;
+
+        // Test that adjust_since_for_giftwrap extends the lookback period correctly
+        let original_timestamp = Timestamp::now();
+        let adjusted = adjust_since_for_giftwrap(Some(original_timestamp));
+
+        assert!(adjusted.is_some());
+        let adjusted_ts = adjusted.unwrap();
+
+        // Should be exactly GIFTWRAP_LOOKBACK_BUFFER earlier
+        assert_eq!(adjusted_ts, original_timestamp - GIFTWRAP_LOOKBACK_BUFFER);
+
+        // Verify the buffer is significant (7 days)
+        assert_eq!(
+            GIFTWRAP_LOOKBACK_BUFFER,
+            Duration::from_secs(7 * 24 * 60 * 60)
+        );
+
+        // Test with None - should return None
+        let none_result = adjust_since_for_giftwrap(None);
+        assert!(none_result.is_none());
     }
 }
