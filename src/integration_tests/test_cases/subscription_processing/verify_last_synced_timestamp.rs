@@ -31,8 +31,8 @@ impl VerifyLastSyncedTimestampTestCase {
         context: &ScenarioContext,
         pubkey: PublicKey,
     ) -> Result<Option<chrono::DateTime<chrono::Utc>>, WhitenoiseError> {
-        let fresh = context.whitenoise.find_account_by_pubkey(&pubkey).await?;
-        Ok(fresh.last_synced_at)
+        let account = context.whitenoise.find_account_by_pubkey(&pubkey).await?;
+        Ok(account.last_synced_at)
     }
 
     async fn assert_advanced(
@@ -46,10 +46,10 @@ impl VerifyLastSyncedTimestampTestCase {
             50,
             Duration::from_millis(50),
             || async {
-                let refreshed = context.whitenoise.find_account_by_pubkey(&pubkey).await?;
-                match (before, refreshed.last_synced_at) {
+                let account = context.whitenoise.find_account_by_pubkey(&pubkey).await?;
+                match (before, account.last_synced_at) {
                     (None, Some(_)) => Ok(()),
-                    (Some(b), Some(a)) if a > b => Ok(()),
+                    (Some(before_time), Some(after_time)) if after_time > before_time => Ok(()),
                     _ => Err(WhitenoiseError::Other(anyhow::anyhow!(
                         "last_synced_at not advanced yet"
                     ))),
@@ -71,12 +71,8 @@ impl VerifyLastSyncedTimestampTestCase {
             50,
             Duration::from_millis(50),
             || async {
-                let after = context
-                    .whitenoise
-                    .find_account_by_pubkey(&pubkey)
-                    .await?
-                    .last_synced_at;
-                if after == before {
+                let account = context.whitenoise.find_account_by_pubkey(&pubkey).await?;
+                if account.last_synced_at == before {
                     Ok(())
                 } else {
                     Err(WhitenoiseError::Other(anyhow::anyhow!(
@@ -89,38 +85,49 @@ impl VerifyLastSyncedTimestampTestCase {
         .await
     }
 
-    async fn publish_account_follow_event(
+    async fn publish_account_follow_event_with_timestamp(
         &self,
         context: &ScenarioContext,
         pubkey: PublicKey,
+        event_timestamp: Timestamp,
     ) -> Result<(), WhitenoiseError> {
-        let account_owned = context.whitenoise.find_account_by_pubkey(&pubkey).await?;
-        let nsec = context
-            .whitenoise
-            .export_account_nsec(&account_owned)
-            .await?;
+        let account = context.whitenoise.find_account_by_pubkey(&pubkey).await?;
+        let nsec = context.whitenoise.export_account_nsec(&account).await?;
         let keys = Keys::parse(&nsec)?;
-        let client = create_test_client(&context.dev_relays, keys).await?;
+        let client = create_test_client(&context.dev_relays, keys.clone()).await?;
         let contact = Keys::generate().public_key();
-        publish_follow_list(&client, &[contact]).await?;
+
+        let tags = vec![Tag::custom(TagKind::p(), [contact.to_hex()])];
+        let event = EventBuilder::new(Kind::ContactList, "")
+            .tags(tags)
+            .custom_created_at(event_timestamp)
+            .sign_with_keys(&keys)
+            .map_err(|e| WhitenoiseError::Other(e.into()))?;
+
+        client.send_event(&event).await?;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         client.disconnect().await;
         Ok(())
     }
 
-    async fn publish_global_metadata_event(
+    async fn publish_global_metadata_event_with_timestamp(
         &self,
         context: &ScenarioContext,
+        event_timestamp: Timestamp,
     ) -> Result<(), WhitenoiseError> {
-        let ext = Keys::generate();
-        let client = create_test_client(&context.dev_relays, ext).await?;
+        let keys = Keys::generate();
+        let client = create_test_client(&context.dev_relays, keys.clone()).await?;
         let metadata = Metadata {
-            name: Some("No-op for account sync".to_string()),
+            name: Some("Test metadata for sync verification".to_string()),
             ..Default::default()
         };
-        client
-            .send_event_builder(EventBuilder::metadata(&metadata))
-            .await?;
+
+        let event = EventBuilder::metadata(&metadata)
+            .custom_created_at(event_timestamp)
+            .sign_with_keys(&keys)
+            .map_err(|e| WhitenoiseError::Other(e.into()))?;
+
+        client.send_event(&event).await?;
         tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
         client.disconnect().await;
         Ok(())
@@ -132,9 +139,16 @@ impl TestCase for VerifyLastSyncedTimestampTestCase {
     async fn run(&self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError> {
         let pubkey = { context.get_account("subscription_test_account")?.pubkey };
         let before = self.baseline(context, pubkey).await?;
+
+        // Create deterministic base timestamp for this test run
+        let base_timestamp = Timestamp::now();
+
         match self.mode {
             Mode::AccountFollowEvent => {
-                self.publish_account_follow_event(context, pubkey).await?;
+                // Use base timestamp + 10 seconds for guaranteed advancement
+                let event_timestamp = Timestamp::from_secs(base_timestamp.as_u64() + 10);
+                self.publish_account_follow_event_with_timestamp(context, pubkey, event_timestamp)
+                    .await?;
                 self.assert_advanced(
                     context,
                     pubkey,
@@ -144,7 +158,10 @@ impl TestCase for VerifyLastSyncedTimestampTestCase {
                 .await?;
             }
             Mode::GlobalMetadataEvent => {
-                self.publish_global_metadata_event(context).await?;
+                // Use base timestamp + 5 seconds (should not affect account sync)
+                let event_timestamp = Timestamp::from_secs(base_timestamp.as_u64() + 5);
+                self.publish_global_metadata_event_with_timestamp(context, event_timestamp)
+                    .await?;
                 self.assert_unchanged(
                     context,
                     pubkey,
