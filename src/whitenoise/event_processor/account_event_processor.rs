@@ -2,6 +2,7 @@ use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
 
 use crate::{
+    nostr_manager::utils::cap_timestamp_to_now,
     types::RetryInfo,
     whitenoise::{
         accounts::Account,
@@ -84,6 +85,89 @@ impl Whitenoise {
                         event.id.to_hex(),
                         e
                     );
+                }
+
+                // Advance account sync timestamp only for account-scoped events
+                match event.kind {
+                    Kind::ContactList | Kind::MlsGroupMessage => {
+                        // Cap timestamp to prevent future corruption
+                        let safe_timestamp = cap_timestamp_to_now(event.created_at);
+                        let created_ms = (safe_timestamp.as_u64() as i64) * 1000;
+
+                        if let Err(e) = Account::update_last_synced_max(
+                            &account.pubkey,
+                            created_ms,
+                            &self.database,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                target: "whitenoise::event_processor::process_account_event",
+                                "Failed to advance last_synced_at for {} on event {}: {}",
+                                account.pubkey.to_hex(),
+                                event.id.to_hex(),
+                                e
+                            );
+                        } else {
+                            tracing::debug!(
+                                target: "whitenoise::event_processor::process_account_event",
+                                "Updated last_synced_at (if older) for {} with candidate {} (ms) [capped from original {}]",
+                                account.pubkey.to_hex(),
+                                created_ms,
+                                event.created_at.as_u64() * 1000
+                            );
+                        }
+                    }
+                    Kind::GiftWrap => {
+                        // Use rumor timestamp for advancement per NIP-59
+                        match self
+                            .extract_rumor_timestamp_for_advancement(&event, &account)
+                            .await
+                        {
+                            Ok(Some(rumor_timestamp)) => {
+                                let safe_timestamp = cap_timestamp_to_now(rumor_timestamp);
+                                let created_ms = (safe_timestamp.as_u64() as i64) * 1000;
+
+                                if let Err(e) = Account::update_last_synced_max(
+                                    &account.pubkey,
+                                    created_ms,
+                                    &self.database,
+                                )
+                                .await
+                                {
+                                    tracing::warn!(
+                                        target: "whitenoise::event_processor::process_account_event",
+                                        "Failed to advance last_synced_at with rumor timestamp for {}: {}",
+                                        account.pubkey.to_hex(),
+                                        e
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        target: "whitenoise::event_processor::process_account_event",
+                                        "Updated last_synced_at (if older) for {} with rumor timestamp {} (ms) [capped from original {}]",
+                                        account.pubkey.to_hex(),
+                                        created_ms,
+                                        rumor_timestamp.as_u64() * 1000
+                                    );
+                                }
+                            }
+                            Ok(None) => {
+                                tracing::debug!(
+                                    target: "whitenoise::event_processor::process_account_event",
+                                    "Skipping timestamp advancement for giftwrap with failed rumor extraction"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    target: "whitenoise::event_processor::process_account_event",
+                                    "Failed to extract rumor timestamp for {}: {}",
+                                    account.pubkey.to_hex(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             Err(e) => {
@@ -242,6 +326,22 @@ impl Whitenoise {
                 );
                 Ok(()) // Unhandled events are not errors
             }
+        }
+    }
+
+    /// Extract rumor timestamp from giftwrap event for sync advancement
+    async fn extract_rumor_timestamp_for_advancement(
+        &self,
+        event: &Event,
+        account: &Account,
+    ) -> Result<Option<Timestamp>> {
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+
+        match extract_rumor(&keys, event).await {
+            Ok(unwrapped) => Ok(Some(unwrapped.rumor.created_at)),
+            Err(_) => Ok(None), // Don't advance on extraction failure
         }
     }
 }
