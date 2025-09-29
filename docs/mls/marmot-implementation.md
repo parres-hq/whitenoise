@@ -1,13 +1,12 @@
-# NIP-EE Implementation Notes
+# Marmot Implementation Notes
 
 ## Overview
 
-Whitenoise implements NIP-EE (Nostr MLS), which brings MLS group messaging to the Nostr protocol. This document outlines our implementation approach and key design decisions.
+Whitenoise implements the Marmot protocol, which brings MLS group messaging to the Nostr protocol. This document outlines our implementation approach and key design decisions.
 
-## NIP-EE Specification
+## Marmot Specification
 
-- **Official Specification**: https://github.com/nostr-protocol/nips/blob/master/EE.md
-- **Status**: Official NIP (merged from original PR)
+- [Official Specification](https://github.com/parres-hq/marmot)
 - **Purpose**: Enable secure group messaging on Nostr using MLS
 
 ## Key Components
