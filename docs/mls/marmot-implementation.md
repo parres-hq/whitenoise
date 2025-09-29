@@ -6,7 +6,7 @@ Whitenoise implements the Marmot protocol, which brings MLS group messaging to t
 
 ## Marmot Specification
 
-- **Official Specification**: https://github.com/parres-hq/marmot
+- [Official Specification](https://github.com/parres-hq/marmot)
 - **Purpose**: Enable secure group messaging on Nostr using MLS
 
 ## Key Components
