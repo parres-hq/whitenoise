@@ -1,5 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
+use ::rand::{rng, RngCore};
 use mdk_core::prelude::*;
 use mdk_sqlite_storage::MdkSqliteStorage;
 use nostr_blossom::client::BlossomClient;
@@ -22,7 +23,7 @@ use crate::{
 ///
 /// Contains the necessary components to update group configuration data
 /// with the uploaded image information.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GroupProfilePictureUpload {
     /// SHA256 hash of the uploaded image file (32 bytes)
     pub image_hash: [u8; 32],
@@ -537,11 +538,8 @@ impl Whitenoise {
         image_key.copy_from_slice(&private_key_bytes);
 
         // Generate a random nonce (12 bytes for ChaCha20-Poly1305)
-        // Use the first 12 bytes of a newly generated key's hash for randomness
-        let nonce_keys = Keys::generate();
-        let nonce_bytes = nonce_keys.public_key().to_bytes();
         let mut image_nonce = [0u8; 12];
-        image_nonce.copy_from_slice(&nonce_bytes[0..12]);
+        rng().fill_bytes(&mut image_nonce);
 
         Ok(GroupProfilePictureUpload {
             image_hash,
@@ -1128,6 +1126,7 @@ mod tests {
     #[tokio::test]
     async fn test_upload_group_profile_picture_success() {
         use mockito::Server;
+        use sha2::Digest;
         use std::io::Write;
         use tempfile::NamedTempFile;
 
@@ -1139,13 +1138,17 @@ mod tests {
         temp_file.write_all(test_image_data).unwrap();
         let file_path = temp_file.path().to_str().unwrap();
 
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(test_image_data);
+        let sha = hex::encode(hasher.finalize());
+
         // Setup mock Blossom server that responds to the actual nostr-blossom client requests
         let mut server = Server::new_async().await;
         let mock_response = serde_json::json!({
-            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "sha256": sha,
             "size": test_image_data.len(),
             "type": "image/png",
-            "url": format!("{}/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", server.url()),
+            "url": format!("{}/{}", server.url(), sha),
             "uploaded": 1640995200
         });
 
@@ -1187,7 +1190,7 @@ mod tests {
             let expected_hash =
                 hex::decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
                     .unwrap();
-            assert_eq!(upload_result.image_hash, expected_hash.as_slice());
+            assert_eq!(&upload_result.image_hash[..], &expected_hash[..]);
 
             // Verify that key and nonce are not all zeros (they should be random/derived)
             assert_ne!(
@@ -1212,7 +1215,7 @@ mod tests {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
         let non_existent_file = "/path/that/does/not/exist.png";
-        let server_url = "http://localhost:8080/upload".parse().unwrap();
+        let server_url = "http://localhost:8080".parse().unwrap();
 
         let result = whitenoise
             .upload_group_profile_picture(
