@@ -1119,8 +1119,8 @@ mod tests {
     #[tokio::test]
     async fn test_upload_group_profile_picture_success() {
         use mockito::Server;
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
@@ -1158,20 +1158,43 @@ mod tests {
         // If the mock doesn't work perfectly, we'll get an error, but we can still test the structure
         if let Ok(upload_result) = result {
             // Verify the returned data has correct formats and lengths
-            assert_eq!(upload_result.image_hash.len(), 32, "Image hash should be 32 bytes");
-            assert_eq!(upload_result.image_key.len(), 32, "Image key should be 32 bytes");
-            assert_eq!(upload_result.image_nonce.len(), 12, "Image nonce should be 12 bytes");
+            assert_eq!(
+                upload_result.image_hash.len(),
+                32,
+                "Image hash should be 32 bytes"
+            );
+            assert_eq!(
+                upload_result.image_key.len(),
+                32,
+                "Image key should be 32 bytes"
+            );
+            assert_eq!(
+                upload_result.image_nonce.len(),
+                12,
+                "Image nonce should be 12 bytes"
+            );
 
             // Verify the hash matches the expected value from the mock response
-            let expected_hash = hex::decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").unwrap();
+            let expected_hash =
+                hex::decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+                    .unwrap();
             assert_eq!(upload_result.image_hash, expected_hash.as_slice());
 
             // Verify that key and nonce are not all zeros (they should be random/derived)
-            assert_ne!(upload_result.image_key, [0u8; 32], "Image key should not be all zeros");
-            assert_ne!(upload_result.image_nonce, [0u8; 12], "Image nonce should not be all zeros");
+            assert_ne!(
+                upload_result.image_key, [0u8; 32],
+                "Image key should not be all zeros"
+            );
+            assert_ne!(
+                upload_result.image_nonce, [0u8; 12],
+                "Image nonce should not be all zeros"
+            );
         } else {
             // If the mock doesn't work, at least verify the method exists and can be called
-            println!("Mock server didn't work as expected, but method is callable: {:?}", result.unwrap_err());
+            println!(
+                "Mock server didn't work as expected, but method is callable: {:?}",
+                result.unwrap_err()
+            );
         }
     }
 
@@ -1203,8 +1226,8 @@ mod tests {
     #[tokio::test]
     async fn test_upload_group_profile_picture_server_error() {
         use mockito::Server;
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
@@ -1256,7 +1279,10 @@ mod tests {
         let short_hash = "abc123";
         let decoded = hex::decode(short_hash);
         assert!(decoded.is_ok(), "Short hex should decode");
-        assert_ne!(decoded.unwrap().len(), 32, "Short hex should not be 32 bytes");
+        assert_ne!(
+            decoded.unwrap().len(),
+            32,
+            "Short hex should not be 32 bytes"
+        );
     }
-
 }
