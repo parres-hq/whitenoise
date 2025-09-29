@@ -1326,12 +1326,20 @@ mod tests {
 
         // This would panic without our length check, but we can't test the panic directly
         // Instead, we verify that our length check logic would catch this
-        assert_ne!(short_hash_bytes.len(), 32, "Short hash should fail length check");
+        assert_ne!(
+            short_hash_bytes.len(),
+            32,
+            "Short hash should fail length check"
+        );
 
         // Test case 3: Long hash (would also cause our new error)
         let long_hash_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855ffff";
         let long_hash_bytes = hex::decode(long_hash_hex).unwrap();
         assert_eq!(long_hash_bytes.len(), 34, "Long hash should be 34 bytes");
-        assert_ne!(long_hash_bytes.len(), 32, "Long hash should fail length check");
+        assert_ne!(
+            long_hash_bytes.len(),
+            32,
+            "Long hash should fail length check"
+        );
     }
 }
