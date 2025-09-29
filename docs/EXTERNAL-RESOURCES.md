@@ -30,9 +30,9 @@ This file provides a comprehensive index of external resources, specifications, 
 - **NIPs (Nostr Implementation Possibilities)**: https://github.com/nostr-protocol/nips
 
 ### MLS on Nostr
-- **NIP-EE - MLS over Nostr**: https://github.com/nostr-protocol/nips/blob/master/EE.md
-  - Our implementation follows this specification
-  - Status: Official NIP (merged)
+- **NIP-EE - MLS over Nostr**: https://github.com/nostr-protocol/nips/blob/master/EE.md (legacy specification)
+- Marmot - Official Specification: https://github.com/parres-hq/marmot
+- MDK (Marmot Development Kit)- https://github.com/parres-hq/mdk
 
 ### Rust Nostr Implementation
 - **rust-nostr Repository**: https://github.com/rust-nostr/nostr
