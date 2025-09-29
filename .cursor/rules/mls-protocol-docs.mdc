@@ -15,14 +15,17 @@ This project implements the MLS (Messaging Layer Security) protocol on top of No
   - Local copy: [docs/mls/rfc9420.txt](mdc:docs/mls/rfc9420.txt)
 
 - **RFC 9750**: MLS Architecture
-  - Official IETF specification: https://www.rfc-editor.org/rfc/rfc9750.html
+  - Official Architecture Overview: https://www.rfc-editor.org/rfc/rfc9750.html
   - Local copy: [docs/mls/rfc9750.txt](mdc:docs/mls/rfc9750.txt)
 
-## Nostr MLS Integration
+## Marmot Protocol Integration
 
-- **NIP-EE**: Nostr MLS Implementation Spec (Official)
+- **NIP-EE**: Nostr MLS Implementation Spec (now outdated, this predated Marmot)
   - Official specification: https://github.com/nostr-protocol/nips/blob/master/EE.md
-  - Local implementation notes: [docs/mls/nip-ee-implementation.md](mdc:docs/mls/nip-ee-implementation.md)
+
+- **Marmot Protocol Docs**: Marmot protocol is the current protocol spec that describes how to integrate MLS message with Nostr.
+  - Official spec/repo: https://github.com/parres-hq/marmot
+  - Local implementation notes: [docs/mls/marmot-implementation.md](mdc:docs/mls/marmot-implementation.md)
 
 ## Implementation References
 
