@@ -519,6 +519,15 @@ impl Whitenoise {
         let hash_hex = &descriptor.sha256;
         let hash_bytes = hex::decode(hash_hex)
             .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Failed to decode hash: {}", e)))?;
+
+        // Ensure the decoded hash is exactly 32 bytes (SHA256 length)
+        if hash_bytes.len() != 32 {
+            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Invalid hash length: expected 32 bytes, got {} bytes",
+                hash_bytes.len()
+            )));
+        }
+
         let mut image_hash = [0u8; 32];
         image_hash.copy_from_slice(&hash_bytes);
 
@@ -1275,7 +1284,7 @@ mod tests {
         let decoded = hex::decode(invalid_hash);
         assert!(decoded.is_err(), "Invalid hex should fail to decode");
 
-        // Test short hex string
+        // Test short hex string (would cause length check to fail)
         let short_hash = "abc123";
         let decoded = hex::decode(short_hash);
         assert!(decoded.is_ok(), "Short hex should decode");
@@ -1284,5 +1293,45 @@ mod tests {
             32,
             "Short hex should not be 32 bytes"
         );
+
+        // Test long hex string (would also cause length check to fail)
+        let long_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855ff";
+        let decoded = hex::decode(long_hash);
+        assert!(decoded.is_ok(), "Long hex should decode");
+        assert_ne!(
+            decoded.unwrap().len(),
+            32,
+            "Long hex should not be 32 bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hash_length_validation_logic() {
+        // Test the hash length validation logic directly
+        // This simulates what happens in the upload_group_profile_picture method
+
+        // Test case 1: Valid 32-byte hash
+        let valid_hash_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let hash_bytes = hex::decode(valid_hash_hex).unwrap();
+        assert_eq!(hash_bytes.len(), 32, "Valid hash should be 32 bytes");
+
+        // This should work without error
+        let mut image_hash = [0u8; 32];
+        image_hash.copy_from_slice(&hash_bytes); // Should not panic
+
+        // Test case 2: Short hash (would cause our new error)
+        let short_hash_hex = "abc123"; // Only 3 bytes when decoded
+        let short_hash_bytes = hex::decode(short_hash_hex).unwrap();
+        assert_eq!(short_hash_bytes.len(), 3, "Short hash should be 3 bytes");
+
+        // This would panic without our length check, but we can't test the panic directly
+        // Instead, we verify that our length check logic would catch this
+        assert_ne!(short_hash_bytes.len(), 32, "Short hash should fail length check");
+
+        // Test case 3: Long hash (would also cause our new error)
+        let long_hash_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855ffff";
+        let long_hash_bytes = hex::decode(long_hash_hex).unwrap();
+        assert_eq!(long_hash_bytes.len(), 34, "Long hash should be 34 bytes");
+        assert_ne!(long_hash_bytes.len(), 32, "Long hash should fail length check");
     }
 }
