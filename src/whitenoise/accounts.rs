@@ -70,6 +70,18 @@ impl Account {
         Ok((account, keys))
     }
 
+    /// Convert last_synced_at to a Timestamp applying a lookback buffer.
+    /// Clamps future timestamps to now to avoid empty subscriptions.
+    /// Returns None if the account has never synced.
+    pub(crate) fn since_timestamp(&self, buffer_secs: u64) -> Option<nostr_sdk::Timestamp> {
+        let ts = self.last_synced_at?;
+        // Clamp to now, then apply buffer
+        let now_secs = Utc::now().timestamp().max(0) as u64;
+        let last_secs = (ts.timestamp().max(0) as u64).min(now_secs);
+        let secs = last_secs.saturating_sub(buffer_secs);
+        Some(nostr_sdk::Timestamp::from(secs))
+    }
+
     /// Retrieves the account's configured relays for a specific relay type.
     ///
     /// This method fetches the locally cached relays associated with this account
@@ -257,18 +269,6 @@ impl Account {
         Ok(MDK::new(storage))
     }
 
-    pub(crate) fn load_nostr_group_ids(
-        &self,
-        whitenoise: &Whitenoise,
-    ) -> core::result::Result<Vec<String>, AccountError> {
-        let mdk = Account::create_mdk(self.pubkey, &whitenoise.config.data_dir)?;
-        let groups = mdk.get_groups()?;
-        Ok(groups
-            .iter()
-            .map(|g| hex::encode(g.nostr_group_id))
-            .collect())
-    }
-
     pub(crate) async fn connect_relays(&self, whitenoise: &Whitenoise) -> Result<()> {
         let mut relays = HashSet::new();
         relays.extend(self.nip65_relays(whitenoise).await?);
@@ -278,75 +278,6 @@ impl Account {
             whitenoise.nostr.client.add_relay(url).await?;
         }
         whitenoise.nostr.client.connect().await;
-        Ok(())
-    }
-
-    /// Processes user event streams fetched from the Nostr network.
-    ///
-    /// This method takes the event streams returned by `fetch_user_event_streams` and
-    /// processes each stream through the appropriate Whitenoise event handlers.
-    /// This provides separation of concerns between data fetching and event processing.
-    ///
-    /// # Arguments
-    ///
-    /// * `streams` - The `UserEventStreams` containing different types of event streams
-    /// * `whitenoise` - The Whitenoise instance for accessing event handlers
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if all events are processed successfully, even if individual
-    /// events fail to process (errors are logged but don't halt the overall processing).
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - Critical event processing errors occur
-    /// - Whitenoise instance is not available for processing
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let streams = nostr_manager.fetch_user_event_streams(signer, &account, group_ids).await?;
-    /// account.process_user_event_streams(streams, &whitenoise).await?;
-    /// ```
-    pub(crate) async fn process_user_event_streams(
-        &self,
-        mut streams: crate::nostr_manager::UserEventStreams,
-        whitenoise: &Whitenoise,
-    ) -> Result<()> {
-        use futures::StreamExt;
-
-        // Process metadata events
-        while let Some(event) = streams.metadata_events.next().await {
-            whitenoise.handle_metadata(event).await.map_err(|e| {
-                WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
-            })?;
-        }
-
-        // Process relay events
-        while let Some(event) = streams.relay_events.next().await {
-            whitenoise.handle_relay_list(event).await.map_err(|e| {
-                WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
-            })?;
-        }
-
-        // Process gift wrap events
-        while let Some(event) = streams.giftwrap_events.next().await {
-            whitenoise.handle_giftwrap(self, event).await.map_err(|e| {
-                WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
-            })?;
-        }
-
-        // Process group messages
-        while let Some(event) = streams.group_messages.next().await {
-            whitenoise
-                .handle_mls_message(self, event)
-                .await
-                .map_err(|e| {
-                    WhitenoiseError::Other(anyhow::anyhow!("Event processing error: {}", e))
-                })?;
-        }
-
         Ok(())
     }
 }
@@ -408,9 +339,6 @@ impl Whitenoise {
 
         self.activate_account(&account).await?;
         tracing::debug!(target: "whitenoise::login", "Account persisted and activated");
-
-        self.background_sync_account_data(&account).await?;
-        tracing::debug!(target: "whitenoise::login", "Background data fetch triggered");
 
         tracing::debug!(target: "whitenoise::login", "Successfully logged in: {}", account.pubkey.to_hex());
         Ok(account)
@@ -838,166 +766,6 @@ impl Whitenoise {
         Ok(())
     }
 
-    pub(crate) async fn background_sync_account_data(&self, account: &Account) -> Result<()> {
-        let group_ids = account.load_nostr_group_ids(self)?;
-        let nostr = self.nostr.clone();
-        let database = self.database.clone();
-        let account_clone = account.clone();
-        let signer = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
-
-        tokio::spawn(async move {
-            tracing::debug!(
-                target: "whitenoise::background_fetch_account_data",
-                "Starting background fetch for account: {}",
-                account_clone.pubkey.to_hex()
-            );
-
-            let current_time = Utc::now().timestamp_millis();
-
-            let whitenoise = match Whitenoise::get_instance() {
-                Ok(instance) => instance,
-                Err(e) => {
-                    tracing::error!(
-                        target: "whitenoise::background_fetch_account_data",
-                        "Failed to get Whitenoise instance for background sync: {}",
-                        e
-                    );
-                    return;
-                }
-            };
-
-            // Get user's relay information for contact list fetching
-            let user_relays = match account_clone.nip65_relays(whitenoise).await {
-                Ok(relays) => relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
-                Err(_) => {
-                    // Fallback to default relays if user has no specific relays
-                    Relay::defaults()
-                        .into_iter()
-                        .map(|r| r.url)
-                        .collect::<Vec<_>>()
-                }
-            };
-
-            // Ensure user relays are connected before fetching contact list
-            if let Err(e) = whitenoise.nostr.ensure_relays_connected(&user_relays).await {
-                tracing::warn!(
-                    target: "whitenoise::background_fetch_account_data",
-                    "Failed to ensure relay connections for account {}: {}. Proceeding with fetch anyway.",
-                    account_clone.pubkey.to_hex(),
-                    e
-                );
-            }
-
-            // Fetch the account's contact list
-            let fetched_contact_list = whitenoise
-                .nostr
-                .fetch_contact_list_events(account_clone.pubkey, &user_relays)
-                .await;
-
-            let contact_list_pubkeys = match &fetched_contact_list {
-                Ok(Some(contact_list_event)) => {
-                    NostrManager::pubkeys_from_event(contact_list_event)
-                }
-                Ok(None) => Vec::new(),
-                Err(e) => {
-                    tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to fetch contact list for account {}: {}", account_clone.pubkey.to_hex(), e);
-                    Vec::new()
-                }
-            };
-
-            // Process the fetched contact list first (if it exists)
-            // This ensures existing contact lists are processed during login even if no new events are streamed
-            if let Ok(Some(contact_list_event)) = fetched_contact_list {
-                tracing::debug!(
-                    target: "whitenoise::nostr_manager::sync_all_user_data",
-                    "Processing fetched contact list for account {}",
-                    account_clone.pubkey.to_hex()
-                );
-                if let Err(e) = whitenoise
-                    .handle_contact_list(&account_clone, contact_list_event)
-                    .await
-                {
-                    tracing::error!(target: "whitenoise::background_fetch_account_data", "Failed to process contact list for account {}: {}", account_clone.pubkey.to_hex(), e);
-                }
-            }
-
-            match nostr
-                .fetch_user_event_streams(
-                    signer,
-                    account_clone.pubkey,
-                    contact_list_pubkeys,
-                    Timestamp::from(
-                        account_clone.last_synced_at.unwrap_or_default().timestamp() as u64
-                    ),
-                    group_ids,
-                )
-                .await
-            {
-                Ok(streams) => {
-                    // Process the event streams
-                    let whitenoise = match Whitenoise::get_instance() {
-                        Ok(instance) => instance,
-                        Err(e) => {
-                            tracing::error!(
-                                target: "whitenoise::background_fetch_account_data",
-                                "Failed to get Whitenoise instance for processing events: {}",
-                                e
-                            );
-                            return;
-                        }
-                    };
-
-                    if let Err(e) = account_clone
-                        .process_user_event_streams(streams, whitenoise)
-                        .await
-                    {
-                        tracing::error!(
-                            target: "whitenoise::background_fetch_account_data",
-                            "Failed to process event streams for account {}: {}",
-                            account_clone.pubkey.to_hex(),
-                            e
-                        );
-                        return;
-                    }
-
-                    // Update the last_synced timestamp in the database
-                    if let Err(e) =
-                        sqlx::query("UPDATE accounts SET last_synced_at = ? WHERE pubkey = ?")
-                            .bind(current_time)
-                            .bind(account_clone.pubkey.to_hex())
-                            .execute(&database.pool)
-                            .await
-                    {
-                        tracing::error!(
-                            target: "whitenoise::background_fetch_account_data",
-                            "Failed to update last_synced timestamp for account {}: {}",
-                            account_clone.pubkey.to_hex(),
-                            e
-                        );
-                    } else {
-                        tracing::info!(
-                            target: "whitenoise::background_fetch_account_data",
-                            "Successfully fetched data and updated last_synced for account: {}",
-                            account_clone.pubkey.to_hex()
-                        );
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(
-                        target: "whitenoise::background_fetch_account_data",
-                        "Failed to fetch user event streams for account {}: {}",
-                        account_clone.pubkey.to_hex(),
-                        e
-                    );
-                }
-            }
-        });
-
-        Ok(())
-    }
-
     /// Extract group data including relay URLs and group IDs for subscription setup.
     async fn extract_groups_relays_and_ids(
         &self,
@@ -1048,6 +816,22 @@ impl Whitenoise {
             Relay::find_or_create_by_url(relay_url, &self.database).await?;
         }
 
+        // Compute per-account since with a 10s lookback buffer when available
+        let since = account.since_timestamp(10);
+        match since {
+            Some(ts) => tracing::debug!(
+                target: "whitenoise::setup_subscriptions",
+                "Computed per-account since={}s (10s buffer) for {}",
+                ts.as_u64(),
+                account.pubkey.to_hex()
+            ),
+            None => tracing::debug!(
+                target: "whitenoise::setup_subscriptions",
+                "Computed per-account since=None (unsynced) for {}",
+                account.pubkey.to_hex()
+            ),
+        }
+
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
@@ -1059,6 +843,7 @@ impl Whitenoise {
                 &inbox_relays,
                 &group_relays_urls,
                 &nostr_group_ids,
+                since,
                 keys,
             )
             .await?;
@@ -1143,6 +928,7 @@ mod tests {
     use super::*;
     use crate::whitenoise::accounts::Account;
     use crate::whitenoise::test_utils::*;
+    use chrono::{TimeDelta, Utc};
 
     #[tokio::test]
     #[ignore]
@@ -1492,6 +1278,80 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_since_timestamp_none_when_never_synced() {
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert!(account.since_timestamp(10).is_none());
+    }
+
+    #[test]
+    fn test_since_timestamp_applies_buffer() {
+        let now = Utc::now();
+        let last = now - TimeDelta::seconds(100);
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: Some(last),
+            created_at: now,
+            updated_at: now,
+        };
+        let ts = account.since_timestamp(10).unwrap();
+        let expected_secs = (last.timestamp().max(0) as u64).saturating_sub(10);
+        assert_eq!(ts.as_u64(), expected_secs);
+    }
+
+    #[test]
+    fn test_since_timestamp_floors_at_zero() {
+        // Choose a timestamp very close to the epoch so that buffer would underflow
+        let epochish = chrono::DateTime::<Utc>::from_timestamp(5, 0).unwrap();
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: Some(epochish),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let ts = account.since_timestamp(10).unwrap();
+        assert_eq!(ts.as_u64(), 0);
+    }
+
+    #[test]
+    fn test_since_timestamp_clamps_future_to_now_minus_buffer() {
+        let now = Utc::now();
+        let future = now + chrono::TimeDelta::seconds(3600 * 24); // 24h in the future
+        let account = Account {
+            id: None,
+            pubkey: Keys::generate().public_key(),
+            user_id: 1,
+            last_synced_at: Some(future),
+            created_at: now,
+            updated_at: now,
+        };
+        let buffer = 10u64;
+        // Capture time before and after to bound the internal now() used by the function
+        let before = Utc::now();
+        let ts = account.since_timestamp(buffer).unwrap();
+        let after = Utc::now();
+
+        let before_secs = before.timestamp().max(0) as u64;
+        let after_secs = after.timestamp().max(0) as u64;
+
+        let min_expected = before_secs.saturating_sub(buffer);
+        let max_expected = after_secs.saturating_sub(buffer);
+
+        let actual = ts.as_u64();
+        assert!(actual >= min_expected && actual <= max_expected);
     }
 
     #[tokio::test]

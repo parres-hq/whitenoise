@@ -1,16 +1,11 @@
 //! This module contains functions for querying Nostr events from relays.
 
-use std::time::Duration;
-
 use nostr_sdk::prelude::*;
 
 use crate::{
-    nostr_manager::{NostrManager, Result},
+    nostr_manager::{utils::is_event_timestamp_valid, NostrManager, Result},
     RelayType,
 };
-
-/// Maximum allowed skew for event timestamps in the future (1 hour)
-const MAX_FUTURE_SKEW: Duration = Duration::from_secs(60 * 60);
 
 impl NostrManager {
     pub(crate) async fn fetch_metadata_from(
@@ -53,25 +48,10 @@ impl NostrManager {
         Self::latest_from_events(events)
     }
 
-    pub(crate) async fn fetch_contact_list_events(
-        &self,
-        pubkey: PublicKey,
-        relays: &[RelayUrl],
-    ) -> Result<Option<Event>> {
-        let filter = Filter::new().author(pubkey).kind(Kind::ContactList);
-        let events = self
-            .client
-            .fetch_events_from(relays, filter, self.timeout)
-            .await?;
-        Self::latest_from_events(events)
-    }
-
     fn latest_from_events(events: Events) -> Result<Option<Event>> {
-        // Filter out events with timestamps too far in the future
-        let cutoff = Timestamp::now() + MAX_FUTURE_SKEW;
         let latest = events
             .into_iter()
-            .filter(|e| e.created_at <= cutoff)
+            .filter(is_event_timestamp_valid)
             .max_by_key(|e| (e.created_at, e.id));
         Ok(latest)
     }

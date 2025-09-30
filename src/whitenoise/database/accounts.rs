@@ -444,6 +444,34 @@ impl Account {
             Ok(())
         }
     }
+
+    /// Advances `last_synced_at` to the provided `created_ms` if it's newer.
+    /// Does nothing if the existing value is greater or equal. Also updates `updated_at`.
+    pub(crate) async fn update_last_synced_max(
+        pubkey: &PublicKey,
+        created_ms: i64,
+        database: &Database,
+    ) -> Result<(), WhitenoiseError> {
+        let now_ms = Utc::now().timestamp_millis();
+        sqlx::query(
+            "UPDATE accounts
+             SET last_synced_at = CASE
+                 WHEN last_synced_at IS NULL OR last_synced_at < ? THEN ?
+                 ELSE last_synced_at
+             END,
+             updated_at = ?
+             WHERE pubkey = ?",
+        )
+        .bind(created_ms)
+        .bind(created_ms)
+        .bind(now_ms)
+        .bind(pubkey.to_hex())
+        .execute(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1264,6 +1292,114 @@ mod tests {
             assert_eq!(follower.pubkey, followers2[i].pubkey);
             assert_eq!(follower.metadata.name, followers2[i].metadata.name);
         }
+    }
+
+    #[tokio::test]
+    async fn test_update_last_synced_max_sets_when_null() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let created_at = chrono::Utc::now();
+        let updated_at = created_at;
+
+        // Account with NULL last_synced_at
+        let account = Account {
+            id: Some(1),
+            pubkey,
+            user_id: 1,
+            last_synced_at: None,
+            created_at,
+            updated_at,
+        };
+        account.save(&whitenoise.database).await.unwrap();
+
+        let before = Account::find_by_pubkey(&pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let event_ms = chrono::Utc::now().timestamp_millis();
+        Account::update_last_synced_max(&pubkey, event_ms, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let after = Account::find_by_pubkey(&pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        assert!(after.last_synced_at.is_some());
+        assert_eq!(after.last_synced_at.unwrap().timestamp_millis(), event_ms);
+        assert!(after.updated_at.timestamp_millis() >= before.updated_at.timestamp_millis());
+    }
+
+    #[tokio::test]
+    async fn test_update_last_synced_max_no_downgrade() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let base_ms = chrono::Utc::now().timestamp_millis();
+        let initial_ms = base_ms + 5_000;
+        let older_ms = base_ms;
+
+        let account = Account {
+            id: Some(1),
+            pubkey,
+            user_id: 1,
+            last_synced_at: chrono::DateTime::<chrono::Utc>::from_timestamp_millis(initial_ms),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        account.save(&whitenoise.database).await.unwrap();
+
+        let before = Account::find_by_pubkey(&pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        Account::update_last_synced_max(&pubkey, older_ms, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let after = Account::find_by_pubkey(&pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        assert_eq!(after.last_synced_at.unwrap().timestamp_millis(), initial_ms);
+        // updated_at is always refreshed by the helper
+        assert!(after.updated_at.timestamp_millis() >= before.updated_at.timestamp_millis());
+    }
+
+    #[tokio::test]
+    async fn test_update_last_synced_max_advances_when_newer() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let base_ms = chrono::Utc::now().timestamp_millis();
+        let initial_ms = base_ms;
+        let newer_ms = base_ms + 10_000;
+
+        let account = Account {
+            id: Some(1),
+            pubkey,
+            user_id: 1,
+            last_synced_at: chrono::DateTime::<chrono::Utc>::from_timestamp_millis(initial_ms),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        account.save(&whitenoise.database).await.unwrap();
+
+        let before = Account::find_by_pubkey(&pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        Account::update_last_synced_max(&pubkey, newer_ms, &whitenoise.database)
+            .await
+            .unwrap();
+
+        let after = Account::find_by_pubkey(&pubkey, &whitenoise.database)
+            .await
+            .unwrap();
+
+        assert_eq!(after.last_synced_at.unwrap().timestamp_millis(), newer_ms);
+        assert!(after.updated_at.timestamp_millis() >= before.updated_at.timestamp_millis());
     }
 
     #[tokio::test]

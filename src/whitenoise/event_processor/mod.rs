@@ -2,6 +2,7 @@ use nostr_sdk::prelude::*;
 use tokio::sync::mpsc::Receiver;
 
 use crate::{
+    nostr_manager::utils::is_event_timestamp_valid,
     types::{ProcessableEvent, RetryInfo},
     whitenoise::{
         error::{Result, WhitenoiseError},
@@ -57,6 +58,17 @@ impl Whitenoise {
                     // Process the event
                     match event {
                         ProcessableEvent::NostrEvent { event, subscription_id, retry_info } => {
+                            // Validate timestamp before processing
+                            if !is_event_timestamp_valid(&event) {
+                                tracing::debug!(
+                                    target: "whitenoise::event_processor::process_events",
+                                    "Skipping event {} with invalid future timestamp: {}",
+                                    event.id.to_hex(),
+                                    event.created_at
+                                );
+                                continue;
+                            }
+
                             let sub_id = match &subscription_id {
                                 Some(s) => s.clone(),
                                 None => {
@@ -183,5 +195,33 @@ mod tests {
 
         // Test that shutdown completed successfully without errors
         // (We can't test queuing operations since those methods were removed)
+    }
+
+    #[tokio::test]
+    async fn test_future_timestamp_rejection() {
+        use crate::nostr_manager::utils::is_event_timestamp_valid;
+        use nostr_sdk::prelude::*;
+        use std::time::Duration as StdDuration;
+
+        // Create test keys
+        let keys = Keys::generate();
+
+        // Create an event with a timestamp far in the future (exceeds MAX_FUTURE_SKEW of 1 hour)
+        let far_future = Timestamp::now() + StdDuration::from_secs(7200); // 2 hours in future
+        let event = EventBuilder::text_note("test message with future timestamp")
+            .custom_created_at(far_future)
+            .sign(&keys)
+            .await
+            .unwrap();
+
+        // Validate that our utility function correctly identifies this as invalid
+        assert!(!is_event_timestamp_valid(&event));
+
+        // Test that a current timestamp is valid for comparison
+        let valid_event = EventBuilder::text_note("test message with current timestamp")
+            .sign(&keys)
+            .await
+            .unwrap();
+        assert!(is_event_timestamp_valid(&valid_event));
     }
 }

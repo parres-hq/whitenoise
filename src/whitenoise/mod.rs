@@ -228,7 +228,7 @@ impl Whitenoise {
 
     pub async fn setup_all_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
         Self::setup_global_users_subscriptions(whitenoise_ref).await?;
-        Self::setup_accounts_sync_and_subscriptions(whitenoise_ref).await?;
+        Self::setup_accounts_subscriptions(whitenoise_ref).await?;
         Ok(())
     }
 
@@ -249,28 +249,66 @@ impl Whitenoise {
             .secrets_store
             .get_nostr_keys_for_pubkey(&signer_account.pubkey)?;
 
+        // Compute shared since for global user subscriptions with 10s lookback buffer
+        let since = Self::compute_global_since_timestamp(whitenoise_ref).await?;
+
         whitenoise_ref
             .nostr
-            .setup_batched_relay_subscriptions_with_signer(users_with_relays, &default_relays, keys)
+            .setup_batched_relay_subscriptions_with_signer(
+                users_with_relays,
+                &default_relays,
+                keys,
+                since,
+            )
             .await?;
         Ok(())
     }
 
-    async fn setup_accounts_sync_and_subscriptions(
+    // Compute a shared since timestamp for global user subscriptions.
+    // - Assumes at least one account exists (caller checked signer presence)
+    // - If any account is unsynced (last_synced_at = None), return None
+    // - Otherwise, use min(last_synced_at) minus a 10s buffer, floored at 0
+    async fn compute_global_since_timestamp(
         whitenoise_ref: &'static Whitenoise,
-    ) -> Result<()> {
+    ) -> Result<Option<nostr_sdk::Timestamp>> {
+        let accounts = Account::all(&whitenoise_ref.database).await?;
+        if accounts.iter().any(|a| a.last_synced_at.is_none()) {
+            let unsynced = accounts
+                .iter()
+                .filter(|a| a.last_synced_at.is_none())
+                .count();
+            tracing::info!(
+                target: "whitenoise::setup_global_users_subscriptions",
+                "Global subscriptions using since=None due to {} unsynced accounts",
+                unsynced
+            );
+            return Ok(None);
+        }
+
+        const BUFFER_SECS: u64 = 10;
+        let since = accounts
+            .iter()
+            .filter_map(|a| a.since_timestamp(BUFFER_SECS))
+            .min_by_key(|t| t.as_u64());
+
+        if let Some(ts) = since {
+            tracing::info!(
+                target: "whitenoise::setup_global_users_subscriptions",
+                "Global subscriptions using since={} ({}s buffer)",
+                ts.as_u64(), BUFFER_SECS
+            );
+        } else {
+            tracing::warn!(
+                target: "whitenoise::setup_global_users_subscriptions",
+                "No minimum last_synced_at found; defaulting to since=None"
+            );
+        }
+        Ok(since)
+    }
+
+    async fn setup_accounts_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
         let accounts = Account::all(&whitenoise_ref.database).await?;
         for account in accounts {
-            // Trigger background data fetch for each account (non-critical)
-            if let Err(e) = whitenoise_ref.background_sync_account_data(&account).await {
-                tracing::warn!(
-                    target: "whitenoise::load_accounts",
-                    "Failed to trigger background fetch for account {}: {}",
-                    account.pubkey.to_hex(),
-                    e
-                );
-                // Continue - background fetch failure should not prevent account loading
-            }
             // Setup subscriptions for this account
             match whitenoise_ref.setup_subscriptions(&account).await {
                 Ok(()) => {
