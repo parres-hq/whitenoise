@@ -46,11 +46,31 @@ just precommit
 
 ## Contributing
 
-To get started contributing you'll need to have the [Rust](https://www.rust-lang.org/tools/install) toolchain installed and [Docker](https://www.docker.com).
+To get started contributing you'll need to have the [Rust](https://www.rust-lang.org/tools/install) toolchain installed (version 1.90.0 or later) and [Docker](https://www.docker.com).
 
 1. Clone the repo: `git clone https://github.com/parres-hq/whitenoise.git` and `cd whitenoise`.
+1. Install recommended development tools: `just install-tools` (optional but recommended)
 1. In one terminal start the development services (two Nostr relays; nostr-rs-relay and strfry, and a blossom server) by running `docker compose up`.
 1. Now you can run the integration test if you'd like.
+
+### Development Tools
+
+We recommend installing additional cargo tools for enhanced development experience:
+
+```sh
+just install-tools
+```
+
+This installs:
+- **cargo-nextest**: Faster parallel test runner
+- **cargo-audit**: Security vulnerability scanner
+- **cargo-outdated**: Check for outdated dependencies
+- **cargo-llvm-cov**: Code coverage reporting
+- **cargo-msrv**: Verify minimum Rust version
+- **cargo-deny**: License and dependency checker
+- **cargo-expand**: Macro expansion tool
+
+See [docs/DEVELOPMENT_TOOLS.md](docs/DEVELOPMENT_TOOLS.md) for detailed usage instructions.
 
 ### Formatting, Linting, and Tests
 
@@ -58,6 +78,25 @@ Before submitting PRs, please run the `precommit` command:
 
 ```sh
 just precommit
+```
+
+Or for a quicker check (without integration tests):
+
+```sh
+just precommit-quick
+```
+
+Available development commands:
+
+```sh
+just check           # Run format, clippy, and doc checks
+just fmt             # Format code
+just test            # Run all tests (uses nextest if available)
+just test-cargo      # Force cargo test (slower)
+just coverage        # Generate coverage report
+just audit           # Security audit
+just outdated        # Check for outdated dependencies
+just deny-check      # Check licenses and dependencies
 ```
 
 ## License

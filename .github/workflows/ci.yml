@@ -6,42 +6,112 @@ on:
   pull_request:
     branches: ["master"]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
-  check:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: native
-          - os: macos-latest
-            target: native
-          - os: macos-14
-            target: native
-    runs-on: ${{ matrix.os }}
+  # Quick checks that fail fast
+  fmt:
+    name: Format Check
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Rust (stable for checks)
-        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
         with:
-          components: rustfmt, clippy
+          toolchain: "1.90.0"
+          components: rustfmt
+
+      - name: Format check
+        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90.0"
+          components: clippy
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Install system dependencies
+      - name: Clippy check
+        run: cargo clippy --all-targets --all-features --no-deps -- -D warnings -A clippy::uninlined_format_args
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90.0"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Documentation check
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  # Security audit
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Security audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build and test matrix
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            run-integration: true
+          - os: macos-latest
+            run-integration: false
+          - os: macos-14
+            run-integration: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90.0"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
-      - name: Start Docker Compose services
+      - name: Start Docker Compose services (Linux)
         if: runner.os == 'Linux'
         run: docker compose up -d
 
-      - name: Wait for services to be ready
+      - name: Wait for services to be ready (Linux)
         if: runner.os == 'Linux'
         run: |
           echo "Running Nostr health checks..."
@@ -65,33 +135,65 @@ jobs:
       - name: Build
         run: cargo build --all-targets --all-features
 
-      - name: Format check
-        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
+      - name: Test (Linux only - requires Docker)
+        if: runner.os == 'Linux'
+        run: cargo test --all-features --all-targets
+        env:
+          RUST_LOG: error
 
-      - name: Documentation check
-        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: cargo doc --no-deps --all-features
-
-      - name: Lint
-        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: cargo clippy --all-targets --all-features --no-deps -- -D warnings -A clippy::uninlined_format_args
-
-      - name: Test
-        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: RUST_LOG=error cargo test --all-features --all-targets
-
-      - name: Test Docs
-        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
-        run: RUST_LOG=error cargo test --all-features --doc
+      - name: Test Docs (Linux only - requires Docker)
+        if: runner.os == 'Linux'
+        run: cargo test --all-features --doc
+        env:
+          RUST_LOG: error
 
       - name: Integration Test
-        if: matrix.target == 'native' && matrix.os == 'ubuntu-latest'
+        if: matrix.run-integration
         run: |
           mkdir -p ./dev/data/integration_test/
-          RUST_LOG=warn,sqlx=info,refinery_core=error,keyring=info,nostr_relay_pool=error,mdk_sqlite_storage=error,tungstenite=error,integration_test=debug cargo run --bin integration_test --features integration-tests -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+          RUST_LOG=warn,sqlx=info,refinery_core=error,keyring=info,nostr_relay_pool=error,mdk_sqlite_storage=error,tungstenite=error,integration_test=debug \
+          cargo run --bin integration_test --features integration-tests -- \
+          --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
           rm -rf ./dev/data/integration_test/
 
-      - name: Stop Docker Compose services
+      - name: Stop Docker Compose services (Linux)
         if: always() && runner.os == 'Linux'
         run: docker compose down -v
+
+  # Test against nightly (informational only)
+  nightly:
+    name: Nightly Check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly
+
+      - name: Check with nightly
+        run: cargo check --all-targets --all-features
+
+  # Ensure all required jobs pass
+  ci-success:
+    name: CI Success
+    needs: [fmt, clippy, docs, audit, test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs
+        run: |
+          if [[ "${{ needs.fmt.result }}" != "success" || \
+                "${{ needs.clippy.result }}" != "success" || \
+                "${{ needs.docs.result }}" != "success" || \
+                "${{ needs.audit.result }}" != "success" || \
+                "${{ needs.test.result }}" != "success" ]]; then
+            echo "❌ One or more CI jobs failed"
+            exit 1
+          fi
+          echo "✅ All CI jobs passed successfully"

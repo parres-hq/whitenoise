@@ -40,7 +40,23 @@ int-test-flamegraph:
     cargo flamegraph --release --bin integration_test --features integration-tests --deterministic -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
 # Run all tests (unit tests, integration tests, and doc tests)
+# Uses nextest for faster parallel execution if available, falls back to cargo test
 test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-nextest &> /dev/null; then
+        echo "Running tests with nextest (parallel)..."
+        cargo nextest run --all-features --all-targets
+        cargo test --all-features --doc
+    else
+        echo "Running tests with cargo test..."
+        echo "Tip: Install cargo-nextest for faster parallel testing: just install-tools"
+        cargo test --all-features --all-targets
+        cargo test --all-features --doc
+    fi
+
+# Run tests with standard cargo test (slower, sequential)
+test-cargo:
     cargo test --all-features --all-targets
     cargo test --all-features --doc
 
@@ -48,27 +64,107 @@ test:
 check-clippy:
     @bash scripts/check-clippy.sh
 
+# Fix clippy issues automatically where possible
+fix-clippy:
+    cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+
 # Check fmt
 check-fmt:
+    @bash scripts/check-fmt.sh check
+
+# Apply formatting
+fmt:
     @bash scripts/check-fmt.sh
 
 # Check docs
 check-docs:
     @bash scripts/check-docs.sh
 
-# Check all
+# Check all (fast checks before running tests)
 check:
     @bash scripts/check-all.sh
 
 # Run pre-commit checks (linting, formatting, docs, tests, integration tests)
 precommit: check test int-test
 
+# Quick pre-commit (skip integration tests)
+precommit-quick: check test
+
+# Check for outdated dependencies
+outdated:
+    cargo outdated --workspace --root-deps-only
+
+# Update dependencies
+update:
+    cargo update
+
+# Audit dependencies for security vulnerabilities
+# Ignoring:
+# - RUSTSEC-2023-0071: RSA Marvin Attack (transitive via sqlx-mysql, not used in our SQLite-only app)
+# - RUSTSEC-2024-0384: instant unmaintained (transitive via rust-nostr, low risk)
+audit:
+    cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0384
+
+# Generate and open documentation
+doc:
+    cargo doc --no-deps --all-features --open
+
+# Clean build artifacts and data
+clean:
+    cargo clean
+    rm -rf ./dev/data/*
+
+# Force running tests with nextest (requires nextest to be installed)
+test-nextest:
+    cargo nextest run --all-features --all-targets
+    cargo test --all-features --doc
+
+# Generate code coverage report
+coverage:
+    cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+    @echo "Coverage report generated: lcov.info"
+
+# Generate HTML code coverage report
+coverage-html:
+    cargo llvm-cov --all-features --workspace --html
+    @echo "HTML coverage report generated in target/llvm-cov/html/"
+    @echo "Open target/llvm-cov/html/index.html in your browser"
+
+# Check minimum supported Rust version
+check-msrv:
+    cargo msrv verify
+
+# Run cargo-deny checks (licenses, security, sources)
+deny-check:
+    cargo deny check
+
+# Install recommended development tools
+install-tools:
+    @bash scripts/install-dev-tools.sh
 
 ######################
 # Build
 ######################
 
+# Build release binary
+build-release:
+    cargo build --release
 
+######################
+# Docker
+######################
+
+# Start docker compose services
+docker-up:
+    docker compose up -d
+
+# Stop docker compose services
+docker-down:
+    docker compose down -v
+
+# Show docker compose logs
+docker-logs:
+    docker compose logs -f
 
 ######################
 # Utilities
