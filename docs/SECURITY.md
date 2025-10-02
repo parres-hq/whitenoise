@@ -34,7 +34,7 @@ This command runs `cargo audit` with the appropriate ignore flags for the adviso
 
 ## Reporting Security Issues
 
-If you discover a security vulnerability in White Noise, please report it privately by emailing j@whiteniose.chat. Please do not create public GitHub issues for security vulnerabilities.
+If you discover a security vulnerability in White Noise, please report it privately by emailing j@whitenoise.chat. Please do not create public GitHub issues for security vulnerabilities.
 
 ## Security Best Practices
 
