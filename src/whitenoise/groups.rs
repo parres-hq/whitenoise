@@ -1,10 +1,13 @@
 use std::{collections::HashSet, time::Duration};
 
+use mdk_core::extension::group_image;
 use mdk_core::prelude::*;
 use mdk_sqlite_storage::MdkSqliteStorage;
+use nostr_blossom::client::BlossomClient;
 use nostr_sdk::prelude::*;
 
 use crate::{
+    types::ImageType,
     whitenoise::{
         accounts::Account,
         error::{Result, WhitenoiseError},
@@ -497,6 +500,109 @@ impl Whitenoise {
 
         // TODO: Do any local updates to ensure that we're accurately reflecting that the account is trying to leave this group
         Ok(())
+    }
+
+    /// Uploads a group image to a Blossom server and returns the encrypted metadata.
+    ///
+    /// This method uses the MDK library's `prepare_group_image_for_upload` function to:
+    /// 1. Encrypt the image using ChaCha20-Poly1305 AEAD
+    /// 2. Generate a SHA256 hash of the encrypted data
+    /// 3. Derive a deterministic upload keypair for Blossom authentication
+    ///
+    /// The returned metadata (hash, key, nonce) should be passed to `update_group_data`
+    /// to update the group's image settings.
+    ///
+    /// # Arguments
+    /// * `account` - The account performing the upload (should be a group admin)
+    /// * `group_id` - The ID of the group to upload the image for
+    /// * `file_path` - Path to the image file to upload
+    /// * `image_type` - Image type (JPEG, PNG, etc.)
+    /// * `server` - Blossom server URL to upload to
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// * `encrypted_hash` - SHA256 hash of the encrypted image (to be stored in group metadata)
+    /// * `image_key` - Encryption key (to be stored in group metadata)
+    /// * `image_nonce` - Encryption nonce (to be stored in group metadata)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let (hash, key, nonce) = whitenoise.upload_group_image(
+    ///     &account,
+    ///     &group_id,
+    ///     "/path/to/image.png",
+    ///     ImageType::Png,
+    ///     server_url,
+    /// ).await?;
+    ///
+    /// // Update the group with the new image metadata
+    /// let update = NostrGroupDataUpdate {
+    ///     image_hash: Some(Some(hash)),
+    ///     image_key: Some(Some(key)),
+    ///     image_nonce: Some(Some(nonce)),
+    ///     ..Default::default()
+    /// };
+    /// whitenoise.update_group_data(&account, &group_id, update).await?;
+    /// ```
+    pub async fn upload_group_image(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        file_path: &str,
+        image_type: ImageType,
+        server: Url,
+    ) -> Result<([u8; 32], [u8; 32], [u8; 12])> {
+        // Verify the account is an admin of the group
+        let admins = self.group_admins(account, group_id).await?;
+        if !admins.contains(&account.pubkey) {
+            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Account is not an admin of the group"
+            )));
+        }
+
+        // Read the image file
+        let image_data = tokio::fs::read(file_path).await?;
+
+        // Use MDK to prepare the image for upload (encrypt + derive keypair)
+        let prepared = group_image::prepare_group_image_for_upload(&image_data).map_err(|e| {
+            WhitenoiseError::Other(anyhow::anyhow!("Failed to prepare group image: {}", e))
+        })?;
+
+        // Upload encrypted data to Blossom using the derived keypair
+        let client = BlossomClient::new(server);
+        let descriptor = client
+            .upload_blob(
+                prepared.encrypted_data,
+                Some(image_type.mime_type().to_string()),
+                None,
+                Some(&prepared.upload_keypair),
+            )
+            .await
+            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
+
+        // Verify the Blossom server returned the expected hash
+        // The descriptor.sha256 is a Hash type from bitcoin_hashes, convert to byte array
+        let returned_hash_bytes: [u8; 32] = *descriptor.sha256.as_ref();
+
+        if returned_hash_bytes != prepared.encrypted_hash {
+            return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                "Blossom returned hash does not match encrypted image hash"
+            )));
+        }
+
+        tracing::debug!(
+            target: "whitenoise::groups::upload_group_image",
+            "Successfully uploaded group image for group {} to Blossom server. Hash: {}",
+            hex::encode(group_id.as_slice()),
+            hex::encode(prepared.encrypted_hash)
+        );
+
+        // Return the metadata needed for group update
+        Ok((
+            prepared.encrypted_hash,
+            prepared.image_key,
+            prepared.image_nonce,
+        ))
     }
 }
 
@@ -1037,5 +1143,89 @@ mod tests {
 
         // For now, we just verify that the proposal was successfully created and published
         // without errors, which indicates the leave_group method works correctly.
+    }
+
+    #[tokio::test]
+    async fn test_upload_group_image() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator and member
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkeys = vec![members[0].0.pubkey];
+
+        // Create group with creator as admin
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let group = whitenoise
+            .create_group(&creator_account, member_pubkeys, config, None)
+            .await
+            .unwrap();
+
+        // Create a test image file
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let test_image_data = vec![0u8; 1024]; // 1KB test image
+        temp_file.write_all(&test_image_data).unwrap();
+        let temp_path = temp_file.path().to_str().unwrap();
+
+        // Upload the group image to local Blossom server (port 3000 per docker-compose.yml)
+        let blossom_server = Url::parse("http://localhost:3000").unwrap();
+        let result = whitenoise
+            .upload_group_image(
+                &creator_account,
+                &group.mls_group_id,
+                temp_path,
+                ImageType::Png,
+                blossom_server,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to upload group image: {:?}",
+            result.unwrap_err()
+        );
+
+        let (hash, key, nonce) = result.unwrap();
+
+        // Verify the returned values are valid
+        assert_ne!(hash, [0u8; 32], "Hash should not be all zeros");
+        assert_ne!(key, [0u8; 32], "Key should not be all zeros");
+        assert_ne!(nonce, [0u8; 12], "Nonce should not be all zeros");
+
+        // Update the group with the new image metadata
+        let update = NostrGroupDataUpdate {
+            name: None,
+            description: None,
+            image_hash: Some(Some(hash)),
+            image_key: Some(Some(key)),
+            image_nonce: Some(Some(nonce)),
+            admins: None,
+            relays: None,
+        };
+
+        let update_result = whitenoise
+            .update_group_data(&creator_account, &group.mls_group_id, update)
+            .await;
+
+        assert!(
+            update_result.is_ok(),
+            "Failed to update group data: {:?}",
+            update_result.unwrap_err()
+        );
+
+        // Verify the group data was updated
+        let updated_groups = whitenoise.groups(&creator_account, true).await.unwrap();
+        let updated_group = updated_groups
+            .iter()
+            .find(|g| g.mls_group_id == group.mls_group_id)
+            .expect("Updated group not found");
+
+        assert_eq!(updated_group.image_hash, Some(hash));
+        assert_eq!(updated_group.image_key, Some(key));
+        assert_eq!(updated_group.image_nonce, Some(nonce));
     }
 }
