@@ -16,7 +16,7 @@ use crate::nostr_manager::{
 impl NostrManager {
     /// Create a short hash from a pubkey for use in subscription IDs
     /// Uses first 12 characters of SHA256 hash for privacy and collision resistance, salted per session
-    fn create_pubkey_hash(&self, pubkey: &PublicKey) -> String {
+    pub(crate) fn create_pubkey_hash(&self, pubkey: &PublicKey) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.session_salt());
         hasher.update(pubkey.to_bytes());

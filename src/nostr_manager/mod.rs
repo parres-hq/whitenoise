@@ -410,4 +410,114 @@ impl NostrManager {
             }
         }
     }
+
+    /// Counts active subscriptions for a specific account by checking subscription IDs.
+    /// Returns the number of subscriptions that start with the account's hashed pubkey prefix.
+    #[allow(dead_code)]
+    pub(crate) async fn count_subscriptions_for_account(&self, pubkey: &PublicKey) -> usize {
+        let hash = self.create_pubkey_hash(pubkey);
+        let prefix = format!("{}_", hash);
+        self.client
+            .subscriptions()
+            .await
+            .keys()
+            .filter(|id| id.as_str().starts_with(&prefix))
+            .count()
+    }
+
+    /// Counts active global subscriptions by checking for subscription IDs that start with "global_users_".
+    #[allow(dead_code)]
+    pub(crate) async fn count_global_subscriptions(&self) -> usize {
+        self.client
+            .subscriptions()
+            .await
+            .keys()
+            .filter(|id| id.as_str().starts_with("global_users_"))
+            .count()
+    }
+
+    /// Checks if at least one relay in the provided list is connected or connecting.
+    /// Returns true if any relay is in Connected or Connecting state.
+    #[allow(dead_code)]
+    pub(crate) async fn has_any_relay_connected(&self, relay_urls: &[RelayUrl]) -> bool {
+        for relay_url in relay_urls {
+            match self.get_relay_status(relay_url).await {
+                Ok(RelayStatus::Connected | RelayStatus::Connecting) => return true,
+                _ => continue,
+            }
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+mod subscription_monitoring_tests {
+    use super::*;
+    use crate::whitenoise::event_tracker::NoEventTracker;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_count_subscriptions_for_account_empty() {
+        let (event_sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        let pubkey = Keys::generate().public_key();
+        let count = nostr_manager.count_subscriptions_for_account(&pubkey).await;
+
+        // Should return 0 when no subscriptions exist
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_count_global_subscriptions_empty() {
+        let (event_sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        let count = nostr_manager.count_global_subscriptions().await;
+
+        // Should return 0 when no global subscriptions exist
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_has_any_relay_connected_empty_list() {
+        let (event_sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        let relay_urls: Vec<RelayUrl> = vec![];
+        let result = nostr_manager.has_any_relay_connected(&relay_urls).await;
+
+        // Should return false with empty relay list
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_has_any_relay_connected_disconnected() {
+        let (event_sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        // Create a relay URL that doesn't exist in the client
+        let relay_url = RelayUrl::parse("wss://relay.example.com").unwrap();
+        let result = nostr_manager.has_any_relay_connected(&[relay_url]).await;
+
+        // Should return false when relay is not in the client pool
+        assert!(!result);
+    }
 }
