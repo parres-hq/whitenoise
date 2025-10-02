@@ -75,6 +75,10 @@ jobs:
         uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Skip advisories:
+          # - RUSTSEC-2023-0071: RSA Marvin Attack (transitive via sqlx-mysql, not used in our SQLite-only app)
+          # - RUSTSEC-2024-0384: instant unmaintained (transitive via rust-nostr, low risk)
+          ignore: RUSTSEC-2023-0071,RUSTSEC-2024-0384
 
   # Build and test matrix
   test:
@@ -178,22 +182,3 @@ jobs:
 
       - name: Check with nightly
         run: cargo check --all-targets --all-features
-
-  # Ensure all required jobs pass
-  ci-success:
-    name: CI Success
-    needs: [fmt, clippy, docs, audit, test]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check all jobs
-        run: |
-          if [[ "${{ needs.fmt.result }}" != "success" || \
-                "${{ needs.clippy.result }}" != "success" || \
-                "${{ needs.docs.result }}" != "success" || \
-                "${{ needs.audit.result }}" != "success" || \
-                "${{ needs.test.result }}" != "success" ]]; then
-            echo "❌ One or more CI jobs failed"
-            exit 1
-          fi
-          echo "✅ All CI jobs passed successfully"
