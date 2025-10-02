@@ -3,7 +3,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use mdk_core::prelude::GroupId;
 
-use super::{utils::parse_timestamp, Database};
+use super::{Database, utils::parse_timestamp};
 use crate::whitenoise::{
     error::WhitenoiseError,
     group_information::{GroupInformation, GroupType},

@@ -5,8 +5,8 @@ use anyhow::Context;
 use dashmap::DashMap;
 use nostr_sdk::{PublicKey, RelayUrl, ToBech32};
 use tokio::sync::{
-    mpsc::{self, Sender},
     OnceCell, Semaphore,
+    mpsc::{self, Sender},
 };
 
 pub mod accounts;
@@ -792,14 +792,18 @@ mod tests {
             // Both should have valid configurations (they'll be different temp dirs, which is fine)
             assert!(whitenoise1.config.data_dir.exists());
             assert!(whitenoise2.config.data_dir.exists());
-            assert!(Account::all(&whitenoise1.database)
-                .await
-                .unwrap()
-                .is_empty());
-            assert!(Account::all(&whitenoise2.database)
-                .await
-                .unwrap()
-                .is_empty());
+            assert!(
+                Account::all(&whitenoise1.database)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                Account::all(&whitenoise2.database)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
         }
     }
 

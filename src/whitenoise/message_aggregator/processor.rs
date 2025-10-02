@@ -213,10 +213,10 @@ fn extract_reply_info(tags: &Tags) -> Option<String> {
     }
 
     // Use the last e-tag as per Nostr convention (NIP-10)
-    if let Some(last_e_tag) = e_tags.last() {
-        if let Some(event_id) = last_e_tag.content() {
-            return Some(event_id.to_string());
-        }
+    if let Some(last_e_tag) = e_tags.last()
+        && let Some(event_id) = last_e_tag.content()
+    {
+        return Some(event_id.to_string());
     }
 
     None

@@ -4,10 +4,10 @@ use async_trait::async_trait;
 use nostr_sdk::prelude::*;
 
 use crate::whitenoise::{
+    Whitenoise,
     accounts::Account,
     database::{processed_events::ProcessedEvent, published_events::PublishedEvent},
     utils::timestamp_to_datetime,
-    Whitenoise,
 };
 
 /// Trait for handling event tracking operations

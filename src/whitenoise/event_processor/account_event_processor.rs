@@ -5,9 +5,9 @@ use crate::{
     nostr_manager::utils::cap_timestamp_to_now,
     types::RetryInfo,
     whitenoise::{
+        Whitenoise,
         accounts::Account,
         error::{Result, WhitenoiseError},
-        Whitenoise,
     },
 };
 

@@ -1,6 +1,6 @@
 use nostr_sdk::PublicKey;
 
-use crate::whitenoise::{accounts::Account, error::Result, users::User, Whitenoise};
+use crate::whitenoise::{Whitenoise, accounts::Account, error::Result, users::User};
 
 impl Whitenoise {
     /// Creates a follow relationship between an account and a user.

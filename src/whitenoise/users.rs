@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     nostr_manager::NostrManager,
     whitenoise::{
+        Whitenoise,
         database::processed_events::ProcessedEvent,
         error::{Result, WhitenoiseError},
         relays::{Relay, RelayType},
         utils::timestamp_to_datetime,
-        Whitenoise,
     },
 };
 
@@ -325,20 +325,19 @@ impl User {
 
         // Remove relays that are no longer needed
         for existing_relay in &stored_relays {
-            if !new_urls_set.contains(&existing_relay.url) {
-                if let Err(e) = self
+            if !new_urls_set.contains(&existing_relay.url)
+                && let Err(e) = self
                     .remove_relay(existing_relay, relay_type, &whitenoise.database)
                     .await
-                {
-                    tracing::warn!(
-                        target: "whitenoise::users::sync_relay_urls",
-                        "Failed to remove {:?} relay {} for user {}: {}",
-                        relay_type,
-                        existing_relay.url,
-                        self.pubkey,
-                        e
-                    );
-                }
+            {
+                tracing::warn!(
+                    target: "whitenoise::users::sync_relay_urls",
+                    "Failed to remove {:?} relay {} for user {}: {}",
+                    relay_type,
+                    existing_relay.url,
+                    self.pubkey,
+                    e
+                );
             }
         }
 
@@ -759,11 +758,13 @@ mod tests {
         let saved_user = user.save(&whitenoise.database).await.unwrap();
 
         saved_user.update_relay_lists(&whitenoise).await.unwrap();
-        assert!(saved_user
-            .relays(RelayType::Nip65, &whitenoise.database)
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

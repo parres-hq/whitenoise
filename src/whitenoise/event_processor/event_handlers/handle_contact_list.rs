@@ -5,12 +5,12 @@ use tokio::sync::Semaphore;
 use crate::{
     nostr_manager::NostrManager,
     whitenoise::{
+        Whitenoise,
         accounts::Account,
         database::processed_events::ProcessedEvent,
         error::{Result, WhitenoiseError},
         users::User,
         utils::timestamp_to_datetime,
-        Whitenoise,
     },
 };
 
@@ -57,17 +57,17 @@ impl Whitenoise {
         let current_event_time =
             ProcessedEvent::newest_contact_list_timestamp(account_id, &self.database).await?;
 
-        if let Some(current_time) = current_event_time {
-            if event_timestamp.timestamp_millis() <= current_time.timestamp_millis() {
-                tracing::debug!(
-                    target: "whitenoise::handle_contact_list",
-                    "Ignoring older contact list event (event: {}, current: {}) for account {}",
-                    event_timestamp.timestamp_millis(),
-                    current_time.timestamp_millis(),
-                    account.pubkey.to_hex()
-                );
-                return Ok(());
-            }
+        if let Some(current_time) = current_event_time
+            && event_timestamp.timestamp_millis() <= current_time.timestamp_millis()
+        {
+            tracing::debug!(
+                target: "whitenoise::handle_contact_list",
+                "Ignoring older contact list event (event: {}, current: {}) for account {}",
+                event_timestamp.timestamp_millis(),
+                current_time.timestamp_millis(),
+                account.pubkey.to_hex()
+            );
+            return Ok(());
         }
 
         tracing::debug!(

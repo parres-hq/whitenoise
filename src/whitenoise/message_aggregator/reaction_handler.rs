@@ -93,17 +93,17 @@ pub fn retry_reaction(
 fn extract_target_message_id(tags: &Tags) -> Result<String, ProcessingError> {
     // Look for the first e-tag (target event)
     for tag in tags.iter() {
-        if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)) {
-            if let Some(event_id) = tag.content() {
-                return Ok(event_id.to_string());
-            }
+        if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E))
+            && let Some(event_id) = tag.content()
+        {
+            return Ok(event_id.to_string());
         }
         // Fallback: parameterized replaceable event ("a" tag)
         for tag in tags.iter() {
-            if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)) {
-                if let Some(addr) = tag.content() {
-                    return Ok(addr.to_string());
-                }
+            if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A))
+                && let Some(addr) = tag.content()
+            {
+                return Ok(addr.to_string());
             }
         }
     }

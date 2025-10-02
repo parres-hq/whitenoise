@@ -1,5 +1,5 @@
-use crate::integration_tests::core::*;
 use crate::WhitenoiseError;
+use crate::integration_tests::core::*;
 use async_trait::async_trait;
 
 pub struct LogoutAccountTestCase {

@@ -1,9 +1,9 @@
 use nostr_sdk::prelude::*;
 
 use crate::whitenoise::{
+    Whitenoise,
     error::{Result, WhitenoiseError},
     users::User,
-    Whitenoise,
 };
 
 impl Whitenoise {

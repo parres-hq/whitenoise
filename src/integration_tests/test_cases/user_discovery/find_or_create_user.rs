@@ -1,6 +1,6 @@
+use crate::WhitenoiseError;
 use crate::integration_tests::core::test_clients::{create_test_client, publish_relay_lists};
 use crate::integration_tests::core::*;
-use crate::WhitenoiseError;
 use async_trait::async_trait;
 use nostr_sdk::{Keys, Metadata, RelayUrl};
 

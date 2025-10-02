@@ -1,5 +1,5 @@
 # Default settings for rustfmt
-edition = "2021"  # Specify your Rust edition
+edition = "2024"  # Specify your Rust edition
 max_width = 100   # Maximum line width
 tab_spaces = 4    # Number of spaces per tab
 newline_style = "Unix"  # Line ending style

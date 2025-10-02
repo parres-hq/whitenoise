@@ -1,10 +1,10 @@
 use crate::{
     types::MessageWithTokens,
     whitenoise::{
+        Whitenoise,
         accounts::Account,
         error::{Result, WhitenoiseError},
         relays::Relay,
-        Whitenoise,
     },
 };
 use mdk_core::prelude::*;

@@ -4,11 +4,11 @@ use mdk_core::prelude::*;
 use nostr_sdk::prelude::*;
 
 use crate::whitenoise::{
+    Whitenoise,
     accounts::Account,
     error::{Result, WhitenoiseError},
     group_information::GroupInformation,
     relays::Relay,
-    Whitenoise,
 };
 
 impl Whitenoise {

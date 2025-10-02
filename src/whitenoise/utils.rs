@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::{PublicKey, Timestamp, ToBech32};
 
-use crate::whitenoise::{error::WhitenoiseError, Whitenoise};
+use crate::whitenoise::{Whitenoise, error::WhitenoiseError};
 
 impl Whitenoise {
     /// Converts a Nostr public key to its bech32-encoded npub representation.

@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 
-use super::{utils::parse_timestamp, Database};
+use super::{Database, utils::parse_timestamp};
 use crate::whitenoise::{
     app_settings::{AppSettings, ThemeMode},
     error::WhitenoiseError,

@@ -5,9 +5,9 @@ use std::{
 };
 
 use sqlx::{
+    Sqlite, SqlitePool,
     migrate::{MigrateDatabase, Migrator},
     sqlite::SqlitePoolOptions,
-    Sqlite, SqlitePool,
 };
 use thiserror::Error;
 

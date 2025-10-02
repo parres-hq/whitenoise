@@ -3,8 +3,8 @@ use nostr_sdk::prelude::*;
 use crate::{
     types::RetryInfo,
     whitenoise::{
-        error::{Result, WhitenoiseError},
         Whitenoise,
+        error::{Result, WhitenoiseError},
     },
 };
 

@@ -3,10 +3,10 @@ use nostr_sdk::PublicKey;
 use sqlx::Row;
 use std::collections::HashSet;
 
-use super::{utils::parse_timestamp, Database, DatabaseError};
+use super::{Database, DatabaseError, utils::parse_timestamp};
 use crate::{
-    whitenoise::{accounts::Account, database::users::UserRow, users::User},
     WhitenoiseError,
+    whitenoise::{accounts::Account, database::users::UserRow, users::User},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

@@ -7,16 +7,16 @@ use nostr_blossom::client::BlossomClient;
 use nostr_sdk::prelude::*;
 
 use crate::{
+    RelayType,
     types::ImageType,
     whitenoise::{
+        Whitenoise,
         accounts::Account,
         error::{Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
         relays::Relay,
         users::User,
-        Whitenoise,
     },
-    RelayType,
 };
 
 impl Whitenoise {
@@ -337,7 +337,7 @@ impl Whitenoise {
             None => {
                 return Err(WhitenoiseError::MdkCoreError(mdk_core::Error::Group(
                     "Missing welcome message".to_owned(),
-                )))
+                )));
             }
             Some(wr) => wr,
         };
@@ -609,8 +609,8 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::whitenoise::test_utils::*;
     use crate::whitenoise::Whitenoise;
+    use crate::whitenoise::test_utils::*;
 
     #[tokio::test]
     async fn test_create_group() {

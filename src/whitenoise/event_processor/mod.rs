@@ -5,8 +5,8 @@ use crate::{
     nostr_manager::utils::is_event_timestamp_valid,
     types::{ProcessableEvent, RetryInfo},
     whitenoise::{
-        error::{Result, WhitenoiseError},
         Whitenoise,
+        error::{Result, WhitenoiseError},
     },
 };
 

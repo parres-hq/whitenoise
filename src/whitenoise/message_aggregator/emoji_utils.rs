@@ -125,10 +125,12 @@ mod tests {
     fn test_invalid_reactions() {
         assert!(validate_and_normalize_reaction("invalid", true).is_err());
         assert!(validate_and_normalize_reaction("", true).is_err());
-        assert!(validate_and_normalize_reaction(
-            "way too long reaction string that exceeds limits",
-            true
-        )
-        .is_err());
+        assert!(
+            validate_and_normalize_reaction(
+                "way too long reaction string that exceeds limits",
+                true
+            )
+            .is_err()
+        );
     }
 }

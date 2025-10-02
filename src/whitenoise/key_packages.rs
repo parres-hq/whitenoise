@@ -1,6 +1,6 @@
+use crate::whitenoise::Whitenoise;
 use crate::whitenoise::accounts::Account;
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use crate::whitenoise::Whitenoise;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
