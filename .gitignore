@@ -16,3 +16,9 @@ vibe-tools.config.json
 
 # Flamegraph
 flamegraph.svg
+cargo-flamegraph.trace
+
+# Coverage reports
+lcov.info
+*.profraw
+*.profdata

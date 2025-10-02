@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A secure messenger built on MLS and Nostr"
 authors = ["White Noise Authors"]
 edition = "2021"
+rust-version = "1.90.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,8 +30,8 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-mdk-core = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "e20d4cf34edcd8592b6218ec20086e453860bf1d" }
-mdk-sqlite-storage = { version = "0.5.0", git="https://github.com/parres-hq/mdk", rev = "e20d4cf34edcd8592b6218ec20086e453860bf1d" }
+mdk-core = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "87e909060c56c83934e24bb078697b3b65d16011" }
+mdk-sqlite-storage = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "87e909060c56c83934e24bb078697b3b65d16011" }
 
 nwc = "0.43"
 nostr-blossom = "0.43"
@@ -63,7 +64,7 @@ reqwest = { version = "0.11", features = ["multipart", "json", "rustls-tls"], de
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10"
-sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "migrate", "macros", "chrono", "derive", "json" ] }
+sqlx = { version = "0.8", default-features = false, features = [ "runtime-tokio", "sqlite", "migrate", "macros", "chrono", "derive", "json" ] }
 thiserror = "2.0.12"
 tokio = { version = "1.44", features = ["full"] }
 tokio-tungstenite = "0.20"

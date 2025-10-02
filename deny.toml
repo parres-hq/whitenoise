@@ -1,0 +1,68 @@
+# Configuration for cargo-deny
+# Documentation: https://embarkstudios.github.io/cargo-deny/
+
+# Checks for security advisories in dependencies
+[advisories]
+# Deny crates with security vulnerabilities
+vulnerability = "deny"
+# Warn about unmaintained crates
+unmaintained = "warn"
+# Warn about security notices
+notice = "warn"
+# Ignore specific advisories (add RUSTSEC IDs here if needed)
+ignore = [
+    # Example: "RUSTSEC-2020-0001",
+]
+
+# Checks for license compliance
+[licenses]
+# Deny dependencies without a license
+unlicensed = "deny"
+# Warn about copyleft licenses (may want to review these)
+copyleft = "warn"
+# Allow these licenses (common permissive licenses)
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "0BSD",
+    "Zlib",
+    "BSL-1.0",
+]
+# Confidence threshold for license detection (0.0 - 1.0)
+confidence-threshold = 0.8
+
+# Warn about multiple versions of the same crate
+[bans]
+# Warn when multiple versions of the same crate are detected
+multiple-versions = "warn"
+# List of crates to allow multiple versions of
+multiple-versions-include-dev = false
+# Highlight major version differences
+highlight = "all"
+# Skip checking for these crates (useful for common duplicates)
+skip = []
+# Deny these specific crates
+deny = []
+# Skip checking for private/local workspace members
+allow-wildcard-paths = true
+
+# Checks for crate sources
+[sources]
+# Deny dependencies from unknown registries
+unknown-registry = "deny"
+# Deny dependencies from unknown git sources
+unknown-git = "deny"
+# Allow git sources from these domains
+allow-git = [
+    "https://github.com/",
+]
+# Allow these specific git repositories
+allow-org = []
+

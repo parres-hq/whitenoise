@@ -1,0 +1,19 @@
+# Configuration for Clippy
+# See: https://doc.rust-lang.org/clippy/lint_configuration.html
+
+# Cognitive complexity threshold for functions
+# Functions with higher complexity will trigger a warning
+cognitive-complexity-threshold = 30
+
+# Maximum number of arguments for a function before clippy warns
+too-many-arguments-threshold = 8
+
+# Maximum type complexity before clippy warns
+type-complexity-threshold = 250
+
+# Minimum Rust version for compatibility lints
+msrv = "1.90.0"
+
+# Allowed names that would otherwise be flagged as non-descriptive
+allowed-idents-below-min-chars = ["i", "j", "k", "x", "y", "z", "id", "db", "tx", "rx"]
+
