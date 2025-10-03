@@ -30,8 +30,8 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-mdk-core = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "87e909060c56c83934e24bb078697b3b65d16011" }
-mdk-sqlite-storage = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "87e909060c56c83934e24bb078697b3b65d16011" }
+mdk-core = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "899f6f09a0c3f5dbe95ea546710eea758cbc7d5e" }
+mdk-sqlite-storage = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "899f6f09a0c3f5dbe95ea546710eea758cbc7d5e" }
 
 nwc = "0.43"
 nostr-blossom = "0.43"
