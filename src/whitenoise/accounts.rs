@@ -768,7 +768,7 @@ impl Whitenoise {
     }
 
     /// Extract group data including relay URLs and group IDs for subscription setup.
-    async fn extract_groups_relays_and_ids(
+    pub(crate) async fn extract_groups_relays_and_ids(
         &self,
         account: &Account,
     ) -> Result<(Vec<RelayUrl>, Vec<String>)> {
@@ -1408,5 +1408,81 @@ mod tests {
             assert_eq!(published_metadata.display_name, new_metadata.display_name);
             assert_eq!(published_metadata.about, new_metadata.about);
         }
+    }
+
+    #[tokio::test]
+    async fn test_extract_groups_relays_and_ids_no_groups() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let account = whitenoise.create_identity().await.unwrap();
+
+        let (relays, group_ids) = whitenoise
+            .extract_groups_relays_and_ids(&account)
+            .await
+            .unwrap();
+
+        assert!(
+            relays.is_empty(),
+            "Should have no relays when account has no groups"
+        );
+        assert!(
+            group_ids.is_empty(),
+            "Should have no group IDs when account has no groups"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_extract_groups_relays_and_ids_with_groups() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create creator and member accounts
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let member_account = whitenoise.create_identity().await.unwrap();
+
+        // Allow time for key packages to be published
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        let relay1 = RelayUrl::parse("ws://localhost:8080").unwrap();
+        let relay2 = RelayUrl::parse("ws://localhost:7777").unwrap();
+
+        // Create a group with specific relays
+        let config = NostrGroupConfigData::new(
+            "Test Group".to_string(),
+            "Test Description".to_string(),
+            None,
+            None,
+            None,
+            vec![relay1.clone(), relay2.clone()],
+            vec![creator_account.pubkey],
+        );
+
+        let group = whitenoise
+            .create_group(&creator_account, vec![member_account.pubkey], config, None)
+            .await
+            .unwrap();
+
+        // Extract groups relays and IDs
+        let (relays, group_ids) = whitenoise
+            .extract_groups_relays_and_ids(&creator_account)
+            .await
+            .unwrap();
+
+        // Verify relays were extracted
+        assert!(!relays.is_empty(), "Should have relays from the group");
+        assert!(
+            relays.contains(&relay1),
+            "Should contain relay1 from group config"
+        );
+        assert!(
+            relays.contains(&relay2),
+            "Should contain relay2 from group config"
+        );
+
+        // Verify group ID was extracted
+        assert_eq!(group_ids.len(), 1, "Should have one group ID");
+        assert_eq!(
+            group_ids[0],
+            hex::encode(group.nostr_group_id),
+            "Group ID should match the created group"
+        );
     }
 }
