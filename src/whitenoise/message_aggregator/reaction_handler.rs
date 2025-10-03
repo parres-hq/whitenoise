@@ -98,13 +98,13 @@ fn extract_target_message_id(tags: &Tags) -> Result<String, ProcessingError> {
         {
             return Ok(event_id.to_string());
         }
-        // Fallback: parameterized replaceable event ("a" tag)
-        for tag in tags.iter() {
-            if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A))
-                && let Some(addr) = tag.content()
-            {
-                return Ok(addr.to_string());
-            }
+    }
+    // Fallback: parameterized replaceable event ("a" tag)
+    for tag in tags.iter() {
+        if tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A))
+            && let Some(addr) = tag.content()
+        {
+            return Ok(addr.to_string());
         }
     }
     Err(ProcessingError::MissingETag)
