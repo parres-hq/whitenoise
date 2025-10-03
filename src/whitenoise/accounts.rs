@@ -9,13 +9,13 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::RelayType;
 use crate::nostr_manager::{NostrManager, NostrManagerError};
 use crate::types::ImageType;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::User;
 use crate::whitenoise::{Whitenoise, WhitenoiseError};
-use crate::RelayType;
 
 #[derive(Error, Debug)]
 pub enum AccountError {
@@ -462,7 +462,8 @@ impl Whitenoise {
         };
 
         account.update_metadata(&metadata, self).await?;
-        tracing::debug!(target: "whitenoise::setup_metadata", "Created and published metadata with petname: {}", metadata.name.as_ref().unwrap_or(&"Unknown".to_string()));
+        let default_name = "Unknown".to_string();
+        tracing::debug!(target: "whitenoise::setup_metadata", "Created and published metadata with petname: {}", metadata.name.as_ref().unwrap_or(&default_name));
         Ok(())
     }
 

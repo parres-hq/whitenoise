@@ -3,8 +3,8 @@
 use nostr_sdk::prelude::*;
 
 use crate::{
-    nostr_manager::{utils::is_event_timestamp_valid, NostrManager, Result},
     RelayType,
+    nostr_manager::{NostrManager, Result, utils::is_event_timestamp_valid},
 };
 
 impl NostrManager {

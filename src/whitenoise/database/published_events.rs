@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::EventId;
 
-use super::{utils::parse_timestamp, Database, DatabaseError};
+use super::{Database, DatabaseError, utils::parse_timestamp};
 
 /// Row structure for published_events table
 #[derive(Debug, PartialEq, Eq, Clone)]

@@ -3,8 +3,8 @@ use nostr_sdk::prelude::*;
 use crate::{
     nostr_manager::NostrManager,
     whitenoise::{
-        accounts::Account, database::processed_events::ProcessedEvent, error::Result, users::User,
-        utils::timestamp_to_datetime, Whitenoise,
+        Whitenoise, accounts::Account, database::processed_events::ProcessedEvent, error::Result,
+        users::User, utils::timestamp_to_datetime,
     },
 };
 
@@ -67,14 +67,14 @@ impl Whitenoise {
         }
 
         // If there's an account for this user, also refresh their account subscriptions
-        if let Ok(account) = Account::find_by_pubkey(&user.pubkey, &self.database).await {
-            if let Err(e) = self.refresh_account_subscriptions(&account).await {
-                tracing::warn!(
-                    target: "whitenoise::handle_relay_list",
-                    "Failed to refresh account subscriptions after relay list change for {}: {}",
-                    event.pubkey, e
-                );
-            }
+        if let Ok(account) = Account::find_by_pubkey(&user.pubkey, &self.database).await
+            && let Err(e) = self.refresh_account_subscriptions(&account).await
+        {
+            tracing::warn!(
+                target: "whitenoise::handle_relay_list",
+                "Failed to refresh account subscriptions after relay list change for {}: {}",
+                event.pubkey, e
+            );
         }
     }
 }

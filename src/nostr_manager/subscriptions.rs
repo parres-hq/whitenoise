@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 const MAX_USERS_PER_GLOBAL_SUBSCRIPTION: usize = 1000;
 
 use crate::nostr_manager::{
-    utils::adjust_since_for_giftwrap, NostrManager, NostrManagerError, Result,
+    NostrManager, NostrManagerError, Result, utils::adjust_since_for_giftwrap,
 };
 
 impl NostrManager {
@@ -280,25 +280,21 @@ impl NostrManager {
         let mut failed_batches = 0;
 
         // Only refresh the batch containing the triggering user
-        if let Some(batch_users) = batches.get(user_batch_id) {
-            if !batch_users.is_empty() {
-                non_empty_batches += 1;
-                if let Err(e) = self
-                    .refresh_batch_subscription(
-                        relay_url.clone(),
-                        user_batch_id,
-                        batch_users.clone(),
-                    )
-                    .await
-                {
-                    tracing::error!(
-                        target: "whitenoise::nostr_manager::refresh_batch_for_relay_containing_user",
-                        error = %e,
-                        "Failed to refresh batch for relay: {}",
-                        relay_url
-                    );
-                    failed_batches += 1;
-                }
+        if let Some(batch_users) = batches.get(user_batch_id)
+            && !batch_users.is_empty()
+        {
+            non_empty_batches += 1;
+            if let Err(e) = self
+                .refresh_batch_subscription(relay_url.clone(), user_batch_id, batch_users.clone())
+                .await
+            {
+                tracing::error!(
+                    target: "whitenoise::nostr_manager::refresh_batch_for_relay_containing_user",
+                    error = %e,
+                    "Failed to refresh batch for relay: {}",
+                    relay_url
+                );
+                failed_batches += 1;
             }
         }
 

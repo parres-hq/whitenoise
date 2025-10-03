@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::{EventId, Kind, PublicKey};
 
-use super::{utils::parse_timestamp, Database, DatabaseError};
+use super::{Database, DatabaseError, utils::parse_timestamp};
 use crate::whitenoise::{error::WhitenoiseError, relays::RelayType};
 
 /// Row structure for processed_events table

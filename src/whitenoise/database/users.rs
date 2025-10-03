@@ -1,13 +1,13 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::{Metadata, PublicKey};
 
-use super::{relays::RelayRow, utils::parse_timestamp, Database, DatabaseError};
+use super::{Database, DatabaseError, relays::RelayRow, utils::parse_timestamp};
 use crate::{
+    WhitenoiseError,
     whitenoise::{
         relays::{Relay, RelayType},
         users::User,
     },
-    WhitenoiseError,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

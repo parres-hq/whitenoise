@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use nostr_sdk::RelayUrl;
 
-use super::{utils::parse_timestamp, Database, DatabaseError};
-use crate::{whitenoise::relays::Relay, WhitenoiseError};
+use super::{Database, DatabaseError, utils::parse_timestamp};
+use crate::{WhitenoiseError, whitenoise::relays::Relay};
 
 /// Normalizes a RelayUrl to ensure consistent database storage.
 ///

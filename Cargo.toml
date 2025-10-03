@@ -3,7 +3,7 @@ name = "whitenoise"
 version = "0.1.0"
 description = "A secure messenger built on MLS and Nostr"
 authors = ["White Noise Authors"]
-edition = "2021"
+edition = "2024"
 rust-version = "1.90.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

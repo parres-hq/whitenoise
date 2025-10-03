@@ -5,7 +5,7 @@ use mdk_core::prelude::GroupId;
 use nostr_sdk::PublicKey;
 use serde::{Deserialize, Serialize};
 
-use crate::whitenoise::{accounts::Account, Whitenoise, WhitenoiseError};
+use crate::whitenoise::{Whitenoise, WhitenoiseError, accounts::Account};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GroupType {

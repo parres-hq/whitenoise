@@ -340,7 +340,10 @@ mod publish_tests {
             .publish_follow_list_with_signer(&follow_list, &relays, keys)
             .await;
 
-        assert!(result.is_ok(), "Should succeed without sending an event when follow_list is empty but relays are provided");
+        assert!(
+            result.is_ok(),
+            "Should succeed without sending an event when follow_list is empty but relays are provided"
+        );
     }
 
     #[tokio::test]

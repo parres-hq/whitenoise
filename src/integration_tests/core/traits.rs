@@ -1,5 +1,5 @@
-use crate::integration_tests::core::{ScenarioContext, ScenarioResult};
 use crate::WhitenoiseError;
+use crate::integration_tests::core::{ScenarioContext, ScenarioResult};
 use async_trait::async_trait;
 use std::time::Instant;
 

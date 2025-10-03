@@ -3,10 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use keyring::Entry;
 use nostr_sdk::{Keys, PublicKey};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
 use uuid::Uuid;
 

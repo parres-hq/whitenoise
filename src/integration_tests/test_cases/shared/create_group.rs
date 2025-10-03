@@ -1,5 +1,5 @@
-use crate::integration_tests::core::*;
 use crate::WhitenoiseError;
+use crate::integration_tests::core::*;
 use async_trait::async_trait;
 use mdk_core::prelude::*;
 use nostr_sdk::prelude::*;

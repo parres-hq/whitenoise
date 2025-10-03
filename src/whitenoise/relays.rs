@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::whitenoise::{accounts::Account, error::Result, Whitenoise};
+use crate::whitenoise::{Whitenoise, accounts::Account, error::Result};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Relay {
