@@ -412,8 +412,7 @@ impl NostrManager {
     }
 
     /// Counts active subscriptions for a specific account by checking subscription IDs.
-    /// Returns the number of subscriptions that start with the account's hashed pubkey prefix.
-    #[allow(dead_code)]
+    /// Returns the number of subscriptions that contain the account's hashed pubkey.
     pub(crate) async fn count_subscriptions_for_account(&self, pubkey: &PublicKey) -> usize {
         let hash = self.create_pubkey_hash(pubkey);
         let prefix = format!("{}_", hash);
@@ -426,7 +425,6 @@ impl NostrManager {
     }
 
     /// Counts active global subscriptions by checking for subscription IDs that start with "global_users_".
-    #[allow(dead_code)]
     pub(crate) async fn count_global_subscriptions(&self) -> usize {
         self.client
             .subscriptions()
@@ -438,7 +436,6 @@ impl NostrManager {
 
     /// Checks if at least one relay in the provided list is connected or connecting.
     /// Returns true if any relay is in Connected or Connecting state.
-    #[allow(dead_code)]
     pub(crate) async fn has_any_relay_connected(&self, relay_urls: &[RelayUrl]) -> bool {
         for relay_url in relay_urls {
             match self.get_relay_status(relay_url).await {

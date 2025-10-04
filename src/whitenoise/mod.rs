@@ -441,6 +441,63 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Checks if account subscriptions are operational
+    ///
+    /// Returns true if at least one relay is connected or connecting AND
+    /// expected subscriptions exist (minimum: follow_list and giftwrap).
+    pub async fn is_account_subscriptions_operational(&self, account: &Account) -> Result<bool> {
+        let sub_count = self
+            .nostr
+            .count_subscriptions_for_account(&account.pubkey)
+            .await;
+
+        if sub_count < 2 {
+            return Ok(false); // Early exit if subscriptions missing
+        }
+
+        let user_relays: Vec<RelayUrl> = account
+            .nip65_relays(self)
+            .await?
+            .into_iter()
+            .map(|r| r.url)
+            .collect();
+
+        let inbox_relays: Vec<RelayUrl> = account
+            .inbox_relays(self)
+            .await?
+            .into_iter()
+            .map(|r| r.url)
+            .collect();
+
+        let (group_relays, _) = self.extract_groups_relays_and_ids(account).await?;
+
+        let all_relays: Vec<RelayUrl> = user_relays
+            .iter()
+            .chain(inbox_relays.iter())
+            .chain(group_relays.iter())
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        Ok(self.nostr.has_any_relay_connected(&all_relays).await)
+    }
+
+    /// Checks if global subscriptions are operational without refreshing.
+    ///
+    /// Returns true if at least one relay (from the client pool) is connected or connecting
+    /// AND at least one global subscription exists.
+    pub async fn is_global_subscriptions_operational(&self) -> Result<bool> {
+        let all_relays: Vec<RelayUrl> = self.nostr.client.relays().await.into_keys().collect();
+
+        if !self.nostr.has_any_relay_connected(&all_relays).await {
+            return Ok(false);
+        }
+
+        let global_count = self.nostr.count_global_subscriptions().await;
+        Ok(global_count > 0)
+    }
+
     #[cfg(feature = "integration-tests")]
     pub async fn wipe_database(&self) -> Result<()> {
         self.database.delete_all_data().await?;
@@ -878,6 +935,47 @@ mod tests {
             // Should return an error (group not found or similar), but not MdkCoreNotInitialized
             assert!(result.is_err());
             // The specific error will be about the group not being found since we're using a fake group ID
+        }
+    }
+
+    // Subscription Status Tests
+    mod subscription_status_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_is_account_operational_with_subscriptions() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let account = whitenoise.create_identity().await.unwrap();
+
+            // create_identity sets up subscriptions automatically
+            let is_operational = whitenoise
+                .is_account_subscriptions_operational(&account)
+                .await
+                .unwrap();
+
+            // Should return true when subscriptions are set up
+            // (create_identity sets up follow_list and giftwrap subscriptions)
+            assert!(
+                is_operational,
+                "Account should be operational after create_identity"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_is_global_subscriptions_operational_no_subscriptions() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // No global subscriptions set up in fresh instance
+            let is_operational = whitenoise
+                .is_global_subscriptions_operational()
+                .await
+                .unwrap();
+
+            // Should return false when no global subscriptions exist
+            assert!(
+                !is_operational,
+                "Global subscriptions should not be operational without setup"
+            );
         }
     }
 }
