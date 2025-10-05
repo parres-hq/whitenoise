@@ -108,16 +108,21 @@ impl Whitenoise {
         Relay::find_or_create_by_url(url, &self.database).await
     }
 
-    /// Fetches the status of relays associated with a user's public key.
+    /// Get connection status for all of an account's relays.
     ///
     /// This method returns a list of relay statuses for relays that are configured
-    /// for the given account. It gets the relay URLs from the user's relay lists
-    /// and then returns the current connection status from the Nostr client.
+    /// for the given account. It retrieves relay URLs from the account's relay lists
+    /// (NIP-65, inbox, and key package relays) and returns the current connection
+    /// status from the Nostr client.
     ///
     /// # Arguments
     ///
-    /// * `pubkey` - The `PublicKey` of the user whose relay statuses should be fetched.
-    pub async fn fetch_relay_status(
+    /// * `account` - The account whose relay statuses should be retrieved.
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of tuples containing relay URLs and their connection status.
+    pub async fn get_account_relay_statuses(
         &self,
         account: &Account,
     ) -> Result<Vec<(RelayUrl, RelayStatus)>> {
