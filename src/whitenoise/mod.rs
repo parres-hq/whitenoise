@@ -232,7 +232,7 @@ impl Whitenoise {
         Ok(())
     }
 
-    async fn setup_global_users_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
+    async fn setup_global_users_subscriptions(whitenoise_ref: &Whitenoise) -> Result<()> {
         let users_with_relays = User::all_users_with_relay_urls(whitenoise_ref).await?;
         let default_relays: Vec<RelayUrl> =
             Relay::defaults().iter().map(|r| r.url.clone()).collect();
@@ -269,7 +269,7 @@ impl Whitenoise {
     // - If any account is unsynced (last_synced_at = None), return None
     // - Otherwise, use min(last_synced_at) minus a 10s buffer, floored at 0
     async fn compute_global_since_timestamp(
-        whitenoise_ref: &'static Whitenoise,
+        whitenoise_ref: &Whitenoise,
     ) -> Result<Option<nostr_sdk::Timestamp>> {
         let accounts = Account::all(&whitenoise_ref.database).await?;
         if accounts.iter().any(|a| a.last_synced_at.is_none()) {
@@ -438,6 +438,35 @@ impl Whitenoise {
                 keys,
             )
             .await?;
+        Ok(())
+    }
+
+    pub async fn ensure_account_subscriptions(&self, account: &Account) -> Result<()> {
+        let is_operational = self.is_account_subscriptions_operational(account).await?;
+
+        if !is_operational {
+            tracing::info!(
+                target: "whitenoise::ensure_account_subscriptions",
+                "Account subscriptions not operational for {}, refreshing...",
+                account.pubkey.to_hex()
+            );
+            self.refresh_account_subscriptions(account).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn ensure_global_subscriptions(&self) -> Result<()> {
+        let is_operational = self.is_global_subscriptions_operational().await?;
+
+        if !is_operational {
+            tracing::info!(
+                target: "whitenoise::ensure_global_subscriptions",
+                "Global subscriptions not operational, refreshing..."
+            );
+            Self::setup_global_users_subscriptions(self).await?;
+        }
+
         Ok(())
     }
 
@@ -975,6 +1004,139 @@ mod tests {
             assert!(
                 !is_operational,
                 "Global subscriptions should not be operational without setup"
+            );
+        }
+    }
+
+    // Ensure Subscriptions Tests
+    mod ensure_subscriptions_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_ensure_account_subscriptions_idempotency() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let account = whitenoise.create_identity().await.unwrap();
+
+            // First call should succeed (subscriptions already set up by create_identity)
+            whitenoise
+                .ensure_account_subscriptions(&account)
+                .await
+                .unwrap();
+
+            // Second call should also succeed and not cause issues (idempotent)
+            whitenoise
+                .ensure_account_subscriptions(&account)
+                .await
+                .unwrap();
+
+            // Verify subscriptions are still operational
+            let is_operational = whitenoise
+                .is_account_subscriptions_operational(&account)
+                .await
+                .unwrap();
+            assert!(
+                is_operational,
+                "Account should remain operational after multiple ensure calls"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_ensure_account_subscriptions_refreshes_when_broken() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let account = whitenoise.create_identity().await.unwrap();
+
+            // Verify subscriptions are operational initially
+            let is_operational = whitenoise
+                .is_account_subscriptions_operational(&account)
+                .await
+                .unwrap();
+            assert!(is_operational, "Account should be operational initially");
+
+            // Simulate broken subscriptions by unsubscribing
+            whitenoise
+                .nostr
+                .unsubscribe_account_subscriptions(&account.pubkey)
+                .await
+                .unwrap();
+
+            // Verify subscriptions are not operational
+            let is_operational = whitenoise
+                .is_account_subscriptions_operational(&account)
+                .await
+                .unwrap();
+            assert!(
+                !is_operational,
+                "Account should not be operational after unsubscribe"
+            );
+
+            // ensure_account_subscriptions should refresh
+            whitenoise
+                .ensure_account_subscriptions(&account)
+                .await
+                .unwrap();
+
+            // Verify subscriptions are operational again
+            let is_operational = whitenoise
+                .is_account_subscriptions_operational(&account)
+                .await
+                .unwrap();
+            assert!(
+                is_operational,
+                "Account should be operational after ensure refresh"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_ensure_global_subscriptions_idempotency() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let _account = whitenoise.create_identity().await.unwrap();
+
+            // First call should succeed
+            whitenoise.ensure_global_subscriptions().await.unwrap();
+
+            // Second call should also succeed (idempotent)
+            whitenoise.ensure_global_subscriptions().await.unwrap();
+
+            // Verify global subscriptions are operational
+            let is_operational = whitenoise
+                .is_global_subscriptions_operational()
+                .await
+                .unwrap();
+            assert!(
+                is_operational,
+                "Global subscriptions should be operational after ensure calls"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_ensure_account_early_exit_optimization() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let account = whitenoise.create_identity().await.unwrap();
+
+            // Get initial subscription count
+            let initial_count = whitenoise
+                .nostr
+                .count_subscriptions_for_account(&account.pubkey)
+                .await;
+            assert!(
+                initial_count >= 2,
+                "Should have at least 2 subscriptions after create_identity"
+            );
+
+            // Call ensure - should be a no-op since subscriptions are operational
+            whitenoise
+                .ensure_account_subscriptions(&account)
+                .await
+                .unwrap();
+
+            // Verify count hasn't changed (early exit prevented unnecessary refresh)
+            let final_count = whitenoise
+                .nostr
+                .count_subscriptions_for_account(&account.pubkey)
+                .await;
+            assert_eq!(
+                initial_count, final_count,
+                "Subscription count should not change when already operational"
             );
         }
     }
