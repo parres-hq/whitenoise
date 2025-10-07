@@ -1,10 +1,11 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, ops::Add, path::PathBuf, time::Duration};
 
 use mdk_core::extension::group_image;
 use mdk_core::prelude::*;
 use mdk_sqlite_storage::MdkSqliteStorage;
 use nostr_blossom::client::BlossomClient;
 use nostr_sdk::prelude::*;
+use sha2::{Digest, Sha256};
 
 use crate::{
     RelayType,
@@ -166,7 +167,6 @@ impl Whitenoise {
                 )))?;
 
             // Create a timestamp 1 month in the future
-            use std::ops::Add;
             let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
             // If the member has no inbox relays configured, use their nip65 relays
             let member_inbox_relays = member.relays(RelayType::Inbox, &self.database).await?;
@@ -476,10 +476,6 @@ impl Whitenoise {
     /// # Arguments
     /// * `account` - The account that wants to leave the group
     /// * `group_id` - The ID of the group to leave
-    ///
-    /// # Returns
-    /// * `Ok(())` if the proposal was successfully created and published
-    /// * `Err(WhitenoiseError)` if the operation failed
     pub async fn leave_group(&self, account: &Account, group_id: &GroupId) -> Result<()> {
         let (relay_urls, evolution_event) = {
             let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
@@ -502,71 +498,246 @@ impl Whitenoise {
         Ok(())
     }
 
-    /// Uploads a group image to a Blossom server and returns the encrypted metadata.
+    /// Syncs group image cache if needed (smart, hash-based check)
     ///
-    /// This method uses the MDK library's `prepare_group_image_for_upload` function to:
-    /// 1. Encrypt the image using ChaCha20-Poly1305 AEAD
-    /// 2. Generate a SHA256 hash of the encrypted data
-    /// 3. Derive a deterministic upload keypair for Blossom authentication
+    /// This method is called after processing welcomes and commits to proactively
+    /// cache group images. It only downloads if:
+    /// 1. The group has an image set
+    /// 2. The image_hash is not already cached
+    ///
+    /// This ensures images are ready before the UI needs them, while avoiding
+    /// redundant downloads.
+    ///
+    /// # Arguments
+    /// * `account` - The account viewing the group
+    /// * `group_id` - The MLS group ID
+    pub(crate) async fn sync_group_image_cache_if_needed(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+    ) -> Result<()> {
+        let group: mdk_core::prelude::group_types::Group;
+        {
+            // Get group data to check if it has an image
+            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+            group = mdk
+                .get_group(group_id)
+                .map_err(WhitenoiseError::from)?
+                .ok_or(WhitenoiseError::GroupNotFound)?;
+        }
+
+        // Check if group has an image set
+        let (image_hash, image_key, image_nonce) =
+            match (group.image_hash, group.image_key, group.image_nonce) {
+                (Some(hash), Some(key), Some(nonce)) => (hash, key, nonce),
+                _ => return Ok(()), // No image set, nothing to do
+            };
+
+        // Download and cache the image
+        self.download_and_cache_group_image(
+            &account.pubkey,
+            group_id,
+            &image_hash,
+            &image_key,
+            &image_nonce,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Downloads, decrypts, and caches a group image if not already cached
+    ///
+    /// # Arguments
+    /// * `account_pubkey` - The account accessing the image
+    /// * `group_id` - The MLS group ID
+    /// * `image_hash` - SHA-256 hash of the encrypted image
+    /// * `image_key` - Encryption key
+    /// * `image_nonce` - Encryption nonce
+    ///
+    /// # Returns
+    /// Path to the cached image file
+    async fn download_and_cache_group_image(
+        &self,
+        account_pubkey: &PublicKey,
+        group_id: &GroupId,
+        image_hash: &[u8; 32],
+        image_key: &[u8; 32],
+        image_nonce: &[u8; 12],
+    ) -> Result<PathBuf> {
+        // Check if already cached (look for any file with this hash prefix)
+        let hash_hex = hex::encode(image_hash);
+        let media_files = self.media_files();
+        if let Some(cached_path) =
+            media_files.find_file_with_prefix(group_id, "group_images", &hash_hex)
+        {
+            tracing::debug!(
+                target: "whitenoise::groups::download_and_cache_group_image",
+                "Group image already cached at: {}",
+                cached_path.display()
+            );
+
+            // Update accessed_at in database
+            use crate::whitenoise::media_files::MediaFileUpload;
+            let upload = MediaFileUpload {
+                data: &[],
+                file_hash: *image_hash,
+                mime_type: "", // MIME type not needed for update
+                media_type: "group_image",
+                blossom_url: None,
+                dimensions: None,
+                blurhash: None,
+            };
+            if let Err(e) = media_files
+                .record_in_database(account_pubkey, group_id, &cached_path, upload)
+                .await
+            {
+                tracing::warn!(
+                    target: "whitenoise::groups::download_and_cache_group_image",
+                    "Failed to update accessed_at in database: {}",
+                    e
+                );
+            }
+
+            return Ok(cached_path);
+        }
+
+        tracing::info!(
+            target: "whitenoise::groups::download_and_cache_group_image",
+            "Downloading group image {} for group {}",
+            hex::encode(image_hash),
+            hex::encode(group_id.as_slice())
+        );
+
+        // Download encrypted blob from Blossom
+        let blossom_server = "https://blossom.primal.net";
+        let blossom_url = reqwest::Url::parse(&format!("{}/{}", blossom_server, hash_hex))
+            .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Invalid Blossom URL: {}", e)))?;
+
+        let client = reqwest::Client::new();
+        let response = client.get(blossom_url.as_str()).send().await.map_err(|e| {
+            WhitenoiseError::BlossomDownload(format!("Failed to download image: {}", e))
+        })?;
+
+        if !response.status().is_success() {
+            return Err(WhitenoiseError::BlossomDownload(format!(
+                "Download failed with status: {}",
+                response.status()
+            )));
+        }
+
+        let encrypted_data = response.bytes().await.map_err(|e| {
+            WhitenoiseError::BlossomDownload(format!("Failed to read response: {}", e))
+        })?;
+
+        // Verify hash
+        let mut hasher = Sha256::new();
+        hasher.update(&encrypted_data);
+        let actual_hash: [u8; 32] = hasher.finalize().into();
+
+        if &actual_hash != image_hash {
+            return Err(WhitenoiseError::HashMismatch {
+                expected: hex::encode(image_hash),
+                actual: hex::encode(actual_hash),
+            });
+        }
+
+        // Decrypt
+        let decrypted_data = group_image::decrypt_group_image(
+            &encrypted_data,
+            image_key,
+            image_nonce,
+        )
+        .map_err(|e| {
+            WhitenoiseError::ImageDecryptionFailed(format!("Failed to decrypt group image: {}", e))
+        })?;
+
+        // Detect image type
+        let image_type = ImageType::detect(&decrypted_data).map_err(|e| {
+            WhitenoiseError::UnsupportedImageFormat(format!("Failed to detect image type: {}", e))
+        })?;
+
+        tracing::debug!(
+            target: "whitenoise::groups::download_and_cache_group_image",
+            "Detected image type: {} for group image {}",
+            image_type.mime_type(),
+            hex::encode(image_hash)
+        );
+
+        // Store to cache and record in database
+        let filename = format!("{}.{}", hash_hex, image_type.extension());
+        use crate::whitenoise::media_files::MediaFileUpload;
+        let upload = MediaFileUpload {
+            data: &decrypted_data,
+            file_hash: *image_hash,
+            mime_type: image_type.mime_type(),
+            media_type: "group_image",
+            blossom_url: Some(blossom_url.as_str()),
+            dimensions: None,
+            blurhash: None,
+        };
+        let cached_path = self
+            .media_files()
+            .store_and_record(account_pubkey, group_id, "group_images", &filename, upload)
+            .await?;
+
+        tracing::info!(
+            target: "whitenoise::groups::download_and_cache_group_image",
+            "Cached group image at: {}",
+            cached_path.display()
+        );
+
+        Ok(cached_path)
+    }
+
+    /// Uploads a group image to a Blossom server and returns the encrypted metadata.
     ///
     /// The returned metadata (hash, key, nonce) should be passed to `update_group_data`
     /// to update the group's image settings.
     ///
     /// # Arguments
-    /// * `account` - The account performing the upload (should be a group admin)
+    /// * `account` - The account performing the upload (must be a group admin)
     /// * `group_id` - The ID of the group to upload the image for
     /// * `file_path` - Path to the image file to upload
-    /// * `image_type` - Image type (JPEG, PNG, etc.)
     /// * `server` - Blossom server URL to upload to
-    ///
-    /// # Returns
-    /// A tuple containing:
-    /// * `encrypted_hash` - SHA256 hash of the encrypted image (to be stored in group metadata)
-    /// * `image_key` - Encryption key (to be stored in group metadata)
-    /// * `image_nonce` - Encryption nonce (to be stored in group metadata)
-    ///
-    /// # Example
-    /// ```ignore
-    /// let (hash, key, nonce) = whitenoise.upload_group_image(
-    ///     &account,
-    ///     &group_id,
-    ///     "/path/to/image.png",
-    ///     ImageType::Png,
-    ///     server_url,
-    /// ).await?;
-    ///
-    /// // Update the group with the new image metadata
-    /// let update = NostrGroupDataUpdate {
-    ///     image_hash: Some(Some(hash)),
-    ///     image_key: Some(Some(key)),
-    ///     image_nonce: Some(Some(nonce)),
-    ///     ..Default::default()
-    /// };
-    /// whitenoise.update_group_data(&account, &group_id, update).await?;
-    /// ```
     pub async fn upload_group_image(
         &self,
         account: &Account,
         group_id: &GroupId,
         file_path: &str,
-        image_type: ImageType,
         server: Url,
     ) -> Result<([u8; 32], [u8; 32], [u8; 12])> {
         // Verify the account is an admin of the group
         let admins = self.group_admins(account, group_id).await?;
         if !admins.contains(&account.pubkey) {
-            return Err(WhitenoiseError::Other(anyhow::anyhow!(
-                "Account is not an admin of the group"
-            )));
+            return Err(WhitenoiseError::AccountNotAuthorized);
         }
 
         // Read the image file
         let image_data = tokio::fs::read(file_path).await?;
 
-        // Use MDK to prepare the image for upload (encrypt + derive keypair)
-        let prepared = group_image::prepare_group_image_for_upload(&image_data).map_err(|e| {
-            WhitenoiseError::Other(anyhow::anyhow!("Failed to prepare group image: {}", e))
+        // Detect and validate image type from file content
+        // This uses the image crate to both detect the format and validate the image
+        let image_type = ImageType::detect(&image_data).map_err(|e| {
+            WhitenoiseError::UnsupportedImageFormat(format!(
+                "Failed to detect or validate image from {}: {}",
+                file_path, e
+            ))
         })?;
+
+        tracing::debug!(
+            target: "whitenoise::groups::upload_group_image",
+            "Detected and validated image type: {} for file {}",
+            image_type.mime_type(),
+            file_path
+        );
+
+        // Use MDK to prepare the image for upload (encrypt + derive keypair)
+        let prepared =
+            group_image::prepare_group_image_for_upload(&image_data, image_type.mime_type())
+                .map_err(|e| {
+                    WhitenoiseError::Other(anyhow::anyhow!("Failed to prepare group image: {}", e))
+                })?;
 
         // Upload encrypted data to Blossom using the derived keypair
         let client = BlossomClient::new(server);
@@ -597,12 +768,98 @@ impl Whitenoise {
             hex::encode(prepared.encrypted_hash)
         );
 
+        // Cache the original unencrypted image immediately to avoid re-downloading
+        // This is an optimization: the uploader already has the image in memory
+        let hash_hex = hex::encode(prepared.encrypted_hash);
+        let filename = format!("{}.{}", hash_hex, image_type.extension());
+
+        use crate::whitenoise::media_files::MediaFileUpload;
+        let upload = MediaFileUpload {
+            data: &image_data,
+            file_hash: prepared.encrypted_hash,
+            mime_type: image_type.mime_type(),
+            media_type: "group_image",
+            blossom_url: Some(descriptor.url.as_str()),
+            dimensions: None,
+            blurhash: None,
+        };
+
+        if let Err(e) = self
+            .media_files()
+            .store_and_record(&account.pubkey, group_id, "group_images", &filename, upload)
+            .await
+        {
+            tracing::warn!(
+                target: "whitenoise::groups::upload_group_image",
+                "Failed to cache uploaded group image: {}. Image will be downloaded on next access.",
+                e
+            );
+        }
+
         // Return the metadata needed for group update
         Ok((
             prepared.encrypted_hash,
             prepared.image_key,
             prepared.image_nonce,
         ))
+    }
+
+    /// Gets the local file path for a group's current image
+    ///
+    /// This is the primary method for UI/Flutter to retrieve group images.
+    /// If the image is already cached, returns the path immediately.
+    /// If not cached, downloads, decrypts, and caches it first.
+    ///
+    /// **This is an on-demand method** - it only downloads when the UI actually
+    /// needs to display the image, avoiding unnecessary network traffic.
+    ///
+    /// # Arguments
+    /// * `account` - The account viewing the group
+    /// * `group_id` - The MLS group ID
+    ///
+    /// # Returns
+    /// * `Ok(Some(PathBuf))` - Path to cached decrypted image
+    /// * `Ok(None)` - Group has no image set
+    /// * `Err(WhitenoiseError)` - Download or cache operation failed
+    ///
+    /// # Example
+    /// ```ignore
+    /// // In UI code - only downloads if not already cached
+    /// if let Some(image_path) = whitenoise.get_group_image_path(&account, &group_id).await? {
+    ///     display_image(image_path);
+    /// }
+    /// ```
+    pub async fn get_group_image_path(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+    ) -> Result<Option<PathBuf>> {
+        // Get group data to check if it has an image
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        let group = mdk
+            .get_group(group_id)
+            .map_err(WhitenoiseError::from)?
+            .ok_or(WhitenoiseError::GroupNotFound)?;
+
+        // Check if group has an image set
+        let (image_hash, image_key, image_nonce) =
+            match (group.image_hash, group.image_key, group.image_nonce) {
+                (Some(hash), Some(key), Some(nonce)) => (hash, key, nonce),
+                _ => return Ok(None), // No image set
+            };
+
+        // Download and cache the image (if not already cached)
+        let path = self
+            .download_and_cache_group_image(
+                &account.pubkey,
+                group_id,
+                &image_hash,
+                &image_key,
+                &image_nonce,
+            )
+            .await?;
+
+        Ok(Some(path))
     }
 }
 
@@ -1165,9 +1422,22 @@ mod tests {
             .await
             .unwrap();
 
-        // Create a test image file
+        // Create a test PNG image file with valid PNG header
         let mut temp_file = NamedTempFile::new().unwrap();
-        let test_image_data = vec![0u8; 1024]; // 1KB test image
+        // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
+        let mut test_image_data = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        // Add minimal PNG chunks (IHDR, IEND) to make it a valid PNG
+        test_image_data.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x0D, // IHDR chunk length
+            0x49, 0x48, 0x44, 0x52, // "IHDR"
+            0x00, 0x00, 0x00, 0x01, // Width: 1
+            0x00, 0x00, 0x00, 0x01, // Height: 1
+            0x08, 0x02, 0x00, 0x00, 0x00, // Bit depth, color type, etc.
+            0x90, 0x77, 0x53, 0xDE, // CRC
+            0x00, 0x00, 0x00, 0x00, // IEND chunk length
+            0x49, 0x45, 0x4E, 0x44, // "IEND"
+            0xAE, 0x42, 0x60, 0x82, // CRC
+        ]);
         temp_file.write_all(&test_image_data).unwrap();
         let temp_path = temp_file.path().to_str().unwrap();
 
@@ -1178,7 +1448,6 @@ mod tests {
                 &creator_account,
                 &group.mls_group_id,
                 temp_path,
-                ImageType::Png,
                 blossom_server,
             )
             .await;
@@ -1227,5 +1496,144 @@ mod tests {
         assert_eq!(updated_group.image_hash, Some(hash));
         assert_eq!(updated_group.image_key, Some(key));
         assert_eq!(updated_group.image_nonce, Some(nonce));
+
+        // Verify the image was cached immediately after upload by retrieving it
+        // (should be instant since it's cached)
+        let cached_path = whitenoise
+            .get_group_image_path(&creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+
+        assert!(
+            cached_path.is_some(),
+            "Uploaded image should be cached and retrievable"
+        );
+
+        let cached_path = cached_path.unwrap();
+        assert!(
+            cached_path.exists(),
+            "Cached image file should exist at: {}",
+            cached_path.display()
+        );
+
+        // Verify the cached content matches the original
+        let cached_content = tokio::fs::read(&cached_path).await.unwrap();
+        assert_eq!(
+            cached_content, test_image_data,
+            "Cached image content should match original"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_group_image_cache() {
+        use std::io::Write;
+        use std::time::Duration;
+        use tempfile::NamedTempFile;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator and member accounts
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_account = &members[0].0;
+        let member_pubkeys = vec![member_account.pubkey];
+
+        // Create group with creator as admin
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let group = whitenoise
+            .create_group(&creator_account, member_pubkeys, config, None)
+            .await
+            .unwrap();
+
+        // Create a test JPEG image file with valid JPEG header
+        let mut temp_file = NamedTempFile::new().unwrap();
+        // JPEG magic bytes: FF D8 FF
+        let mut test_image_data = vec![0xFF, 0xD8, 0xFF];
+        // Add minimal JPEG structure (JFIF marker + EOI)
+        test_image_data.extend_from_slice(&[
+            0xE0, 0x00, 0x10, // APP0 marker and length
+            0x4A, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
+            0x01, 0x01, // Version 1.1
+            0x00, // Density units
+            0x00, 0x01, 0x00, 0x01, // X and Y density
+            0x00, 0x00, // Thumbnail dimensions
+            0xFF, 0xD9, // EOI (End of Image) marker
+        ]);
+        temp_file.write_all(&test_image_data).unwrap();
+        let temp_path = temp_file.path().to_str().unwrap();
+
+        // Creator uploads the group image
+        let blossom_server = Url::parse("http://localhost:3000").unwrap();
+        let (hash, key, nonce) = whitenoise
+            .upload_group_image(
+                &creator_account,
+                &group.mls_group_id,
+                temp_path,
+                blossom_server,
+            )
+            .await
+            .unwrap();
+
+        // Update the group data with the image metadata
+        let update = NostrGroupDataUpdate {
+            name: None,
+            description: None,
+            image_hash: Some(Some(hash)),
+            image_key: Some(Some(key)),
+            image_nonce: Some(Some(nonce)),
+            admins: None,
+            relays: None,
+        };
+
+        whitenoise
+            .update_group_data(&creator_account, &group.mls_group_id, update)
+            .await
+            .unwrap();
+
+        // Give time for the commit to propagate
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Member should receive the update and sync the image
+        // Note: Creator has it cached from upload, but member shouldn't yet
+        // (This test assumes member hasn't called groups() yet)
+
+        // Now get the member's image (downloads and caches it)
+        let synced_path_opt = whitenoise
+            .get_group_image_path(member_account, &group.mls_group_id)
+            .await
+            .unwrap();
+
+        assert!(
+            synced_path_opt.is_some(),
+            "Should have retrieved an image path"
+        );
+
+        let synced_path = synced_path_opt.unwrap();
+        assert!(
+            synced_path.exists(),
+            "Retrieved image should exist at: {}",
+            synced_path.display()
+        );
+
+        // Verify the synced content matches the original
+        let synced_content = tokio::fs::read(&synced_path).await.unwrap();
+        assert_eq!(
+            synced_content, test_image_data,
+            "Retrieved image content should match original uploaded by creator"
+        );
+
+        // Verify subsequent access is instant (cached)
+        let sync_again = whitenoise
+            .get_group_image_path(member_account, &group.mls_group_id)
+            .await
+            .unwrap();
+
+        assert!(sync_again.is_some());
+        assert_eq!(
+            sync_again.unwrap(),
+            synced_path,
+            "Should return same cached path"
+        );
     }
 }

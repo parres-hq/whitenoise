@@ -121,6 +121,21 @@ pub enum WhitenoiseError {
 
     #[error("Invalid timestamp")]
     InvalidTimestamp,
+
+    #[error("Media cache operation failed: {0}")]
+    MediaCache(String),
+
+    #[error("Failed to download from Blossom server: {0}")]
+    BlossomDownload(String),
+
+    #[error("Image decryption failed: {0}")]
+    ImageDecryptionFailed(String),
+
+    #[error("Hash verification failed - expected: {expected}, actual: {actual}")]
+    HashMismatch { expected: String, actual: String },
+
+    #[error("Unsupported image format: {0}")]
+    UnsupportedImageFormat(String),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {
