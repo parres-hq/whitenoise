@@ -11,50 +11,58 @@ use crate::{
 };
 
 impl NostrManager {
-    /// Publishes an MLS commit event to the specified relays.
+    /// Publishes an event to the specified relays in a background task.
     ///
-    /// This method allows publishing an MLS commit event (which is already signed) to a list of relay URLs. It ensures that the client
-    /// is connected to all specified relays before attempting to publish the event and then tracks that we published the event to the database.
-    /// This is the public crate interface to ensure you're using the correct publishing method.
-    pub(crate) async fn publish_mls_commit_to(
+    /// This is a fire-and-forget operation that spawns a background task to publish the event
+    /// without blocking the caller. Errors are logged but not returned. This is useful for
+    /// scenarios where you want to queue a publish operation but don't need to wait for completion.
+    ///
+    /// The method clones the necessary data to ensure `'static` lifetime for the spawned task.
+    /// The event is tracked in the database if published successfully to at least one relay.
+    pub(crate) fn background_publish_event_to(
         &self,
         event: Event,
         account: &Account,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
-    ) -> Result<Output<EventId>> {
-        self.publish_event_to(event, account, relays).await
+        relays: Vec<RelayUrl>,
+    ) {
+        let nostr = self.clone();
+        let account = account.clone();
+
+        tokio::spawn(async move {
+            match nostr.publish_event_to(event, &account, &relays).await {
+                Ok(output) => {
+                    tracing::debug!(
+                        target: "whitenoise::nostr_manager::background_publish_event_to",
+                        "Successfully published message to {} relay(s)",
+                        output.success.len()
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::nostr_manager::background_publish_event_to",
+                        "Failed to publish message in background task: {}",
+                        e
+                    );
+                }
+            }
+        });
     }
 
-    /// Publishes an MLS message event to the specified relays.
+    /// Constructs and publishes a Nostr gift wrap event using the provided signer.
     ///
-    /// This method allows publishing an MLS message event (which is already signed) to a list of relay URLs. It ensures that the client
-    /// is connected to all specified relays before attempting to publish the event and then tracks that we published the event to the database.
-    /// This is the public crate interface to ensure you're using the correct publishing method.
-    pub(crate) async fn publish_mls_message_to(
-        &self,
-        event: Event,
-        account: &Account,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
-    ) -> Result<Output<EventId>> {
-        self.publish_event_to(event, account, relays).await
-    }
-
-    /// Constructs and publishes a Nostr gift wrap event using a temporary signer.
+    /// This method creates a gift-wrapped Nostr event and publishes it to specified relays.
+    /// Gift wrapping provides privacy by encrypting the inner event (rumor) and hiding the
+    /// recipient's identity from relay operators and other observers.
     ///
-    /// This method creates a gift-wrapped Nostr event and publishes it to specified relays using a
-    /// temporary signer. Gift wrapping provides privacy by encrypting the inner event (rumor) and
-    /// hiding the recipient's identity from relay operators and other observers.
-    ///
-    /// The signer is set before publishing and automatically unset immediately after the operation
-    /// completes, ensuring it doesn't persist in the client state. This method also ensures that
-    /// the client is connected to all specified relays before attempting to publish.
+    /// The method ensures that the client is connected to all specified relays before attempting
+    /// to publish. The published event is tracked in the database if successful.
     pub(crate) async fn publish_gift_wrap_to(
         &self,
         receiver: &PublicKey,
         rumor: UnsignedEvent,
         extra_tags: &[Tag],
         account: &Account,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let wrapped_event =
@@ -62,7 +70,9 @@ impl NostrManager {
         self.publish_event_to(wrapped_event, account, relays).await
     }
 
-    /// Publishes a Nostr metadata event using a passed signer.
+    /// Publishes a Nostr metadata event using the provided signer.
+    ///
+    /// The event is automatically tracked in the database if published successfully.
     pub(crate) async fn publish_metadata_with_signer(
         &self,
         metadata: &Metadata,
@@ -74,7 +84,9 @@ impl NostrManager {
             .await
     }
 
-    /// Publishes a Nostr relay list event using a passed signer.
+    /// Publishes a Nostr relay list event using the provided signer.
+    ///
+    /// The event is automatically tracked in the database if published successfully.
     pub(crate) async fn publish_relay_list_with_signer(
         &self,
         relay_list: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
@@ -102,7 +114,10 @@ impl NostrManager {
         Ok(())
     }
 
-    /// Publishes a Nostr follow list event using a passed signer.
+    /// Publishes a Nostr follow list event using the provided signer.
+    ///
+    /// Returns early with `Ok(())` if the follow list is empty. Otherwise, publishes the
+    /// contact list event which is automatically tracked in the database if successful.
     pub(crate) async fn publish_follow_list_with_signer(
         &self,
         follow_list: &[PublicKey],
@@ -132,7 +147,9 @@ impl NostrManager {
         Ok(())
     }
 
-    /// Publishes a Nostr key package event using a passed signer.
+    /// Publishes a Nostr MLS key package event using the provided signer.
+    ///
+    /// The event is automatically tracked in the database if published successfully.
     pub(crate) async fn publish_key_package_with_signer(
         &self,
         encoded_key_package: &str,
@@ -147,7 +164,9 @@ impl NostrManager {
             .await
     }
 
-    /// Publishes a Nostr event deletion event using a passed signer.
+    /// Publishes a Nostr event deletion event using the provided signer.
+    ///
+    /// The deletion event is automatically tracked in the database if published successfully.
     pub(crate) async fn publish_event_deletion_with_signer(
         &self,
         event_id: &EventId,
@@ -160,21 +179,20 @@ impl NostrManager {
             .await
     }
 
-    /// Publishes a Nostr event (which is already signed) to the specified relays.
+    /// Publishes an already signed Nostr event to the specified relays.
     ///
-    /// This method allows publishing an already signed event to a list of relay URLs. It ensures that the client
-    /// is connected to all specified relays before attempting to publish the event and then tracks that we published the event to the database.
-    async fn publish_event_to(
+    /// This method publishes a pre-signed event to a list of relay URLs. It ensures that the client
+    /// is connected to all specified relays before attempting to publish. The event is automatically
+    /// tracked in the database if published successfully to at least one relay.
+    pub(crate) async fn publish_event_to(
         &self,
         event: Event,
         account: &Account,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        relays: &[RelayUrl],
     ) -> Result<Output<EventId>> {
-        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
-
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(&urls).await?;
-        let result = self.client.send_event_to(urls, &event).await?;
+        self.ensure_relays_connected(relays).await?;
+        let result = self.client.send_event_to(relays, &event).await?;
 
         // Track the published event if we have a successful result (best-effort)
         if !result.success.is_empty() {
@@ -186,13 +204,13 @@ impl NostrManager {
         Ok(result)
     }
 
-    /// Publishes a Nostr event using a temporary signer.
+    /// Publishes a Nostr event builder using a temporary signer.
     ///
-    /// This method allows publishing an event with a signer that is only used for this specific operation.
-    /// The signer is set before publishing and unset immediately after. This method also ensures that
-    /// the client is connected to all specified relays before attempting to publish.
+    /// This method signs and publishes an event builder using the provided signer within a scoped
+    /// context via `with_signer`. The signer is only active for the duration of the publish operation.
+    /// The method ensures that the client is connected to all specified relays before attempting to publish.
     ///
-    /// Automatically tracks published events in the database by looking up the account from the signer's public key.
+    /// Automatically tracks published events in the database using the signer's public key.
     async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
@@ -452,5 +470,242 @@ mod publish_tests {
             wrapped_event.pubkey, real_pubkey,
             "Giftwrap should use ephemeral keys, not real keys"
         );
+    }
+
+    #[tokio::test]
+    async fn test_publish_event_to_empty_relays() {
+        use crate::whitenoise::accounts::Account;
+        use crate::whitenoise::event_tracker::NoEventTracker;
+
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        // Create a test account and keys
+        let keys = Keys::generate();
+        let account = Account {
+            id: Some(1),
+            pubkey: keys.public_key(),
+            user_id: 1,
+            last_synced_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Create a test event
+        let event_builder = EventBuilder::text_note("test message");
+        let event = event_builder.sign_with_keys(&keys).unwrap();
+
+        // Attempt to publish to empty relay list
+        let relays: Vec<RelayUrl> = vec![];
+        let result = nostr_manager
+            .publish_event_to(event, &account, &relays)
+            .await;
+
+        // Publishing to empty relays should fail - nostr-sdk returns an error for empty targets
+        assert!(result.is_err(), "Publishing to empty relays should fail");
+    }
+
+    #[tokio::test]
+    async fn test_publish_event_to_unreachable_relays() {
+        use crate::whitenoise::accounts::Account;
+        use crate::whitenoise::event_tracker::NoEventTracker;
+
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        // Create a test account and keys
+        let keys = Keys::generate();
+        let account = Account {
+            id: Some(1),
+            pubkey: keys.public_key(),
+            user_id: 1,
+            last_synced_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Create a test event
+        let event_builder = EventBuilder::text_note("test message");
+        let event = event_builder.sign_with_keys(&keys).unwrap();
+
+        // Use unreachable relays
+        let relays = vec![
+            RelayUrl::parse("ws://localhost:1").unwrap(), // Invalid port
+            RelayUrl::parse("ws://localhost:2").unwrap(), // Invalid port
+        ];
+
+        let result = nostr_manager
+            .publish_event_to(event, &account, &relays)
+            .await;
+
+        // The publish should succeed at the API level (returns Output)
+        // but have no successful relay sends
+        match result {
+            Ok(output) => {
+                // All relay publishes should have failed
+                assert!(
+                    output.success.is_empty(),
+                    "No relays should have succeeded with unreachable endpoints"
+                );
+            }
+            Err(_) => {
+                // It's also acceptable for the entire operation to fail
+                // due to connection issues
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_publish_event_to_success() {
+        use crate::whitenoise::accounts::Account;
+        use crate::whitenoise::event_tracker::NoEventTracker;
+
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(10))
+                .await
+                .unwrap();
+
+        // Create a test account and keys
+        let keys = Keys::generate();
+        let account = Account {
+            id: Some(1),
+            pubkey: keys.public_key(),
+            user_id: 1,
+            last_synced_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Create a unique test event to avoid conflicts
+        let test_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let event_builder = EventBuilder::text_note(format!("test message {}", test_timestamp));
+        let event = event_builder.sign_with_keys(&keys).unwrap();
+
+        // Use test relays
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        let result = nostr_manager
+            .publish_event_to(event.clone(), &account, &test_relays)
+            .await;
+
+        // Should succeed with at least some relay sends
+        match result {
+            Ok(output) => {
+                // Should have the correct event ID
+                assert_eq!(*output.id(), event.id);
+                tracing::debug!(
+                    "Published to {} successful relays, {} failed",
+                    output.success.len(),
+                    output.failed.len()
+                );
+            }
+            Err(e) => {
+                panic!(
+                    "Failed to publish event: {:?}. Are test relays running on localhost:8080 and localhost:7777?",
+                    e
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_background_publish_event_to_completes() {
+        use crate::whitenoise::accounts::Account;
+        use crate::whitenoise::event_tracker::NoEventTracker;
+
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(10))
+                .await
+                .unwrap();
+
+        // Create a test account and keys
+        let keys = Keys::generate();
+        let account = Account {
+            id: Some(1),
+            pubkey: keys.public_key(),
+            user_id: 1,
+            last_synced_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Create a test event
+        let event_builder = EventBuilder::text_note("background test message");
+        let event = event_builder.sign_with_keys(&keys).unwrap();
+
+        // Use test relays
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        // Call background publish (fire-and-forget)
+        nostr_manager.background_publish_event_to(event, &account, test_relays);
+
+        // Give the background task time to complete
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // No assertions - just verify it doesn't panic or hang
+        // The background task logs success/failure internally
+    }
+
+    #[tokio::test]
+    async fn test_background_publish_event_to_with_unreachable_relays() {
+        use crate::whitenoise::accounts::Account;
+        use crate::whitenoise::event_tracker::NoEventTracker;
+
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        // Create a test account and keys
+        let keys = Keys::generate();
+        let account = Account {
+            id: Some(1),
+            pubkey: keys.public_key(),
+            user_id: 1,
+            last_synced_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Create a test event
+        let event_builder = EventBuilder::text_note("background test with unreachable relays");
+        let event = event_builder.sign_with_keys(&keys).unwrap();
+
+        // Use unreachable relays
+        let relays = vec![
+            RelayUrl::parse("ws://localhost:1").unwrap(),
+            RelayUrl::parse("ws://localhost:2").unwrap(),
+        ];
+
+        // Call background publish - should not panic even with unreachable relays
+        nostr_manager.background_publish_event_to(event, &account, relays);
+
+        // Give the background task time to complete and log the error
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // No assertions - verify it handles errors gracefully without panicking
     }
 }
