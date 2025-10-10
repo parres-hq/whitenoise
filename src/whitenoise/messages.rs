@@ -4,7 +4,6 @@ use crate::{
         Whitenoise,
         accounts::Account,
         error::{Result, WhitenoiseError},
-        relays::Relay,
     },
 };
 use mdk_core::prelude::*;
@@ -48,15 +47,12 @@ impl Whitenoise {
             ))?;
         let group_relays = mdk.get_relays(group_id)?;
 
-        let mut db_relays = Vec::with_capacity(group_relays.len());
-        for relay_url in group_relays {
-            let db_relay = Relay::find_or_create_by_url(&relay_url, &self.database).await?;
-            db_relays.push(db_relay);
-        }
-
-        self.nostr
-            .publish_mls_message_to(message_event, account, &db_relays)
-            .await?;
+        // Publish message in background without blocking
+        self.nostr.background_publish_event_to(
+            message_event,
+            account,
+            group_relays.into_iter().collect::<Vec<_>>(),
+        );
 
         let tokens = self.nostr.parse(&message.content);
 

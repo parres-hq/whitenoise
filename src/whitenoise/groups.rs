@@ -14,7 +14,6 @@ use crate::{
         accounts::Account,
         error::{Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
-        relays::Relay,
         users::User,
     },
 };
@@ -43,25 +42,6 @@ impl Whitenoise {
         Ok(group_relays.into_iter().collect())
     }
 
-    /// Converts relay URLs to database Relay objects.
-    ///
-    /// # Arguments
-    /// * `relay_urls` - Vector of relay URLs to convert
-    ///
-    /// # Returns
-    /// * `Ok(Vec<Relay>)` - Vector of database Relay objects
-    /// * `Err(WhitenoiseError)` - If relay creation fails
-    async fn convert_relay_urls_to_relays(
-        &self,
-        relay_urls: Vec<nostr_sdk::RelayUrl>,
-    ) -> Result<Vec<Relay>> {
-        let mut relays = Vec::new();
-        for relay_url in relay_urls {
-            let db_relay = self.find_or_create_relay_by_url(&relay_url).await?;
-            relays.push(db_relay);
-        }
-        Ok(relays)
-    }
     /// Creates a new MLS group with the specified members and settings
     ///
     /// # Arguments
@@ -182,7 +162,10 @@ impl Whitenoise {
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
                     creator_account,
-                    &relays_to_use,
+                    &relays_to_use
+                        .iter()
+                        .map(|r| r.url.clone())
+                        .collect::<Vec<_>>(),
                     keys.clone(),
                 )
                 .await
@@ -331,8 +314,6 @@ impl Whitenoise {
             )
         };
 
-        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
-
         let welcome_rumors = match welcome_rumors {
             None => {
                 return Err(WhitenoiseError::MdkCoreError(mdk_core::Error::Group(
@@ -349,7 +330,7 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_mls_commit_to(evolution_event, account, &relays)
+            .publish_event_to(evolution_event, account, &relay_urls)
             .await?;
 
         // Evolution event published successfully
@@ -384,13 +365,18 @@ impl Whitenoise {
                 user_inbox_relays
             };
 
+            let relay_urls = relays_to_use
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
+
             self.nostr
                 .publish_gift_wrap_to(
                     &member_pubkey,
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
                     account,
-                    &relays_to_use,
+                    &relay_urls,
                     keys.clone(),
                 )
                 .await
@@ -427,10 +413,8 @@ impl Whitenoise {
             (relay_urls, update_result.evolution_event)
         };
 
-        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
-
         self.nostr
-            .publish_mls_commit_to(evolution_event, account, &relays)
+            .publish_event_to(evolution_event, account, &relay_urls)
             .await?;
         Ok(())
     }
@@ -459,10 +443,8 @@ impl Whitenoise {
             (relay_urls, update_result.evolution_event)
         };
 
-        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
-
         self.nostr
-            .publish_mls_commit_to(evolution_event, account, &relays)
+            .publish_event_to(evolution_event, account, &relay_urls)
             .await?;
         Ok(())
     }
@@ -491,11 +473,9 @@ impl Whitenoise {
             (relay_urls, update_result.evolution_event)
         };
 
-        let relays = self.convert_relay_urls_to_relays(relay_urls).await?;
-
         // Publish the self-removal proposal to the group
         self.nostr
-            .publish_mls_commit_to(evolution_event, account, &relays)
+            .publish_event_to(evolution_event, account, &relay_urls)
             .await?;
 
         // TODO: Do any local updates to ensure that we're accurately reflecting that the account is trying to leave this group
