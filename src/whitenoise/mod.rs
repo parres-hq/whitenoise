@@ -822,14 +822,17 @@ pub mod test_utils {
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
 
+            let key_package_relays_urls = account
+                .key_package_relays(whitenoise)
+                .await
+                .unwrap()
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
+
             let _ = whitenoise
                 .nostr
-                .publish_key_package_with_signer(
-                    &ekp,
-                    &account.key_package_relays(whitenoise).await.unwrap(),
-                    &tags,
-                    keys,
-                )
+                .publish_key_package_with_signer(&ekp, &key_package_relays_urls, &tags, keys)
                 .await
                 .unwrap();
         }

@@ -37,12 +37,16 @@ impl Whitenoise {
         if relays.is_empty() {
             return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
         }
+        let relays_urls = relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
         let result = self
             .nostr
-            .publish_key_package_with_signer(&encoded_key_package, &relays, &tags, signer)
+            .publish_key_package_with_signer(&encoded_key_package, &relays_urls, &tags, signer)
             .await?;
 
         tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
@@ -90,9 +94,14 @@ impl Whitenoise {
                 return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
             }
 
+            let key_package_relays_urls = key_package_relays
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
+
             let result = self
                 .nostr
-                .publish_event_deletion_with_signer(&event.id, &key_package_relays, signer)
+                .publish_event_deletion_with_signer(&event.id, &key_package_relays_urls, signer)
                 .await?;
             return Ok(!result.success.is_empty());
         }
@@ -235,12 +244,21 @@ impl Whitenoise {
             }
         }
 
+        let key_package_relays_urls = key_package_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
+
         // Delete from relays (always happens regardless of delete_mls_stored_keys)
         for event in &key_package_events {
             // Publish deletion event
             match self
                 .nostr
-                .publish_event_deletion_with_signer(&event.id, &key_package_relays, signer.clone())
+                .publish_event_deletion_with_signer(
+                    &event.id,
+                    &key_package_relays_urls,
+                    signer.clone(),
+                )
                 .await
             {
                 Ok(_) => {

@@ -3,11 +3,9 @@
 use nostr_sdk::prelude::*;
 
 use crate::{
+    RelayType,
     nostr_manager::{NostrManager, NostrManagerError, Result},
-    whitenoise::{
-        accounts::Account,
-        relays::{Relay, RelayType},
-    },
+    whitenoise::accounts::Account,
 };
 
 impl NostrManager {
@@ -76,7 +74,7 @@ impl NostrManager {
     pub(crate) async fn publish_metadata_with_signer(
         &self,
         metadata: &Metadata,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let event_builder = EventBuilder::metadata(metadata);
@@ -89,19 +87,19 @@ impl NostrManager {
     /// The event is automatically tracked in the database if published successfully.
     pub(crate) async fn publish_relay_list_with_signer(
         &self,
-        relay_list: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        relay_list: &[RelayUrl],
         relay_type: RelayType,
-        target_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        target_relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         let tags: Vec<Tag> = match relay_type {
             RelayType::Nip65 => relay_list
                 .iter()
-                .map(|relay| Tag::reference(relay.url.to_string()))
+                .map(|relay| Tag::reference(relay.to_string()))
                 .collect(),
             RelayType::Inbox | RelayType::KeyPackage => relay_list
                 .iter()
-                .map(|relay| Tag::custom(TagKind::Relay, [relay.url.to_string()]))
+                .map(|relay| Tag::custom(TagKind::Relay, [relay.to_string()]))
                 .collect(),
         };
         tracing::debug!(target: "whitenoise::nostr_manager::publish_relay_list_with_signer", "Publishing relay list tags {:?}", tags);
@@ -121,7 +119,7 @@ impl NostrManager {
     pub(crate) async fn publish_follow_list_with_signer(
         &self,
         follow_list: &[PublicKey],
-        target_relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        target_relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<()> {
         if follow_list.is_empty() {
@@ -153,7 +151,7 @@ impl NostrManager {
     pub(crate) async fn publish_key_package_with_signer(
         &self,
         encoded_key_package: &str,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        relays: &[RelayUrl],
         tags: &[Tag],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
@@ -170,7 +168,7 @@ impl NostrManager {
     pub(crate) async fn publish_event_deletion_with_signer(
         &self,
         event_id: &EventId,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let event_deletion_event_builder =
@@ -214,19 +212,18 @@ impl NostrManager {
     async fn publish_event_builder_with_signer(
         &self,
         event_builder: EventBuilder,
-        relays: &[Relay], // TODO: Refactor this method to use RelayUrls instead of Relays
+        relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         // Get the public key from the signer for account lookup
         let pubkey = signer.get_public_key().await?;
-        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
 
         // Ensure we're connected to all target relays before publishing
-        self.ensure_relays_connected(&urls).await?;
+        self.ensure_relays_connected(relays).await?;
         let result = self
             .with_signer(signer, || async {
                 self.client
-                    .send_event_builder_to(urls, event_builder)
+                    .send_event_builder_to(relays, event_builder)
                     .await
                     .map_err(NostrManagerError::Client)
             })
@@ -261,7 +258,7 @@ mod publish_tests {
                 .unwrap();
 
         let metadata = Metadata::new().name("test_user").display_name("Test User");
-        let relays: Vec<crate::whitenoise::relays::Relay> = vec![];
+        let relays: Vec<RelayUrl> = vec![];
         let keys = Keys::generate();
 
         let result = nostr_manager
@@ -287,18 +284,8 @@ mod publish_tests {
                 .unwrap();
 
         let test_relays = vec![
-            crate::whitenoise::relays::Relay {
-                id: None,
-                url: RelayUrl::parse("ws://localhost:8080").unwrap(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
-            crate::whitenoise::relays::Relay {
-                id: None,
-                url: RelayUrl::parse("ws://localhost:7777").unwrap(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
         ];
 
         let test_timestamp = std::time::SystemTime::now()
@@ -321,9 +308,8 @@ mod publish_tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-        let test_relay_urls: Vec<RelayUrl> = test_relays.iter().map(|r| r.url.clone()).collect();
         let fetch_result = nostr_manager
-            .fetch_metadata_from(&test_relay_urls, keys.public_key())
+            .fetch_metadata_from(&test_relays, keys.public_key())
             .await
             .expect("Failed to fetch metadata from relays");
 
@@ -346,12 +332,7 @@ mod publish_tests {
 
         let follow_list: Vec<PublicKey> = vec![];
         let test_relay_url = RelayUrl::parse("wss://relay.example.com").unwrap();
-        let relays = vec![crate::whitenoise::relays::Relay {
-            id: None,
-            url: test_relay_url,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        }];
+        let relays = vec![test_relay_url];
         let keys = Keys::generate();
 
         let result = nostr_manager
@@ -374,7 +355,7 @@ mod publish_tests {
                 .unwrap();
 
         let follow_list: Vec<PublicKey> = vec![];
-        let relays: Vec<crate::whitenoise::relays::Relay> = vec![];
+        let relays: Vec<RelayUrl> = vec![];
         let keys = Keys::generate();
 
         let result = nostr_manager
@@ -397,7 +378,7 @@ mod publish_tests {
                 .unwrap();
 
         let follow_list = vec![Keys::generate().public_key()];
-        let relays: Vec<crate::whitenoise::relays::Relay> = vec![];
+        let relays: Vec<RelayUrl> = vec![];
         let keys = Keys::generate();
 
         let result = nostr_manager

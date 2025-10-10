@@ -680,8 +680,21 @@ impl Whitenoise {
         target_relays: &[Relay],
         keys: &Keys,
     ) -> Result<()> {
+        let relays_urls = relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
+        let target_relays_urls = target_relays
+            .iter()
+            .map(|r| r.url.clone())
+            .collect::<Vec<RelayUrl>>();
         self.nostr
-            .publish_relay_list_with_signer(relays, relay_type, target_relays, keys.clone())
+            .publish_relay_list_with_signer(
+                &relays_urls,
+                relay_type,
+                &target_relays_urls,
+                keys.clone(),
+            )
             .await?;
         Ok(())
     }
@@ -701,8 +714,13 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Background task: Publishing metadata for account: {:?}", account_clone.pubkey);
 
+            let relays_urls = relays
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
+
             nostr
-                .publish_metadata_with_signer(&user.metadata, &relays, signer)
+                .publish_metadata_with_signer(&user.metadata, &relays_urls, signer)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Successfully published metadata for account: {:?}", account_clone.pubkey);
@@ -731,8 +749,17 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Background task: Publishing relay list for account: {:?}", account_clone.pubkey);
 
+            let relays_urls = relays
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
+            let target_relays_urls = target_relays
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
+
             nostr
-                .publish_relay_list_with_signer(&relays, relay_type, &target_relays, keys)
+                .publish_relay_list_with_signer(&relays_urls, relay_type, &target_relays_urls, keys)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Successfully published relay list for account: {:?}", account_clone.pubkey);
@@ -757,8 +784,12 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Background task: Publishing follow list for account: {:?}", account_clone.pubkey);
 
+            let relays_urls = relays
+                .iter()
+                .map(|r| r.url.clone())
+                .collect::<Vec<RelayUrl>>();
             nostr
-                .publish_follow_list_with_signer(&follows_pubkeys, &relays, keys)
+                .publish_follow_list_with_signer(&follows_pubkeys, &relays_urls, keys)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Successfully published follow list for account: {:?}", account_clone.pubkey);
