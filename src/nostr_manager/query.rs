@@ -35,6 +35,8 @@ impl NostrManager {
         Self::latest_from_events(events)
     }
 
+    // TODO: Add key package validation logic here to check key package tags for correct extensions and version
+    // We don't want to do this quite yet as we were publishing incorrect tags for a while. MLS will validate the actual values of the KeyPackage so we can't actually use a bad KeyPackage.
     pub(crate) async fn fetch_user_key_package(
         &self,
         pubkey: PublicKey,

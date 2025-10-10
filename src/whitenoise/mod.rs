@@ -19,10 +19,12 @@ pub mod follows;
 pub mod group_information;
 pub mod groups;
 pub mod key_packages;
+pub mod media_files;
 pub mod message_aggregator;
 pub mod messages;
 pub mod relays;
 pub mod secrets_store;
+pub mod storage;
 pub mod users;
 pub mod utils;
 pub mod welcomes;
@@ -96,6 +98,7 @@ pub struct Whitenoise {
     database: Arc<Database>,
     nostr: NostrManager,
     secrets_store: SecretsStore,
+    storage: storage::Storage,
     message_aggregator: message_aggregator::MessageAggregator,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
@@ -112,6 +115,7 @@ impl std::fmt::Debug for Whitenoise {
             .field("database", &"<REDACTED>")
             .field("nostr", &"<REDACTED>")
             .field("secrets_store", &"<REDACTED>")
+            .field("storage", &"<REDACTED>")
             .field("message_aggregator", &"<REDACTED>")
             .field("event_sender", &"<REDACTED>")
             .field("shutdown_sender", &"<REDACTED>")
@@ -162,6 +166,9 @@ impl Whitenoise {
         // Create SecretsStore
         let secrets_store = SecretsStore::new(data_dir);
 
+        // Create Storage
+        let storage = storage::Storage::new(data_dir)?;
+
         // Create message aggregator - always initialize, use custom config if provided
         let message_aggregator = if let Some(aggregator_config) = config.message_aggregator_config.clone() {
             message_aggregator::MessageAggregator::with_config(aggregator_config)
@@ -174,6 +181,7 @@ impl Whitenoise {
             database,
             nostr,
             secrets_store,
+            storage,
             message_aggregator,
             event_sender,
             shutdown_sender,
@@ -411,6 +419,14 @@ impl Whitenoise {
     /// This allows consumers to access the message aggregator directly for custom processing
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
         &self.message_aggregator
+    }
+
+    /// Get a MediaFiles orchestrator for coordinating storage and database operations
+    ///
+    /// This provides high-level methods that coordinate between the storage layer
+    /// (filesystem) and database layer (metadata) for media files.
+    pub(crate) fn media_files(&self) -> media_files::MediaFiles<'_> {
+        media_files::MediaFiles::new(&self.storage, &self.database)
     }
 
     pub(crate) async fn refresh_global_subscription_for_user(&self, user: &User) -> Result<()> {
@@ -681,6 +697,9 @@ pub mod test_utils {
 
         nostr.client.connect().await;
 
+        // Create Storage
+        let storage = storage::Storage::new(data_temp.path()).unwrap();
+
         // Create message aggregator for testing
         let message_aggregator = message_aggregator::MessageAggregator::new();
 
@@ -689,6 +708,7 @@ pub mod test_utils {
             database,
             nostr,
             secrets_store,
+            storage,
             message_aggregator,
             event_sender,
             shutdown_sender,
