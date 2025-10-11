@@ -234,8 +234,7 @@ impl Whitenoise {
 
     async fn setup_global_users_subscriptions(whitenoise_ref: &Whitenoise) -> Result<()> {
         let users_with_relays = User::all_users_with_relay_urls(whitenoise_ref).await?;
-        let default_relays: Vec<RelayUrl> =
-            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+        let default_relays: Vec<RelayUrl> = Relay::urls(&Relay::defaults());
 
         let Some(signer_account) = Account::first(&whitenoise_ref.database).await? else {
             tracing::info!(
@@ -415,8 +414,7 @@ impl Whitenoise {
 
     pub(crate) async fn refresh_global_subscription_for_user(&self, user: &User) -> Result<()> {
         let users_with_relays = User::all_users_with_relay_urls(self).await?;
-        let default_relays: Vec<RelayUrl> =
-            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+        let default_relays: Vec<RelayUrl> = Relay::urls(&Relay::defaults());
 
         let Some(signer_account) = Account::first(&self.database).await? else {
             tracing::info!(
@@ -544,19 +542,8 @@ impl Whitenoise {
             return Ok(false); // Early exit if subscriptions missing
         }
 
-        let user_relays: Vec<RelayUrl> = account
-            .nip65_relays(self)
-            .await?
-            .into_iter()
-            .map(|r| r.url)
-            .collect();
-
-        let inbox_relays: Vec<RelayUrl> = account
-            .inbox_relays(self)
-            .await?
-            .into_iter()
-            .map(|r| r.url)
-            .collect();
+        let user_relays: Vec<RelayUrl> = Relay::urls(&account.nip65_relays(self).await?);
+        let inbox_relays: Vec<RelayUrl> = Relay::urls(&account.inbox_relays(self).await?);
 
         let (group_relays, _) = self.extract_groups_relays_and_ids(account).await?;
 
@@ -672,8 +659,7 @@ pub mod test_utils {
         .expect("Failed to create NostrManager");
 
         // connect to default relays
-        let default_relays_urls: Vec<RelayUrl> =
-            Relay::defaults().iter().map(|r| r.url.clone()).collect();
+        let default_relays_urls: Vec<RelayUrl> = Relay::urls(&Relay::defaults());
 
         for relay in default_relays_urls {
             nostr.client.add_relay(relay).await.unwrap();
@@ -822,13 +808,8 @@ pub mod test_utils {
             // publish keypackage to relays
             let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
 
-            let key_package_relays_urls = account
-                .key_package_relays(whitenoise)
-                .await
-                .unwrap()
-                .iter()
-                .map(|r| r.url.clone())
-                .collect::<Vec<RelayUrl>>();
+            let key_package_relays_urls =
+                Relay::urls(&account.key_package_relays(whitenoise).await.unwrap());
 
             let _ = whitenoise
                 .nostr

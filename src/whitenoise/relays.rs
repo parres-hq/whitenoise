@@ -101,6 +101,13 @@ impl Relay {
             .map(|url| Relay::new(&url))
             .collect()
     }
+
+    pub(crate) fn urls<'a, I>(relays: I) -> Vec<RelayUrl>
+    where
+        I: IntoIterator<Item = &'a Relay>,
+    {
+        relays.into_iter().map(|r| r.url.clone()).collect()
+    }
 }
 
 impl Whitenoise {
@@ -155,5 +162,43 @@ impl Whitenoise {
         }
 
         Ok(relay_statuses)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_relay(url: &RelayUrl) -> super::Relay {
+        super::Relay {
+            id: None,
+            url: url.clone(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_urls_empty_list() {
+        let relays: Vec<super::Relay> = vec![];
+        let urls = super::Relay::urls(&relays);
+        assert_eq!(urls.len(), 0);
+    }
+
+    #[test]
+    fn test_urls_extracts_and_preserves_order() {
+        let url1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+        let url2 = RelayUrl::parse("wss://relay2.example.com").unwrap();
+        let url3 = RelayUrl::parse("wss://relay3.example.com").unwrap();
+
+        let relays = vec![
+            create_test_relay(&url1),
+            create_test_relay(&url2),
+            create_test_relay(&url3),
+        ];
+
+        let urls = super::Relay::urls(&relays);
+
+        assert_eq!(urls, vec![url1, url2, url3]);
     }
 }
