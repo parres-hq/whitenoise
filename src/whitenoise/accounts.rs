@@ -273,7 +273,7 @@ impl Account {
         let mut relays = HashSet::new();
         relays.extend(self.nip65_relays(whitenoise).await?);
         relays.extend(self.inbox_relays(whitenoise).await?);
-        let urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+        let urls: Vec<RelayUrl> = Relay::urls(&relays);
         for url in urls {
             whitenoise.nostr.client.add_relay(url).await?;
         }
@@ -484,10 +484,7 @@ impl Whitenoise {
     async fn setup_key_package(&self, account: &Account) -> Result<()> {
         let relays = account.key_package_relays(self).await?;
         tracing::debug!(target: "whitenoise::setup_key_package", "Found {} key package relays", relays.len());
-        let relays_urls = relays
-            .iter()
-            .map(|r| r.url.clone())
-            .collect::<Vec<RelayUrl>>();
+        let relays_urls = Relay::urls(&relays);
         let key_package_event = self
             .nostr
             .fetch_user_key_package(account.pubkey, &relays_urls)
@@ -640,10 +637,7 @@ impl Whitenoise {
         relay_type: RelayType,
         source_relays: &[Relay],
     ) -> Result<Vec<Relay>> {
-        let source_relay_urls = source_relays
-            .iter()
-            .map(|r| r.url.clone())
-            .collect::<Vec<RelayUrl>>();
+        let source_relay_urls = Relay::urls(source_relays);
         let relay_event = self
             .nostr
             .fetch_user_relays(pubkey, relay_type, &source_relay_urls)
@@ -680,8 +674,15 @@ impl Whitenoise {
         target_relays: &[Relay],
         keys: &Keys,
     ) -> Result<()> {
+        let relays_urls = Relay::urls(relays);
+        let target_relays_urls = Relay::urls(target_relays);
         self.nostr
-            .publish_relay_list_with_signer(relays, relay_type, target_relays, keys.clone())
+            .publish_relay_list_with_signer(
+                &relays_urls,
+                relay_type,
+                &target_relays_urls,
+                keys.clone(),
+            )
             .await?;
         Ok(())
     }
@@ -701,8 +702,10 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Background task: Publishing metadata for account: {:?}", account_clone.pubkey);
 
+            let relays_urls = Relay::urls(&relays);
+
             nostr
-                .publish_metadata_with_signer(&user.metadata, &relays, signer)
+                .publish_metadata_with_signer(&user.metadata, &relays_urls, signer)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_user_metadata", "Successfully published metadata for account: {:?}", account_clone.pubkey);
@@ -731,8 +734,11 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Background task: Publishing relay list for account: {:?}", account_clone.pubkey);
 
+            let relays_urls = Relay::urls(&relays);
+            let target_relays_urls = Relay::urls(&target_relays);
+
             nostr
-                .publish_relay_list_with_signer(&relays, relay_type, &target_relays, keys)
+                .publish_relay_list_with_signer(&relays_urls, relay_type, &target_relays_urls, keys)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_relay_list", "Successfully published relay list for account: {:?}", account_clone.pubkey);
@@ -757,8 +763,9 @@ impl Whitenoise {
         tokio::spawn(async move {
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Background task: Publishing follow list for account: {:?}", account_clone.pubkey);
 
+            let relays_urls = Relay::urls(&relays);
             nostr
-                .publish_follow_list_with_signer(&follows_pubkeys, &relays, keys)
+                .publish_follow_list_with_signer(&follows_pubkeys, &relays_urls, keys)
                 .await?;
 
             tracing::debug!(target: "whitenoise::accounts::background_publish_account_follow_list", "Successfully published follow list for account: {:?}", account_clone.pubkey);
@@ -795,19 +802,9 @@ impl Whitenoise {
             account
         );
 
-        let user_relays: Vec<RelayUrl> = account
-            .nip65_relays(self)
-            .await?
-            .into_iter()
-            .map(|r| r.url)
-            .collect();
+        let user_relays: Vec<RelayUrl> = Relay::urls(&account.nip65_relays(self).await?);
 
-        let inbox_relays: Vec<RelayUrl> = account
-            .inbox_relays(self)
-            .await?
-            .into_iter()
-            .map(|r| r.url)
-            .collect();
+        let inbox_relays: Vec<RelayUrl> = Relay::urls(&account.inbox_relays(self).await?);
 
         let (group_relays_urls, nostr_group_ids) =
             self.extract_groups_relays_and_ids(account).await?;
@@ -872,19 +869,9 @@ impl Whitenoise {
             account.pubkey
         );
 
-        let user_relays: Vec<RelayUrl> = account
-            .nip65_relays(self)
-            .await?
-            .into_iter()
-            .map(|r| r.url)
-            .collect();
+        let user_relays: Vec<RelayUrl> = Relay::urls(&account.nip65_relays(self).await?);
 
-        let inbox_relays: Vec<RelayUrl> = account
-            .inbox_relays(self)
-            .await?
-            .into_iter()
-            .map(|r| r.url)
-            .collect();
+        let inbox_relays: Vec<RelayUrl> = Relay::urls(&account.inbox_relays(self).await?);
 
         let (group_relays_urls, nostr_group_ids) =
             self.extract_groups_relays_and_ids(account).await?;
@@ -1009,10 +996,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let nip65_relays = account.nip65_relays(&whitenoise).await.unwrap();
-        let nip65_relay_urls = nip65_relays
-            .iter()
-            .map(|r| r.url.clone())
-            .collect::<Vec<RelayUrl>>();
+        let nip65_relay_urls = Relay::urls(&nip65_relays);
         // Check that all three event types were published
         let inbox_events = whitenoise
             .nostr
@@ -1030,13 +1014,7 @@ mod tests {
             .nostr
             .fetch_user_key_package(
                 account.pubkey,
-                &account
-                    .nip65_relays(&whitenoise)
-                    .await
-                    .unwrap()
-                    .iter()
-                    .map(|r| r.url.clone())
-                    .collect::<Vec<RelayUrl>>(),
+                &Relay::urls(&account.nip65_relays(&whitenoise).await.unwrap()),
             )
             .await
             .unwrap();
@@ -1079,29 +1057,13 @@ mod tests {
             "Account should have default key package relays configured"
         );
 
-        let default_relays_vec: Vec<RelayUrl> =
-            default_relays.iter().map(|r| r.url.clone()).collect();
-        let nip65_relay_urls: Vec<RelayUrl> = account
-            .nip65_relays(whitenoise)
-            .await
-            .unwrap()
-            .iter()
-            .map(|r| r.url.clone())
-            .collect();
-        let inbox_relay_urls: Vec<RelayUrl> = account
-            .inbox_relays(whitenoise)
-            .await
-            .unwrap()
-            .iter()
-            .map(|r| r.url.clone())
-            .collect();
-        let key_package_relay_urls: Vec<RelayUrl> = account
-            .key_package_relays(whitenoise)
-            .await
-            .unwrap()
-            .iter()
-            .map(|r| r.url.clone())
-            .collect();
+        let default_relays_vec: Vec<RelayUrl> = Relay::urls(&default_relays);
+        let nip65_relay_urls: Vec<RelayUrl> =
+            Relay::urls(&account.nip65_relays(whitenoise).await.unwrap());
+        let inbox_relay_urls: Vec<RelayUrl> =
+            Relay::urls(&account.inbox_relays(whitenoise).await.unwrap());
+        let key_package_relay_urls: Vec<RelayUrl> =
+            Relay::urls(&account.key_package_relays(whitenoise).await.unwrap());
         for default_relay in default_relays_vec.iter() {
             assert!(
                 nip65_relay_urls.contains(default_relay),
@@ -1128,13 +1090,7 @@ mod tests {
             .nostr
             .fetch_user_key_package(
                 account.pubkey,
-                &account
-                    .key_package_relays(whitenoise)
-                    .await
-                    .unwrap()
-                    .iter()
-                    .map(|r| r.url.clone())
-                    .collect::<Vec<RelayUrl>>(),
+                &Relay::urls(&account.key_package_relays(whitenoise).await.unwrap()),
             )
             .await
             .unwrap();
@@ -1392,10 +1348,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
         let nip65_relays = account.nip65_relays(&whitenoise).await.unwrap();
-        let nip65_relay_urls = nip65_relays
-            .iter()
-            .map(|r| r.url.clone())
-            .collect::<Vec<RelayUrl>>();
+        let nip65_relay_urls = Relay::urls(&nip65_relays);
         let fetched_metadata = whitenoise
             .nostr
             .fetch_metadata_from(&nip65_relay_urls, account.pubkey)

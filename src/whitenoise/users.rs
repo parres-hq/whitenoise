@@ -39,12 +39,7 @@ impl User {
     ///
     /// * `whitenoise` - The Whitenoise instance used to access the Nostr client and database
     pub async fn sync_metadata(&mut self, whitenoise: &Whitenoise) -> Result<()> {
-        let relays_urls: Vec<_> = self
-            .get_query_relays(whitenoise)
-            .await?
-            .iter()
-            .map(|r| r.url.clone())
-            .collect();
+        let relays_urls: Vec<_> = Relay::urls(&self.get_query_relays(whitenoise).await?);
         let metadata_event = whitenoise
             .nostr
             .fetch_metadata_from(&relays_urls, self.pubkey)
@@ -95,19 +90,16 @@ impl User {
             .relays(RelayType::KeyPackage, &whitenoise.database)
             .await?;
         let mut key_package_relays_urls_set: HashSet<RelayUrl> =
-            key_package_relays.iter().map(|r| r.url.clone()).collect();
+            Relay::urls(&key_package_relays).into_iter().collect();
         if key_package_relays.is_empty() {
             tracing::warn!(
                 target: "whitenoise::users::key_package_event",
                 "User {} has no key package relays, using nip65 relays",
                 self.pubkey
             );
-            key_package_relays_urls_set.extend(
-                self.relays(RelayType::Nip65, &whitenoise.database)
-                    .await?
-                    .iter()
-                    .map(|r| r.url.clone()),
-            );
+            key_package_relays_urls_set.extend(Relay::urls(
+                &self.relays(RelayType::Nip65, &whitenoise.database).await?,
+            ));
         }
         if key_package_relays_urls_set.is_empty() {
             tracing::warn!(
@@ -375,7 +367,7 @@ impl User {
         relay_type: RelayType,
         query_relays: &[Relay],
     ) -> Result<bool> {
-        let relays_urls: Vec<_> = query_relays.iter().map(|r| r.url.clone()).collect();
+        let relays_urls: Vec<_> = Relay::urls(query_relays);
         let relay_event = whitenoise
             .nostr
             .fetch_user_relays(self.pubkey, relay_type, &relays_urls)
@@ -436,7 +428,7 @@ impl User {
 
         for user in users {
             let relays = user.relays(RelayType::Nip65, &whitenoise.database).await?;
-            let relay_urls: Vec<RelayUrl> = relays.iter().map(|r| r.url.clone()).collect();
+            let relay_urls: Vec<RelayUrl> = Relay::urls(&relays);
             users_with_relays.push((user.pubkey, relay_urls));
         }
 
@@ -814,13 +806,7 @@ mod tests {
         let saved_user = user.save(&whitenoise.database).await.unwrap();
         let query_relays = saved_user.get_query_relays(&whitenoise).await.unwrap();
 
-        assert_eq!(
-            query_relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
-            Relay::defaults()
-                .into_iter()
-                .map(|r| r.url)
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(Relay::urls(&query_relays), Relay::urls(&Relay::defaults()));
     }
 
     #[tokio::test]

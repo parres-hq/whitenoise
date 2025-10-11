@@ -14,6 +14,7 @@ use crate::{
         accounts::Account,
         error::{Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
+        relays::Relay,
         users::User,
     },
 };
@@ -87,10 +88,7 @@ impl Whitenoise {
                 }
             }
             let kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
-            let kp_relays_urls = kp_relays
-                .iter()
-                .map(|r| r.url.clone())
-                .collect::<Vec<RelayUrl>>();
+            let kp_relays_urls = Relay::urls(&kp_relays);
             let some_event = self
                 .nostr
                 .fetch_user_key_package(*pk, &kp_relays_urls)
@@ -162,10 +160,7 @@ impl Whitenoise {
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
                     creator_account,
-                    &relays_to_use
-                        .iter()
-                        .map(|r| r.url.clone())
-                        .collect::<Vec<_>>(),
+                    &Relay::urls(&relays_to_use),
                     keys.clone(),
                 )
                 .await
@@ -181,7 +176,7 @@ impl Whitenoise {
         self.nostr
             .setup_group_messages_subscriptions_with_signer(
                 creator_account.pubkey,
-                &relays.into_iter().map(|r| r.url).collect::<Vec<_>>(),
+                &Relay::urls(&relays),
                 &group_ids,
                 keys,
             )
@@ -283,10 +278,7 @@ impl Whitenoise {
                 );
                 relays_to_use = account.nip65_relays(self).await?;
             }
-            let relays_to_use_urls = relays_to_use
-                .iter()
-                .map(|r| r.url.clone())
-                .collect::<Vec<RelayUrl>>();
+            let relays_to_use_urls = Relay::urls(&relays_to_use);
             let some_event = self
                 .nostr
                 .fetch_user_key_package(*pk, &relays_to_use_urls)
@@ -365,10 +357,7 @@ impl Whitenoise {
                 user_inbox_relays
             };
 
-            let relay_urls = relays_to_use
-                .iter()
-                .map(|r| r.url.clone())
-                .collect::<Vec<RelayUrl>>();
+            let relay_urls = Relay::urls(&relays_to_use);
 
             self.nostr
                 .publish_gift_wrap_to(
