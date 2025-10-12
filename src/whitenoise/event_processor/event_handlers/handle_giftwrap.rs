@@ -89,6 +89,7 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::whitenoise::relays::Relay;
     use crate::whitenoise::test_utils::*;
 
     // Builds a real MLS Welcome rumor for `member_pubkey` by creating a group with `creator_account`
@@ -98,13 +99,12 @@ mod tests {
         member_pubkey: PublicKey,
     ) -> Event {
         // Fetch a real key package event for the member from relays
-        let relays_urls = creator_account
-            .key_package_relays(whitenoise)
-            .await
-            .unwrap()
-            .iter()
-            .map(|r| r.url.clone())
-            .collect::<Vec<RelayUrl>>();
+        let relays_urls = Relay::urls(
+            &creator_account
+                .key_package_relays(whitenoise)
+                .await
+                .unwrap(),
+        );
         let key_pkg_event = whitenoise
             .nostr
             .fetch_user_key_package(member_pubkey, &relays_urls)
