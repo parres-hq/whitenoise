@@ -50,7 +50,7 @@ impl Whitenoise {
         // Publish message in background without blocking
         self.nostr.background_publish_event_to(
             message_event,
-            account,
+            account.pubkey,
             group_relays.into_iter().collect::<Vec<_>>(),
         );
 
