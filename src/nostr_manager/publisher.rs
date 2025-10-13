@@ -5,7 +5,6 @@ use nostr_sdk::prelude::*;
 use crate::{
     RelayType,
     nostr_manager::{NostrManager, NostrManagerError, Result},
-    whitenoise::accounts::Account,
 };
 
 impl NostrManager {
@@ -20,14 +19,16 @@ impl NostrManager {
     pub(crate) fn background_publish_event_to(
         &self,
         event: Event,
-        account: &Account,
+        account_pubkey: PublicKey,
         relays: Vec<RelayUrl>,
     ) {
         let nostr = self.clone();
-        let account = account.clone();
 
         tokio::spawn(async move {
-            match nostr.publish_event_to(event, &account, &relays).await {
+            match nostr
+                .publish_event_to(event, &account_pubkey, &relays)
+                .await
+            {
                 Ok(output) => {
                     tracing::debug!(
                         target: "whitenoise::nostr_manager::background_publish_event_to",
@@ -59,13 +60,14 @@ impl NostrManager {
         receiver: &PublicKey,
         rumor: UnsignedEvent,
         extra_tags: &[Tag],
-        account: &Account,
+        account_pubkey: PublicKey,
         relays: &[RelayUrl],
         signer: impl NostrSigner + 'static,
     ) -> Result<Output<EventId>> {
         let wrapped_event =
             EventBuilder::gift_wrap(&signer, receiver, rumor, extra_tags.to_vec()).await?;
-        self.publish_event_to(wrapped_event, account, relays).await
+        self.publish_event_to(wrapped_event, &account_pubkey, relays)
+            .await
     }
 
     /// Publishes a Nostr metadata event using the provided signer.
@@ -185,7 +187,7 @@ impl NostrManager {
     pub(crate) async fn publish_event_to(
         &self,
         event: Event,
-        account: &Account,
+        account_pubkey: &PublicKey,
         relays: &[RelayUrl],
     ) -> Result<Output<EventId>> {
         // Ensure we're connected to all target relays before publishing
@@ -195,7 +197,7 @@ impl NostrManager {
         // Track the published event if we have a successful result (best-effort)
         if !result.success.is_empty() {
             self.event_tracker
-                .track_published_event(result.id(), &account.pubkey)
+                .track_published_event(result.id(), account_pubkey)
                 .await
                 .map_err(|e| NostrManagerError::FailedToTrackPublishedEvent(e.to_string()))?;
         }
@@ -244,7 +246,6 @@ impl NostrManager {
 #[cfg(test)]
 mod publish_tests {
     use super::*;
-    use chrono::Utc;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -455,7 +456,6 @@ mod publish_tests {
 
     #[tokio::test]
     async fn test_publish_event_to_empty_relays() {
-        use crate::whitenoise::accounts::Account;
         use crate::whitenoise::event_tracker::NoEventTracker;
 
         let (sender, _receiver) = mpsc::channel(100);
@@ -467,14 +467,6 @@ mod publish_tests {
 
         // Create a test account and keys
         let keys = Keys::generate();
-        let account = Account {
-            id: Some(1),
-            pubkey: keys.public_key(),
-            user_id: 1,
-            last_synced_at: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
 
         // Create a test event
         let event_builder = EventBuilder::text_note("test message");
@@ -483,7 +475,7 @@ mod publish_tests {
         // Attempt to publish to empty relay list
         let relays: Vec<RelayUrl> = vec![];
         let result = nostr_manager
-            .publish_event_to(event, &account, &relays)
+            .publish_event_to(event, &keys.public_key(), &relays)
             .await;
 
         // Publishing to empty relays should fail - nostr-sdk returns an error for empty targets
@@ -492,7 +484,6 @@ mod publish_tests {
 
     #[tokio::test]
     async fn test_publish_event_to_unreachable_relays() {
-        use crate::whitenoise::accounts::Account;
         use crate::whitenoise::event_tracker::NoEventTracker;
 
         let (sender, _receiver) = mpsc::channel(100);
@@ -504,14 +495,6 @@ mod publish_tests {
 
         // Create a test account and keys
         let keys = Keys::generate();
-        let account = Account {
-            id: Some(1),
-            pubkey: keys.public_key(),
-            user_id: 1,
-            last_synced_at: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
 
         // Create a test event
         let event_builder = EventBuilder::text_note("test message");
@@ -524,7 +507,7 @@ mod publish_tests {
         ];
 
         let result = nostr_manager
-            .publish_event_to(event, &account, &relays)
+            .publish_event_to(event, &keys.public_key(), &relays)
             .await;
 
         // The publish should succeed at the API level (returns Output)
@@ -546,7 +529,6 @@ mod publish_tests {
 
     #[tokio::test]
     async fn test_publish_event_to_success() {
-        use crate::whitenoise::accounts::Account;
         use crate::whitenoise::event_tracker::NoEventTracker;
 
         let (sender, _receiver) = mpsc::channel(100);
@@ -558,14 +540,6 @@ mod publish_tests {
 
         // Create a test account and keys
         let keys = Keys::generate();
-        let account = Account {
-            id: Some(1),
-            pubkey: keys.public_key(),
-            user_id: 1,
-            last_synced_at: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
 
         // Create a unique test event to avoid conflicts
         let test_timestamp = std::time::SystemTime::now()
@@ -582,7 +556,7 @@ mod publish_tests {
         ];
 
         let result = nostr_manager
-            .publish_event_to(event.clone(), &account, &test_relays)
+            .publish_event_to(event.clone(), &keys.public_key(), &test_relays)
             .await;
 
         // Should succeed with at least some relay sends
@@ -607,7 +581,6 @@ mod publish_tests {
 
     #[tokio::test]
     async fn test_background_publish_event_to_completes() {
-        use crate::whitenoise::accounts::Account;
         use crate::whitenoise::event_tracker::NoEventTracker;
 
         let (sender, _receiver) = mpsc::channel(100);
@@ -619,14 +592,6 @@ mod publish_tests {
 
         // Create a test account and keys
         let keys = Keys::generate();
-        let account = Account {
-            id: Some(1),
-            pubkey: keys.public_key(),
-            user_id: 1,
-            last_synced_at: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
 
         // Create a test event
         let event_builder = EventBuilder::text_note("background test message");
@@ -639,7 +604,7 @@ mod publish_tests {
         ];
 
         // Call background publish (fire-and-forget)
-        nostr_manager.background_publish_event_to(event, &account, test_relays);
+        nostr_manager.background_publish_event_to(event, keys.public_key(), test_relays);
 
         // Give the background task time to complete
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -650,7 +615,6 @@ mod publish_tests {
 
     #[tokio::test]
     async fn test_background_publish_event_to_with_unreachable_relays() {
-        use crate::whitenoise::accounts::Account;
         use crate::whitenoise::event_tracker::NoEventTracker;
 
         let (sender, _receiver) = mpsc::channel(100);
@@ -662,14 +626,6 @@ mod publish_tests {
 
         // Create a test account and keys
         let keys = Keys::generate();
-        let account = Account {
-            id: Some(1),
-            pubkey: keys.public_key(),
-            user_id: 1,
-            last_synced_at: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
 
         // Create a test event
         let event_builder = EventBuilder::text_note("background test with unreachable relays");
@@ -682,11 +638,120 @@ mod publish_tests {
         ];
 
         // Call background publish - should not panic even with unreachable relays
-        nostr_manager.background_publish_event_to(event, &account, relays);
+        nostr_manager.background_publish_event_to(event, keys.public_key(), relays);
 
         // Give the background task time to complete and log the error
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         // No assertions - verify it handles errors gracefully without panicking
+    }
+
+    #[tokio::test]
+    async fn test_publish_gift_wrap_to_empty_relays() {
+        use crate::whitenoise::event_tracker::NoEventTracker;
+
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        let sender_keys = Keys::generate();
+        let receiver_keys = Keys::generate();
+
+        let rumor = UnsignedEvent::new(
+            sender_keys.public_key(),
+            Timestamp::now(),
+            Kind::TextNote,
+            vec![],
+            "test gift wrap message".to_string(),
+        );
+
+        let relays: Vec<RelayUrl> = vec![];
+
+        let result = nostr_manager
+            .publish_gift_wrap_to(
+                &receiver_keys.public_key(),
+                rumor,
+                &[],
+                sender_keys.public_key(),
+                &relays,
+                sender_keys,
+            )
+            .await;
+
+        assert!(result.is_err(), "Should fail with empty relays");
+        let error_message = format!("{:?}", result.unwrap_err());
+        assert!(
+            error_message.contains("NoRelaysSpecified"),
+            "Expected NoRelaysSpecified error, got: {}",
+            error_message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_gift_wrap_to_success() {
+        use crate::whitenoise::event_tracker::NoEventTracker;
+
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(10))
+                .await
+                .unwrap();
+
+        let sender_keys = Keys::generate();
+        let receiver_keys = Keys::generate();
+
+        let test_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let rumor = UnsignedEvent::new(
+            sender_keys.public_key(),
+            Timestamp::now(),
+            Kind::TextNote,
+            vec![],
+            format!("test gift wrap message {}", test_timestamp),
+        );
+
+        let extra_tags = vec![
+            Tag::custom(TagKind::custom("test"), ["value1"]),
+            Tag::custom(TagKind::custom("metadata"), ["value2"]),
+        ];
+
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        let result = nostr_manager
+            .publish_gift_wrap_to(
+                &receiver_keys.public_key(),
+                rumor,
+                &extra_tags,
+                sender_keys.public_key(),
+                &test_relays,
+                sender_keys,
+            )
+            .await;
+
+        match result {
+            Ok(output) => {
+                tracing::debug!(
+                    "Published gift wrap to {} successful relays, {} failed",
+                    output.success.len(),
+                    output.failed.len()
+                );
+            }
+            Err(e) => {
+                panic!(
+                    "Failed to publish gift wrap: {:?}. Are test relays running on localhost:8080 and localhost:7777?",
+                    e
+                );
+            }
+        }
     }
 }

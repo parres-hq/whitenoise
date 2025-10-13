@@ -159,7 +159,7 @@ impl Whitenoise {
                     &member_pubkey,
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
-                    creator_account,
+                    creator_account.pubkey,
                     &Relay::urls(&relays_to_use),
                     keys.clone(),
                 )
@@ -322,7 +322,7 @@ impl Whitenoise {
         }
 
         self.nostr
-            .publish_event_to(evolution_event, account, &relay_urls)
+            .publish_event_to(evolution_event, &account.pubkey, &relay_urls)
             .await?;
 
         // Evolution event published successfully
@@ -364,7 +364,7 @@ impl Whitenoise {
                     &member_pubkey,
                     welcome_rumor.clone(),
                     &[Tag::expiration(one_month_future)],
-                    account,
+                    account.pubkey,
                     &relay_urls,
                     keys.clone(),
                 )
@@ -403,7 +403,7 @@ impl Whitenoise {
         };
 
         self.nostr
-            .publish_event_to(evolution_event, account, &relay_urls)
+            .publish_event_to(evolution_event, &account.pubkey, &relay_urls)
             .await?;
         Ok(())
     }
@@ -433,7 +433,7 @@ impl Whitenoise {
         };
 
         self.nostr
-            .publish_event_to(evolution_event, account, &relay_urls)
+            .publish_event_to(evolution_event, &account.pubkey, &relay_urls)
             .await?;
         Ok(())
     }
@@ -464,7 +464,7 @@ impl Whitenoise {
 
         // Publish the self-removal proposal to the group
         self.nostr
-            .publish_event_to(evolution_event, account, &relay_urls)
+            .publish_event_to(evolution_event, &account.pubkey, &relay_urls)
             .await?;
 
         // TODO: Do any local updates to ensure that we're accurately reflecting that the account is trying to leave this group
