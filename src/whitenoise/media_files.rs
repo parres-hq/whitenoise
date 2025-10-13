@@ -99,14 +99,16 @@ impl<'a> MediaFiles<'a> {
     /// Stores a file and records it in the database in one operation
     ///
     /// This is a convenience method that:
-    /// 1. Stores the file to the filesystem
-    /// 2. Records the metadata in the database
+    /// 1. Stores the file to the filesystem (deduplicated by content)
+    /// 2. Records the metadata in the database (linking this group to the file)
+    ///
+    /// Files with the same content (hash) are stored only once on disk.
+    /// Multiple groups can reference the same file through database records.
     ///
     /// # Arguments
     /// * `account_pubkey` - The account accessing this file
-    /// * `group_id` - The MLS group ID
-    /// * `subdirectory` - Subdirectory within the group (e.g., "group_images", "media")
-    /// * `filename` - The filename to store as
+    /// * `group_id` - The MLS group ID (for database relationship tracking)
+    /// * `filename` - The filename to store as (typically `<hash>.<ext>`)
     /// * `upload` - MediaFileUpload containing file data and metadata
     ///
     /// # Returns
@@ -115,18 +117,17 @@ impl<'a> MediaFiles<'a> {
         &self,
         account_pubkey: &PublicKey,
         group_id: &GroupId,
-        subdirectory: &str,
         filename: &str,
         upload: MediaFileUpload<'_>,
     ) -> Result<PathBuf> {
-        // Store file to filesystem
+        // Store file to filesystem (deduplicated by content)
         let file_path = self
             .storage
             .media_files
-            .store_file(group_id, subdirectory, filename, upload.data)
+            .store_file(filename, upload.data)
             .await?;
 
-        // Record in database
+        // Record in database (tracks group-file relationship)
         use crate::whitenoise::database::media_files::MediaFile;
         MediaFile::save(
             self.database,
@@ -187,22 +188,12 @@ impl<'a> MediaFiles<'a> {
     /// Useful when you know the hash but not the exact extension.
     ///
     /// # Arguments
-    /// * `group_id` - The MLS group ID
-    /// * `subdirectory` - Subdirectory within the group
     /// * `prefix` - The filename prefix to search for
     ///
     /// # Returns
     /// The path to the first matching file, if any
-    pub(crate) async fn find_file_with_prefix(
-        &self,
-        group_id: &GroupId,
-        subdirectory: &str,
-        prefix: &str,
-    ) -> Option<PathBuf> {
-        self.storage
-            .media_files
-            .find_file_with_prefix(group_id, subdirectory, prefix)
-            .await
+    pub(crate) async fn find_file_with_prefix(&self, prefix: &str) -> Option<PathBuf> {
+        self.storage.media_files.find_file_with_prefix(prefix).await
     }
 }
 
@@ -261,7 +252,7 @@ mod tests {
             file_metadata: None,
         };
         let path = media_files
-            .store_and_record(&pubkey, &group_id, "test_subdir", "test.jpg", upload)
+            .store_and_record(&pubkey, &group_id, "test.jpg", upload)
             .await
             .unwrap();
 
@@ -293,20 +284,15 @@ mod tests {
 
         let media_files = MediaFiles::new(&storage, &db);
 
-        let group_id = GroupId::from_slice(&[1u8; 8]);
-
         // Store files directly via storage
         storage
             .media_files
-            .store_file(&group_id, "images", "abc123.jpg", b"jpeg data")
+            .store_file("abc123.jpg", b"jpeg data")
             .await
             .unwrap();
 
         // Find by prefix
-        let found = media_files
-            .find_file_with_prefix(&group_id, "images", "abc123")
-            .await
-            .unwrap();
+        let found = media_files.find_file_with_prefix("abc123").await.unwrap();
         assert!(found.to_string_lossy().contains("abc123"));
     }
 }

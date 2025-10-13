@@ -1,21 +1,22 @@
 use crate::whitenoise::error::{Result, WhitenoiseError};
-use mdk_core::GroupId;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
-use tokio::fs;
 
-/// Filesystem storage for media files organized by MLS group
+/// Filesystem storage for media files using content-addressed storage
 ///
 /// Directory structure:
 /// ```text
 /// <cache_dir>/
-///   <mls_group_id_hex>/
-///     <subdirectory>/
-///       <filename>
+///   <hash>.<ext>
 /// ```
 ///
+/// Files are stored in a flat structure, deduplicated by content hash.
+/// Multiple groups can reference the same file through database records.
+/// The database maintains the relationship between groups and files, as
+/// well as metadata like media type, mime type, etc.
+///
 /// This module handles:
-/// - Creating directory structures
+/// - Creating the cache directory
 /// - Atomic file writes
 /// - File retrieval by path
 /// - File existence checks
@@ -25,6 +26,8 @@ use tokio::fs;
 /// - Database operations (see database::media_files)
 /// - Network operations (see BlossomClient)
 /// - Encryption/decryption (caller's responsibility)
+/// - Group/file relationships (see database::media_files)
+/// - Media type classification (see database::media_files)
 pub struct MediaFileStorage {
     cache_dir: PathBuf,
 }
@@ -52,10 +55,11 @@ impl MediaFileStorage {
 
     /// Stores a file in the cache using atomic write
     ///
+    /// Files with the same content (hash) will be stored only once.
+    /// Multiple groups can reference the same file via database records.
+    ///
     /// # Arguments
-    /// * `group_id` - The MLS group ID
-    /// * `subdirectory` - Subdirectory within the group (e.g., "group_images", "media")
-    /// * `filename` - The filename to store as (e.g., "abc123.jpg")
+    /// * `filename` - The filename to store as (typically `<hash>.<ext>`)
     /// * `data` - The file data to store
     ///
     /// # Returns
@@ -63,27 +67,25 @@ impl MediaFileStorage {
     ///
     /// # Errors
     /// Returns error if filesystem operations fail
-    pub(crate) async fn store_file(
-        &self,
-        group_id: &GroupId,
-        subdirectory: &str,
-        filename: &str,
-        data: &[u8],
-    ) -> Result<PathBuf> {
-        let group_dir = self.get_group_dir(group_id, subdirectory);
+    pub(crate) async fn store_file(&self, filename: &str, data: &[u8]) -> Result<PathBuf> {
+        let file_path = self.cache_dir.join(filename);
 
-        // Create directory if it doesn't exist
-        if !group_dir.exists() {
-            fs::create_dir_all(&group_dir).await.map_err(|e| {
-                WhitenoiseError::MediaCache(format!("Failed to create cache directory: {}", e))
-            })?;
+        // If file already exists with identical content, return early (deduplication)
+        if file_path.exists()
+            && let Ok(existing_data) = tokio::fs::read(&file_path).await
+            && existing_data == data
+        {
+            tracing::debug!(
+                target: "whitenoise::storage::media_files",
+                "File already exists with same content: {}",
+                file_path.display()
+            );
+            return Ok(file_path);
         }
-
-        let file_path = group_dir.join(filename);
 
         // Write atomically using NamedTempFile with unique temp filename
         // This prevents race conditions when multiple threads write to the same file
-        let temp_file = NamedTempFile::new_in(&group_dir).map_err(|e| {
+        let temp_file = NamedTempFile::new_in(&self.cache_dir).map_err(|e| {
             WhitenoiseError::MediaCache(format!("Failed to create temp file: {}", e))
         })?;
 
@@ -102,19 +104,12 @@ impl MediaFileStorage {
     /// Gets the path to a cached file if it exists
     ///
     /// # Arguments
-    /// * `group_id` - The MLS group ID
-    /// * `subdirectory` - Subdirectory within the group
     /// * `filename` - The filename to look for
     ///
     /// # Returns
     /// The path if the file exists, None otherwise
-    pub(crate) fn get_file_path(
-        &self,
-        group_id: &GroupId,
-        subdirectory: &str,
-        filename: &str,
-    ) -> Option<PathBuf> {
-        let file_path = self.get_group_dir(group_id, subdirectory).join(filename);
+    pub(crate) fn get_file_path(&self, filename: &str) -> Option<PathBuf> {
+        let file_path = self.cache_dir.join(filename);
 
         if file_path.exists() {
             Some(file_path)
@@ -126,18 +121,10 @@ impl MediaFileStorage {
     /// Checks if a file exists in the cache
     ///
     /// # Arguments
-    /// * `group_id` - The MLS group ID
-    /// * `subdirectory` - Subdirectory within the group
     /// * `filename` - The filename to check
     #[allow(dead_code)]
-    pub(crate) fn file_exists(
-        &self,
-        group_id: &GroupId,
-        subdirectory: &str,
-        filename: &str,
-    ) -> bool {
-        self.get_file_path(group_id, subdirectory, filename)
-            .is_some()
+    pub(crate) fn file_exists(&self, filename: &str) -> bool {
+        self.get_file_path(filename).is_some()
     }
 
     /// Finds a file with a given prefix in the cache
@@ -145,25 +132,16 @@ impl MediaFileStorage {
     /// Useful when you know the hash but not the exact extension.
     ///
     /// # Arguments
-    /// * `group_id` - The MLS group ID
-    /// * `subdirectory` - Subdirectory within the group
     /// * `prefix` - The filename prefix to search for
     ///
     /// # Returns
     /// The path to the first matching file, if any
-    pub(crate) async fn find_file_with_prefix(
-        &self,
-        group_id: &GroupId,
-        subdirectory: &str,
-        prefix: &str,
-    ) -> Option<PathBuf> {
-        let group_dir = self.get_group_dir(group_id, subdirectory);
-
-        if !group_dir.exists() {
+    pub(crate) async fn find_file_with_prefix(&self, prefix: &str) -> Option<PathBuf> {
+        if !self.cache_dir.exists() {
             return None;
         }
 
-        if let Ok(mut entries) = tokio::fs::read_dir(&group_dir).await {
+        if let Ok(mut entries) = tokio::fs::read_dir(&self.cache_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 if let Some(filename) = entry.file_name().to_str()
                     && filename.starts_with(prefix)
@@ -174,12 +152,6 @@ impl MediaFileStorage {
         }
 
         None
-    }
-
-    /// Gets the cache directory for a specific group and subdirectory
-    fn get_group_dir(&self, group_id: &GroupId, subdirectory: &str) -> PathBuf {
-        let group_id_hex = hex::encode(group_id.as_slice());
-        self.cache_dir.join(group_id_hex).join(subdirectory)
     }
 
     /// Returns the cache directory path
@@ -208,14 +180,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
-        let group_id = GroupId::from_slice(&[1u8; 8]);
         let test_data = b"test file content";
 
         // Store file
-        let path = storage
-            .store_file(&group_id, "test_subdir", "test.txt", test_data)
-            .await
-            .unwrap();
+        let path = storage.store_file("test.txt", test_data).await.unwrap();
 
         // Verify it exists
         assert!(path.exists());
@@ -225,14 +193,12 @@ mod tests {
         assert_eq!(content, test_data);
 
         // Verify retrieval
-        let retrieved_path = storage
-            .get_file_path(&group_id, "test_subdir", "test.txt")
-            .unwrap();
+        let retrieved_path = storage.get_file_path("test.txt").unwrap();
         assert_eq!(path, retrieved_path);
 
         // Verify existence check
-        assert!(storage.file_exists(&group_id, "test_subdir", "test.txt"));
-        assert!(!storage.file_exists(&group_id, "test_subdir", "nonexistent.txt"));
+        assert!(storage.file_exists("test.txt"));
+        assert!(!storage.file_exists("nonexistent.txt"));
     }
 
     #[tokio::test]
@@ -240,36 +206,23 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
-        let group_id = GroupId::from_slice(&[1u8; 8]);
-
         // Store files with different extensions
         storage
-            .store_file(&group_id, "images", "abc123.jpg", b"jpeg data")
+            .store_file("abc123.jpg", b"jpeg data")
             .await
             .unwrap();
+        storage.store_file("abc123.png", b"png data").await.unwrap();
         storage
-            .store_file(&group_id, "images", "abc123.png", b"png data")
-            .await
-            .unwrap();
-        storage
-            .store_file(&group_id, "images", "def456.jpg", b"other jpeg")
+            .store_file("def456.jpg", b"other jpeg")
             .await
             .unwrap();
 
         // Find by prefix
-        let found = storage
-            .find_file_with_prefix(&group_id, "images", "abc123")
-            .await
-            .unwrap();
+        let found = storage.find_file_with_prefix("abc123").await.unwrap();
         assert!(found.to_string_lossy().contains("abc123"));
 
         // Non-existent prefix
-        assert!(
-            storage
-                .find_file_with_prefix(&group_id, "images", "xyz")
-                .await
-                .is_none()
-        );
+        assert!(storage.find_file_with_prefix("xyz").await.is_none());
     }
 
     #[tokio::test]
@@ -277,20 +230,14 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
-        let group_id = GroupId::from_slice(&[1u8; 8]);
-
         // Store file
-        let path = storage
-            .store_file(&group_id, "test", "atomic.txt", b"data")
-            .await
-            .unwrap();
+        let path = storage.store_file("atomic.txt", b"data").await.unwrap();
 
         // Verify actual file exists
         assert!(path.exists());
 
         // Verify no temp files left behind (NamedTempFile uses random names)
-        let group_dir = storage.get_group_dir(&group_id, "test");
-        let entries: Vec<_> = std::fs::read_dir(&group_dir)
+        let entries: Vec<_> = std::fs::read_dir(&storage.cache_dir)
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
@@ -300,29 +247,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multiple_subdirectories() {
+    async fn test_multiple_files() {
         let temp_dir = TempDir::new().unwrap();
         let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
-        let group_id = GroupId::from_slice(&[1u8; 8]);
-
-        // Store files in different subdirectories
+        // Store multiple files
         storage
-            .store_file(&group_id, "group_images", "image.jpg", b"image data")
+            .store_file("image.jpg", b"image data")
             .await
             .unwrap();
         storage
-            .store_file(&group_id, "media", "video.mp4", b"video data")
+            .store_file("video.mp4", b"video data")
             .await
             .unwrap();
 
-        // Both should exist in their respective subdirectories
-        assert!(storage.file_exists(&group_id, "group_images", "image.jpg"));
-        assert!(storage.file_exists(&group_id, "media", "video.mp4"));
+        // Both should exist
+        assert!(storage.file_exists("image.jpg"));
+        assert!(storage.file_exists("video.mp4"));
 
-        // Should not exist in wrong subdirectory
-        assert!(!storage.file_exists(&group_id, "media", "image.jpg"));
-        assert!(!storage.file_exists(&group_id, "group_images", "video.mp4"));
+        // Non-existent files should not exist
+        assert!(!storage.file_exists("nonexistent.txt"));
     }
 
     #[tokio::test]
@@ -330,18 +274,13 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = std::sync::Arc::new(MediaFileStorage::new(temp_dir.path()).await.unwrap());
 
-        let group_id = GroupId::from_slice(&[1u8; 8]);
-
         // Spawn multiple concurrent writes to the same file
         let handles: Vec<_> = (0..10)
             .map(|i| {
                 let storage = storage.clone();
-                let group_id = group_id.clone();
                 tokio::spawn(async move {
                     let data = format!("data from thread {}", i);
-                    storage
-                        .store_file(&group_id, "concurrent", "same_file.txt", data.as_bytes())
-                        .await
+                    storage.store_file("same_file.txt", data.as_bytes()).await
                 })
             })
             .collect();
@@ -352,21 +291,38 @@ mod tests {
         }
 
         // File should exist and contain data from one of the writes
-        let path = storage
-            .get_file_path(&group_id, "concurrent", "same_file.txt")
-            .unwrap();
+        let path = storage.get_file_path("same_file.txt").unwrap();
         assert!(path.exists());
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.starts_with("data from thread "));
 
         // Verify no temp files left behind
-        let group_dir = storage.get_group_dir(&group_id, "concurrent");
-        let entries: Vec<_> = std::fs::read_dir(&group_dir)
+        let entries: Vec<_> = std::fs::read_dir(&storage.cache_dir)
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
         // Should only have the one file we created
         assert_eq!(entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_deduplication() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
+
+        let test_data = b"shared content";
+
+        // Store the same file twice
+        let path1 = storage.store_file("shared.txt", test_data).await.unwrap();
+
+        let path2 = storage.store_file("shared.txt", test_data).await.unwrap();
+
+        // Should be the same path
+        assert_eq!(path1, path2);
+
+        // File should exist with correct content
+        let content = tokio::fs::read(&path1).await.unwrap();
+        assert_eq!(content, test_data);
     }
 }

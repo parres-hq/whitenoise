@@ -569,17 +569,14 @@ impl Whitenoise {
         // Check if already cached (look for any file with this hash prefix)
         let hash_hex = hex::encode(image_hash);
         let media_files = self.media_files();
-        if let Some(cached_path) = media_files
-            .find_file_with_prefix(group_id, "group_images", &hash_hex)
-            .await
-        {
+        if let Some(cached_path) = media_files.find_file_with_prefix(&hash_hex).await {
             tracing::debug!(
                 target: "whitenoise::groups::download_and_cache_group_image",
                 "Group image already cached at: {}",
                 cached_path.display()
             );
 
-            // Update accessed_at in database
+            // Update database record to link this group to the cached file
             use crate::whitenoise::media_files::MediaFileUpload;
             let upload = MediaFileUpload {
                 data: &[],
@@ -595,7 +592,7 @@ impl Whitenoise {
             {
                 tracing::warn!(
                     target: "whitenoise::groups::download_and_cache_group_image",
-                    "Failed to update accessed_at in database: {}",
+                    "Failed to record file in database: {}",
                     e
                 );
             }
@@ -678,7 +675,7 @@ impl Whitenoise {
         };
         let cached_path = self
             .media_files()
-            .store_and_record(account_pubkey, group_id, "group_images", &filename, upload)
+            .store_and_record(account_pubkey, group_id, &filename, upload)
             .await?;
 
         tracing::info!(
@@ -801,7 +798,7 @@ impl Whitenoise {
 
         if let Err(e) = self
             .media_files()
-            .store_and_record(&account.pubkey, group_id, "group_images", &filename, upload)
+            .store_and_record(&account.pubkey, group_id, &filename, upload)
             .await
         {
             tracing::warn!(
