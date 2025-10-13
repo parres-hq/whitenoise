@@ -1,12 +1,13 @@
 use crate::whitenoise::error::{Result, WhitenoiseError};
 use mdk_core::GroupId;
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 use tokio::fs;
 
 /// Filesystem storage for media files organized by MLS group
 ///
 /// Directory structure:
-/// ```
+/// ```text
 /// <cache_dir>/
 ///   <mls_group_id_hex>/
 ///     <subdirectory>/
@@ -36,12 +37,12 @@ impl MediaFileStorage {
     ///
     /// # Returns
     /// A new MediaFileStorage instance with cache directory at `<data_dir>/media_cache/`
-    pub(crate) fn new(data_dir: &Path) -> Result<Self> {
+    pub(crate) async fn new(data_dir: &Path) -> Result<Self> {
         let cache_dir = data_dir.join("media_cache");
 
         // Create cache directory if it doesn't exist
         if !cache_dir.exists() {
-            std::fs::create_dir_all(&cache_dir).map_err(|e| {
+            tokio::fs::create_dir_all(&cache_dir).await.map_err(|e| {
                 WhitenoiseError::MediaCache(format!("Failed to create cache directory: {}", e))
             })?;
         }
@@ -80,15 +81,19 @@ impl MediaFileStorage {
 
         let file_path = group_dir.join(filename);
 
-        // Write atomically: write to temp file, then rename
-        let temp_path = file_path.with_extension("tmp");
+        // Write atomically using NamedTempFile with unique temp filename
+        // This prevents race conditions when multiple threads write to the same file
+        let temp_file = NamedTempFile::new_in(&group_dir).map_err(|e| {
+            WhitenoiseError::MediaCache(format!("Failed to create temp file: {}", e))
+        })?;
 
-        fs::write(&temp_path, data).await.map_err(|e| {
+        std::fs::write(temp_file.path(), data).map_err(|e| {
             WhitenoiseError::MediaCache(format!("Failed to write file data: {}", e))
         })?;
 
-        fs::rename(&temp_path, &file_path).await.map_err(|e| {
-            WhitenoiseError::MediaCache(format!("Failed to rename temp file: {}", e))
+        // Persist atomically renames the temp file to the final path
+        temp_file.persist(&file_path).map_err(|e| {
+            WhitenoiseError::MediaCache(format!("Failed to persist temp file: {}", e))
         })?;
 
         Ok(file_path)
@@ -146,7 +151,7 @@ impl MediaFileStorage {
     ///
     /// # Returns
     /// The path to the first matching file, if any
-    pub(crate) fn find_file_with_prefix(
+    pub(crate) async fn find_file_with_prefix(
         &self,
         group_id: &GroupId,
         subdirectory: &str,
@@ -158,8 +163,8 @@ impl MediaFileStorage {
             return None;
         }
 
-        if let Ok(entries) = std::fs::read_dir(&group_dir) {
-            for entry in entries.flatten() {
+        if let Ok(mut entries) = tokio::fs::read_dir(&group_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
                 if let Some(filename) = entry.file_name().to_str()
                     && filename.starts_with(prefix)
                 {
@@ -192,7 +197,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let storage = MediaFileStorage::new(temp_dir.path()).unwrap();
+        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
         assert!(storage.cache_dir().exists());
         assert_eq!(storage.cache_dir(), temp_dir.path().join("media_cache"));
@@ -201,7 +206,7 @@ mod tests {
     #[tokio::test]
     async fn test_store_and_retrieve_file() {
         let temp_dir = TempDir::new().unwrap();
-        let storage = MediaFileStorage::new(temp_dir.path()).unwrap();
+        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
         let group_id = GroupId::from_slice(&[1u8; 8]);
         let test_data = b"test file content";
@@ -233,7 +238,7 @@ mod tests {
     #[tokio::test]
     async fn test_find_file_with_prefix() {
         let temp_dir = TempDir::new().unwrap();
-        let storage = MediaFileStorage::new(temp_dir.path()).unwrap();
+        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
         let group_id = GroupId::from_slice(&[1u8; 8]);
 
@@ -254,6 +259,7 @@ mod tests {
         // Find by prefix
         let found = storage
             .find_file_with_prefix(&group_id, "images", "abc123")
+            .await
             .unwrap();
         assert!(found.to_string_lossy().contains("abc123"));
 
@@ -261,6 +267,7 @@ mod tests {
         assert!(
             storage
                 .find_file_with_prefix(&group_id, "images", "xyz")
+                .await
                 .is_none()
         );
     }
@@ -268,7 +275,7 @@ mod tests {
     #[tokio::test]
     async fn test_atomic_write() {
         let temp_dir = TempDir::new().unwrap();
-        let storage = MediaFileStorage::new(temp_dir.path()).unwrap();
+        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
         let group_id = GroupId::from_slice(&[1u8; 8]);
 
@@ -278,18 +285,24 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify no .tmp file left behind
-        let temp_path = path.with_extension("tmp");
-        assert!(!temp_path.exists());
-
         // Verify actual file exists
         assert!(path.exists());
+
+        // Verify no temp files left behind (NamedTempFile uses random names)
+        let group_dir = storage.get_group_dir(&group_id, "test");
+        let entries: Vec<_> = std::fs::read_dir(&group_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        // Should only have the one file we created
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file_name(), "atomic.txt");
     }
 
     #[tokio::test]
     async fn test_multiple_subdirectories() {
         let temp_dir = TempDir::new().unwrap();
-        let storage = MediaFileStorage::new(temp_dir.path()).unwrap();
+        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
 
         let group_id = GroupId::from_slice(&[1u8; 8]);
 
@@ -310,5 +323,50 @@ mod tests {
         // Should not exist in wrong subdirectory
         assert!(!storage.file_exists(&group_id, "media", "image.jpg"));
         assert!(!storage.file_exists(&group_id, "group_images", "video.mp4"));
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_writes_same_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = std::sync::Arc::new(MediaFileStorage::new(temp_dir.path()).await.unwrap());
+
+        let group_id = GroupId::from_slice(&[1u8; 8]);
+
+        // Spawn multiple concurrent writes to the same file
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let storage = storage.clone();
+                let group_id = group_id.clone();
+                tokio::spawn(async move {
+                    let data = format!("data from thread {}", i);
+                    storage
+                        .store_file(&group_id, "concurrent", "same_file.txt", data.as_bytes())
+                        .await
+                })
+            })
+            .collect();
+
+        // Wait for all writes to complete
+        for handle in handles {
+            handle.await.unwrap().unwrap();
+        }
+
+        // File should exist and contain data from one of the writes
+        let path = storage
+            .get_file_path(&group_id, "concurrent", "same_file.txt")
+            .unwrap();
+        assert!(path.exists());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.starts_with("data from thread "));
+
+        // Verify no temp files left behind
+        let group_dir = storage.get_group_dir(&group_id, "concurrent");
+        let entries: Vec<_> = std::fs::read_dir(&group_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        // Should only have the one file we created
+        assert_eq!(entries.len(), 1);
     }
 }

@@ -18,9 +18,9 @@ impl Storage {
     ///
     /// # Returns
     /// A new Storage instance with all subsystems initialized
-    pub(crate) fn new(data_dir: &Path) -> Result<Self> {
+    pub(crate) async fn new(data_dir: &Path) -> Result<Self> {
         Ok(Self {
-            media_files: media_files::MediaFileStorage::new(data_dir)?,
+            media_files: media_files::MediaFileStorage::new(data_dir).await?,
         })
     }
 }

@@ -167,7 +167,7 @@ impl Whitenoise {
         let secrets_store = SecretsStore::new(data_dir);
 
         // Create Storage
-        let storage = storage::Storage::new(data_dir)?;
+        let storage = storage::Storage::new(data_dir).await?;
 
         // Create message aggregator - always initialize, use custom config if provided
         let message_aggregator = if let Some(aggregator_config) = config.message_aggregator_config.clone() {
@@ -698,7 +698,7 @@ pub mod test_utils {
         nostr.client.connect().await;
 
         // Create Storage
-        let storage = storage::Storage::new(data_temp.path()).unwrap();
+        let storage = storage::Storage::new(data_temp.path()).await.unwrap();
 
         // Create message aggregator for testing
         let message_aggregator = message_aggregator::MessageAggregator::new();

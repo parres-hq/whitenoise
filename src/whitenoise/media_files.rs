@@ -4,7 +4,7 @@ use crate::whitenoise::{
     storage::Storage,
 };
 use mdk_core::{
-    encrypted_media::types::EncryptedMediaUpload, extension::group_image::GroupImageUpload, GroupId,
+    GroupId, encrypted_media::types::EncryptedMediaUpload, extension::group_image::GroupImageUpload,
 };
 use nostr_sdk::PublicKey;
 use std::path::{Path, PathBuf};
@@ -185,27 +185,6 @@ impl<'a> MediaFiles<'a> {
         Ok(())
     }
 
-    /// Gets a file path if it exists in cache
-    ///
-    /// # Arguments
-    /// * `group_id` - The MLS group ID
-    /// * `subdirectory` - Subdirectory within the group
-    /// * `filename` - The filename to look for
-    ///
-    /// # Returns
-    /// The path if the file exists, None otherwise
-    #[allow(dead_code)]
-    pub(crate) fn get_file_path(
-        &self,
-        group_id: &GroupId,
-        subdirectory: &str,
-        filename: &str,
-    ) -> Option<PathBuf> {
-        self.storage
-            .media_files
-            .get_file_path(group_id, subdirectory, filename)
-    }
-
     /// Finds a file with a given prefix
     ///
     /// Useful when you know the hash but not the exact extension.
@@ -217,7 +196,7 @@ impl<'a> MediaFiles<'a> {
     ///
     /// # Returns
     /// The path to the first matching file, if any
-    pub(crate) fn find_file_with_prefix(
+    pub(crate) async fn find_file_with_prefix(
         &self,
         group_id: &GroupId,
         subdirectory: &str,
@@ -226,6 +205,7 @@ impl<'a> MediaFiles<'a> {
         self.storage
             .media_files
             .find_file_with_prefix(group_id, subdirectory, prefix)
+            .await
     }
 }
 
@@ -239,7 +219,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let db = Database::new(db_path).await.unwrap();
-        let storage = Storage::new(temp_dir.path()).unwrap();
+        let storage = Storage::new(temp_dir.path()).await.unwrap();
 
         let media_files = MediaFiles::new(&storage, &db);
 
@@ -313,7 +293,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let db = Database::new(db_path).await.unwrap();
-        let storage = Storage::new(temp_dir.path()).unwrap();
+        let storage = Storage::new(temp_dir.path()).await.unwrap();
 
         let media_files = MediaFiles::new(&storage, &db);
 
@@ -329,6 +309,7 @@ mod tests {
         // Find by prefix
         let found = media_files
             .find_file_with_prefix(&group_id, "images", "abc123")
+            .await
             .unwrap();
         assert!(found.to_string_lossy().contains("abc123"));
     }
