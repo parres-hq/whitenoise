@@ -547,6 +547,47 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Spawns a background task to sync group image cache without blocking
+    ///
+    /// This is used by event handlers to proactively cache group images
+    /// without blocking event processing. Failures are logged but don't
+    /// affect the caller - images will download on-demand if needed.
+    ///
+    /// # Arguments
+    /// * `account` - The account viewing the group
+    /// * `group_id` - The MLS group ID
+    pub(crate) fn background_sync_group_image_cache_if_needed(
+        account: &Account,
+        group_id: &GroupId,
+    ) {
+        let account_clone = account.clone();
+        let group_id_clone = group_id.clone();
+        tokio::spawn(async move {
+            let whitenoise = match Whitenoise::get_instance() {
+                Ok(wn) => wn,
+                Err(e) => {
+                    tracing::error!(
+                        target: "whitenoise::groups::background_sync_group_image_cache_if_needed",
+                        "Failed to get Whitenoise instance for background image cache: {}",
+                        e
+                    );
+                    return;
+                }
+            };
+
+            if let Err(e) = whitenoise
+                .sync_group_image_cache_if_needed(&account_clone, &group_id_clone)
+                .await
+            {
+                tracing::warn!(
+                    target: "whitenoise::groups::background_sync_group_image_cache_if_needed",
+                    "Background image cache failed: {}. Image will download on-demand.",
+                    e
+                );
+            }
+        });
+    }
+
     /// Downloads, decrypts, and caches a group image if not already cached
     ///
     /// # Arguments

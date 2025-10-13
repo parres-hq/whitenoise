@@ -57,16 +57,8 @@ impl Whitenoise {
 
         // After processing welcome, proactively cache the group image if it has one
         // This ensures the image is ready when the UI displays the group
-        if let Err(e) = self
-            .sync_group_image_cache_if_needed(account, &group_id)
-            .await
-        {
-            tracing::warn!(
-                target: "whitenoise::event_processor::process_welcome",
-                "Failed to cache group image after welcome: {}. Image will download on-demand.",
-                e
-            );
-        }
+        // Spawn as background task to avoid blocking event processing
+        Whitenoise::background_sync_group_image_cache_if_needed(account, &group_id);
 
         let key_package_event_id: Option<EventId> = rumor
             .tags
