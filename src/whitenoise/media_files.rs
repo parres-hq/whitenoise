@@ -1,5 +1,8 @@
 use crate::whitenoise::{
-    database::{Database, media_files::MediaFileParams},
+    database::{
+        Database,
+        media_files::{FileMetadata, MediaFileParams},
+    },
     error::Result,
     storage::Storage,
 };
@@ -24,10 +27,8 @@ pub(crate) struct MediaFileUpload<'a> {
     pub media_type: &'a str,
     /// Optional Blossom URL where the encrypted file is stored
     pub blossom_url: Option<&'a str>,
-    /// Optional dimensions string (e.g., "1920x1080")
-    pub dimensions: Option<&'a str>,
-    /// Optional blurhash string
-    pub blurhash: Option<&'a str>,
+    /// Optional file metadata (original filename, dimensions, blurhash, duration, etc.)
+    pub file_metadata: Option<&'a FileMetadata>,
 }
 
 impl<'a> From<(&'a GroupImageUpload, &'a [u8], &'a str, &'a str)> for MediaFileUpload<'a> {
@@ -45,8 +46,7 @@ impl<'a> From<(&'a GroupImageUpload, &'a [u8], &'a str, &'a str)> for MediaFileU
             mime_type,
             media_type: "group_image",
             blossom_url: Some(blossom_url),
-            dimensions: None,
-            blurhash: None,
+            file_metadata: None,
         }
     }
 }
@@ -66,8 +66,7 @@ impl<'a> From<(&'a EncryptedMediaUpload, &'a [u8], &'a str, &'a str)> for MediaF
             mime_type,
             media_type: "chat_media",
             blossom_url: Some(blossom_url),
-            dimensions: None,
-            blurhash: None,
+            file_metadata: None,
         }
     }
 }
@@ -139,8 +138,7 @@ impl<'a> MediaFiles<'a> {
                 mime_type: upload.mime_type,
                 media_type: upload.media_type,
                 blossom_url: upload.blossom_url,
-                dimensions: upload.dimensions,
-                blurhash: upload.blurhash,
+                file_metadata: upload.file_metadata,
             },
         )
         .await?;
@@ -176,8 +174,7 @@ impl<'a> MediaFiles<'a> {
                 mime_type: upload.mime_type,
                 media_type: upload.media_type,
                 blossom_url: upload.blossom_url,
-                dimensions: upload.dimensions,
-                blurhash: upload.blurhash,
+                file_metadata: upload.file_metadata,
             },
         )
         .await?;
@@ -261,8 +258,7 @@ mod tests {
             mime_type: "image/jpeg",
             media_type: "test_media",
             blossom_url: None,
-            dimensions: None,
-            blurhash: None,
+            file_metadata: None,
         };
         let path = media_files
             .store_and_record(&pubkey, &group_id, "test_subdir", "test.jpg", upload)

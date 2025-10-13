@@ -1,10 +1,51 @@
 use chrono::{DateTime, Utc};
 use mdk_core::GroupId;
 use nostr_sdk::PublicKey;
+use serde::{Deserialize, Serialize};
+use sqlx::types::Json;
 use std::path::{Path, PathBuf};
 
 use super::{Database, DatabaseError, utils::parse_timestamp};
 use crate::whitenoise::error::WhitenoiseError;
+
+/// Optional metadata for media files stored as JSONB
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct FileMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_filename: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blurhash: Option<String>,
+}
+
+impl FileMetadata {
+    /// Creates a new FileMetadata with all fields set to None
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_filename(mut self, original_filename: String) -> Self {
+        self.original_filename = Some(original_filename);
+        self
+    }
+
+    pub fn with_dimensions(mut self, dimensions: String) -> Self {
+        self.dimensions = Some(dimensions);
+        self
+    }
+
+    pub fn with_blurhash(mut self, blurhash: String) -> Self {
+        self.blurhash = Some(blurhash);
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.original_filename.is_none() && self.dimensions.is_none() && self.blurhash.is_none()
+    }
+}
 
 /// Internal database row representation for media_files table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -18,10 +59,8 @@ pub(crate) struct MediaFileRow {
     pub media_type: String,
     pub blossom_url: Option<String>,
     pub nostr_key: Option<String>,
-    pub dimensions: Option<String>,
-    pub blurhash: Option<String>,
+    pub file_metadata: Option<FileMetadata>,
     pub created_at: DateTime<Utc>,
-    pub accessed_at: DateTime<Utc>,
 }
 
 impl<'r, R> sqlx::FromRow<'r, R> for MediaFileRow
@@ -62,11 +101,15 @@ where
         let media_type: String = row.try_get("media_type")?;
         let blossom_url: Option<String> = row.try_get("blossom_url")?;
         let nostr_key: Option<String> = row.try_get("nostr_key")?;
-        let dimensions: Option<String> = row.try_get("dimensions")?;
-        let blurhash: Option<String> = row.try_get("blurhash")?;
+
+        // Deserialize file_metadata from JSON stored as TEXT/BLOB
+        // We can't use Json<T> directly here because our generic FromRow implementation
+        // doesn't constrain the database type, so we deserialize manually
+        let file_metadata: Option<FileMetadata> = row
+            .try_get::<Option<String>, _>("file_metadata")?
+            .and_then(|json_str| serde_json::from_str(&json_str).ok());
 
         let created_at = parse_timestamp(row, "created_at")?;
-        let accessed_at = parse_timestamp(row, "accessed_at")?;
 
         Ok(Self {
             id,
@@ -78,10 +121,8 @@ where
             media_type,
             blossom_url,
             nostr_key,
-            dimensions,
-            blurhash,
+            file_metadata,
             created_at,
-            accessed_at,
         })
     }
 }
@@ -94,8 +135,7 @@ pub struct MediaFileParams<'a> {
     pub mime_type: &'a str,
     pub media_type: &'a str,
     pub blossom_url: Option<&'a str>,
-    pub dimensions: Option<&'a str>,
-    pub blurhash: Option<&'a str>,
+    pub file_metadata: Option<&'a FileMetadata>,
 }
 
 /// Represents a cached media file
@@ -110,15 +150,13 @@ pub struct MediaFile {
     pub media_type: String,
     pub blossom_url: Option<String>,
     pub nostr_key: Option<String>,
-    pub dimensions: Option<String>,
-    pub blurhash: Option<String>,
+    pub file_metadata: Option<FileMetadata>,
     pub created_at: DateTime<Utc>,
-    pub accessed_at: DateTime<Utc>,
 }
 
 impl From<MediaFileRow> for MediaFile {
     fn from(val: MediaFileRow) -> Self {
-        MediaFile {
+        Self {
             id: Some(val.id),
             mls_group_id: val.mls_group_id,
             account_pubkey: val.account_pubkey,
@@ -128,10 +166,8 @@ impl From<MediaFileRow> for MediaFile {
             media_type: val.media_type,
             blossom_url: val.blossom_url,
             nostr_key: val.nostr_key,
-            dimensions: val.dimensions,
-            blurhash: val.blurhash,
+            file_metadata: val.file_metadata,
             created_at: val.created_at,
-            accessed_at: val.accessed_at,
         }
     }
 }
@@ -139,7 +175,7 @@ impl From<MediaFileRow> for MediaFile {
 impl MediaFile {
     /// Saves a cached media file to the database
     ///
-    /// Inserts a new row or updates accessed_at if the record already exists
+    /// Inserts a new row or ignores if the record already exists
     /// (based on unique constraint on mls_group_id, file_hash, account_pubkey)
     ///
     /// # Arguments
@@ -166,18 +202,22 @@ impl MediaFile {
             .to_str()
             .ok_or_else(|| WhitenoiseError::MediaCache("Invalid file path".to_string()))?;
 
+        // Wrap file_metadata in Json for automatic serialization
+        // Only store if not empty (optimization)
+        let file_metadata_json = params.file_metadata.filter(|m| !m.is_empty()).map(Json);
+
         let row = sqlx::query_as::<_, MediaFileRow>(
             "INSERT INTO media_files (
                 mls_group_id, account_pubkey, file_path, file_hash,
                 mime_type, media_type, blossom_url, nostr_key,
-                dimensions, blurhash, created_at, accessed_at
+                file_metadata, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
             ON CONFLICT (mls_group_id, file_hash, account_pubkey)
-            DO UPDATE SET accessed_at = ?
+            DO NOTHING
             RETURNING id, mls_group_id, account_pubkey, file_path, file_hash,
                       mime_type, media_type, blossom_url, nostr_key,
-                      dimensions, blurhash, created_at, accessed_at",
+                      file_metadata, created_at",
         )
         .bind(mls_group_id.as_slice())
         .bind(account_pubkey.to_hex())
@@ -186,10 +226,7 @@ impl MediaFile {
         .bind(params.mime_type)
         .bind(params.media_type)
         .bind(params.blossom_url)
-        .bind(params.dimensions)
-        .bind(params.blurhash)
-        .bind(now_ms)
-        .bind(now_ms)
+        .bind(file_metadata_json)
         .bind(now_ms)
         .fetch_one(&database.pool)
         .await
@@ -223,7 +260,7 @@ impl MediaFile {
         let result = sqlx::query_as::<_, MediaFileRow>(
             "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
                     mime_type, media_type, blossom_url, nostr_key,
-                    dimensions, blurhash, created_at, accessed_at
+                    file_metadata, created_at
              FROM media_files
              WHERE mls_group_id = ? AND file_hash = ?
              LIMIT 1",
@@ -297,8 +334,7 @@ mod tests {
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: None,
-                dimensions: None,
-                blurhash: None,
+                file_metadata: None,
             },
         )
         .await
@@ -318,77 +354,5 @@ mod tests {
         assert_eq!(record.file_hash, file_hash.to_vec());
         assert_eq!(record.mime_type, "image/jpeg");
         assert_eq!(record.media_type, "group_image");
-    }
-
-    #[tokio::test]
-    async fn test_record_updates_accessed_at() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        let db = Database::new(db_path).await.unwrap();
-
-        let group_id = mdk_core::GroupId::from_slice(&[2u8; 8]);
-        let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = [3u8; 32];
-        let file_path = temp_dir.path().join("test.jpg");
-
-        // Create test account to satisfy foreign key constraint
-        create_test_account(&db, &pubkey).await;
-
-        // Save first time
-        let media_file1 = MediaFile::save(
-            &db,
-            &group_id,
-            &pubkey,
-            MediaFileParams {
-                file_path: &file_path,
-                file_hash: &file_hash,
-                mime_type: "image/jpeg",
-                media_type: "group_image",
-                blossom_url: None,
-                dimensions: None,
-                blurhash: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        // Get original accessed_at
-        let record1 = MediaFile::find_by_group_and_hash(&db, &group_id, &file_hash)
-            .await
-            .unwrap()
-            .unwrap();
-
-        // Wait a bit
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        // Save again (should update accessed_at)
-        let media_file2 = MediaFile::save(
-            &db,
-            &group_id,
-            &pubkey,
-            MediaFileParams {
-                file_path: &file_path,
-                file_hash: &file_hash,
-                mime_type: "image/jpeg",
-                media_type: "group_image",
-                blossom_url: None,
-                dimensions: None,
-                blurhash: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        // Should be same record
-        assert_eq!(media_file1.id, media_file2.id);
-
-        // Get updated record
-        let record2 = MediaFile::find_by_group_and_hash(&db, &group_id, &file_hash)
-            .await
-            .unwrap()
-            .unwrap();
-
-        // accessed_at should be updated
-        assert!(record2.accessed_at.timestamp_millis() >= record1.accessed_at.timestamp_millis());
     }
 }

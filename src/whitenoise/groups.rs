@@ -587,8 +587,7 @@ impl Whitenoise {
                 mime_type: "", // MIME type not needed for update
                 media_type: "group_image",
                 blossom_url: None,
-                dimensions: None,
-                blurhash: None,
+                file_metadata: None,
             };
             if let Err(e) = media_files
                 .record_in_database(account_pubkey, group_id, &cached_path, upload)
@@ -675,8 +674,7 @@ impl Whitenoise {
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: Some(blossom_url.as_str()),
-            dimensions: None,
-            blurhash: None,
+            file_metadata: None,
         };
         let cached_path = self
             .media_files()
@@ -798,8 +796,7 @@ impl Whitenoise {
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: Some(descriptor.url.as_str()),
-            dimensions: None,
-            blurhash: None,
+            file_metadata: None,
         };
 
         if let Err(e) = self
