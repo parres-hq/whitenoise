@@ -27,6 +27,10 @@ use crate::{
     },
 };
 
+/// Default timeout for Blossom HTTP operations (download and upload)
+/// Set to 300 seconds to accommodate large image files over slow connections
+const BLOSSOM_TIMEOUT: Duration = Duration::from_secs(300);
+
 impl Whitenoise {
     /// Returns the default Blossom server URL
     ///
@@ -733,9 +737,16 @@ impl Whitenoise {
         let sha256 = Sha256Hash::from_slice(image_hash)
             .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Invalid SHA256 hash: {}", e)))?;
 
-        client
-            .get_blob(sha256, None, None, None::<&Keys>)
+        let download_future = client.get_blob(sha256, None, None, None::<&Keys>);
+
+        tokio::time::timeout(BLOSSOM_TIMEOUT, download_future)
             .await
+            .map_err(|_| {
+                WhitenoiseError::BlossomDownload(format!(
+                    "Download timed out after {} seconds",
+                    BLOSSOM_TIMEOUT.as_secs()
+                ))
+            })?
             .map_err(|e| {
                 WhitenoiseError::BlossomDownload(format!("Failed to download blob: {}", e))
             })
@@ -865,14 +876,21 @@ impl Whitenoise {
 
         // Upload encrypted data to Blossom using the derived keypair
         let client = BlossomClient::new(server);
-        let descriptor = client
-            .upload_blob(
-                prepared.encrypted_data,
-                Some(image_type.mime_type().to_string()),
-                None,
-                Some(&prepared.upload_keypair),
-            )
+        let upload_future = client.upload_blob(
+            prepared.encrypted_data,
+            Some(image_type.mime_type().to_string()),
+            None,
+            Some(&prepared.upload_keypair),
+        );
+
+        let descriptor = tokio::time::timeout(BLOSSOM_TIMEOUT, upload_future)
             .await
+            .map_err(|_| {
+                WhitenoiseError::Other(anyhow::anyhow!(
+                    "Upload timed out after {} seconds",
+                    BLOSSOM_TIMEOUT.as_secs()
+                ))
+            })?
             .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
 
         // Verify the Blossom server returned the expected hash
