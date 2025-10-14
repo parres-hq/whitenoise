@@ -101,32 +101,6 @@ impl MediaFileStorage {
         Ok(file_path)
     }
 
-    /// Gets the path to a cached file if it exists
-    ///
-    /// # Arguments
-    /// * `filename` - The filename to look for
-    ///
-    /// # Returns
-    /// The path if the file exists, None otherwise
-    pub(crate) fn get_file_path(&self, filename: &str) -> Option<PathBuf> {
-        let file_path = self.cache_dir.join(filename);
-
-        if file_path.exists() {
-            Some(file_path)
-        } else {
-            None
-        }
-    }
-
-    /// Checks if a file exists in the cache
-    ///
-    /// # Arguments
-    /// * `filename` - The filename to check
-    #[allow(dead_code)]
-    pub(crate) fn file_exists(&self, filename: &str) -> bool {
-        self.get_file_path(filename).is_some()
-    }
-
     /// Finds a file with a given prefix in the cache
     ///
     /// Useful when you know the hash but not the exact extension.
@@ -191,14 +165,6 @@ mod tests {
         // Verify content
         let content = tokio::fs::read(&path).await.unwrap();
         assert_eq!(content, test_data);
-
-        // Verify retrieval
-        let retrieved_path = storage.get_file_path("test.txt").unwrap();
-        assert_eq!(path, retrieved_path);
-
-        // Verify existence check
-        assert!(storage.file_exists("test.txt"));
-        assert!(!storage.file_exists("nonexistent.txt"));
     }
 
     #[tokio::test]
@@ -247,29 +213,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multiple_files() {
-        let temp_dir = TempDir::new().unwrap();
-        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
-
-        // Store multiple files
-        storage
-            .store_file("image.jpg", b"image data")
-            .await
-            .unwrap();
-        storage
-            .store_file("video.mp4", b"video data")
-            .await
-            .unwrap();
-
-        // Both should exist
-        assert!(storage.file_exists("image.jpg"));
-        assert!(storage.file_exists("video.mp4"));
-
-        // Non-existent files should not exist
-        assert!(!storage.file_exists("nonexistent.txt"));
-    }
-
-    #[tokio::test]
     async fn test_concurrent_writes_same_file() {
         let temp_dir = TempDir::new().unwrap();
         let storage = std::sync::Arc::new(MediaFileStorage::new(temp_dir.path()).await.unwrap());
@@ -291,7 +234,10 @@ mod tests {
         }
 
         // File should exist and contain data from one of the writes
-        let path = storage.get_file_path("same_file.txt").unwrap();
+        let path = storage
+            .find_file_with_prefix("same_file.txt")
+            .await
+            .unwrap();
         assert!(path.exists());
 
         let content = std::fs::read_to_string(&path).unwrap();
