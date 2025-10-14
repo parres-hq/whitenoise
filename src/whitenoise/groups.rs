@@ -721,6 +721,12 @@ impl Whitenoise {
     }
 
     /// Links an already cached image to a group in the database
+    ///
+    /// When an image file is already cached on disk (from another group using the same image),
+    /// this method creates a database record linking this group/account to the existing file.
+    ///
+    /// If an existing database record exists for this file hash, it copies metadata from it.
+    /// If no database record exists, it detects the MIME type from the cached file itself.
     async fn link_cached_image_to_group(
         &self,
         account_pubkey: &PublicKey,
@@ -728,21 +734,133 @@ impl Whitenoise {
         cached_path: &Path,
         image_hash: &[u8; 32],
     ) {
+        // Try to get metadata from any existing record with this hash
+        let existing_record_opt =
+            match crate::whitenoise::database::media_files::MediaFile::find_by_hash(
+                &self.database,
+                image_hash,
+            )
+            .await
+            {
+                Ok(record_opt) => record_opt,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::groups::link_cached_image_to_group",
+                        "Failed to query database for existing record: {}",
+                        e
+                    );
+                    return;
+                }
+            };
+
+        if let Some(existing_record) = existing_record_opt {
+            self.link_cached_image_from_existing_record(
+                account_pubkey,
+                group_id,
+                cached_path,
+                image_hash,
+                existing_record,
+            )
+            .await;
+        } else {
+            self.link_cached_image_with_detection(
+                account_pubkey,
+                group_id,
+                cached_path,
+                image_hash,
+            )
+            .await;
+        }
+    }
+
+    /// Links a cached image using metadata from an existing database record
+    async fn link_cached_image_from_existing_record(
+        &self,
+        account_pubkey: &PublicKey,
+        group_id: &GroupId,
+        cached_path: &Path,
+        image_hash: &[u8; 32],
+        existing_record: crate::whitenoise::database::media_files::MediaFile,
+    ) {
+        let metadata_ref = existing_record.file_metadata.as_ref();
         let upload = MediaFileUpload {
-            data: &[],
+            data: &[], // Empty is OK - file already exists on disk
             file_hash: *image_hash,
-            mime_type: "", // MIME type not needed for update
-            media_type: "group_image",
-            blossom_url: None,
-            file_metadata: None,
+            mime_type: &existing_record.mime_type,
+            media_type: &existing_record.media_type,
+            blossom_url: existing_record.blossom_url.as_deref(),
+            file_metadata: metadata_ref,
         };
+
         if let Err(e) = self
             .media_files()
             .record_in_database(account_pubkey, group_id, cached_path, upload)
             .await
         {
             tracing::warn!(
-                target: "whitenoise::groups::link_cached_image_to_group",
+                target: "whitenoise::groups::link_cached_image_from_existing_record",
+                "Failed to record file in database: {}",
+                e
+            );
+        }
+    }
+
+    /// Links a cached image by detecting its MIME type from the file
+    async fn link_cached_image_with_detection(
+        &self,
+        account_pubkey: &PublicKey,
+        group_id: &GroupId,
+        cached_path: &Path,
+        image_hash: &[u8; 32],
+    ) {
+        tracing::debug!(
+            target: "whitenoise::groups::link_cached_image_with_detection",
+            "No existing database record for hash {}, detecting MIME type from cached file",
+            hex::encode(image_hash)
+        );
+
+        let file_data = match tokio::fs::read(cached_path).await {
+            Ok(data) => data,
+            Err(e) => {
+                tracing::warn!(
+                    target: "whitenoise::groups::link_cached_image_with_detection",
+                    "Failed to read cached file {}: {}",
+                    cached_path.display(),
+                    e
+                );
+                return;
+            }
+        };
+
+        let image_type = match ImageType::detect(&file_data) {
+            Ok(img_type) => img_type,
+            Err(e) => {
+                tracing::warn!(
+                    target: "whitenoise::groups::link_cached_image_with_detection",
+                    "Failed to detect image type for cached file {}: {}",
+                    cached_path.display(),
+                    e
+                );
+                return;
+            }
+        };
+
+        let upload = MediaFileUpload {
+            data: &[], // Empty is OK - file already exists on disk
+            file_hash: *image_hash,
+            mime_type: image_type.mime_type(),
+            media_type: "group_image",
+            blossom_url: None,
+            file_metadata: None,
+        };
+
+        if let Err(e) = self
+            .media_files()
+            .record_in_database(account_pubkey, group_id, cached_path, upload)
+            .await
+        {
+            tracing::warn!(
+                target: "whitenoise::groups::link_cached_image_with_detection",
                 "Failed to record file in database: {}",
                 e
             );
