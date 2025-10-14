@@ -173,6 +173,40 @@ impl From<MediaFileRow> for MediaFile {
 }
 
 impl MediaFile {
+    /// Finds a media file by its encrypted file hash
+    ///
+    /// Returns the first matching media file for any group/account combination.
+    /// This is useful for retrieving stored metadata (like blossom_url) when you
+    /// only have the hash.
+    ///
+    /// # Arguments
+    /// * `database` - The database connection
+    /// * `file_hash` - The SHA-256 hash of the encrypted file
+    ///
+    /// # Returns
+    /// The MediaFile if found, None otherwise
+    pub(crate) async fn find_by_hash(
+        database: &Database,
+        file_hash: &[u8; 32],
+    ) -> Result<Option<Self>, WhitenoiseError> {
+        let file_hash_hex = hex::encode(file_hash);
+
+        let row_opt = sqlx::query_as::<_, MediaFileRow>(
+            "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
+                    mime_type, media_type, blossom_url, nostr_key,
+                    file_metadata, created_at
+             FROM media_files
+             WHERE file_hash = ?
+             LIMIT 1",
+        )
+        .bind(&file_hash_hex)
+        .fetch_optional(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(row_opt.map(Into::into))
+    }
+
     /// Saves a cached media file to the database
     ///
     /// Inserts a new row or ignores if the record already exists
@@ -395,5 +429,111 @@ mod tests {
             second_save.blossom_url,
             Some("https://example.com/blob1".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_find_by_hash_returns_first_match() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        // Test with multiple records having same hash (different groups/accounts)
+        let group_id1 = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let group_id2 = mdk_core::GroupId::from_slice(&[2u8; 8]);
+        let pubkey1 = PublicKey::from_slice(&[10u8; 32]).unwrap();
+        let pubkey2 = PublicKey::from_slice(&[20u8; 32]).unwrap();
+        let file_hash = [42u8; 32];
+        let file_path1 = temp_dir.path().join("test1.jpg");
+        let file_path2 = temp_dir.path().join("test2.jpg");
+
+        create_test_account(&db, &pubkey1).await;
+        create_test_account(&db, &pubkey2).await;
+
+        // Create metadata for first record
+        let metadata = FileMetadata::new()
+            .with_filename("original.jpg".to_string())
+            .with_dimensions("1920x1080".to_string())
+            .with_blurhash("LEHV6nWB2yk8pyo0adR*.7kCMdnj".to_string());
+
+        // Save first record with metadata
+        let first_save = MediaFile::save(
+            &db,
+            &group_id1,
+            &pubkey1,
+            MediaFileParams {
+                file_path: &file_path1,
+                file_hash: &file_hash,
+                mime_type: "image/jpeg",
+                media_type: "group_image",
+                blossom_url: Some("https://blossom.example.com/hash42"),
+                file_metadata: Some(&metadata),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Save second record with same hash but different details
+        MediaFile::save(
+            &db,
+            &group_id2,
+            &pubkey2,
+            MediaFileParams {
+                file_path: &file_path2,
+                file_hash: &file_hash,
+                mime_type: "image/png",
+                media_type: "group_image",
+                blossom_url: Some("https://another-server.com/hash42"),
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Find by hash should return the first inserted record
+        let found = MediaFile::find_by_hash(&db, &file_hash).await.unwrap();
+
+        assert!(found.is_some());
+        let media_file = found.unwrap();
+
+        // Verify it returns the first record
+        assert_eq!(media_file.id, first_save.id);
+        assert_eq!(media_file.file_hash, file_hash.to_vec());
+        assert_eq!(media_file.mls_group_id, group_id1);
+        assert_eq!(media_file.account_pubkey, pubkey1);
+        assert_eq!(media_file.mime_type, "image/jpeg");
+        assert_eq!(media_file.media_type, "group_image");
+        assert_eq!(
+            media_file.blossom_url,
+            Some("https://blossom.example.com/hash42".to_string())
+        );
+
+        // Verify metadata is preserved
+        assert!(media_file.file_metadata.is_some());
+        let retrieved_metadata = media_file.file_metadata.unwrap();
+        assert_eq!(
+            retrieved_metadata.original_filename,
+            Some("original.jpg".to_string())
+        );
+        assert_eq!(retrieved_metadata.dimensions, Some("1920x1080".to_string()));
+        assert_eq!(
+            retrieved_metadata.blurhash,
+            Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_find_by_hash_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        let nonexistent_hash = [99u8; 32];
+
+        // Try to find a hash that doesn't exist
+        let found = MediaFile::find_by_hash(&db, &nonexistent_hash)
+            .await
+            .unwrap();
+
+        assert!(found.is_none());
     }
 }

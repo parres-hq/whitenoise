@@ -32,12 +32,17 @@ use crate::{
 const BLOSSOM_TIMEOUT: Duration = Duration::from_secs(300);
 
 impl Whitenoise {
-    /// Returns the default Blossom server URL
+    /// Returns the default Blossom server URL based on build configuration
     ///
-    /// This method provides a centralized location for the default Blossom server,
-    /// making it easier to support multiple servers in the future through configuration.
+    /// In debug builds, uses localhost:3000 for local testing.
+    /// In release builds, uses the production Blossom server.
     fn default_blossom_url() -> Url {
-        Url::parse("https://blossom.primal.net").expect("Hardcoded Blossom URL should be valid")
+        let url = if cfg!(debug_assertions) {
+            "http://localhost:3000"
+        } else {
+            "https://blossom.primal.net"
+        };
+        Url::parse(url).expect("Hardcoded Blossom URL should be valid")
     }
 
     /// Ensures that group relays are available for publishing evolution events.
@@ -552,10 +557,24 @@ impl Whitenoise {
                 _ => return Ok(()), // No image set, nothing to do
             };
 
+        // Try to get the stored blossom_url from the database
+        let blossom_url = if let Some(media_file) =
+            crate::whitenoise::database::media_files::MediaFile::find_by_hash(
+                &self.database,
+                &image_hash,
+            )
+            .await?
+        {
+            media_file
+                .blossom_url
+                .and_then(|url_str| Url::parse(&url_str).ok())
+        } else {
+            None
+        };
+
         // Download and cache the image
-        let blossom_url = Self::default_blossom_url();
         self.download_and_cache_group_image(
-            &blossom_url,
+            blossom_url,
             &account.pubkey,
             group_id,
             &image_hash,
@@ -611,7 +630,7 @@ impl Whitenoise {
     /// Downloads, decrypts, and caches a group image if not already cached
     ///
     /// # Arguments
-    /// * `blossom_url` - The Blossom server base URL
+    /// * `blossom_url` - Optional Blossom server URL (uses default if None)
     /// * `account_pubkey` - The account accessing the image
     /// * `group_id` - The MLS group ID
     /// * `image_hash` - SHA-256 hash of the encrypted image
@@ -622,7 +641,7 @@ impl Whitenoise {
     /// Path to the cached image file
     async fn download_and_cache_group_image(
         &self,
-        blossom_url: &Url,
+        blossom_url: Option<Url>,
         account_pubkey: &PublicKey,
         group_id: &GroupId,
         image_hash: &[u8; 32],
@@ -638,15 +657,19 @@ impl Whitenoise {
             return Ok(cached_path);
         }
 
+        // Use provided URL or fall back to default
+        let blossom_url = blossom_url.unwrap_or_else(Self::default_blossom_url);
+
         tracing::info!(
             target: "whitenoise::groups::download_and_cache_group_image",
-            "Downloading group image {} for group {}",
+            "Downloading group image {} for group {} from {}",
             hash_hex,
-            hex::encode(group_id.as_slice())
+            hex::encode(group_id.as_slice()),
+            blossom_url
         );
 
         // Download, verify, decrypt, and cache the image
-        let encrypted_data = Self::download_blob_from_blossom(blossom_url, image_hash).await?;
+        let encrypted_data = Self::download_blob_from_blossom(&blossom_url, image_hash).await?;
         Self::verify_blob_hash(&encrypted_data, image_hash)?;
 
         let decrypted_data = Self::decrypt_group_image(&encrypted_data, image_key, image_nonce)?;
@@ -669,7 +692,7 @@ impl Whitenoise {
                 &decrypted_data,
                 image_hash,
                 &image_type,
-                blossom_url,
+                &blossom_url,
             )
             .await?;
 
@@ -988,11 +1011,25 @@ impl Whitenoise {
                 _ => return Ok(None), // No image set
             };
 
+        // Try to get the stored blossom_url from the database
+        let blossom_url = if let Some(media_file) =
+            crate::whitenoise::database::media_files::MediaFile::find_by_hash(
+                &self.database,
+                &image_hash,
+            )
+            .await?
+        {
+            media_file
+                .blossom_url
+                .and_then(|url_str| Url::parse(&url_str).ok())
+        } else {
+            None
+        };
+
         // Download and cache the image (if not already cached)
-        let blossom_url = Self::default_blossom_url();
         let path = self
             .download_and_cache_group_image(
-                &blossom_url,
+                blossom_url,
                 &account.pubkey,
                 group_id,
                 &image_hash,
