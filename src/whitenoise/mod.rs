@@ -358,9 +358,9 @@ impl Whitenoise {
     /// Deletes all application data, including the database, MLS data, and log files.
     ///
     /// This asynchronous method removes all persistent data associated with the Whitenoise instance.
-    /// It deletes the nostr cache, database, MLS-related directories, and all log files. If the MLS directory exists,
-    /// it is removed and then recreated as an empty directory. This is useful for resetting the application
-    /// to a clean state.
+    /// It deletes the nostr cache, database, MLS-related directories, media cache, and all log files.
+    /// If the MLS directory exists, it is removed and then recreated as an empty directory.
+    /// This is useful for resetting the application to a clean state.
     pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
@@ -369,6 +369,9 @@ impl Whitenoise {
 
         // Remove database (accounts and media) data
         self.database.delete_all_data().await?;
+
+        // Remove storage artifacts (media cache, etc.)
+        self.storage.wipe_all().await?;
 
         // Remove MLS related data
         let mls_dir = self.config.data_dir.join("mls");
@@ -991,6 +994,21 @@ mod tests {
             assert!(test_data_file.exists());
             assert!(test_log_file.exists());
 
+            // Create some test media files in cache
+            whitenoise
+                .storage
+                .media_files
+                .store_file("test_image.jpg", b"fake image data")
+                .await
+                .unwrap();
+            let media_cache_dir = whitenoise.storage.media_files.cache_dir();
+            assert!(media_cache_dir.exists());
+            let cache_entries: Vec<_> = std::fs::read_dir(media_cache_dir)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .collect();
+            assert_eq!(cache_entries.len(), 1);
+
             // Delete all data
             let result = whitenoise.delete_all_data().await;
             assert!(result.is_ok());
@@ -998,6 +1016,10 @@ mod tests {
             // Verify cleanup
             assert!(Account::all(&whitenoise.database).await.unwrap().is_empty());
             assert!(!test_log_file.exists());
+
+            // Media cache directory should be removed
+            let media_cache_dir_after = whitenoise.storage.media_files.cache_dir();
+            assert!(!media_cache_dir_after.exists());
 
             // MLS directory should be recreated as empty
             let mls_dir = whitenoise.config.data_dir.join("mls");

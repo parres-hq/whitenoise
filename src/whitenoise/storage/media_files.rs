@@ -133,6 +133,32 @@ impl MediaFileStorage {
     pub(crate) fn cache_dir(&self) -> &Path {
         &self.cache_dir
     }
+
+    /// Removes all cached media files and the cache directory
+    ///
+    /// This is used when deleting all application data.
+    /// The cache directory will be automatically recreated when needed.
+    ///
+    /// # Returns
+    /// Ok(()) on success
+    ///
+    /// # Errors
+    /// Returns error if filesystem operations fail
+    pub(crate) async fn wipe_all(&self) -> Result<()> {
+        if self.cache_dir.exists() {
+            tracing::debug!(
+                target: "whitenoise::storage::media_files",
+                "Removing media cache directory: {:?}",
+                self.cache_dir
+            );
+            tokio::fs::remove_dir_all(&self.cache_dir)
+                .await
+                .map_err(|e| {
+                    WhitenoiseError::MediaCache(format!("Failed to remove cache directory: {}", e))
+                })?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -270,5 +296,42 @@ mod tests {
         // File should exist with correct content
         let content = tokio::fs::read(&path1).await.unwrap();
         assert_eq!(content, test_data);
+    }
+
+    #[tokio::test]
+    async fn test_wipe_all() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = MediaFileStorage::new(temp_dir.path()).await.unwrap();
+
+        // Store some test files
+        storage
+            .store_file("test1.jpg", b"image data 1")
+            .await
+            .unwrap();
+        storage
+            .store_file("test2.png", b"image data 2")
+            .await
+            .unwrap();
+        storage
+            .store_file("test3.mp4", b"video data")
+            .await
+            .unwrap();
+
+        // Verify cache directory exists and has files
+        assert!(storage.cache_dir().exists());
+        let entries: Vec<_> = std::fs::read_dir(storage.cache_dir())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(entries.len(), 3);
+
+        // Wipe all
+        storage.wipe_all().await.unwrap();
+
+        // Cache directory should be removed
+        assert!(!storage.cache_dir().exists());
+
+        // Calling wipe_all again should not error (idempotent)
+        storage.wipe_all().await.unwrap();
     }
 }

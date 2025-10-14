@@ -23,4 +23,19 @@ impl Storage {
             media_files: media_files::MediaFileStorage::new(data_dir).await?,
         })
     }
+
+    /// Removes all storage artifacts (media cache, etc.)
+    ///
+    /// This is used when deleting all application data.
+    /// Cached directories will be automatically recreated when needed.
+    ///
+    /// # Returns
+    /// Ok(()) on success
+    ///
+    /// # Errors
+    /// Returns error if filesystem operations fail
+    pub(crate) async fn wipe_all(&self) -> Result<()> {
+        self.media_files.wipe_all().await?;
+        Ok(())
+    }
 }
