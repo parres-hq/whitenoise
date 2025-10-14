@@ -1,4 +1,9 @@
-use std::{collections::HashSet, ops::Add, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet,
+    ops::Add,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use mdk_core::extension::group_image;
 use mdk_core::media_processing::MediaProcessingOptions;
@@ -22,6 +27,14 @@ use crate::{
 };
 
 impl Whitenoise {
+    /// Returns the default Blossom server URL
+    ///
+    /// This method provides a centralized location for the default Blossom server,
+    /// making it easier to support multiple servers in the future through configuration.
+    fn default_blossom_url() -> Url {
+        Url::parse("https://blossom.primal.net").expect("Hardcoded Blossom URL should be valid")
+    }
+
     /// Ensures that group relays are available for publishing evolution events.
     /// Returns the validated relay URLs.
     ///
@@ -535,7 +548,9 @@ impl Whitenoise {
             };
 
         // Download and cache the image
+        let blossom_url = Self::default_blossom_url();
         self.download_and_cache_group_image(
+            &blossom_url,
             &account.pubkey,
             group_id,
             &image_hash,
@@ -591,6 +606,7 @@ impl Whitenoise {
     /// Downloads, decrypts, and caches a group image if not already cached
     ///
     /// # Arguments
+    /// * `blossom_url` - The Blossom server base URL
     /// * `account_pubkey` - The account accessing the image
     /// * `group_id` - The MLS group ID
     /// * `image_hash` - SHA-256 hash of the encrypted image
@@ -601,97 +617,34 @@ impl Whitenoise {
     /// Path to the cached image file
     async fn download_and_cache_group_image(
         &self,
+        blossom_url: &Url,
         account_pubkey: &PublicKey,
         group_id: &GroupId,
         image_hash: &[u8; 32],
         image_key: &[u8; 32],
         image_nonce: &[u8; 12],
     ) -> Result<PathBuf> {
-        // Check if already cached (look for any file with this hash prefix)
         let hash_hex = hex::encode(image_hash);
-        let media_files = self.media_files();
-        if let Some(cached_path) = media_files.find_file_with_prefix(&hash_hex).await {
-            tracing::debug!(
-                target: "whitenoise::groups::download_and_cache_group_image",
-                "Group image already cached at: {}",
-                cached_path.display()
-            );
 
-            // Update database record to link this group to the cached file
-            use crate::whitenoise::media_files::MediaFileUpload;
-            let upload = MediaFileUpload {
-                data: &[],
-                file_hash: *image_hash,
-                mime_type: "", // MIME type not needed for update
-                media_type: "group_image",
-                blossom_url: None,
-                file_metadata: None,
-            };
-            if let Err(e) = media_files
-                .record_in_database(account_pubkey, group_id, &cached_path, upload)
-                .await
-            {
-                tracing::warn!(
-                    target: "whitenoise::groups::download_and_cache_group_image",
-                    "Failed to record file in database: {}",
-                    e
-                );
-            }
-
+        // Check if already cached and return early if found
+        if let Some(cached_path) = self.check_cached_image(&hash_hex).await? {
+            self.link_cached_image_to_group(account_pubkey, group_id, &cached_path, image_hash)
+                .await;
             return Ok(cached_path);
         }
 
         tracing::info!(
             target: "whitenoise::groups::download_and_cache_group_image",
             "Downloading group image {} for group {}",
-            hex::encode(image_hash),
+            hash_hex,
             hex::encode(group_id.as_slice())
         );
 
-        // Download encrypted blob from Blossom
-        let blossom_server = "https://blossom.primal.net";
-        let blossom_url = reqwest::Url::parse(&format!("{}/{}", blossom_server, hash_hex))
-            .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Invalid Blossom URL: {}", e)))?;
+        // Download, verify, decrypt, and cache the image
+        let encrypted_data = Self::download_blob_from_blossom(blossom_url, image_hash).await?;
+        Self::verify_blob_hash(&encrypted_data, image_hash)?;
 
-        let client = reqwest::Client::new();
-        let response = client.get(blossom_url.as_str()).send().await.map_err(|e| {
-            WhitenoiseError::BlossomDownload(format!("Failed to download image: {}", e))
-        })?;
-
-        if !response.status().is_success() {
-            return Err(WhitenoiseError::BlossomDownload(format!(
-                "Download failed with status: {}",
-                response.status()
-            )));
-        }
-
-        let encrypted_data = response.bytes().await.map_err(|e| {
-            WhitenoiseError::BlossomDownload(format!("Failed to read response: {}", e))
-        })?;
-
-        // Verify hash
-        let mut hasher = Sha256::new();
-        hasher.update(&encrypted_data);
-        let actual_hash: [u8; 32] = hasher.finalize().into();
-
-        if &actual_hash != image_hash {
-            return Err(WhitenoiseError::HashMismatch {
-                expected: hex::encode(image_hash),
-                actual: hex::encode(actual_hash),
-            });
-        }
-
-        // Decrypt
-        let decrypted_data = group_image::decrypt_group_image(
-            &encrypted_data,
-            image_key,
-            image_nonce,
-        )
-        .map_err(|e| {
-            WhitenoiseError::ImageDecryptionFailed(format!("Failed to decrypt group image: {}", e))
-        })?;
-
-        // Detect image type
+        let decrypted_data = Self::decrypt_group_image(&encrypted_data, image_key, image_nonce)?;
         let image_type = ImageType::detect(&decrypted_data).map_err(|e| {
             WhitenoiseError::UnsupportedImageFormat(format!("Failed to detect image type: {}", e))
         })?;
@@ -700,23 +653,19 @@ impl Whitenoise {
             target: "whitenoise::groups::download_and_cache_group_image",
             "Detected image type: {} for group image {}",
             image_type.mime_type(),
-            hex::encode(image_hash)
+            hash_hex
         );
 
-        // Store to cache and record in database
-        let filename = format!("{}.{}", hash_hex, image_type.extension());
-        use crate::whitenoise::media_files::MediaFileUpload;
-        let upload = MediaFileUpload {
-            data: &decrypted_data,
-            file_hash: *image_hash,
-            mime_type: image_type.mime_type(),
-            media_type: "group_image",
-            blossom_url: Some(blossom_url.as_str()),
-            file_metadata: None,
-        };
         let cached_path = self
-            .media_files()
-            .store_and_record(account_pubkey, group_id, &filename, upload)
+            .store_and_record_group_image(
+                account_pubkey,
+                group_id,
+                &hash_hex,
+                &decrypted_data,
+                image_hash,
+                &image_type,
+                blossom_url,
+            )
             .await?;
 
         tracing::info!(
@@ -726,6 +675,128 @@ impl Whitenoise {
         );
 
         Ok(cached_path)
+    }
+
+    /// Checks if an image is already cached
+    async fn check_cached_image(&self, hash_hex: &str) -> Result<Option<PathBuf>> {
+        let media_files = self.media_files();
+        if let Some(cached_path) = media_files.find_file_with_prefix(hash_hex).await {
+            tracing::debug!(
+                target: "whitenoise::groups::check_cached_image",
+                "Group image already cached at: {}",
+                cached_path.display()
+            );
+            Ok(Some(cached_path))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Links an already cached image to a group in the database
+    async fn link_cached_image_to_group(
+        &self,
+        account_pubkey: &PublicKey,
+        group_id: &GroupId,
+        cached_path: &Path,
+        image_hash: &[u8; 32],
+    ) {
+        use crate::whitenoise::media_files::MediaFileUpload;
+        let upload = MediaFileUpload {
+            data: &[],
+            file_hash: *image_hash,
+            mime_type: "", // MIME type not needed for update
+            media_type: "group_image",
+            blossom_url: None,
+            file_metadata: None,
+        };
+        if let Err(e) = self
+            .media_files()
+            .record_in_database(account_pubkey, group_id, cached_path, upload)
+            .await
+        {
+            tracing::warn!(
+                target: "whitenoise::groups::link_cached_image_to_group",
+                "Failed to record file in database: {}",
+                e
+            );
+        }
+    }
+
+    /// Downloads an encrypted blob from a Blossom server
+    async fn download_blob_from_blossom(
+        blossom_url: &Url,
+        image_hash: &[u8; 32],
+    ) -> Result<Vec<u8>> {
+        use nostr::hashes::{Hash, sha256::Hash as Sha256Hash};
+
+        let client = BlossomClient::new(blossom_url.clone());
+        let sha256 = Sha256Hash::from_slice(image_hash)
+            .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Invalid SHA256 hash: {}", e)))?;
+
+        client
+            .get_blob(sha256, None, None, None::<&Keys>)
+            .await
+            .map_err(|e| {
+                WhitenoiseError::BlossomDownload(format!("Failed to download blob: {}", e))
+            })
+    }
+
+    /// Verifies that downloaded blob matches expected hash
+    fn verify_blob_hash(data: &[u8], expected_hash: &[u8; 32]) -> Result<()> {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let actual_hash: [u8; 32] = hasher.finalize().into();
+
+        if &actual_hash != expected_hash {
+            return Err(WhitenoiseError::HashMismatch {
+                expected: hex::encode(expected_hash),
+                actual: hex::encode(actual_hash),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Decrypts a group image using the provided key and nonce
+    fn decrypt_group_image(
+        encrypted_data: &[u8],
+        image_key: &[u8; 32],
+        image_nonce: &[u8; 12],
+    ) -> Result<Vec<u8>> {
+        group_image::decrypt_group_image(encrypted_data, image_key, image_nonce).map_err(|e| {
+            WhitenoiseError::ImageDecryptionFailed(format!("Failed to decrypt group image: {}", e))
+        })
+    }
+
+    /// Stores decrypted image to cache and records it in database
+    async fn store_and_record_group_image(
+        &self,
+        account_pubkey: &PublicKey,
+        group_id: &GroupId,
+        hash_hex: &str,
+        decrypted_data: &[u8],
+        image_hash: &[u8; 32],
+        image_type: &ImageType,
+        blossom_server: &Url,
+    ) -> Result<PathBuf> {
+        let filename = format!("{}.{}", hash_hex, image_type.extension());
+        let blossom_url = blossom_server.join(hash_hex).map_err(|e| {
+            WhitenoiseError::Other(anyhow::anyhow!("Failed to construct Blossom URL: {}", e))
+        })?;
+
+        use crate::whitenoise::media_files::MediaFileUpload;
+        let upload = MediaFileUpload {
+            data: decrypted_data,
+            file_hash: *image_hash,
+            mime_type: image_type.mime_type(),
+            media_type: "group_image",
+            blossom_url: Some(blossom_url.as_str()),
+            file_metadata: None,
+        };
+
+        self.media_files()
+            .store_and_record(account_pubkey, group_id, &filename, upload)
+            .await
     }
 
     /// Uploads a group image to a Blossom server and returns the encrypted metadata.
@@ -902,8 +973,10 @@ impl Whitenoise {
             };
 
         // Download and cache the image (if not already cached)
+        let blossom_url = Self::default_blossom_url();
         let path = self
             .download_and_cache_group_image(
+                &blossom_url,
                 &account.pubkey,
                 group_id,
                 &image_hash,
