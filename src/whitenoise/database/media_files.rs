@@ -206,7 +206,9 @@ impl MediaFile {
         // Only store if not empty (optimization)
         let file_metadata_json = params.file_metadata.filter(|m| !m.is_empty()).map(Json);
 
-        let row = sqlx::query_as::<_, MediaFileRow>(
+        let account_pubkey_hex = account_pubkey.to_hex();
+
+        let row_opt = sqlx::query_as::<_, MediaFileRow>(
             "INSERT INTO media_files (
                 mls_group_id, account_pubkey, file_path, file_hash,
                 mime_type, media_type, blossom_url, nostr_key,
@@ -220,19 +222,39 @@ impl MediaFile {
                       file_metadata, created_at",
         )
         .bind(mls_group_id.as_slice())
-        .bind(account_pubkey.to_hex())
+        .bind(&account_pubkey_hex)
         .bind(file_path_str)
-        .bind(file_hash_hex)
+        .bind(&file_hash_hex)
         .bind(params.mime_type)
         .bind(params.media_type)
         .bind(params.blossom_url)
         .bind(file_metadata_json)
         .bind(now_ms)
+        .fetch_optional(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        if let Some(row) = row_opt {
+            return Ok(row.into());
+        }
+
+        // Conflict occurred - select existing row
+        let existing = sqlx::query_as::<_, MediaFileRow>(
+            "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
+                    mime_type, media_type, blossom_url, nostr_key,
+                    file_metadata, created_at
+             FROM media_files
+             WHERE mls_group_id = ? AND file_hash = ? AND account_pubkey = ?
+             LIMIT 1",
+        )
+        .bind(mls_group_id.as_slice())
+        .bind(&file_hash_hex)
+        .bind(&account_pubkey_hex)
         .fetch_one(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)?;
 
-        Ok(row.into())
+        Ok(existing.into())
     }
 
     /// Finds a cached media file by group and hash
@@ -354,5 +376,69 @@ mod tests {
         assert_eq!(record.file_hash, file_hash.to_vec());
         assert_eq!(record.mime_type, "image/jpeg");
         assert_eq!(record.media_type, "group_image");
+    }
+
+    #[tokio::test]
+    async fn test_upsert_on_conflict() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        // Create a test group ID
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
+        let file_hash = [3u8; 32];
+        let file_path = temp_dir.path().join("test.jpg");
+
+        // Create test account to satisfy foreign key constraint
+        create_test_account(&db, &pubkey).await;
+
+        // Save media first time
+        let first_save = MediaFile::save(
+            &db,
+            &group_id,
+            &pubkey,
+            MediaFileParams {
+                file_path: &file_path,
+                file_hash: &file_hash,
+                mime_type: "image/jpeg",
+                media_type: "group_image",
+                blossom_url: Some("https://example.com/blob1"),
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(first_save.id.is_some());
+        let first_id = first_save.id.unwrap();
+
+        // Save same media again (should trigger conflict and return existing row)
+        let second_save = MediaFile::save(
+            &db,
+            &group_id,
+            &pubkey,
+            MediaFileParams {
+                file_path: &file_path,
+                file_hash: &file_hash,
+                mime_type: "image/jpeg",
+                media_type: "group_image",
+                blossom_url: Some("https://example.com/blob2"),
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(second_save.id.is_some());
+        let second_id = second_save.id.unwrap();
+
+        // Both saves should return the same ID (existing row)
+        assert_eq!(first_id, second_id);
+        // Original blossom_url should be preserved
+        assert_eq!(
+            second_save.blossom_url,
+            Some("https://example.com/blob1".to_string())
+        );
     }
 }
