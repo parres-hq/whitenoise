@@ -9,7 +9,7 @@ The media files system is organized into three distinct layers, each with a spec
 │                    whitenoise/media_files                   │
 │                   (High-level orchestration)                │
 │  - Coordinates between storage, database, and Blossom       │
-│  - Handles encryption/decryption                            │
+│  - Handles encryption/decryption (delegated to MDK)         │
 │  - Manages business logic                                   │
 └────────────┬──────────────┬──────────────┬──────────────────┘
              │              │              │
@@ -39,7 +39,7 @@ The media files system is organized into three distinct layers, each with a spec
 - Touch the filesystem directly (delegates to storage layer)
 - Execute SQL directly (delegates to database layer)
 - Handle network operations (use BlossomClient)
-- Handle encryption/decryption directly (MDK's responsibility)
+- Perform encryption/decryption directly (delegates to MDK via callers)
 
 **Key Types:**
 
