@@ -243,23 +243,29 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify file exists
+        // Verify file exists on disk
         assert!(path.exists());
 
-        // Verify content
+        // Verify file content is correct
         let content = tokio::fs::read(&path).await.unwrap();
         assert_eq!(content, test_data);
 
-        // Verify database record
-        use crate::whitenoise::database::media_files::MediaFile;
-        let found = MediaFile::find_by_group_and_hash(&db, &group_id, &file_hash)
+        // Verify idempotency: calling store_and_record again should succeed
+        let upload2 = MediaFileUpload {
+            data: test_data,
+            file_hash,
+            mime_type: "image/jpeg",
+            media_type: "test_media",
+            blossom_url: None,
+            file_metadata: None,
+        };
+        let path2 = media_files
+            .store_and_record(&pubkey, &group_id, "test.jpg", upload2)
             .await
             .unwrap();
 
-        assert!(found.is_some());
-        let record = found.unwrap();
-        assert_eq!(record.mime_type, "image/jpeg");
-        assert_eq!(record.media_type, "test_media");
+        // Should return the same path
+        assert_eq!(path, path2);
     }
 
     #[tokio::test]

@@ -256,45 +256,6 @@ impl MediaFile {
 
         Ok(existing.into())
     }
-
-    /// Finds a cached media file by group and hash
-    ///
-    /// Returns the first matching record (any account) if it exists in cache
-    ///
-    /// # Arguments
-    /// * `database` - The database connection
-    /// * `mls_group_id` - The MLS group ID
-    /// * `file_hash` - The hash of the ENCRYPTED data (32 bytes)
-    ///
-    /// # Returns
-    /// The media file if found, None otherwise
-    ///
-    /// # Errors
-    /// Returns a [`WhitenoiseError`] if the database query fails.
-    #[allow(unused)]
-    pub(crate) async fn find_by_group_and_hash(
-        database: &Database,
-        mls_group_id: &GroupId,
-        file_hash: &[u8; 32],
-    ) -> Result<Option<Self>, WhitenoiseError> {
-        let file_hash_hex = hex::encode(file_hash);
-
-        let result = sqlx::query_as::<_, MediaFileRow>(
-            "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
-                    mime_type, media_type, blossom_url, nostr_key,
-                    file_metadata, created_at
-             FROM media_files
-             WHERE mls_group_id = ? AND file_hash = ?
-             LIMIT 1",
-        )
-        .bind(mls_group_id.as_slice())
-        .bind(file_hash_hex)
-        .fetch_optional(&database.pool)
-        .await
-        .map_err(DatabaseError::Sqlx)?;
-
-        Ok(result.map(Self::from))
-    }
 }
 
 #[cfg(test)]
@@ -331,7 +292,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_record_and_find_cached_media() {
+    async fn test_save_media_file() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let db = Database::new(db_path).await.unwrap();
@@ -345,7 +306,7 @@ mod tests {
         // Create test account to satisfy foreign key constraint
         create_test_account(&db, &pubkey).await;
 
-        // Save media
+        // Save media - the save method returns the persisted record
         let media_file = MediaFile::save(
             &db,
             &group_id,
@@ -362,20 +323,14 @@ mod tests {
         .await
         .unwrap();
 
+        // Verify the returned record has correct data
         assert!(media_file.id.is_some());
         assert!(media_file.id.unwrap() > 0);
-
-        // Find media
-        let found = MediaFile::find_by_group_and_hash(&db, &group_id, &file_hash)
-            .await
-            .unwrap();
-
-        assert!(found.is_some());
-        let record = found.unwrap();
-        assert_eq!(record.id, media_file.id);
-        assert_eq!(record.file_hash, file_hash.to_vec());
-        assert_eq!(record.mime_type, "image/jpeg");
-        assert_eq!(record.media_type, "group_image");
+        assert_eq!(media_file.file_hash, file_hash.to_vec());
+        assert_eq!(media_file.mime_type, "image/jpeg");
+        assert_eq!(media_file.media_type, "group_image");
+        assert_eq!(media_file.mls_group_id, group_id);
+        assert_eq!(media_file.account_pubkey, pubkey);
     }
 
     #[tokio::test]
