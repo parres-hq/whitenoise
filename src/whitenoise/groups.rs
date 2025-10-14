@@ -21,6 +21,7 @@ use crate::{
         accounts::Account,
         error::{Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
+        media_files::MediaFileUpload,
         relays::Relay,
         users::User,
     },
@@ -700,7 +701,6 @@ impl Whitenoise {
         cached_path: &Path,
         image_hash: &[u8; 32],
     ) {
-        use crate::whitenoise::media_files::MediaFileUpload;
         let upload = MediaFileUpload {
             data: &[],
             file_hash: *image_hash,
@@ -784,7 +784,6 @@ impl Whitenoise {
             WhitenoiseError::Other(anyhow::anyhow!("Failed to construct Blossom URL: {}", e))
         })?;
 
-        use crate::whitenoise::media_files::MediaFileUpload;
         let upload = MediaFileUpload {
             data: decrypted_data,
             file_hash: *image_hash,
@@ -898,7 +897,6 @@ impl Whitenoise {
         let hash_hex = hex::encode(prepared.encrypted_hash);
         let filename = format!("{}.{}", hash_hex, image_type.extension());
 
-        use crate::whitenoise::media_files::MediaFileUpload;
         let upload = MediaFileUpload {
             data: &image_data,
             file_hash: prepared.encrypted_hash,
