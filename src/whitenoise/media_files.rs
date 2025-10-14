@@ -1,7 +1,7 @@
 use crate::whitenoise::{
     database::{
         Database,
-        media_files::{FileMetadata, MediaFileParams},
+        media_files::{FileMetadata, MediaFile, MediaFileParams},
     },
     error::Result,
     storage::Storage,
@@ -128,21 +128,8 @@ impl<'a> MediaFiles<'a> {
             .await?;
 
         // Record in database (tracks group-file relationship)
-        use crate::whitenoise::database::media_files::MediaFile;
-        MediaFile::save(
-            self.database,
-            group_id,
-            account_pubkey,
-            MediaFileParams {
-                file_path: &file_path,
-                file_hash: &upload.file_hash,
-                mime_type: upload.mime_type,
-                media_type: upload.media_type,
-                blossom_url: upload.blossom_url,
-                file_metadata: upload.file_metadata,
-            },
-        )
-        .await?;
+        self.record_in_database(account_pubkey, group_id, &file_path, upload)
+            .await?;
 
         Ok(file_path)
     }
@@ -163,8 +150,6 @@ impl<'a> MediaFiles<'a> {
         file_path: &Path,
         upload: MediaFileUpload<'_>,
     ) -> Result<()> {
-        use crate::whitenoise::database::media_files::MediaFile;
-
         MediaFile::save(
             self.database,
             group_id,
