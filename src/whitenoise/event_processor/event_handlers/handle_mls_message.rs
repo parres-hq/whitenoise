@@ -1,3 +1,4 @@
+use mdk_core::prelude::MessageProcessingResult;
 use nostr_sdk::prelude::*;
 
 use crate::whitenoise::{
@@ -22,6 +23,20 @@ impl Whitenoise {
                   "Handled MLS message - Result: {:?}",
                   result
                 );
+
+                if let MessageProcessingResult::Commit = result {
+                    let groups_result = self.groups(account, true).await;
+                    if let Ok(groups) = groups_result {
+                        // Spawn background tasks for image caching to avoid blocking event processing
+                        // TODO: This is a blunt instrument, in future we can improve this by looking up the specific group the Commit was against.
+                        for group in groups {
+                            Whitenoise::background_sync_group_image_cache_if_needed(
+                                account,
+                                &group.mls_group_id,
+                            );
+                        }
+                    }
+                }
                 Ok(())
             }
             Err(e) => {

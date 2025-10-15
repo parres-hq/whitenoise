@@ -46,12 +46,19 @@ impl Whitenoise {
         rumor: UnsignedEvent,
     ) -> Result<()> {
         // Process the welcome message - lock scope is minimal
-        {
+        let group_id = {
             let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
-            mdk.process_welcome(&event.id, &rumor)
+            let welcome = mdk
+                .process_welcome(&event.id, &rumor)
                 .map_err(WhitenoiseError::MdkCoreError)?;
             tracing::debug!(target: "whitenoise::event_processor::process_welcome", "Processed welcome event");
-        } // mdk lock released here
+            welcome.mls_group_id
+        }; // mdk lock released here
+
+        // After processing welcome, proactively cache the group image if it has one
+        // This ensures the image is ready when the UI displays the group
+        // Spawn as background task to avoid blocking event processing
+        Whitenoise::background_sync_group_image_cache_if_needed(account, &group_id);
 
         let key_package_event_id: Option<EventId> = rumor
             .tags

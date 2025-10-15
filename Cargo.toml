@@ -30,8 +30,10 @@ keyring = { version = "3.6", features = [
 ] }
 lightning-invoice = "0.33.1"
 
-mdk-core = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "899f6f09a0c3f5dbe95ea546710eea758cbc7d5e" }
-mdk-sqlite-storage = { version = "0.5.1", git="https://github.com/parres-hq/mdk", rev = "899f6f09a0c3f5dbe95ea546710eea758cbc7d5e" }
+mdk-core = { version = "0.5.1", git = "https://github.com/parres-hq/mdk", rev = "f9550e69be4f37919e95c84ee6c81b0e70d09b08", features = [
+    "mip04",
+] }
+mdk-sqlite-storage = { version = "0.5.1", git = "https://github.com/parres-hq/mdk", rev = "f9550e69be4f37919e95c84ee6c81b0e70d09b08" }
 
 nwc = "0.43"
 nostr-blossom = "0.43"
@@ -44,8 +46,8 @@ nostr-sdk = { version = "0.43", features = [
 ] }
 
 # LOCAL MDK FOR DEVELOPMENT
-# mdk-core = { version = "0.5.0", path="../mdk/crates/mdk-core" }
-# mdk-sqlite-storage = { version = "0.5.0", path="../mdk/crates/mdk-sqlite-storage" }
+# mdk-core = { version = "0.5.1", path="../mdk/crates/mdk-core" }
+# mdk-sqlite-storage = { version = "0.5.1", path="../mdk/crates/mdk-sqlite-storage" }
 
 # LOCAL RUST_NOSTR FOR DEVELOPMENT
 # nwc = { version = "0.43", path="../rust-nostr/crates/nwc" }
@@ -60,11 +62,23 @@ nostr-sdk = { version = "0.43", features = [
 
 petname = "2.0.2"
 rand = "0.9"
-reqwest = { version = "0.11", features = ["multipart", "json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.11", features = [
+    "multipart",
+    "json",
+    "rustls-tls",
+], default-features = false }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10"
-sqlx = { version = "0.8", default-features = false, features = [ "runtime-tokio", "sqlite", "migrate", "macros", "chrono", "derive", "json" ] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "sqlite",
+    "migrate",
+    "macros",
+    "chrono",
+    "derive",
+    "json",
+] }
 thiserror = "2.0.12"
 tokio = { version = "1.44", features = ["full"] }
 tokio-tungstenite = "0.20"
@@ -75,10 +89,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.16.0", features = ["v4"] }
 base64ct = "=1.7.3"
 dotenvy = "0.15"
+tempfile = "3.19.1"
 
 [dev-dependencies]
 mockito = "1.2"
-tempfile = "3.19.1"
 
 [features]
 default = []
