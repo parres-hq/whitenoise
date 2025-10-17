@@ -2363,8 +2363,8 @@ dependencies = [
 
 [[package]]
 name = "mdk-core"
-version = "0.5.1"
-source = "git+https://github.com/parres-hq/mdk?rev=f9550e69be4f37919e95c84ee6c81b0e70d09b08#f9550e69be4f37919e95c84ee6c81b0e70d09b08"
+version = "0.5.2"
+source = "git+https://github.com/parres-hq/mdk?rev=f46875ec6fbe1cd616e9dfb4d2aa10f56044e58c#f46875ec6fbe1cd616e9dfb4d2aa10f56044e58c"
 dependencies = [
  "blurhash",
  "chacha20poly1305",
@@ -2388,7 +2388,7 @@ dependencies = [
 [[package]]
 name = "mdk-sqlite-storage"
 version = "0.5.1"
-source = "git+https://github.com/parres-hq/mdk?rev=f9550e69be4f37919e95c84ee6c81b0e70d09b08#f9550e69be4f37919e95c84ee6c81b0e70d09b08"
+source = "git+https://github.com/parres-hq/mdk?rev=f46875ec6fbe1cd616e9dfb4d2aa10f56044e58c#f46875ec6fbe1cd616e9dfb4d2aa10f56044e58c"
 dependencies = [
  "mdk-storage-traits",
  "nostr",
@@ -2404,7 +2404,7 @@ dependencies = [
 [[package]]
 name = "mdk-storage-traits"
 version = "0.5.1"
-source = "git+https://github.com/parres-hq/mdk?rev=f9550e69be4f37919e95c84ee6c81b0e70d09b08#f9550e69be4f37919e95c84ee6c81b0e70d09b08"
+source = "git+https://github.com/parres-hq/mdk?rev=f46875ec6fbe1cd616e9dfb4d2aa10f56044e58c#f46875ec6fbe1cd616e9dfb4d2aa10f56044e58c"
 dependencies = [
  "nostr",
  "openmls",
