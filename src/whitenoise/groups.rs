@@ -919,6 +919,42 @@ impl Whitenoise {
             .await
     }
 
+    /// Uploads encrypted blob to Blossom server with timeout
+    ///
+    /// # Arguments
+    /// * `blossom_server_url` - Blossom server URL to upload to
+    /// * `encrypted_data` - The encrypted image data to upload
+    /// * `mime_type` - MIME type of the original image
+    /// * `upload_keypair` - Keypair for signing the upload
+    ///
+    /// # Returns
+    /// * `Ok(BlobDescriptor)` - Descriptor from Blossom server containing URL and hash
+    /// * `Err(WhitenoiseError)` - Upload timeout or network error
+    async fn upload_encrypted_blob_to_blossom(
+        blossom_server_url: &Url,
+        encrypted_data: Vec<u8>,
+        mime_type: &str,
+        upload_keypair: &Keys,
+    ) -> Result<nostr_blossom::bud02::BlobDescriptor> {
+        let client = BlossomClient::new(blossom_server_url.clone());
+        let upload_future = client.upload_blob(
+            encrypted_data,
+            Some(mime_type.to_string()),
+            None,
+            Some(upload_keypair),
+        );
+
+        tokio::time::timeout(BLOSSOM_TIMEOUT, upload_future)
+            .await
+            .map_err(|_| {
+                WhitenoiseError::Other(anyhow::anyhow!(
+                    "Upload timed out after {} seconds",
+                    BLOSSOM_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))
+    }
+
     /// Uploads a group image to a Blossom server and returns the encrypted metadata.
     ///
     /// The returned metadata (hash, key, nonce) should be passed to `update_group_data`
@@ -928,14 +964,14 @@ impl Whitenoise {
     /// * `account` - The account performing the upload (must be a group admin)
     /// * `group_id` - The ID of the group to upload the image for
     /// * `file_path` - Path to the image file to upload
-    /// * `server` - Blossom server URL to upload to
+    /// * `blossom_server_url` - Blossom server URL to upload to
     /// * `options` - Optional media processing options (defaults to standard options if None)
     pub async fn upload_group_image(
         &self,
         account: &Account,
         group_id: &GroupId,
         file_path: &str,
-        server: Url,
+        blossom_server_url: Option<Url>,
         options: Option<MediaProcessingOptions>,
     ) -> Result<([u8; 32], [u8; 32], [u8; 12])> {
         // Verify the account is an admin of the group
@@ -964,53 +1000,34 @@ impl Whitenoise {
         );
 
         // Use MDK to prepare the image for upload (encrypt + derive keypair)
-        let prepared = match options {
-            Some(opts) => group_image::prepare_group_image_for_upload_with_options(
-                &image_data,
-                image_type.mime_type(),
-                &opts,
-            )
-            .map_err(|e| {
-                WhitenoiseError::Other(anyhow::anyhow!("Failed to prepare group image: {}", e))
-            })?,
-            None => {
-                group_image::prepare_group_image_for_upload(&image_data, image_type.mime_type())
-                    .map_err(|e| {
-                        WhitenoiseError::Other(anyhow::anyhow!(
-                            "Failed to prepare group image: {}",
-                            e
-                        ))
-                    })?
-            }
-        };
+        let prepared = group_image::prepare_group_image_for_upload_with_options(
+            &image_data,
+            image_type.mime_type(),
+            &options.unwrap_or_default(),
+        )
+        .map_err(|e| {
+            WhitenoiseError::Other(anyhow::anyhow!("Failed to prepare group image: {}", e))
+        })?;
 
+        let blossom_server_url = blossom_server_url.unwrap_or(Self::default_blossom_url());
         // Upload encrypted data to Blossom using the derived keypair
-        let client = BlossomClient::new(server);
-        let upload_future = client.upload_blob(
+        let descriptor = Self::upload_encrypted_blob_to_blossom(
+            &blossom_server_url,
             prepared.encrypted_data,
-            Some(image_type.mime_type().to_string()),
-            None,
-            Some(&prepared.upload_keypair),
-        );
-
-        let descriptor = tokio::time::timeout(BLOSSOM_TIMEOUT, upload_future)
-            .await
-            .map_err(|_| {
-                WhitenoiseError::Other(anyhow::anyhow!(
-                    "Upload timed out after {} seconds",
-                    BLOSSOM_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
+            image_type.mime_type(),
+            &prepared.upload_keypair,
+        )
+        .await?;
 
         // Verify the Blossom server returned the expected hash
         // The descriptor.sha256 is a Hash type from bitcoin_hashes, convert to byte array
         let returned_hash_bytes: [u8; 32] = *descriptor.sha256.as_ref();
 
         if returned_hash_bytes != prepared.encrypted_hash {
-            return Err(WhitenoiseError::Other(anyhow::anyhow!(
-                "Blossom returned hash does not match encrypted image hash"
-            )));
+            return Err(WhitenoiseError::HashMismatch {
+                expected: hex::encode(prepared.encrypted_hash),
+                actual: hex::encode(returned_hash_bytes),
+            });
         }
 
         tracing::debug!(
@@ -1710,7 +1727,7 @@ mod tests {
                 &creator_account,
                 &group.mls_group_id,
                 temp_path,
-                blossom_server,
+                Some(blossom_server),
                 Some(test_options),
             )
             .await;
@@ -1831,7 +1848,7 @@ mod tests {
                 &creator_account,
                 &group.mls_group_id,
                 temp_path,
-                blossom_server,
+                Some(blossom_server),
                 Some(test_options),
             )
             .await
