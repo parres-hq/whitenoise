@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use mdk_core::{
-    GroupId, encrypted_media::types::EncryptedMediaUpload, extension::group_image::GroupImageUpload,
-};
+use mdk_core::GroupId;
 use nostr_sdk::PublicKey;
 
 use crate::whitenoise::{
@@ -29,48 +27,12 @@ pub(crate) struct MediaFileUpload<'a> {
     pub media_type: &'a str,
     /// Optional Blossom URL where the encrypted file is stored
     pub blossom_url: Option<&'a str>,
+    /// Optional Nostr key (hex-encoded secret key) used for upload authentication/cleanup
+    /// For group images: deterministically derived from image_key (stored for convenience)
+    /// For chat images: randomly generated per upload (must be stored)
+    pub nostr_key: Option<String>,
     /// Optional file metadata (original filename, dimensions, blurhash, duration, etc.)
     pub file_metadata: Option<&'a FileMetadata>,
-}
-
-impl<'a> From<(&'a GroupImageUpload, &'a [u8], &'a str, &'a str)> for MediaFileUpload<'a> {
-    fn from(
-        (upload, decrypted_data, mime_type, blossom_url): (
-            &'a GroupImageUpload,
-            &'a [u8],
-            &'a str,
-            &'a str,
-        ),
-    ) -> Self {
-        Self {
-            data: decrypted_data,
-            file_hash: upload.encrypted_hash,
-            mime_type,
-            media_type: "group_image",
-            blossom_url: Some(blossom_url),
-            file_metadata: None,
-        }
-    }
-}
-
-impl<'a> From<(&'a EncryptedMediaUpload, &'a [u8], &'a str, &'a str)> for MediaFileUpload<'a> {
-    fn from(
-        (upload, decrypted_data, mime_type, blossom_url): (
-            &'a EncryptedMediaUpload,
-            &'a [u8],
-            &'a str,
-            &'a str,
-        ),
-    ) -> Self {
-        Self {
-            data: decrypted_data,
-            file_hash: upload.encrypted_hash,
-            mime_type,
-            media_type: "chat_media",
-            blossom_url: Some(blossom_url),
-            file_metadata: None,
-        }
-    }
 }
 
 /// High-level media files orchestration layer
@@ -114,14 +76,14 @@ impl<'a> MediaFiles<'a> {
     /// * `upload` - MediaFileUpload containing file data and metadata
     ///
     /// # Returns
-    /// The path to the stored file
+    /// The MediaFile record from the database
     pub(crate) async fn store_and_record(
         &self,
         account_pubkey: &PublicKey,
         group_id: &GroupId,
         filename: &str,
         upload: MediaFileUpload<'_>,
-    ) -> Result<PathBuf> {
+    ) -> Result<MediaFile> {
         // Store file to filesystem (deduplicated by content)
         let file_path = self
             .storage
@@ -129,11 +91,9 @@ impl<'a> MediaFiles<'a> {
             .store_file(filename, upload.data)
             .await?;
 
-        // Record in database (tracks group-file relationship)
+        // Record in database (tracks group-file relationship) and return the MediaFile
         self.record_in_database(account_pubkey, group_id, &file_path, upload)
-            .await?;
-
-        Ok(file_path)
+            .await
     }
 
     /// Records an existing file in the database
@@ -145,14 +105,17 @@ impl<'a> MediaFiles<'a> {
     /// * `group_id` - The MLS group ID
     /// * `file_path` - Path to the cached file
     /// * `upload` - MediaFileUpload containing file metadata
+    ///
+    /// # Returns
+    /// The MediaFile record from the database
     pub(crate) async fn record_in_database(
         &self,
         account_pubkey: &PublicKey,
         group_id: &GroupId,
         file_path: &Path,
         upload: MediaFileUpload<'_>,
-    ) -> Result<()> {
-        MediaFile::save(
+    ) -> Result<MediaFile> {
+        let media_file = MediaFile::save(
             self.database,
             group_id,
             account_pubkey,
@@ -162,12 +125,13 @@ impl<'a> MediaFiles<'a> {
                 mime_type: upload.mime_type,
                 media_type: upload.media_type,
                 blossom_url: upload.blossom_url,
+                nostr_key: upload.nostr_key.as_deref(),
                 file_metadata: upload.file_metadata,
             },
         )
         .await?;
 
-        Ok(())
+        Ok(media_file)
     }
 
     /// Finds a file with a given prefix
@@ -236,18 +200,19 @@ mod tests {
             mime_type: "image/jpeg",
             media_type: "test_media",
             blossom_url: None,
+            nostr_key: None,
             file_metadata: None,
         };
-        let path = media_files
+        let media_file = media_files
             .store_and_record(&pubkey, &group_id, "test.jpg", upload)
             .await
             .unwrap();
 
         // Verify file exists on disk
-        assert!(path.exists());
+        assert!(media_file.file_path.exists());
 
         // Verify file content is correct
-        let content = tokio::fs::read(&path).await.unwrap();
+        let content = tokio::fs::read(&media_file.file_path).await.unwrap();
         assert_eq!(content, test_data);
 
         // Verify idempotency: calling store_and_record again should succeed
@@ -257,15 +222,16 @@ mod tests {
             mime_type: "image/jpeg",
             media_type: "test_media",
             blossom_url: None,
+            nostr_key: None,
             file_metadata: None,
         };
-        let path2 = media_files
+        let media_file2 = media_files
             .store_and_record(&pubkey, &group_id, "test.jpg", upload2)
             .await
             .unwrap();
 
         // Should return the same path
-        assert_eq!(path, path2);
+        assert_eq!(media_file.file_path, media_file2.file_path);
     }
 
     #[tokio::test]

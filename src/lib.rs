@@ -32,6 +32,9 @@ pub use whitenoise::app_settings::{AppSettings, ThemeMode};
 pub use whitenoise::group_information::{GroupInformation, GroupType};
 pub use whitenoise::relays::{Relay, RelayType};
 
+// Media files
+pub use whitenoise::database::media_files::{FileMetadata, MediaFile};
+
 // Messaging
 pub use whitenoise::message_aggregator::{
     ChatMessage, EmojiReaction, ReactionSummary, UserReaction,
