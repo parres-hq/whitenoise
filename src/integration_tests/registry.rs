@@ -31,6 +31,7 @@ impl ScenarioRegistry {
         run_scenario!(SubscriptionProcessingScenario);
         run_scenario!(AdvancedMessagingScenario);
         run_scenario!(GroupMembershipScenario);
+        run_scenario!(ChatMediaUploadScenario);
         run_scenario!(UserDiscoveryScenario);
 
         Self::print_summary(&results, overall_start.elapsed()).await;

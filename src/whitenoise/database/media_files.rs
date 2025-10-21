@@ -135,6 +135,7 @@ pub struct MediaFileParams<'a> {
     pub mime_type: &'a str,
     pub media_type: &'a str,
     pub blossom_url: Option<&'a str>,
+    pub nostr_key: Option<&'a str>,
     pub file_metadata: Option<&'a FileMetadata>,
 }
 
@@ -248,7 +249,7 @@ impl MediaFile {
                 mime_type, media_type, blossom_url, nostr_key,
                 file_metadata, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (mls_group_id, file_hash, account_pubkey)
             DO NOTHING
             RETURNING id, mls_group_id, account_pubkey, file_path, file_hash,
@@ -262,6 +263,7 @@ impl MediaFile {
         .bind(params.mime_type)
         .bind(params.media_type)
         .bind(params.blossom_url)
+        .bind(params.nostr_key)
         .bind(file_metadata_json)
         .bind(now_ms)
         .fetch_optional(&database.pool)
@@ -351,6 +353,7 @@ mod tests {
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: None,
+                nostr_key: None,
                 file_metadata: None,
             },
         )
@@ -393,6 +396,7 @@ mod tests {
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: Some("https://example.com/blob1"),
+                nostr_key: None,
                 file_metadata: None,
             },
         )
@@ -413,6 +417,7 @@ mod tests {
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: Some("https://example.com/blob2"),
+                nostr_key: None,
                 file_metadata: None,
             },
         )
@@ -466,6 +471,7 @@ mod tests {
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: Some("https://blossom.example.com/hash42"),
+                nostr_key: None,
                 file_metadata: Some(&metadata),
             },
         )
@@ -483,6 +489,7 @@ mod tests {
                 mime_type: "image/png",
                 media_type: "group_image",
                 blossom_url: Some("https://another-server.com/hash42"),
+                nostr_key: None,
                 file_metadata: None,
             },
         )

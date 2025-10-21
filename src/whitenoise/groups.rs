@@ -19,6 +19,7 @@ use crate::{
     whitenoise::{
         Whitenoise,
         accounts::Account,
+        database::media_files::{FileMetadata, MediaFile},
         error::{Result, WhitenoiseError},
         group_information::{GroupInformation, GroupType},
         media_files::MediaFileUpload,
@@ -607,7 +608,7 @@ impl Whitenoise {
     /// * `image_nonce` - Encryption nonce
     ///
     /// # Returns
-    /// Path to the cached image file
+    /// The MediaFile record for the cached image
     async fn download_and_cache_group_image(
         &self,
         blossom_url: Option<Url>,
@@ -616,14 +617,21 @@ impl Whitenoise {
         image_hash: &[u8; 32],
         image_key: &[u8; 32],
         image_nonce: &[u8; 12],
-    ) -> Result<PathBuf> {
+    ) -> Result<MediaFile> {
         let hash_hex = hex::encode(image_hash);
 
         // Check if already cached and return early if found
         if let Some(cached_path) = self.check_cached_image(&hash_hex).await? {
-            self.link_cached_image_to_group(account_pubkey, group_id, &cached_path, image_hash)
-                .await;
-            return Ok(cached_path);
+            let media_file = self
+                .link_cached_image_to_group(
+                    account_pubkey,
+                    group_id,
+                    &cached_path,
+                    image_hash,
+                    image_key,
+                )
+                .await?;
+            return Ok(media_file);
         }
 
         // Use provided URL or fall back to default
@@ -653,13 +661,13 @@ impl Whitenoise {
             hash_hex
         );
 
-        let cached_path = self
+        let media_file = self
             .store_and_record_group_image(
                 account_pubkey,
                 group_id,
-                &hash_hex,
                 &decrypted_data,
                 image_hash,
+                image_key,
                 &image_type,
                 &blossom_url,
             )
@@ -668,10 +676,10 @@ impl Whitenoise {
         tracing::info!(
             target: "whitenoise::groups::download_and_cache_group_image",
             "Cached group image at: {}",
-            cached_path.display()
+            media_file.file_path.display()
         );
 
-        Ok(cached_path)
+        Ok(media_file)
     }
 
     /// Checks if an image is already cached
@@ -696,31 +704,19 @@ impl Whitenoise {
     ///
     /// If an existing database record exists for this file hash, it copies metadata from it.
     /// If no database record exists, it detects the MIME type from the cached file itself.
+    ///
+    /// # Returns
+    /// The MediaFile record that was created or already exists
     async fn link_cached_image_to_group(
         &self,
         account_pubkey: &PublicKey,
         group_id: &GroupId,
         cached_path: &Path,
         image_hash: &[u8; 32],
-    ) {
+        image_key: &[u8; 32],
+    ) -> Result<MediaFile> {
         // Try to get metadata from any existing record with this hash
-        let existing_record_opt =
-            match crate::whitenoise::database::media_files::MediaFile::find_by_hash(
-                &self.database,
-                image_hash,
-            )
-            .await
-            {
-                Ok(record_opt) => record_opt,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "whitenoise::groups::link_cached_image_to_group",
-                        "Failed to query database for existing record: {}",
-                        e
-                    );
-                    return;
-                }
-            };
+        let existing_record_opt = MediaFile::find_by_hash(&self.database, image_hash).await?;
 
         if let Some(existing_record) = existing_record_opt {
             self.link_cached_image_from_existing_record(
@@ -730,15 +726,16 @@ impl Whitenoise {
                 image_hash,
                 existing_record,
             )
-            .await;
+            .await
         } else {
             self.link_cached_image_with_detection(
                 account_pubkey,
                 group_id,
                 cached_path,
                 image_hash,
+                image_key,
             )
-            .await;
+            .await
         }
     }
 
@@ -750,7 +747,7 @@ impl Whitenoise {
         cached_path: &Path,
         image_hash: &[u8; 32],
         existing_record: crate::whitenoise::database::media_files::MediaFile,
-    ) {
+    ) -> Result<MediaFile> {
         let metadata_ref = existing_record.file_metadata.as_ref();
         let upload = MediaFileUpload {
             data: &[], // Empty is OK - file already exists on disk
@@ -758,20 +755,13 @@ impl Whitenoise {
             mime_type: &existing_record.mime_type,
             media_type: &existing_record.media_type,
             blossom_url: existing_record.blossom_url.as_deref(),
+            nostr_key: existing_record.nostr_key.clone(),
             file_metadata: metadata_ref,
         };
 
-        if let Err(e) = self
-            .media_files()
+        self.media_files()
             .record_in_database(account_pubkey, group_id, cached_path, upload)
             .await
-        {
-            tracing::warn!(
-                target: "whitenoise::groups::link_cached_image_from_existing_record",
-                "Failed to record file in database: {}",
-                e
-            );
-        }
     }
 
     /// Links a cached image by detecting its MIME type from the file
@@ -781,38 +771,28 @@ impl Whitenoise {
         group_id: &GroupId,
         cached_path: &Path,
         image_hash: &[u8; 32],
-    ) {
+        image_key: &[u8; 32],
+    ) -> Result<MediaFile> {
         tracing::debug!(
             target: "whitenoise::groups::link_cached_image_with_detection",
             "No existing database record for hash {}, detecting MIME type from cached file",
             hex::encode(image_hash)
         );
 
-        let file_data = match tokio::fs::read(cached_path).await {
-            Ok(data) => data,
-            Err(e) => {
-                tracing::warn!(
-                    target: "whitenoise::groups::link_cached_image_with_detection",
-                    "Failed to read cached file {}: {}",
-                    cached_path.display(),
-                    e
-                );
-                return;
-            }
-        };
+        let file_data = tokio::fs::read(cached_path).await?;
 
-        let image_type = match ImageType::detect(&file_data) {
-            Ok(img_type) => img_type,
-            Err(e) => {
-                tracing::warn!(
-                    target: "whitenoise::groups::link_cached_image_with_detection",
-                    "Failed to detect image type for cached file {}: {}",
-                    cached_path.display(),
-                    e
-                );
-                return;
-            }
-        };
+        let image_type = ImageType::detect(&file_data).map_err(|e| {
+            WhitenoiseError::UnsupportedImageFormat(format!(
+                "Failed to detect image type for cached file {}: {}",
+                cached_path.display(),
+                e
+            ))
+        })?;
+
+        // Derive the upload keypair from the image key for cleanup purposes
+        let upload_keypair = group_image::derive_upload_keypair(image_key).map_err(|e| {
+            WhitenoiseError::Other(anyhow::anyhow!("Failed to derive upload keypair: {}", e))
+        })?;
 
         let upload = MediaFileUpload {
             data: &[], // Empty is OK - file already exists on disk
@@ -820,20 +800,13 @@ impl Whitenoise {
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: None,
+            nostr_key: Some(upload_keypair.secret_key().to_secret_hex()),
             file_metadata: None,
         };
 
-        if let Err(e) = self
-            .media_files()
+        self.media_files()
             .record_in_database(account_pubkey, group_id, cached_path, upload)
             .await
-        {
-            tracing::warn!(
-                target: "whitenoise::groups::link_cached_image_with_detection",
-                "Failed to record file in database: {}",
-                e
-            );
-        }
     }
 
     /// Downloads an encrypted blob from a Blossom server
@@ -894,15 +867,21 @@ impl Whitenoise {
         &self,
         account_pubkey: &PublicKey,
         group_id: &GroupId,
-        hash_hex: &str,
         decrypted_data: &[u8],
         image_hash: &[u8; 32],
+        image_key: &[u8; 32],
         image_type: &ImageType,
         blossom_server: &Url,
-    ) -> Result<PathBuf> {
+    ) -> Result<MediaFile> {
+        let hash_hex = hex::encode(image_hash);
         let filename = format!("{}.{}", hash_hex, image_type.extension());
-        let blossom_url = blossom_server.join(hash_hex).map_err(|e| {
+        let blossom_url = blossom_server.join(&hash_hex).map_err(|e| {
             WhitenoiseError::Other(anyhow::anyhow!("Failed to construct Blossom URL: {}", e))
+        })?;
+
+        // Derive the upload keypair from the image key for cleanup purposes
+        let upload_keypair = group_image::derive_upload_keypair(image_key).map_err(|e| {
+            WhitenoiseError::Other(anyhow::anyhow!("Failed to derive upload keypair: {}", e))
         })?;
 
         let upload = MediaFileUpload {
@@ -911,12 +890,49 @@ impl Whitenoise {
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: Some(blossom_url.as_str()),
+            nostr_key: Some(upload_keypair.secret_key().to_secret_hex()),
             file_metadata: None,
         };
 
         self.media_files()
             .store_and_record(account_pubkey, group_id, &filename, upload)
             .await
+    }
+
+    /// Uploads encrypted blob to Blossom server with timeout
+    ///
+    /// # Arguments
+    /// * `blossom_server_url` - Blossom server URL to upload to
+    /// * `encrypted_data` - The encrypted image data to upload
+    /// * `mime_type` - MIME type of the original image
+    /// * `upload_keypair` - Keypair for signing the upload
+    ///
+    /// # Returns
+    /// * `Ok(BlobDescriptor)` - Descriptor from Blossom server containing URL and hash
+    /// * `Err(WhitenoiseError)` - Upload timeout or network error
+    async fn upload_encrypted_blob_to_blossom(
+        blossom_server_url: &Url,
+        encrypted_data: Vec<u8>,
+        mime_type: &str,
+        upload_keypair: &Keys,
+    ) -> Result<nostr_blossom::bud02::BlobDescriptor> {
+        let client = BlossomClient::new(blossom_server_url.clone());
+        let upload_future = client.upload_blob(
+            encrypted_data,
+            Some(mime_type.to_string()),
+            None,
+            Some(upload_keypair),
+        );
+
+        tokio::time::timeout(BLOSSOM_TIMEOUT, upload_future)
+            .await
+            .map_err(|_| {
+                WhitenoiseError::Other(anyhow::anyhow!(
+                    "Upload timed out after {} seconds",
+                    BLOSSOM_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))
     }
 
     /// Uploads a group image to a Blossom server and returns the encrypted metadata.
@@ -928,14 +944,14 @@ impl Whitenoise {
     /// * `account` - The account performing the upload (must be a group admin)
     /// * `group_id` - The ID of the group to upload the image for
     /// * `file_path` - Path to the image file to upload
-    /// * `server` - Blossom server URL to upload to
+    /// * `blossom_server_url` - Blossom server URL to upload to
     /// * `options` - Optional media processing options (defaults to standard options if None)
     pub async fn upload_group_image(
         &self,
         account: &Account,
         group_id: &GroupId,
         file_path: &str,
-        server: Url,
+        blossom_server_url: Option<Url>,
         options: Option<MediaProcessingOptions>,
     ) -> Result<([u8; 32], [u8; 32], [u8; 12])> {
         // Verify the account is an admin of the group
@@ -964,53 +980,34 @@ impl Whitenoise {
         );
 
         // Use MDK to prepare the image for upload (encrypt + derive keypair)
-        let prepared = match options {
-            Some(opts) => group_image::prepare_group_image_for_upload_with_options(
-                &image_data,
-                image_type.mime_type(),
-                &opts,
-            )
-            .map_err(|e| {
-                WhitenoiseError::Other(anyhow::anyhow!("Failed to prepare group image: {}", e))
-            })?,
-            None => {
-                group_image::prepare_group_image_for_upload(&image_data, image_type.mime_type())
-                    .map_err(|e| {
-                        WhitenoiseError::Other(anyhow::anyhow!(
-                            "Failed to prepare group image: {}",
-                            e
-                        ))
-                    })?
-            }
-        };
+        let prepared = group_image::prepare_group_image_for_upload_with_options(
+            &image_data,
+            image_type.mime_type(),
+            &options.unwrap_or_default(),
+        )
+        .map_err(|e| {
+            WhitenoiseError::Other(anyhow::anyhow!("Failed to prepare group image: {}", e))
+        })?;
 
+        let blossom_server_url = blossom_server_url.unwrap_or(Self::default_blossom_url());
         // Upload encrypted data to Blossom using the derived keypair
-        let client = BlossomClient::new(server);
-        let upload_future = client.upload_blob(
+        let descriptor = Self::upload_encrypted_blob_to_blossom(
+            &blossom_server_url,
             prepared.encrypted_data,
-            Some(image_type.mime_type().to_string()),
-            None,
-            Some(&prepared.upload_keypair),
-        );
-
-        let descriptor = tokio::time::timeout(BLOSSOM_TIMEOUT, upload_future)
-            .await
-            .map_err(|_| {
-                WhitenoiseError::Other(anyhow::anyhow!(
-                    "Upload timed out after {} seconds",
-                    BLOSSOM_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
+            image_type.mime_type(),
+            &prepared.upload_keypair,
+        )
+        .await?;
 
         // Verify the Blossom server returned the expected hash
         // The descriptor.sha256 is a Hash type from bitcoin_hashes, convert to byte array
         let returned_hash_bytes: [u8; 32] = *descriptor.sha256.as_ref();
 
         if returned_hash_bytes != prepared.encrypted_hash {
-            return Err(WhitenoiseError::Other(anyhow::anyhow!(
-                "Blossom returned hash does not match encrypted image hash"
-            )));
+            return Err(WhitenoiseError::HashMismatch {
+                expected: hex::encode(prepared.encrypted_hash),
+                actual: hex::encode(returned_hash_bytes),
+            });
         }
 
         tracing::debug!(
@@ -1031,6 +1028,7 @@ impl Whitenoise {
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: Some(descriptor.url.as_str()),
+            nostr_key: Some(prepared.upload_keypair.secret_key().to_secret_hex()),
             file_metadata: None,
         };
 
@@ -1052,6 +1050,139 @@ impl Whitenoise {
             prepared.image_key,
             prepared.image_nonce,
         ))
+    }
+
+    /// Uploads a chat image to a Blossom server and returns the media file record.
+    ///
+    /// This method is designed for images sent in group chat messages. Unlike
+    /// `upload_group_image`, it does not require admin privileges since any group
+    /// member can send images in chat.
+    ///
+    /// Uses the encrypted media manager which derives encryption keys from the group secret.
+    /// The encryption keys are not returned as they can be re-derived for decryption.
+    ///
+    /// # Arguments
+    /// * `account` - The account uploading the image
+    /// * `group_id` - The ID of the group where the image will be used
+    /// * `file_path` - Path to the image file to upload
+    /// * `blossom_server_url` - Optional Blossom server URL (uses default if None)
+    /// * `options` - Optional media processing options (defaults to standard options if None)
+    ///
+    /// # Returns
+    /// * `Ok(MediaFile)` - MediaFile record containing file hash and metadata
+    /// * `Err(WhitenoiseError)` - If image validation, upload, or caching fails
+    pub async fn upload_chat_media(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        file_path: &str,
+        blossom_server_url: Option<Url>,
+        options: Option<MediaProcessingOptions>,
+    ) -> Result<MediaFile> {
+        // Read the image file
+        let image_data = tokio::fs::read(file_path).await?;
+
+        // Detect and validate image type from file content
+        let image_type = ImageType::detect(&image_data).map_err(|e| {
+            WhitenoiseError::UnsupportedImageFormat(format!(
+                "Failed to detect or validate image from {}: {}",
+                file_path, e
+            ))
+        })?;
+
+        tracing::debug!(
+            target: "whitenoise::groups::upload_chat_media",
+            "Detected and validated image type: {} for file {}",
+            image_type.mime_type(),
+            file_path
+        );
+
+        // Extract filename from path for AAD in encryption
+        let original_filename = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| WhitenoiseError::Other(anyhow::anyhow!("Invalid file path")))?;
+
+        // Use MDK encrypted media manager to prepare the image for upload
+        // Wrap in a block to ensure MDK and media_manager are dropped before any await points
+        let prepared = {
+            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+            let media_manager = mdk.media_manager(group_id.clone());
+
+            media_manager
+                .encrypt_for_upload_with_options(
+                    &image_data,
+                    image_type.mime_type(),
+                    original_filename,
+                    &options.unwrap_or_default(),
+                )
+                .map_err(|e| {
+                    WhitenoiseError::Other(anyhow::anyhow!("Failed to encrypt chat image: {}", e))
+                })?
+        };
+
+        let blossom_server_url = blossom_server_url.unwrap_or_else(Self::default_blossom_url);
+
+        // Generate fresh keys for upload authentication (for MIP-04 cleanup)
+        let upload_keys = nostr_sdk::Keys::generate();
+        let upload_keys_hex = upload_keys.secret_key().to_secret_hex();
+
+        // Upload encrypted data to Blossom
+        let descriptor = Self::upload_encrypted_blob_to_blossom(
+            &blossom_server_url,
+            prepared.encrypted_data,
+            &prepared.mime_type,
+            &upload_keys,
+        )
+        .await?;
+
+        // Verify the Blossom server returned the expected hash
+        let returned_hash_bytes: [u8; 32] = *descriptor.sha256.as_ref();
+        if returned_hash_bytes != prepared.encrypted_hash {
+            return Err(WhitenoiseError::HashMismatch {
+                expected: hex::encode(prepared.encrypted_hash),
+                actual: hex::encode(returned_hash_bytes),
+            });
+        }
+
+        tracing::debug!(
+            target: "whitenoise::groups::upload_chat_media",
+            "Successfully uploaded chat image for group {} to Blossom server. Hash: {}",
+            hex::encode(group_id.as_slice()),
+            hex::encode(prepared.encrypted_hash)
+        );
+
+        // Cache the decrypted image locally
+        let hash_hex = hex::encode(prepared.encrypted_hash);
+        let cached_filename = format!("{}.{}", hash_hex, image_type.extension());
+
+        // Construct file metadata from the prepared image data
+        let file_metadata = if prepared.dimensions.is_some() || prepared.blurhash.is_some() {
+            Some(FileMetadata {
+                original_filename: Some(prepared.filename.clone()),
+                dimensions: prepared.dimensions.map(|(w, h)| format!("{}x{}", w, h)),
+                blurhash: prepared.blurhash.clone(),
+            })
+        } else {
+            None
+        };
+
+        let upload = MediaFileUpload {
+            data: &image_data,
+            file_hash: prepared.encrypted_hash,
+            mime_type: &prepared.mime_type,
+            media_type: "chat_media",
+            blossom_url: Some(descriptor.url.as_str()),
+            nostr_key: Some(upload_keys_hex),
+            file_metadata: file_metadata.as_ref(),
+        };
+
+        let media_file = self
+            .media_files()
+            .store_and_record(&account.pubkey, group_id, &cached_filename, upload)
+            .await?;
+
+        Ok(media_file)
     }
 
     /// Gets the local file path for a group's current image
@@ -1114,7 +1245,7 @@ impl Whitenoise {
         };
 
         // Download and cache the image (if not already cached)
-        let path = self
+        let media_file = self
             .download_and_cache_group_image(
                 blossom_url,
                 &account.pubkey,
@@ -1125,7 +1256,7 @@ impl Whitenoise {
             )
             .await?;
 
-        Ok(Some(path))
+        Ok(Some(media_file.file_path))
     }
 }
 
@@ -1710,7 +1841,7 @@ mod tests {
                 &creator_account,
                 &group.mls_group_id,
                 temp_path,
-                blossom_server,
+                Some(blossom_server),
                 Some(test_options),
             )
             .await;
@@ -1785,6 +1916,19 @@ mod tests {
             cached_content, test_image_data,
             "Cached image content should match original"
         );
+
+        // Verify the nostr_key (upload keypair) was stored in the database
+        let media_file = crate::whitenoise::database::media_files::MediaFile::find_by_hash(
+            &whitenoise.database,
+            &hash,
+        )
+        .await
+        .unwrap();
+        assert!(media_file.is_some(), "Media file should be in database");
+        assert!(
+            media_file.unwrap().nostr_key.is_some(),
+            "Nostr key should be stored for group images for cleanup"
+        );
     }
 
     #[tokio::test]
@@ -1831,7 +1975,7 @@ mod tests {
                 &creator_account,
                 &group.mls_group_id,
                 temp_path,
-                blossom_server,
+                Some(blossom_server),
                 Some(test_options),
             )
             .await
@@ -1892,6 +2036,87 @@ mod tests {
             cached_again.unwrap(),
             cached_path,
             "Second retrieval should return same cached path"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_upload_chat_media() {
+        use tempfile::NamedTempFile;
+
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator and member
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_account = &members[0].0;
+        let member_pubkeys = vec![member_account.pubkey];
+
+        // Create group
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let group = whitenoise
+            .create_group(&creator_account, member_pubkeys, config, None)
+            .await
+            .unwrap();
+
+        // Create a valid 100x100 PNG image
+        let img = ::image::RgbaImage::from_pixel(100, 100, ::image::Rgba([0u8, 255, 0, 255]));
+        let temp_file = NamedTempFile::new().unwrap();
+        img.save_with_format(temp_file.path(), ::image::ImageFormat::Png)
+            .unwrap();
+        let temp_path = temp_file.path().to_str().unwrap();
+
+        // Test upload with creator account
+        // Note: In a real scenario, members would upload after processing their welcome message,
+        // which gives them access to the group secrets needed for encryption key derivation.
+        // For this unit test, we use the creator who has immediate group access.
+        let test_options = MediaProcessingOptions {
+            generate_blurhash: false,
+            ..Default::default()
+        };
+        let result = whitenoise
+            .upload_chat_media(
+                &creator_account,
+                &group.mls_group_id,
+                temp_path,
+                Some(Url::parse("http://localhost:3000").unwrap()),
+                Some(test_options),
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to upload chat image as non-admin: {:?}",
+            result.unwrap_err()
+        );
+
+        let media_file = result.unwrap();
+
+        // Verify the media file contains valid data
+        assert_ne!(
+            media_file.file_hash,
+            vec![0u8; 32],
+            "Hash should not be all zeros"
+        );
+        assert!(media_file.blossom_url.is_some(), "URL should be present");
+        assert!(
+            media_file.nostr_key.is_some(),
+            "Nostr key should be stored for chat images"
+        );
+        assert_eq!(media_file.mime_type, "image/png");
+        assert_eq!(media_file.media_type, "chat_media");
+        assert!(
+            media_file.file_path.exists(),
+            "Cached file should exist at: {}",
+            media_file.file_path.display()
+        );
+
+        // Verify the original filename was stored in metadata
+        assert!(media_file.file_metadata.is_some());
+        let metadata = media_file.file_metadata.as_ref().unwrap();
+        assert!(
+            metadata.original_filename.is_some(),
+            "Original filename should be stored"
         );
     }
 }
