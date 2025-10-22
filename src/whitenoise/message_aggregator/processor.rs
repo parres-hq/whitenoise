@@ -7,9 +7,7 @@ use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 use super::reaction_handler;
-use super::types::{
-    AggregatorConfig, ChatMessage, ProcessingError, UnresolvedMessage, UnresolvedReason,
-};
+use super::types::{AggregatorConfig, ChatMessage, ProcessingError};
 use crate::nostr_manager::parser::Parser;
 use mdk_core::prelude::message_types::Message;
 
@@ -24,7 +22,6 @@ pub async fn process_messages(
     }
 
     let mut processed_messages: HashMap<String, ChatMessage> = HashMap::new();
-    let mut unresolved_messages: Vec<UnresolvedMessage> = Vec::new();
 
     let mut sorted_messages = messages;
     sorted_messages.sort_unstable_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -34,18 +31,8 @@ pub async fn process_messages(
     }
 
     process_base_messages_pass(&sorted_messages, parser, &mut processed_messages, config).await;
-    process_reactions_pass(
-        &sorted_messages,
-        &mut processed_messages,
-        &mut unresolved_messages,
-        config,
-    );
-    process_deletions_pass(
-        &sorted_messages,
-        &mut processed_messages,
-        &mut unresolved_messages,
-    );
-    retry_unresolved_messages(&mut unresolved_messages, &mut processed_messages, config);
+    process_reactions_pass(&sorted_messages, &mut processed_messages, config);
+    process_deletions_pass(&sorted_messages, &mut processed_messages, config);
 
     let mut result: Vec<ChatMessage> = processed_messages.into_values().collect();
     result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -84,109 +71,32 @@ async fn process_base_messages_pass(
 fn process_reactions_pass(
     messages: &[Message],
     processed_messages: &mut HashMap<String, ChatMessage>,
-    unresolved_messages: &mut Vec<UnresolvedMessage>,
     config: &AggregatorConfig,
 ) {
     for message in messages {
         if message.kind == Kind::Reaction
-            && reaction_handler::process_reaction(
-                message,
-                processed_messages,
-                unresolved_messages,
-                config,
-            )
-            .is_err()
+            && let Err(e) = reaction_handler::process_reaction(message, processed_messages, config)
             && config.enable_debug_logging
         {
-            tracing::warn!("Failed to process reaction: {}", message.id);
+            tracing::warn!("Failed to process reaction {}: {}", message.id, e);
         }
     }
 
     if config.enable_debug_logging {
-        tracing::debug!(
-            "Processed reactions, {} unresolved messages",
-            unresolved_messages.len()
-        );
+        tracing::debug!("Processed reactions pass");
     }
 }
 
 fn process_deletions_pass(
     messages: &[Message],
     processed_messages: &mut HashMap<String, ChatMessage>,
-    unresolved_messages: &mut Vec<UnresolvedMessage>,
+    config: &AggregatorConfig,
 ) {
     for message in messages {
         if message.kind == Kind::EventDeletion {
-            process_deletion(message, processed_messages, unresolved_messages);
+            process_deletion(message, processed_messages, config);
         }
     }
-}
-
-fn retry_unresolved_messages(
-    unresolved_messages: &mut Vec<UnresolvedMessage>,
-    processed_messages: &mut HashMap<String, ChatMessage>,
-    config: &AggregatorConfig,
-) {
-    for retry_attempt in 1..=config.max_retry_attempts {
-        if unresolved_messages.is_empty() {
-            break;
-        }
-
-        if config.enable_debug_logging {
-            tracing::debug!(
-                "Retry attempt {} for {} unresolved messages",
-                retry_attempt,
-                unresolved_messages.len()
-            );
-        }
-
-        let mut remaining_unresolved = Vec::new();
-
-        for mut unresolved in std::mem::take(unresolved_messages) {
-            unresolved.retry_count += 1;
-
-            let resolved = match &unresolved.reason {
-                UnresolvedReason::ReplyToMissing(_) => false,
-                UnresolvedReason::ReactionToMissing(_) => reaction_handler::retry_reaction(
-                    &unresolved.message,
-                    processed_messages,
-                    config,
-                )
-                .is_ok(),
-                UnresolvedReason::DeleteTargetMissing(_) => {
-                    retry_deletion(&unresolved.message, processed_messages).is_ok()
-                }
-            };
-
-            if !resolved && unresolved.retry_count < config.max_retry_attempts {
-                remaining_unresolved.push(unresolved);
-            } else if !resolved && config.enable_debug_logging {
-                log_unresolved_message(&unresolved);
-            }
-        }
-
-        *unresolved_messages = remaining_unresolved;
-    }
-}
-
-fn log_unresolved_message(unresolved: &UnresolvedMessage) {
-    let reason_detail = match &unresolved.reason {
-        UnresolvedReason::ReplyToMissing(parent_id) => {
-            format!("ReplyToMissing({})", parent_id)
-        }
-        UnresolvedReason::ReactionToMissing(target_id) => {
-            format!("ReactionToMissing({})", target_id)
-        }
-        UnresolvedReason::DeleteTargetMissing(target_id) => {
-            format!("DeleteTargetMissing({})", target_id)
-        }
-    };
-    tracing::warn!(
-        "Message {} unresolved after {} attempts: {}",
-        unresolved.message.id,
-        unresolved.retry_count,
-        reason_detail
-    );
 }
 
 /// Process a regular chat message (kind 9)
@@ -248,20 +158,20 @@ fn extract_reply_info(tags: &Tags) -> Option<String> {
 fn process_deletion(
     message: &Message,
     processed_messages: &mut HashMap<String, ChatMessage>,
-    unresolved_messages: &mut Vec<UnresolvedMessage>,
+    config: &AggregatorConfig,
 ) {
     let target_ids = extract_deletion_target_ids(&message.tags);
 
     for target_id in target_ids {
         if let Some(target_message) = processed_messages.get_mut(&target_id) {
             target_message.is_deleted = true;
-            target_message.content = String::new(); // Clear content
-        } else {
-            unresolved_messages.push(UnresolvedMessage {
-                message: message.clone(),
-                retry_count: 0,
-                reason: UnresolvedReason::DeleteTargetMissing(target_id),
-            });
+            target_message.content = String::new();
+        } else if config.enable_debug_logging {
+            tracing::warn!(
+                "Deletion {} references non-existent message {}",
+                message.id,
+                target_id
+            );
         }
     }
 }
@@ -272,31 +182,6 @@ pub(crate) fn extract_deletion_target_ids(tags: &Tags) -> Vec<String> {
         .filter(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
         .filter_map(|tag| tag.content().map(|s| s.to_string()))
         .collect()
-}
-
-/// Retry processing a deletion message
-fn retry_deletion(
-    message: &Message,
-    processed_messages: &mut HashMap<String, ChatMessage>,
-) -> Result<(), ProcessingError> {
-    let target_ids = extract_deletion_target_ids(&message.tags);
-    let mut any_resolved = false;
-
-    for target_id in target_ids {
-        if let Some(target_message) = processed_messages.get_mut(&target_id) {
-            target_message.is_deleted = true;
-            target_message.content = String::new();
-            any_resolved = true;
-        }
-    }
-
-    if any_resolved {
-        Ok(())
-    } else {
-        Err(ProcessingError::Internal(
-            "No deletion targets resolved".to_string(),
-        ))
-    }
 }
 
 #[cfg(test)]
@@ -362,7 +247,6 @@ mod tests {
     fn test_config_defaults() {
         let config = AggregatorConfig::default();
 
-        assert_eq!(config.max_retry_attempts, 3);
         assert!(config.normalize_emoji);
         assert!(!config.enable_debug_logging);
     }
@@ -370,12 +254,10 @@ mod tests {
     #[test]
     fn test_config_custom() {
         let config = AggregatorConfig {
-            max_retry_attempts: 5,
             normalize_emoji: false,
             enable_debug_logging: true,
         };
 
-        assert_eq!(config.max_retry_attempts, 5);
         assert!(!config.normalize_emoji);
         assert!(config.enable_debug_logging);
     }

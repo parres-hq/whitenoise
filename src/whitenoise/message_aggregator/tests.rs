@@ -31,7 +31,6 @@ mod integration_tests {
 
         // Check default configuration
         let config = aggregator.config();
-        assert_eq!(config.max_retry_attempts, 3);
         assert!(config.normalize_emoji);
         assert!(!config.enable_debug_logging);
     }
@@ -39,7 +38,6 @@ mod integration_tests {
     #[test]
     fn test_aggregator_with_custom_config() {
         let config = AggregatorConfig {
-            max_retry_attempts: 5,
             normalize_emoji: false,
             enable_debug_logging: true,
         };
@@ -47,7 +45,6 @@ mod integration_tests {
         let aggregator = MessageAggregator::with_config(config.clone());
 
         let retrieved_config = aggregator.config();
-        assert_eq!(retrieved_config.max_retry_attempts, 5);
         assert!(!retrieved_config.normalize_emoji);
         assert!(retrieved_config.enable_debug_logging);
     }
@@ -58,10 +55,6 @@ mod integration_tests {
         let aggregator2 = MessageAggregator::default();
 
         // Both should have the same default configuration
-        assert_eq!(
-            aggregator1.config().max_retry_attempts,
-            aggregator2.config().max_retry_attempts
-        );
         assert_eq!(
             aggregator1.config().normalize_emoji,
             aggregator2.config().normalize_emoji
@@ -75,14 +68,12 @@ mod integration_tests {
     #[test]
     fn test_config_debug_clone() {
         let config = AggregatorConfig {
-            max_retry_attempts: 10,
             normalize_emoji: false,
             enable_debug_logging: true,
         };
 
         let cloned_config = config.clone();
 
-        assert_eq!(config.max_retry_attempts, cloned_config.max_retry_attempts);
         assert_eq!(config.normalize_emoji, cloned_config.normalize_emoji);
         assert_eq!(
             config.enable_debug_logging,
@@ -179,9 +170,8 @@ mod integration_tests {
     #[tokio::test]
     async fn test_aggregator_with_debug_config() {
         let config = AggregatorConfig {
-            max_retry_attempts: 1,
             normalize_emoji: true,
-            enable_debug_logging: true, // This should not cause any issues
+            enable_debug_logging: true,
         };
 
         let aggregator = MessageAggregator::with_config(config);

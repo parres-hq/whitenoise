@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::nostr_manager::parser::SerializableToken;
-pub type MlsMessage = mdk_core::prelude::message_types::Message;
 
 /// Represents an aggregated chat message ready for frontend display
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -78,30 +77,9 @@ pub struct UserReaction {
     pub created_at: Timestamp,
 }
 
-/// Internal type for tracking unresolved references
-#[derive(Debug, Clone)]
-pub(crate) struct UnresolvedMessage {
-    pub message: MlsMessage,
-    pub retry_count: u8,
-    pub reason: UnresolvedReason,
-}
-
-/// Reasons why messages might remain unresolved during processing
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone)]
-pub(crate) enum UnresolvedReason {
-    #[allow(dead_code)] // Future: For reply processing
-    ReplyToMissing(String), // Missing parent message ID
-    ReactionToMissing(String),   // Missing target message ID
-    DeleteTargetMissing(String), // Missing delete target ID
-}
-
 /// Configuration for the message aggregator
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AggregatorConfig {
-    /// Maximum number of retry attempts for unresolved messages
-    pub max_retry_attempts: u8,
-
     /// Whether to normalize emoji (treat skin tone variants as same base emoji)
     pub normalize_emoji: bool,
 
@@ -112,7 +90,6 @@ pub struct AggregatorConfig {
 impl Default for AggregatorConfig {
     fn default() -> Self {
         Self {
-            max_retry_attempts: 3,
             normalize_emoji: true,
             enable_debug_logging: false,
         }
