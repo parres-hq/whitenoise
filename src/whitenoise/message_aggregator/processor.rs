@@ -21,18 +21,80 @@ pub async fn process_messages(
         return Ok(Vec::new());
     }
 
-    let mut processed_messages: HashMap<String, ChatMessage> = HashMap::new();
+    let mut processed_messages = HashMap::new();
+    let mut orphaned_messages = Vec::new();
 
     let mut sorted_messages = messages;
     sorted_messages.sort_unstable_by(|a, b| a.created_at.cmp(&b.created_at));
 
     if config.enable_debug_logging {
-        tracing::debug!("Sorted {} messages chronologically", sorted_messages.len());
+        tracing::debug!(
+            "Processing {} messages chronologically",
+            sorted_messages.len()
+        );
     }
 
-    process_base_messages_pass(&sorted_messages, parser, &mut processed_messages, config).await;
-    process_reactions_pass(&sorted_messages, &mut processed_messages, config);
-    process_deletions_pass(&sorted_messages, &mut processed_messages, config);
+    // Pass 1: Process all messages in chronological order
+    for message in &sorted_messages {
+        match message.kind {
+            Kind::Custom(9) => {
+                if let Ok(chat_message) = process_regular_message(message, parser).await {
+                    processed_messages.insert(message.id.to_string(), chat_message);
+                } else if config.enable_debug_logging {
+                    tracing::warn!("Failed to process regular message: {}", message.id);
+                }
+            }
+            Kind::Reaction => {
+                if reaction_handler::process_reaction(message, &mut processed_messages, config)
+                    .is_err()
+                {
+                    orphaned_messages.push(message);
+                }
+            }
+            Kind::EventDeletion => {
+                if !try_process_deletion(message, &mut processed_messages) {
+                    orphaned_messages.push(message);
+                }
+            }
+            _ => continue,
+        }
+    }
+
+    if config.enable_debug_logging {
+        tracing::debug!(
+            "Pass 1 complete: {} messages processed, {} orphaned",
+            processed_messages.len(),
+            orphaned_messages.len()
+        );
+    }
+
+    // Pass 2: Process orphaned messages (their targets should exist now)
+    for message in orphaned_messages {
+        match message.kind {
+            Kind::Reaction => {
+                if reaction_handler::process_reaction(message, &mut processed_messages, config)
+                    .is_err()
+                    && config.enable_debug_logging
+                {
+                    tracing::warn!(
+                        "Reaction {} references non-existent message, ignoring",
+                        message.id
+                    );
+                }
+            }
+            Kind::EventDeletion => {
+                if !try_process_deletion(message, &mut processed_messages)
+                    && config.enable_debug_logging
+                {
+                    tracing::warn!(
+                        "Deletion {} references non-existent message, ignoring",
+                        message.id
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
 
     let mut result: Vec<ChatMessage> = processed_messages.into_values().collect();
     result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
@@ -42,61 +104,6 @@ pub async fn process_messages(
     }
 
     Ok(result)
-}
-
-async fn process_base_messages_pass(
-    messages: &[Message],
-    parser: &dyn Parser,
-    processed_messages: &mut HashMap<String, ChatMessage>,
-    config: &AggregatorConfig,
-) {
-    for message in messages {
-        match message.kind {
-            Kind::Custom(9) => {
-                if let Ok(chat_message) = process_regular_message(message, parser).await {
-                    processed_messages.insert(message.id.to_string(), chat_message);
-                } else if config.enable_debug_logging {
-                    tracing::warn!("Failed to process regular message: {}", message.id);
-                }
-            }
-            _ => continue,
-        }
-    }
-
-    if config.enable_debug_logging {
-        tracing::debug!("Processed {} base messages", processed_messages.len());
-    }
-}
-
-fn process_reactions_pass(
-    messages: &[Message],
-    processed_messages: &mut HashMap<String, ChatMessage>,
-    config: &AggregatorConfig,
-) {
-    for message in messages {
-        if message.kind == Kind::Reaction
-            && let Err(e) = reaction_handler::process_reaction(message, processed_messages, config)
-            && config.enable_debug_logging
-        {
-            tracing::warn!("Failed to process reaction {}: {}", message.id, e);
-        }
-    }
-
-    if config.enable_debug_logging {
-        tracing::debug!("Processed reactions pass");
-    }
-}
-
-fn process_deletions_pass(
-    messages: &[Message],
-    processed_messages: &mut HashMap<String, ChatMessage>,
-    config: &AggregatorConfig,
-) {
-    for message in messages {
-        if message.kind == Kind::EventDeletion {
-            process_deletion(message, processed_messages, config);
-        }
-    }
 }
 
 /// Process a regular chat message (kind 9)
@@ -154,26 +161,24 @@ fn extract_reply_info(tags: &Tags) -> Option<String> {
     None
 }
 
-/// Process deletion message (kind 5)
-fn process_deletion(
+/// Try to process deletion message (kind 5)
+/// Returns true if at least one target was found and deleted, false otherwise
+fn try_process_deletion(
     message: &Message,
     processed_messages: &mut HashMap<String, ChatMessage>,
-    config: &AggregatorConfig,
-) {
+) -> bool {
     let target_ids = extract_deletion_target_ids(&message.tags);
+    let mut any_processed = false;
 
     for target_id in target_ids {
         if let Some(target_message) = processed_messages.get_mut(&target_id) {
             target_message.is_deleted = true;
             target_message.content = String::new();
-        } else if config.enable_debug_logging {
-            tracing::warn!(
-                "Deletion {} references non-existent message {}",
-                message.id,
-                target_id
-            );
+            any_processed = true;
         }
     }
+
+    any_processed
 }
 
 /// Extract target message IDs from deletion event e-tags
