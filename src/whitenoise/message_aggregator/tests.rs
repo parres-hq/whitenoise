@@ -18,7 +18,7 @@ mod integration_tests {
         let pubkey = Keys::generate().public_key();
 
         let result = aggregator
-            .aggregate_messages_for_group(&pubkey, &group_id, vec![], &parser)
+            .aggregate_messages_for_group(&pubkey, &group_id, vec![], &parser, vec![])
             .await
             .unwrap();
 
@@ -181,7 +181,7 @@ mod integration_tests {
 
         // This should work even with debug logging enabled
         let result = aggregator
-            .aggregate_messages_for_group(&pubkey, &group_id, vec![], &parser)
+            .aggregate_messages_for_group(&pubkey, &group_id, vec![], &parser, vec![])
             .await
             .unwrap();
 
@@ -226,6 +226,7 @@ mod integration_tests {
             content_tokens: vec![],
             reactions: ReactionSummary::default(),
             kind: 9, // Default to MLS group chat
+            media_attachments: vec![],
         };
 
         // Test serialization
@@ -254,6 +255,7 @@ mod integration_tests {
             content_tokens: vec![],
             reactions: ReactionSummary::default(),
             kind: 9, // Default to MLS group chat
+            media_attachments: vec![],
         };
 
         let message2 = message1.clone();

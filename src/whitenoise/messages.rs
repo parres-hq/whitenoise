@@ -4,6 +4,8 @@ use crate::{
         Whitenoise,
         accounts::Account,
         error::{Result, WhitenoiseError},
+        media_files::MediaFile,
+        message_aggregator::ChatMessage,
     },
 };
 use mdk_core::prelude::*;
@@ -97,12 +99,16 @@ impl Whitenoise {
         &self,
         pubkey: &PublicKey,
         group_id: &GroupId,
-    ) -> Result<Vec<crate::whitenoise::message_aggregator::ChatMessage>> {
+    ) -> Result<Vec<ChatMessage>> {
         // Get account to access mdk instance
         let account = Account::find_by_pubkey(pubkey, &self.database).await?;
 
         let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
         let raw_messages = mdk.get_messages(group_id)?;
+
+        // Fetch all media files for this group upfront
+        let media_files = MediaFile::find_by_group(&self.database, group_id).await?;
+
         // Use the aggregator to process the messages
         self.message_aggregator
             .aggregate_messages_for_group(
@@ -110,6 +116,7 @@ impl Whitenoise {
                 group_id,
                 raw_messages,
                 &self.nostr, // For token parsing
+                media_files,
             )
             .await
             .map_err(|e| {

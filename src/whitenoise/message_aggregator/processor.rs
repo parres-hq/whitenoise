@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use super::reaction_handler;
 use super::types::{AggregatorConfig, ChatMessage, ProcessingError};
 use crate::nostr_manager::parser::Parser;
+use crate::whitenoise::media_files::MediaFile;
 use mdk_core::prelude::message_types::Message;
 
 /// Process raw messages into aggregated chat messages
@@ -16,10 +17,17 @@ pub async fn process_messages(
     messages: Vec<Message>,
     parser: &dyn Parser,
     config: &AggregatorConfig,
+    media_files: Vec<MediaFile>,
 ) -> Result<Vec<ChatMessage>, ProcessingError> {
     if messages.is_empty() {
         return Ok(Vec::new());
     }
+
+    // Build internal lookup map for O(1) access during processing
+    let media_files_map: HashMap<String, MediaFile> = media_files
+        .into_iter()
+        .map(|mf| (hex::encode(&mf.file_hash), mf))
+        .collect();
 
     let mut processed_messages = HashMap::new();
     let mut orphaned_messages = Vec::new();
@@ -38,7 +46,9 @@ pub async fn process_messages(
     for message in &sorted_messages {
         match message.kind {
             Kind::Custom(9) => {
-                if let Ok(chat_message) = process_regular_message(message, parser).await {
+                if let Ok(chat_message) =
+                    process_regular_message(message, parser, &media_files_map).await
+                {
                     processed_messages.insert(message.id.to_string(), chat_message);
                 } else if config.enable_debug_logging {
                     tracing::warn!("Failed to process regular message: {}", message.id);
@@ -110,6 +120,7 @@ pub async fn process_messages(
 async fn process_regular_message(
     message: &Message,
     parser: &dyn Parser,
+    media_files_map: &HashMap<String, MediaFile>,
 ) -> Result<ChatMessage, ProcessingError> {
     // Parse content tokens
     let content_tokens = match parser.parse(&message.content) {
@@ -124,6 +135,9 @@ async fn process_regular_message(
     let reply_to_id = extract_reply_info(&message.tags);
     let is_reply = reply_to_id.is_some();
 
+    // Extract media attachments
+    let media_attachments = extract_media_attachments(&message.tags, media_files_map);
+
     Ok(ChatMessage {
         id: message.id.to_string(),
         author: message.pubkey,
@@ -136,6 +150,7 @@ async fn process_regular_message(
         content_tokens,
         reactions: Default::default(),
         kind: u16::from(message.kind),
+        media_attachments,
     })
 }
 
@@ -187,6 +202,55 @@ pub(crate) fn extract_deletion_target_ids(tags: &Tags) -> Vec<String> {
         .filter(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
         .filter_map(|tag| tag.content().map(|s| s.to_string()))
         .collect()
+}
+
+/// Extract media file hashes from message imeta tags (MIP-04)
+///
+/// Returns a vector of unique file hashes found in the message tags.
+/// Per MIP-04, imeta tags have format: ["imeta", "url <blossom_url>", "x <hash>", "m <mime_type>", ...]
+fn extract_media_hashes(tags: &Tags) -> Vec<String> {
+    let mut hashes = Vec::new();
+
+    for tag in tags.iter() {
+        if tag.kind() == TagKind::Custom("imeta".into()) {
+            // Tag format: ["imeta", "url ...", "x <hash>", "m <mime>", ...]
+            // Iterate through tag parameters looking for "x" parameter
+            // Skip first element (tag name "imeta") by using tag.content() for second element,
+            // then check remaining elements by converting tag to_vec and iterating
+            let tag_vec = tag.clone().to_vec();
+            for value in tag_vec.iter().skip(1) {
+                // Look for "x" parameter which contains the hex-encoded hash
+                if let Some(hash_str) = value.strip_prefix("x ") {
+                    // Validate it's a 64-character hex string (32 bytes)
+                    if hash_str.len() == 64 && hash_str.chars().all(|c| c.is_ascii_hexdigit()) {
+                        hashes.push(hash_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    hashes
+}
+
+/// Extract media attachments from a message by matching hashes from imeta tags
+///
+/// Extracts media hashes from the message tags and looks them up in the provided map.
+/// Returns a Vec of MediaFile records that were found.
+fn extract_media_attachments(
+    tags: &Tags,
+    media_files_map: &HashMap<String, MediaFile>,
+) -> Vec<MediaFile> {
+    let media_hashes = extract_media_hashes(tags);
+    let mut media_attachments = Vec::new();
+
+    for hash in media_hashes {
+        if let Some(media_file) = media_files_map.get(&hash) {
+            media_attachments.push(media_file.clone());
+        }
+    }
+
+    media_attachments
 }
 
 #[cfg(test)]
@@ -244,7 +308,9 @@ mod tests {
         let parser = MockParser::new();
         let config = AggregatorConfig::default();
 
-        let result = process_messages(vec![], &parser, &config).await.unwrap();
+        let result = process_messages(vec![], &parser, &config, vec![])
+            .await
+            .unwrap();
         assert!(result.is_empty());
     }
 

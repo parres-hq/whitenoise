@@ -162,6 +162,7 @@ mod tests {
             content_tokens: vec![],
             reactions: ReactionSummary::default(),
             kind: 9, // Default to MLS group chat
+            media_attachments: vec![],
         }
     }
 

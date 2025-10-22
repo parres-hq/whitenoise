@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::nostr_manager::parser::SerializableToken;
+use crate::whitenoise::media_files::MediaFile;
 
 /// Represents an aggregated chat message ready for frontend display
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -39,6 +40,9 @@ pub struct ChatMessage {
 
     /// The kind of the original Nostr event
     pub kind: u16,
+
+    /// Media files attached to this message
+    pub media_attachments: Vec<MediaFile>,
 }
 
 /// Summary of reactions on a message
