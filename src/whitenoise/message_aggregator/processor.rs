@@ -14,7 +14,6 @@ use crate::nostr_manager::parser::Parser;
 use mdk_core::prelude::message_types::Message;
 
 /// Process raw messages into aggregated chat messages
-/// This implements the Phase 1 stateless algorithm from the plan
 pub async fn process_messages(
     messages: Vec<Message>,
     parser: &dyn Parser,
@@ -24,11 +23,9 @@ pub async fn process_messages(
         return Ok(Vec::new());
     }
 
-    // Step 1: Initialize state
     let mut processed_messages: HashMap<String, ChatMessage> = HashMap::new();
     let mut unresolved_messages: Vec<UnresolvedMessage> = Vec::new();
 
-    // Step 2: Sort messages by timestamp for chronological processing
     let mut sorted_messages = messages;
     sorted_messages.sort_unstable_by(|a, b| a.created_at.cmp(&b.created_at));
 
@@ -36,8 +33,37 @@ pub async fn process_messages(
         tracing::debug!("Sorted {} messages chronologically", sorted_messages.len());
     }
 
-    // Step 3: First Pass - Process base messages (kind 9)
-    for message in &sorted_messages {
+    process_base_messages_pass(&sorted_messages, parser, &mut processed_messages, config).await;
+    process_reactions_pass(
+        &sorted_messages,
+        &mut processed_messages,
+        &mut unresolved_messages,
+        config,
+    );
+    process_deletions_pass(
+        &sorted_messages,
+        &mut processed_messages,
+        &mut unresolved_messages,
+    );
+    retry_unresolved_messages(&mut unresolved_messages, &mut processed_messages, config);
+
+    let mut result: Vec<ChatMessage> = processed_messages.into_values().collect();
+    result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
+    if config.enable_debug_logging {
+        tracing::debug!("Returning {} aggregated messages", result.len());
+    }
+
+    Ok(result)
+}
+
+async fn process_base_messages_pass(
+    messages: &[Message],
+    parser: &dyn Parser,
+    processed_messages: &mut HashMap<String, ChatMessage>,
+    config: &AggregatorConfig,
+) {
+    for message in messages {
         match message.kind {
             Kind::Custom(9) => {
                 if let Ok(chat_message) = process_regular_message(message, parser).await {
@@ -46,24 +72,27 @@ pub async fn process_messages(
                     tracing::warn!("Failed to process regular message: {}", message.id);
                 }
             }
-            _ => {
-                // Non-chat messages will be processed in later passes
-                continue;
-            }
+            _ => continue,
         }
     }
 
     if config.enable_debug_logging {
         tracing::debug!("Processed {} base messages", processed_messages.len());
     }
+}
 
-    // Step 4: Second Pass - Process reactions (kind 7)
-    for message in &sorted_messages {
+fn process_reactions_pass(
+    messages: &[Message],
+    processed_messages: &mut HashMap<String, ChatMessage>,
+    unresolved_messages: &mut Vec<UnresolvedMessage>,
+    config: &AggregatorConfig,
+) {
+    for message in messages {
         if message.kind == Kind::Reaction
             && reaction_handler::process_reaction(
                 message,
-                &mut processed_messages,
-                &mut unresolved_messages,
+                processed_messages,
+                unresolved_messages,
                 config,
             )
             .is_err()
@@ -79,22 +108,25 @@ pub async fn process_messages(
             unresolved_messages.len()
         );
     }
+}
 
-    // Step 5: Third Pass - Process deletions (kind 5)
-    for message in &sorted_messages {
+fn process_deletions_pass(
+    messages: &[Message],
+    processed_messages: &mut HashMap<String, ChatMessage>,
+    unresolved_messages: &mut Vec<UnresolvedMessage>,
+) {
+    for message in messages {
         if message.kind == Kind::EventDeletion {
-            process_deletion(message, &mut processed_messages, &mut unresolved_messages);
+            process_deletion(message, processed_messages, unresolved_messages);
         }
     }
+}
 
-    if config.enable_debug_logging {
-        tracing::debug!(
-            "Processed deletions, {} unresolved messages",
-            unresolved_messages.len()
-        );
-    }
-
-    // Step 6: Retry Pass - Handle unresolved messages
+fn retry_unresolved_messages(
+    unresolved_messages: &mut Vec<UnresolvedMessage>,
+    processed_messages: &mut HashMap<String, ChatMessage>,
+    config: &AggregatorConfig,
+) {
     for retry_attempt in 1..=config.max_retry_attempts {
         if unresolved_messages.is_empty() {
             break;
@@ -110,61 +142,51 @@ pub async fn process_messages(
 
         let mut remaining_unresolved = Vec::new();
 
-        for mut unresolved in unresolved_messages {
+        for mut unresolved in std::mem::take(unresolved_messages) {
             unresolved.retry_count += 1;
 
             let resolved = match &unresolved.reason {
-                UnresolvedReason::ReplyToMissing(_) => {
-                    // For replies that failed processing, we just skip retries
-                    // since the parent message structure doesn't change
-                    false
-                }
+                UnresolvedReason::ReplyToMissing(_) => false,
                 UnresolvedReason::ReactionToMissing(_) => reaction_handler::retry_reaction(
                     &unresolved.message,
-                    &mut processed_messages,
+                    processed_messages,
                     config,
                 )
                 .is_ok(),
                 UnresolvedReason::DeleteTargetMissing(_) => {
-                    retry_deletion(&unresolved.message, &mut processed_messages).is_ok()
+                    retry_deletion(&unresolved.message, processed_messages).is_ok()
                 }
             };
 
             if !resolved && unresolved.retry_count < config.max_retry_attempts {
                 remaining_unresolved.push(unresolved);
             } else if !resolved && config.enable_debug_logging {
-                let reason_detail = match &unresolved.reason {
-                    UnresolvedReason::ReplyToMissing(parent_id) => {
-                        format!("ReplyToMissing({})", parent_id)
-                    }
-                    UnresolvedReason::ReactionToMissing(target_id) => {
-                        format!("ReactionToMissing({})", target_id)
-                    }
-                    UnresolvedReason::DeleteTargetMissing(target_id) => {
-                        format!("DeleteTargetMissing({})", target_id)
-                    }
-                };
-                tracing::warn!(
-                    "Message {} unresolved after {} attempts: {}",
-                    unresolved.message.id,
-                    unresolved.retry_count,
-                    reason_detail
-                );
+                log_unresolved_message(&unresolved);
             }
         }
 
-        unresolved_messages = remaining_unresolved;
+        *unresolved_messages = remaining_unresolved;
     }
+}
 
-    // Step 7: Return sorted results
-    let mut result: Vec<ChatMessage> = processed_messages.into_values().collect();
-    result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-
-    if config.enable_debug_logging {
-        tracing::debug!("Returning {} aggregated messages", result.len());
-    }
-
-    Ok(result)
+fn log_unresolved_message(unresolved: &UnresolvedMessage) {
+    let reason_detail = match &unresolved.reason {
+        UnresolvedReason::ReplyToMissing(parent_id) => {
+            format!("ReplyToMissing({})", parent_id)
+        }
+        UnresolvedReason::ReactionToMissing(target_id) => {
+            format!("ReactionToMissing({})", target_id)
+        }
+        UnresolvedReason::DeleteTargetMissing(target_id) => {
+            format!("DeleteTargetMissing({})", target_id)
+        }
+    };
+    tracing::warn!(
+        "Message {} unresolved after {} attempts: {}",
+        unresolved.message.id,
+        unresolved.retry_count,
+        reason_detail
+    );
 }
 
 /// Process a regular chat message (kind 9)
