@@ -206,7 +206,7 @@ pub(crate) fn extract_deletion_target_ids(tags: &Tags) -> Vec<String> {
 
 /// Extract media file hashes from message imeta tags (MIP-04)
 ///
-/// Returns a vector of unique file hashes found in the message tags.
+/// Returns a vector of file hashes found in the message tags, preserving order and allowing duplicates.
 /// Per MIP-04, imeta tags have format: ["imeta", "url <blossom_url>", "x <hash>", "m <mime_type>", ...]
 fn extract_media_hashes(tags: &Tags) -> Vec<String> {
     let mut hashes = Vec::new();
@@ -223,7 +223,7 @@ fn extract_media_hashes(tags: &Tags) -> Vec<String> {
                 if let Some(hash_str) = value.strip_prefix("x ") {
                     // Validate it's a 64-character hex string (32 bytes)
                     if hash_str.len() == 64 && hash_str.chars().all(|c| c.is_ascii_hexdigit()) {
-                        hashes.push(hash_str.to_string());
+                        hashes.push(hash_str.to_lowercase());
                     }
                 }
             }
