@@ -893,7 +893,6 @@ mod tests {
 
             // Test with custom aggregator config
             let custom_config = message_aggregator::AggregatorConfig {
-                max_retry_attempts: 5,
                 normalize_emoji: false,
                 enable_debug_logging: true,
             };
@@ -906,7 +905,6 @@ mod tests {
 
             assert!(config.message_aggregator_config.is_some());
             let aggregator_config = config.message_aggregator_config.unwrap();
-            assert_eq!(aggregator_config.max_retry_attempts, 5);
             assert!(!aggregator_config.normalize_emoji);
             assert!(aggregator_config.enable_debug_logging);
         }
@@ -1028,7 +1026,6 @@ mod tests {
 
             // Check that it has expected default configuration
             let config = aggregator.config();
-            assert_eq!(config.max_retry_attempts, 3);
             assert!(config.normalize_emoji);
             assert!(!config.enable_debug_logging);
         }

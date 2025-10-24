@@ -7,156 +7,105 @@ use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 use super::reaction_handler;
-use super::types::{
-    AggregatorConfig, ChatMessage, ProcessingError, UnresolvedMessage, UnresolvedReason,
-};
+use super::types::{AggregatorConfig, ChatMessage, ProcessingError};
 use crate::nostr_manager::parser::Parser;
+use crate::whitenoise::media_files::MediaFile;
 use mdk_core::prelude::message_types::Message;
 
 /// Process raw messages into aggregated chat messages
-/// This implements the Phase 1 stateless algorithm from the plan
 pub async fn process_messages(
     messages: Vec<Message>,
     parser: &dyn Parser,
     config: &AggregatorConfig,
+    media_files: Vec<MediaFile>,
 ) -> Result<Vec<ChatMessage>, ProcessingError> {
     if messages.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Step 1: Initialize state
-    let mut processed_messages: HashMap<String, ChatMessage> = HashMap::new();
-    let mut unresolved_messages: Vec<UnresolvedMessage> = Vec::new();
+    // Build internal lookup map for O(1) access during processing
+    let media_files_map: HashMap<String, MediaFile> = media_files
+        .into_iter()
+        .map(|mf| (hex::encode(&mf.file_hash), mf))
+        .collect();
 
-    // Step 2: Sort messages by timestamp for chronological processing
+    let mut processed_messages = HashMap::new();
+    let mut orphaned_messages = Vec::new();
+
     let mut sorted_messages = messages;
     sorted_messages.sort_unstable_by(|a, b| a.created_at.cmp(&b.created_at));
 
     if config.enable_debug_logging {
-        tracing::debug!("Sorted {} messages chronologically", sorted_messages.len());
+        tracing::debug!(
+            "Processing {} messages chronologically",
+            sorted_messages.len()
+        );
     }
 
-    // Step 3: First Pass - Process base messages (kind 9)
+    // Pass 1: Process all messages in chronological order
     for message in &sorted_messages {
         match message.kind {
             Kind::Custom(9) => {
-                if let Ok(chat_message) = process_regular_message(message, parser).await {
+                if let Ok(chat_message) =
+                    process_regular_message(message, parser, &media_files_map).await
+                {
                     processed_messages.insert(message.id.to_string(), chat_message);
                 } else if config.enable_debug_logging {
                     tracing::warn!("Failed to process regular message: {}", message.id);
                 }
             }
-            _ => {
-                // Non-chat messages will be processed in later passes
-                continue;
+            Kind::Reaction => {
+                if reaction_handler::process_reaction(message, &mut processed_messages, config)
+                    .is_err()
+                {
+                    orphaned_messages.push(message);
+                }
             }
-        }
-    }
-
-    if config.enable_debug_logging {
-        tracing::debug!("Processed {} base messages", processed_messages.len());
-    }
-
-    // Step 4: Second Pass - Process reactions (kind 7)
-    for message in &sorted_messages {
-        if message.kind == Kind::Reaction
-            && reaction_handler::process_reaction(
-                message,
-                &mut processed_messages,
-                &mut unresolved_messages,
-                config,
-            )
-            .is_err()
-            && config.enable_debug_logging
-        {
-            tracing::warn!("Failed to process reaction: {}", message.id);
+            Kind::EventDeletion => {
+                if !try_process_deletion(message, &mut processed_messages) {
+                    orphaned_messages.push(message);
+                }
+            }
+            _ => continue,
         }
     }
 
     if config.enable_debug_logging {
         tracing::debug!(
-            "Processed reactions, {} unresolved messages",
-            unresolved_messages.len()
+            "Pass 1 complete: {} messages processed, {} orphaned",
+            processed_messages.len(),
+            orphaned_messages.len()
         );
     }
 
-    // Step 5: Third Pass - Process deletions (kind 5)
-    for message in &sorted_messages {
-        if message.kind == Kind::EventDeletion {
-            process_deletion(message, &mut processed_messages, &mut unresolved_messages);
-        }
-    }
-
-    if config.enable_debug_logging {
-        tracing::debug!(
-            "Processed deletions, {} unresolved messages",
-            unresolved_messages.len()
-        );
-    }
-
-    // Step 6: Retry Pass - Handle unresolved messages
-    for retry_attempt in 1..=config.max_retry_attempts {
-        if unresolved_messages.is_empty() {
-            break;
-        }
-
-        if config.enable_debug_logging {
-            tracing::debug!(
-                "Retry attempt {} for {} unresolved messages",
-                retry_attempt,
-                unresolved_messages.len()
-            );
-        }
-
-        let mut remaining_unresolved = Vec::new();
-
-        for mut unresolved in unresolved_messages {
-            unresolved.retry_count += 1;
-
-            let resolved = match &unresolved.reason {
-                UnresolvedReason::ReplyToMissing(_) => {
-                    // For replies that failed processing, we just skip retries
-                    // since the parent message structure doesn't change
-                    false
+    // Pass 2: Process orphaned messages (their targets should exist now)
+    for message in orphaned_messages {
+        match message.kind {
+            Kind::Reaction => {
+                if reaction_handler::process_reaction(message, &mut processed_messages, config)
+                    .is_err()
+                    && config.enable_debug_logging
+                {
+                    tracing::warn!(
+                        "Reaction {} references non-existent message, ignoring",
+                        message.id
+                    );
                 }
-                UnresolvedReason::ReactionToMissing(_) => reaction_handler::retry_reaction(
-                    &unresolved.message,
-                    &mut processed_messages,
-                    config,
-                )
-                .is_ok(),
-                UnresolvedReason::DeleteTargetMissing(_) => {
-                    retry_deletion(&unresolved.message, &mut processed_messages).is_ok()
-                }
-            };
-
-            if !resolved && unresolved.retry_count < config.max_retry_attempts {
-                remaining_unresolved.push(unresolved);
-            } else if !resolved && config.enable_debug_logging {
-                let reason_detail = match &unresolved.reason {
-                    UnresolvedReason::ReplyToMissing(parent_id) => {
-                        format!("ReplyToMissing({})", parent_id)
-                    }
-                    UnresolvedReason::ReactionToMissing(target_id) => {
-                        format!("ReactionToMissing({})", target_id)
-                    }
-                    UnresolvedReason::DeleteTargetMissing(target_id) => {
-                        format!("DeleteTargetMissing({})", target_id)
-                    }
-                };
-                tracing::warn!(
-                    "Message {} unresolved after {} attempts: {}",
-                    unresolved.message.id,
-                    unresolved.retry_count,
-                    reason_detail
-                );
             }
+            Kind::EventDeletion => {
+                if !try_process_deletion(message, &mut processed_messages)
+                    && config.enable_debug_logging
+                {
+                    tracing::warn!(
+                        "Deletion {} references non-existent message, ignoring",
+                        message.id
+                    );
+                }
+            }
+            _ => {}
         }
-
-        unresolved_messages = remaining_unresolved;
     }
 
-    // Step 7: Return sorted results
     let mut result: Vec<ChatMessage> = processed_messages.into_values().collect();
     result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
@@ -171,6 +120,7 @@ pub async fn process_messages(
 async fn process_regular_message(
     message: &Message,
     parser: &dyn Parser,
+    media_files_map: &HashMap<String, MediaFile>,
 ) -> Result<ChatMessage, ProcessingError> {
     // Parse content tokens
     let content_tokens = match parser.parse(&message.content) {
@@ -185,6 +135,9 @@ async fn process_regular_message(
     let reply_to_id = extract_reply_info(&message.tags);
     let is_reply = reply_to_id.is_some();
 
+    // Extract media attachments
+    let media_attachments = extract_media_attachments(&message.tags, media_files_map);
+
     Ok(ChatMessage {
         id: message.id.to_string(),
         author: message.pubkey,
@@ -197,6 +150,7 @@ async fn process_regular_message(
         content_tokens,
         reactions: Default::default(),
         kind: u16::from(message.kind),
+        media_attachments,
     })
 }
 
@@ -222,26 +176,24 @@ fn extract_reply_info(tags: &Tags) -> Option<String> {
     None
 }
 
-/// Process deletion message (kind 5)
-fn process_deletion(
+/// Try to process deletion message (kind 5)
+/// Returns true if at least one target was found and deleted, false otherwise
+fn try_process_deletion(
     message: &Message,
     processed_messages: &mut HashMap<String, ChatMessage>,
-    unresolved_messages: &mut Vec<UnresolvedMessage>,
-) {
+) -> bool {
     let target_ids = extract_deletion_target_ids(&message.tags);
+    let mut any_processed = false;
 
     for target_id in target_ids {
         if let Some(target_message) = processed_messages.get_mut(&target_id) {
             target_message.is_deleted = true;
-            target_message.content = String::new(); // Clear content
-        } else {
-            unresolved_messages.push(UnresolvedMessage {
-                message: message.clone(),
-                retry_count: 0,
-                reason: UnresolvedReason::DeleteTargetMissing(target_id),
-            });
+            target_message.content = String::new();
+            any_processed = true;
         }
     }
+
+    any_processed
 }
 
 /// Extract target message IDs from deletion event e-tags
@@ -252,29 +204,53 @@ pub(crate) fn extract_deletion_target_ids(tags: &Tags) -> Vec<String> {
         .collect()
 }
 
-/// Retry processing a deletion message
-fn retry_deletion(
-    message: &Message,
-    processed_messages: &mut HashMap<String, ChatMessage>,
-) -> Result<(), ProcessingError> {
-    let target_ids = extract_deletion_target_ids(&message.tags);
-    let mut any_resolved = false;
+/// Extract media file hashes from message imeta tags (MIP-04)
+///
+/// Returns a vector of file hashes found in the message tags, preserving order and allowing duplicates.
+/// Per MIP-04, imeta tags have format: ["imeta", "url <blossom_url>", "x <hash>", "m <mime_type>", ...]
+fn extract_media_hashes(tags: &Tags) -> Vec<String> {
+    let mut hashes = Vec::new();
 
-    for target_id in target_ids {
-        if let Some(target_message) = processed_messages.get_mut(&target_id) {
-            target_message.is_deleted = true;
-            target_message.content = String::new();
-            any_resolved = true;
+    for tag in tags.iter() {
+        if tag.kind() == TagKind::Custom("imeta".into()) {
+            // Tag format: ["imeta", "url ...", "x <hash>", "m <mime>", ...]
+            // Iterate through tag parameters looking for "x" parameter
+            // Skip first element (tag name "imeta") by using tag.content() for second element,
+            // then check remaining elements by converting tag to_vec and iterating
+            let tag_vec = tag.clone().to_vec();
+            for value in tag_vec.iter().skip(1) {
+                // Look for "x" parameter which contains the hex-encoded hash
+                if let Some(hash_str) = value.strip_prefix("x ") {
+                    // Validate it's a 64-character hex string (32 bytes)
+                    if hash_str.len() == 64 && hash_str.chars().all(|c| c.is_ascii_hexdigit()) {
+                        hashes.push(hash_str.to_lowercase());
+                    }
+                }
+            }
         }
     }
 
-    if any_resolved {
-        Ok(())
-    } else {
-        Err(ProcessingError::Internal(
-            "No deletion targets resolved".to_string(),
-        ))
+    hashes
+}
+
+/// Extract media attachments from a message by matching hashes from imeta tags
+///
+/// Extracts media hashes from the message tags and looks them up in the provided map.
+/// Returns a Vec of MediaFile records that were found.
+fn extract_media_attachments(
+    tags: &Tags,
+    media_files_map: &HashMap<String, MediaFile>,
+) -> Vec<MediaFile> {
+    let media_hashes = extract_media_hashes(tags);
+    let mut media_attachments = Vec::new();
+
+    for hash in media_hashes {
+        if let Some(media_file) = media_files_map.get(&hash) {
+            media_attachments.push(media_file.clone());
+        }
     }
+
+    media_attachments
 }
 
 #[cfg(test)]
@@ -332,7 +308,9 @@ mod tests {
         let parser = MockParser::new();
         let config = AggregatorConfig::default();
 
-        let result = process_messages(vec![], &parser, &config).await.unwrap();
+        let result = process_messages(vec![], &parser, &config, vec![])
+            .await
+            .unwrap();
         assert!(result.is_empty());
     }
 
@@ -340,7 +318,6 @@ mod tests {
     fn test_config_defaults() {
         let config = AggregatorConfig::default();
 
-        assert_eq!(config.max_retry_attempts, 3);
         assert!(config.normalize_emoji);
         assert!(!config.enable_debug_logging);
     }
@@ -348,12 +325,10 @@ mod tests {
     #[test]
     fn test_config_custom() {
         let config = AggregatorConfig {
-            max_retry_attempts: 5,
             normalize_emoji: false,
             enable_debug_logging: true,
         };
 
-        assert_eq!(config.max_retry_attempts, 5);
         assert!(!config.normalize_emoji);
         assert!(config.enable_debug_logging);
     }

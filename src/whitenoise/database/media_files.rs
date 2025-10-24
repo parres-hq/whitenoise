@@ -140,7 +140,7 @@ pub struct MediaFileParams<'a> {
 }
 
 /// Represents a cached media file
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaFile {
     pub id: Option<i64>,
     pub mls_group_id: GroupId,
@@ -291,6 +291,33 @@ impl MediaFile {
         .map_err(DatabaseError::Sqlx)?;
 
         Ok(existing.into())
+    }
+
+    /// Finds all media files for a specific MLS group
+    ///
+    /// Returns a Vec of MediaFile records for the group.
+    /// This leverages the indexed mls_group_id column for efficient retrieval.
+    ///
+    /// # Arguments
+    /// * `database` - Database connection
+    /// * `group_id` - The MLS group ID to fetch media files for
+    pub(crate) async fn find_by_group(
+        database: &Database,
+        group_id: &GroupId,
+    ) -> Result<Vec<Self>, WhitenoiseError> {
+        let rows = sqlx::query_as::<_, MediaFileRow>(
+            "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
+                    mime_type, media_type, blossom_url, nostr_key,
+                    file_metadata, created_at
+             FROM media_files
+             WHERE mls_group_id = ?",
+        )
+        .bind(group_id.as_slice())
+        .fetch_all(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 }
 
@@ -542,5 +569,160 @@ mod tests {
             .unwrap();
 
         assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_by_group_empty_result() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        let nonexistent_group_id = mdk_core::GroupId::from_slice(&[99u8; 8]);
+
+        // Try to find media for a group that doesn't exist
+        let media_files = MediaFile::find_by_group(&db, &nonexistent_group_id)
+            .await
+            .unwrap();
+
+        assert!(media_files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_find_by_group_multiple_files_and_group_isolation() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        let group_id1 = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let group_id2 = mdk_core::GroupId::from_slice(&[2u8; 8]);
+        let pubkey1 = PublicKey::from_slice(&[10u8; 32]).unwrap();
+        let pubkey2 = PublicKey::from_slice(&[20u8; 32]).unwrap();
+
+        create_test_account(&db, &pubkey1).await;
+        create_test_account(&db, &pubkey2).await;
+
+        // Create metadata for one file
+        let metadata = FileMetadata::new()
+            .with_filename("image1.jpg".to_string())
+            .with_dimensions("1920x1080".to_string());
+
+        // Save multiple media files for group 1 (different accounts)
+        let file_hash1a = [11u8; 32];
+        let file_hash1b = [12u8; 32];
+        let file_path1a = temp_dir.path().join("group1_file1.jpg");
+        let file_path1b = temp_dir.path().join("group1_file2.png");
+
+        MediaFile::save(
+            &db,
+            &group_id1,
+            &pubkey1,
+            MediaFileParams {
+                file_path: &file_path1a,
+                file_hash: &file_hash1a,
+                mime_type: "image/jpeg",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob1a"),
+                nostr_key: Some("nostr_key_1a"),
+                file_metadata: Some(&metadata),
+            },
+        )
+        .await
+        .unwrap();
+
+        MediaFile::save(
+            &db,
+            &group_id1,
+            &pubkey2,
+            MediaFileParams {
+                file_path: &file_path1b,
+                file_hash: &file_hash1b,
+                mime_type: "image/png",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob1b"),
+                nostr_key: None,
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Save one media file for group 2
+        let file_hash2 = [22u8; 32];
+        let file_path2 = temp_dir.path().join("group2_file.jpg");
+
+        MediaFile::save(
+            &db,
+            &group_id2,
+            &pubkey1,
+            MediaFileParams {
+                file_path: &file_path2,
+                file_hash: &file_hash2,
+                mime_type: "image/jpeg",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob2"),
+                nostr_key: None,
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Test: Find all media files for group 1
+        let media_files_group1 = MediaFile::find_by_group(&db, &group_id1).await.unwrap();
+
+        // Should return both files from group 1 regardless of account
+        assert_eq!(media_files_group1.len(), 2);
+
+        // Verify we got both files from group 1
+        let hashes1: Vec<Vec<u8>> = media_files_group1
+            .iter()
+            .map(|mf| mf.file_hash.clone())
+            .collect();
+        assert!(hashes1.contains(&file_hash1a.to_vec()));
+        assert!(hashes1.contains(&file_hash1b.to_vec()));
+        assert!(!hashes1.contains(&file_hash2.to_vec())); // Should not contain group 2 file
+
+        // Verify all files have correct group_id
+        assert!(
+            media_files_group1
+                .iter()
+                .all(|mf| mf.mls_group_id == group_id1)
+        );
+
+        // Verify metadata is preserved for the file that has it
+        let file_with_metadata = media_files_group1
+            .iter()
+            .find(|mf| mf.file_hash == file_hash1a.to_vec())
+            .unwrap();
+        assert!(file_with_metadata.file_metadata.is_some());
+        assert_eq!(
+            file_with_metadata
+                .file_metadata
+                .as_ref()
+                .unwrap()
+                .original_filename,
+            Some("image1.jpg".to_string())
+        );
+
+        // Test: Find all media files for group 2
+        let media_files_group2 = MediaFile::find_by_group(&db, &group_id2).await.unwrap();
+
+        // Should return only one file from group 2
+        assert_eq!(media_files_group2.len(), 1);
+        assert_eq!(media_files_group2[0].file_hash, file_hash2.to_vec());
+        assert_eq!(media_files_group2[0].mls_group_id, group_id2);
+
+        // Verify groups are properly isolated
+        assert_ne!(
+            media_files_group1.len(),
+            media_files_group2.len(),
+            "Different groups should have different file counts"
+        );
+        let hashes2: Vec<Vec<u8>> = media_files_group2
+            .iter()
+            .map(|mf| mf.file_hash.clone())
+            .collect();
+        assert!(!hashes2.contains(&file_hash1a.to_vec()));
+        assert!(!hashes2.contains(&file_hash1b.to_vec()));
     }
 }

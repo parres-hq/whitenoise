@@ -1,3 +1,4 @@
+use crate::whitenoise::media_files::MediaFile;
 use crate::{Account, Whitenoise, WhitenoiseError};
 use mdk_core::prelude::group_types::Group;
 use std::collections::HashMap;
@@ -9,6 +10,7 @@ pub struct ScenarioContext {
     pub accounts: HashMap<String, Account>,
     pub groups: HashMap<String, Group>,
     pub messages_ids: HashMap<String, String>,
+    pub media_files: HashMap<String, MediaFile>,
     pub tests_count: u32,
     pub tests_passed: u32,
 }
@@ -30,6 +32,7 @@ impl ScenarioContext {
             accounts: HashMap::new(),
             groups: HashMap::new(),
             messages_ids: HashMap::new(),
+            media_files: HashMap::new(),
             tests_count: 0,
             tests_passed: 0,
         }
@@ -51,6 +54,16 @@ impl ScenarioContext {
 
     pub fn get_group(&self, name: &str) -> Result<&Group, WhitenoiseError> {
         self.groups.get(name).ok_or(WhitenoiseError::GroupNotFound)
+    }
+
+    pub fn add_media_file(&mut self, name: &str, media_file: MediaFile) {
+        self.media_files.insert(name.to_string(), media_file);
+    }
+
+    pub fn get_media_file(&self, name: &str) -> Result<&MediaFile, WhitenoiseError> {
+        self.media_files.get(name).ok_or_else(|| {
+            WhitenoiseError::Configuration(format!("Media file '{}' not found in context", name))
+        })
     }
 
     pub fn add_message_id(&mut self, name: &str, message_id: String) {

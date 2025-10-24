@@ -7,24 +7,18 @@ use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
 use super::emoji_utils;
-use super::types::{
-    AggregatorConfig, ChatMessage, EmojiReaction, ProcessingError, UnresolvedMessage,
-    UnresolvedReason, UserReaction,
-};
+use super::types::{AggregatorConfig, ChatMessage, EmojiReaction, ProcessingError, UserReaction};
 use mdk_core::prelude::message_types::Message;
 
 /// Process a reaction message and update the target message's reaction summary
 pub fn process_reaction(
     message: &Message,
     processed_messages: &mut HashMap<String, ChatMessage>,
-    unresolved_messages: &mut Vec<UnresolvedMessage>,
     config: &AggregatorConfig,
 ) -> Result<(), ProcessingError> {
-    // Validate and normalize reaction content
     let reaction_emoji =
         emoji_utils::validate_and_normalize_reaction(&message.content, config.normalize_emoji)?;
 
-    // Extract target message ID
     let target_id = extract_target_message_id(&message.tags)?;
 
     if let Some(target_message) = processed_messages.get_mut(&target_id) {
@@ -43,49 +37,19 @@ pub fn process_reaction(
                 target_id
             );
         }
+        Ok(())
     } else {
-        unresolved_messages.push(UnresolvedMessage {
-            message: message.clone(),
-            retry_count: 0,
-            reason: UnresolvedReason::ReactionToMissing(target_id.clone()),
-        });
-
         if config.enable_debug_logging {
-            tracing::debug!(
-                "Reaction target {} not found, added to unresolved",
+            tracing::warn!(
+                "Reaction {} references non-existent message {}",
+                message.id,
                 target_id
             );
         }
-    }
-
-    Ok(())
-}
-
-/// Retry processing a reaction message
-pub fn retry_reaction(
-    message: &Message,
-    processed_messages: &mut HashMap<String, ChatMessage>,
-    config: &AggregatorConfig,
-) -> Result<(), ProcessingError> {
-    // Validate reaction content again
-    let reaction_emoji =
-        emoji_utils::validate_and_normalize_reaction(&message.content, config.normalize_emoji)?;
-
-    // Extract target message ID
-    let target_id = extract_target_message_id(&message.tags)?;
-
-    if let Some(target_message) = processed_messages.get_mut(&target_id) {
-        add_reaction_to_message(
-            target_message,
-            &message.pubkey,
-            &reaction_emoji,
-            message.created_at,
-        );
-        Ok(())
-    } else {
-        Err(ProcessingError::Internal(
-            "Reaction target still missing".to_string(),
-        ))
+        Err(ProcessingError::Internal(format!(
+            "Reaction target {} not found",
+            target_id
+        )))
     }
 }
 
@@ -198,6 +162,7 @@ mod tests {
             content_tokens: vec![],
             reactions: ReactionSummary::default(),
             kind: 9, // Default to MLS group chat
+            media_attachments: vec![],
         }
     }
 

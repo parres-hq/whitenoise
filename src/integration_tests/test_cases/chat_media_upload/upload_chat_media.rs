@@ -92,7 +92,7 @@ impl TestCase for UploadChatMediaTestCase {
             hex::encode(&media_file.file_hash)
         );
 
-        // Basic validation
+        // Validate upload results
         assert!(
             !media_file.file_hash.is_empty(),
             "File hash should not be empty"
@@ -137,6 +137,10 @@ impl TestCase for UploadChatMediaTestCase {
         );
 
         tracing::info!("✓ All media file validations passed");
+
+        // Store the media file in context for subsequent tests
+        context.add_media_file("uploaded_chat_media", media_file);
+
         Ok(())
     }
 }

@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use mdk_core::GroupId;
 use nostr_sdk::PublicKey;
 
+pub use crate::whitenoise::database::media_files::MediaFile;
 use crate::whitenoise::{
     database::{
         Database,
-        media_files::{FileMetadata, MediaFile, MediaFileParams},
+        media_files::{FileMetadata, MediaFileParams},
     },
     error::Result,
     storage::Storage,

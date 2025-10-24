@@ -23,6 +23,7 @@ use mdk_core::prelude::*;
 use nostr_sdk::PublicKey;
 
 use crate::nostr_manager::parser::Parser;
+use crate::whitenoise::media_files::MediaFile;
 
 /// Main message aggregator - designed to be a singleton per Whitenoise instance
 /// Group-aware to ensure proper isolation between different group conversations
@@ -60,12 +61,14 @@ impl MessageAggregator {
     /// * `group_id` - The group to fetch and aggregate messages for
     /// * `messages` - The raw messages to process (from mdk.get_messages())
     /// * `parser` - Reference to the nostr parser for tokenizing message content
+    /// * `media_files` - Vector of MediaFile records for linking media to messages
     pub async fn aggregate_messages_for_group(
         &self,
         pubkey: &PublicKey,
         group_id: &GroupId,
         messages: Vec<Message>,
         parser: &dyn Parser,
+        media_files: Vec<MediaFile>,
     ) -> Result<Vec<ChatMessage>, ProcessingError> {
         if self.config.enable_debug_logging {
             tracing::debug!(
@@ -77,7 +80,7 @@ impl MessageAggregator {
         }
 
         // Use the processor module to handle the actual processing
-        processor::process_messages(messages, parser, &self.config).await
+        processor::process_messages(messages, parser, &self.config, media_files).await
     }
 
     /// Get the current configuration
