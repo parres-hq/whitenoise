@@ -28,7 +28,6 @@ services:
 
   blossom:
     image: ghcr.io/hzrd149/blossom-server:master
-    build: .
     volumes:
       - ./dev/data/blossom-ts-server:/app/data
       - ./dev/blossom-server-ts-config.yml:/app/config.yml

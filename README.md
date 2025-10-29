@@ -50,8 +50,15 @@ To get started contributing you'll need to have the [Rust](https://www.rust-lang
 
 1. Clone the repo: `git clone https://github.com/parres-hq/whitenoise.git` and `cd whitenoise`.
 1. Install recommended development tools: `just install-tools` (optional but recommended)
-1. In one terminal start the development services (two Nostr relays; nostr-rs-relay and strfry, and a blossom server) by running `docker compose up`.
-1. Now you can run the integration test if you'd like.
+1. Start the development services (two Nostr relays; nostr-rs-relay and strfry, and a blossom server):
+   ```bash
+   docker compose up -d
+   ```
+   Or if using older Docker versions:
+   ```bash
+   docker-compose up -d
+   ```
+1. Now you can run the integration tests with `just int-test`.
 
 ### Development Tools
 
