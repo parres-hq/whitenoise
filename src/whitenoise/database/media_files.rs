@@ -319,6 +319,26 @@ impl MediaFile {
 
         Ok(rows.into_iter().map(Into::into).collect())
     }
+
+    /// Check if this media file is an image
+    pub fn is_image(&self) -> bool {
+        self.mime_type.starts_with("image/")
+    }
+
+    /// Check if this media file is a video
+    pub fn is_video(&self) -> bool {
+        self.mime_type.starts_with("video/")
+    }
+
+    /// Check if this media file is audio
+    pub fn is_audio(&self) -> bool {
+        self.mime_type.starts_with("audio/")
+    }
+
+    /// Check if this media file is a document
+    pub fn is_document(&self) -> bool {
+        self.mime_type == "application/pdf"
+    }
 }
 
 #[cfg(test)]
@@ -724,5 +744,250 @@ mod tests {
             .collect();
         assert!(!hashes2.contains(&file_hash1a.to_vec()));
         assert!(!hashes2.contains(&file_hash1b.to_vec()));
+    }
+
+    #[test]
+    fn test_is_image() {
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
+        let file_hash = vec![3u8; 32];
+
+        // Test various image MIME types
+        let image_types = vec!["image/jpeg", "image/png", "image/gif", "image/webp"];
+        for mime_type in image_types {
+            let media_file = MediaFile {
+                id: Some(1),
+                mls_group_id: group_id.clone(),
+                account_pubkey: pubkey,
+                file_path: PathBuf::from("/test.jpg"),
+                file_hash: file_hash.clone(),
+                mime_type: mime_type.to_string(),
+                media_type: "test".to_string(),
+                blossom_url: None,
+                nostr_key: None,
+                file_metadata: None,
+                created_at: Utc::now(),
+            };
+            assert!(media_file.is_image(), "Failed for MIME type: {}", mime_type);
+        }
+
+        // Test non-image types
+        let non_image_types = vec!["video/mp4", "audio/mpeg", "application/pdf"];
+        for mime_type in non_image_types {
+            let media_file = MediaFile {
+                id: Some(1),
+                mls_group_id: group_id.clone(),
+                account_pubkey: pubkey,
+                file_path: PathBuf::from("/test.file"),
+                file_hash: file_hash.clone(),
+                mime_type: mime_type.to_string(),
+                media_type: "test".to_string(),
+                blossom_url: None,
+                nostr_key: None,
+                file_metadata: None,
+                created_at: Utc::now(),
+            };
+            assert!(
+                !media_file.is_image(),
+                "Should fail for MIME type: {}",
+                mime_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_video() {
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
+        let file_hash = vec![3u8; 32];
+
+        // Test various video MIME types
+        let video_types = vec!["video/mp4", "video/webm", "video/quicktime"];
+        for mime_type in video_types {
+            let media_file = MediaFile {
+                id: Some(1),
+                mls_group_id: group_id.clone(),
+                account_pubkey: pubkey,
+                file_path: PathBuf::from("/test.mp4"),
+                file_hash: file_hash.clone(),
+                mime_type: mime_type.to_string(),
+                media_type: "test".to_string(),
+                blossom_url: None,
+                nostr_key: None,
+                file_metadata: None,
+                created_at: Utc::now(),
+            };
+            assert!(media_file.is_video(), "Failed for MIME type: {}", mime_type);
+        }
+
+        // Test non-video types
+        let non_video_types = vec!["image/jpeg", "audio/mpeg", "application/pdf"];
+        for mime_type in non_video_types {
+            let media_file = MediaFile {
+                id: Some(1),
+                mls_group_id: group_id.clone(),
+                account_pubkey: pubkey,
+                file_path: PathBuf::from("/test.file"),
+                file_hash: file_hash.clone(),
+                mime_type: mime_type.to_string(),
+                media_type: "test".to_string(),
+                blossom_url: None,
+                nostr_key: None,
+                file_metadata: None,
+                created_at: Utc::now(),
+            };
+            assert!(
+                !media_file.is_video(),
+                "Should fail for MIME type: {}",
+                mime_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_audio() {
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
+        let file_hash = vec![3u8; 32];
+
+        // Test various audio MIME types
+        let audio_types = vec![
+            "audio/mpeg",
+            "audio/ogg",
+            "audio/mp4",
+            "audio/m4a",
+            "audio/wav",
+            "audio/x-wav",
+        ];
+        for mime_type in audio_types {
+            let media_file = MediaFile {
+                id: Some(1),
+                mls_group_id: group_id.clone(),
+                account_pubkey: pubkey,
+                file_path: PathBuf::from("/test.mp3"),
+                file_hash: file_hash.clone(),
+                mime_type: mime_type.to_string(),
+                media_type: "test".to_string(),
+                blossom_url: None,
+                nostr_key: None,
+                file_metadata: None,
+                created_at: Utc::now(),
+            };
+            assert!(media_file.is_audio(), "Failed for MIME type: {}", mime_type);
+        }
+
+        // Test non-audio types
+        let non_audio_types = vec!["image/jpeg", "video/mp4", "application/pdf"];
+        for mime_type in non_audio_types {
+            let media_file = MediaFile {
+                id: Some(1),
+                mls_group_id: group_id.clone(),
+                account_pubkey: pubkey,
+                file_path: PathBuf::from("/test.file"),
+                file_hash: file_hash.clone(),
+                mime_type: mime_type.to_string(),
+                media_type: "test".to_string(),
+                blossom_url: None,
+                nostr_key: None,
+                file_metadata: None,
+                created_at: Utc::now(),
+            };
+            assert!(
+                !media_file.is_audio(),
+                "Should fail for MIME type: {}",
+                mime_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_document() {
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
+        let file_hash = vec![3u8; 32];
+
+        // Test PDF
+        let media_file = MediaFile {
+            id: Some(1),
+            mls_group_id: group_id.clone(),
+            account_pubkey: pubkey,
+            file_path: PathBuf::from("/test.pdf"),
+            file_hash: file_hash.clone(),
+            mime_type: "application/pdf".to_string(),
+            media_type: "test".to_string(),
+            blossom_url: None,
+            nostr_key: None,
+            file_metadata: None,
+            created_at: Utc::now(),
+        };
+        assert!(media_file.is_document());
+
+        // Test non-document types
+        let non_document_types = vec!["image/jpeg", "video/mp4", "audio/mpeg", "application/json"];
+        for mime_type in non_document_types {
+            let media_file = MediaFile {
+                id: Some(1),
+                mls_group_id: group_id.clone(),
+                account_pubkey: pubkey,
+                file_path: PathBuf::from("/test.file"),
+                file_hash: file_hash.clone(),
+                mime_type: mime_type.to_string(),
+                media_type: "test".to_string(),
+                blossom_url: None,
+                nostr_key: None,
+                file_metadata: None,
+                created_at: Utc::now(),
+            };
+            assert!(
+                !media_file.is_document(),
+                "Should fail for MIME type: {}",
+                mime_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_media_type_edge_cases() {
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
+        let file_hash = vec![3u8; 32];
+
+        // Test empty MIME type
+        let media_file = MediaFile {
+            id: Some(1),
+            mls_group_id: group_id.clone(),
+            account_pubkey: pubkey,
+            file_path: PathBuf::from("/test.file"),
+            file_hash: file_hash.clone(),
+            mime_type: "".to_string(),
+            media_type: "test".to_string(),
+            blossom_url: None,
+            nostr_key: None,
+            file_metadata: None,
+            created_at: Utc::now(),
+        };
+        assert!(!media_file.is_image());
+        assert!(!media_file.is_video());
+        assert!(!media_file.is_audio());
+        assert!(!media_file.is_document());
+
+        // Test malformed MIME type
+        let media_file = MediaFile {
+            id: Some(1),
+            mls_group_id: group_id.clone(),
+            account_pubkey: pubkey,
+            file_path: PathBuf::from("/test.file"),
+            file_hash: file_hash.clone(),
+            mime_type: "notamimetype".to_string(),
+            media_type: "test".to_string(),
+            blossom_url: None,
+            nostr_key: None,
+            file_metadata: None,
+            created_at: Utc::now(),
+        };
+        assert!(!media_file.is_image());
+        assert!(!media_file.is_video());
+        assert!(!media_file.is_audio());
+        assert!(!media_file.is_document());
     }
 }

@@ -37,7 +37,7 @@ impl Scenario for ChatMediaUploadScenario {
             .await?;
 
         // Upload image with default options (includes blurhash generation)
-        UploadChatMediaTestCase::basic()
+        UploadChatImageTestCase::basic()
             .with_account("media_uploader")
             .with_group("media_upload_test_group")
             .execute(&mut self.context)
@@ -48,12 +48,36 @@ impl Scenario for ChatMediaUploadScenario {
             .execute(&mut self.context)
             .await?;
 
+        // Test video upload (MP4)
+        UploadVideoTestCase::new("media_uploader", "media_upload_test_group")
+            .execute(&mut self.context)
+            .await?;
+
+        // Test audio upload (MP3)
+        UploadAudioTestCase::new("media_uploader", "media_upload_test_group")
+            .execute(&mut self.context)
+            .await?;
+
+        // Test PDF document upload
+        UploadPdfTestCase::new("media_uploader", "media_upload_test_group")
+            .execute(&mut self.context)
+            .await?;
+
+        // Test unsupported format rejection (BMP)
+        UnsupportedFormatTestCase::new("media_uploader", "media_upload_test_group")
+            .execute(&mut self.context)
+            .await?;
+
         tracing::info!("✓ Chat media upload scenario completed with:");
         tracing::info!("  • Image upload with default processing options");
         tracing::info!("  • Blurhash generation verification");
         tracing::info!("  • Metadata extraction and storage");
         tracing::info!("  • Message with media reference sent");
         tracing::info!("  • Message aggregation verified media linking");
+        tracing::info!("  • Video (MP4) upload verified");
+        tracing::info!("  • Audio (MP3) upload verified");
+        tracing::info!("  • Document (PDF) upload verified");
+        tracing::info!("  • Unsupported format (BMP) rejection verified");
 
         Ok(())
     }

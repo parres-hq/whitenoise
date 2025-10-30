@@ -1,4 +1,4 @@
-use crate::nostr_manager::parser::SerializableToken;
+use crate::{nostr_manager::parser::SerializableToken, whitenoise::error::WhitenoiseError};
 use mdk_core::prelude::*;
 use nostr_sdk::prelude::*;
 use serde::Serialize;
@@ -229,6 +229,104 @@ impl TryFrom<&str> for ImageType {
             )),
         }
     }
+}
+
+/// Result of media type detection
+///
+/// This enum preserves rich type information for images (via ImageType)
+/// while providing necessary details for non-image media types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MediaTypeDetection {
+    /// An image with full ImageType information
+    Image(ImageType),
+    /// Other media type (video, audio, document)
+    Other {
+        mime_type: String,
+        extension: &'static str,
+    },
+}
+
+impl MediaTypeDetection {
+    /// Get the MIME type for this media
+    pub fn mime_type(&self) -> &str {
+        match self {
+            Self::Image(image_type) => image_type.mime_type(),
+            Self::Other { mime_type, .. } => mime_type,
+        }
+    }
+
+    /// Get the file extension for this media
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Image(image_type) => image_type.extension(),
+            Self::Other { extension, .. } => extension,
+        }
+    }
+}
+
+/// Detect MIME type from file data
+///
+/// Uses robust ImageType validation for images, infer crate with explicit
+/// whitelist for other types. This provides strong security for images while
+/// supporting other media types.
+pub fn detect_media_type(data: &[u8]) -> Result<MediaTypeDetection, WhitenoiseError> {
+    if data.is_empty() {
+        return Err(WhitenoiseError::UnsupportedMediaFormat(
+            "File is empty".to_string(),
+        ));
+    }
+
+    // Try image detection first (robust: detects format + validates structure)
+    if let Ok(image_type) = ImageType::detect(data) {
+        return Ok(MediaTypeDetection::Image(image_type));
+    }
+
+    // Fall back to infer crate for non-images
+    detect_non_image_type(data)
+}
+
+/// Detect non-image media types using the infer crate with explicit whitelist
+///
+/// This function uses an explicit whitelist to only accept specific formats,
+/// rejecting anything else even if the infer crate can detect it.
+pub(crate) fn detect_non_image_type(data: &[u8]) -> Result<MediaTypeDetection, WhitenoiseError> {
+    let detected = infer::get(data).ok_or_else(|| {
+        WhitenoiseError::UnsupportedMediaFormat(
+            "Unable to detect media type from file data".to_string(),
+        )
+    })?;
+
+    let mime_type = detected.mime_type();
+
+    // Explicit whitelist - only accept these specific formats
+    let extension = match mime_type {
+        // Videos
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        "video/quicktime" => "mov",
+
+        // Audio
+        "audio/mpeg" => "mp3",
+        "audio/ogg" => "ogg",
+        "audio/mp4" | "audio/m4a" => "m4a",
+        "audio/wav" | "audio/x-wav" => "wav",
+
+        // Documents
+        "application/pdf" => "pdf",
+
+        // Reject everything else
+        _ => {
+            return Err(WhitenoiseError::UnsupportedMediaFormat(format!(
+                "Unsupported media format: {}. Supported formats: images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV), audio (MP3, OGG, M4A, WAV), documents (PDF)",
+                mime_type
+            )));
+        }
+    };
+
+    Ok(MediaTypeDetection::Other {
+        mime_type: mime_type.to_string(),
+        extension,
+    })
 }
 
 #[cfg(test)]
@@ -493,5 +591,246 @@ mod tests {
         assert!(err_msg.contains("Unsupported"));
         assert!(err_msg.contains("image/bmp"));
         assert!(err_msg.contains("JPEG") || err_msg.contains("image/jpeg"));
+    }
+
+    // ========================================================================
+    // MediaTypeDetection Tests
+    // ========================================================================
+
+    #[test]
+    fn test_detect_media_type_empty_file() {
+        let empty_data: Vec<u8> = vec![];
+        let result = detect_media_type(&empty_data);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty"));
+    }
+
+    #[test]
+    fn test_detect_non_image_mp4_video() {
+        // MP4 magic bytes (ftyp box)
+        let mp4_data = vec![
+            0x00, 0x00, 0x00, 0x18, // Box size
+            b'f', b't', b'y', b'p', // "ftyp"
+            b'i', b's', b'o', b'm', // Brand: isom
+            0x00, 0x00, 0x00, 0x00, // Version
+            b'i', b's', b'o', b'm', // Compatible brands
+            b'm', b'p', b'4', b'2',
+        ];
+        let result = detect_media_type(&mp4_data).unwrap();
+        assert_eq!(result.mime_type(), "video/mp4");
+        assert_eq!(result.extension(), "mp4");
+        match result {
+            MediaTypeDetection::Other { .. } => {}
+            _ => panic!("Expected Other variant for MP4"),
+        }
+    }
+
+    #[test]
+    fn test_detect_non_image_webm_video() {
+        // WebM magic bytes (EBML header)
+        let webm_data = vec![
+            0x1A, 0x45, 0xDF, 0xA3, // EBML header
+            0x9F, 0x42, 0x86, 0x81, 0x01, 0x42, 0xF7, 0x81, 0x01, 0x42, 0xF2, 0x81, 0x04, 0x42,
+            0xF3, 0x81, 0x08, 0x42, 0x82, 0x88, 0x77, 0x65, 0x62, 0x6D,
+        ];
+        let result = detect_media_type(&webm_data).unwrap();
+        assert_eq!(result.mime_type(), "video/webm");
+        assert_eq!(result.extension(), "webm");
+    }
+
+    #[test]
+    fn test_detect_non_image_quicktime_video() {
+        // QuickTime/MOV magic bytes
+        let mov_data = vec![
+            0x00, 0x00, 0x00, 0x14, // Box size
+            b'f', b't', b'y', b'p', // "ftyp"
+            b'q', b't', b' ', b' ', // Brand: qt
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let result = detect_media_type(&mov_data).unwrap();
+        assert_eq!(result.mime_type(), "video/quicktime");
+        assert_eq!(result.extension(), "mov");
+    }
+
+    #[test]
+    fn test_detect_non_image_mp3_audio() {
+        // MP3 with ID3v2 tag
+        let mp3_data = vec![
+            b'I', b'D', b'3', // ID3v2 identifier
+            0x03, 0x00, // Version
+            0x00, // Flags
+            0x00, 0x00, 0x00, 0x00, // Size
+        ];
+        let result = detect_media_type(&mp3_data).unwrap();
+        assert_eq!(result.mime_type(), "audio/mpeg");
+        assert_eq!(result.extension(), "mp3");
+    }
+
+    #[test]
+    fn test_detect_non_image_ogg_audio() {
+        // OGG magic bytes
+        let ogg_data = vec![
+            b'O', b'g', b'g', b'S', // "OggS"
+            0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let result = detect_media_type(&ogg_data).unwrap();
+        assert_eq!(result.mime_type(), "audio/ogg");
+        assert_eq!(result.extension(), "ogg");
+    }
+
+    #[test]
+    fn test_detect_non_image_m4a_audio() {
+        // M4A magic bytes (infer detects this as audio/m4a)
+        let m4a_data = vec![
+            0x00, 0x00, 0x00, 0x20, // Box size
+            b'f', b't', b'y', b'p', // "ftyp"
+            b'M', b'4', b'A', b' ', // Brand: M4A
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let result = detect_media_type(&m4a_data).unwrap();
+        assert_eq!(result.mime_type(), "audio/m4a");
+        assert_eq!(result.extension(), "m4a");
+    }
+
+    #[test]
+    fn test_detect_non_image_wav_audio() {
+        // WAV magic bytes (RIFF WAVE) - infer detects this as audio/x-wav
+        let wav_data = vec![
+            b'R', b'I', b'F', b'F', // "RIFF"
+            0x00, 0x00, 0x00, 0x00, // File size
+            b'W', b'A', b'V', b'E', // "WAVE"
+        ];
+        let result = detect_media_type(&wav_data).unwrap();
+        assert_eq!(result.mime_type(), "audio/x-wav");
+        assert_eq!(result.extension(), "wav");
+    }
+
+    #[test]
+    fn test_detect_non_image_pdf_document() {
+        // PDF magic bytes
+        let pdf_data = vec![
+            b'%', b'P', b'D', b'F', b'-', b'1', b'.', b'4', 0x0A, // "%PDF-1.4\n"
+        ];
+        let result = detect_media_type(&pdf_data).unwrap();
+        assert_eq!(result.mime_type(), "application/pdf");
+        assert_eq!(result.extension(), "pdf");
+    }
+
+    #[test]
+    fn test_detect_media_type_rejects_bmp() {
+        // BMP is detectable by infer but NOT in our whitelist
+        let bmp_data = vec![
+            b'B', b'M', // BMP signature
+            0x46, 0x00, 0x00, 0x00, // File size
+            0x00, 0x00, // Reserved
+            0x00, 0x00, // Reserved
+            0x36, 0x00, 0x00, 0x00, // Pixel data offset
+        ];
+        let result = detect_media_type(&bmp_data);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Unsupported media format"));
+        assert!(err_msg.contains("image/bmp"));
+    }
+
+    #[test]
+    fn test_detect_media_type_rejects_avi() {
+        // AVI is detectable by infer but NOT in our whitelist
+        let avi_data = vec![
+            b'R', b'I', b'F', b'F', // "RIFF"
+            0x00, 0x00, 0x00, 0x00, // File size
+            b'A', b'V', b'I', b' ', // "AVI "
+        ];
+        let result = detect_media_type(&avi_data);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Unsupported media format"));
+        assert!(err_msg.contains("video/x-msvideo"));
+    }
+
+    #[test]
+    fn test_detect_media_type_unknown_format() {
+        // Random data that doesn't match any known format
+        let random_data = vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
+        let result = detect_media_type(&random_data);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unable to detect media type")
+        );
+    }
+
+    #[test]
+    fn test_media_type_detection_convenience_methods() {
+        // Test convenience methods on Image variant
+        // Note: We can't create a valid image with just magic bytes,
+        // so we test the enum directly
+        let image_detection = MediaTypeDetection::Image(ImageType::Jpeg);
+        assert_eq!(image_detection.mime_type(), "image/jpeg");
+        assert_eq!(image_detection.extension(), "jpg");
+
+        // Test convenience methods on Other variant
+        let other_detection = MediaTypeDetection::Other {
+            mime_type: "video/mp4".to_string(),
+            extension: "mp4",
+        };
+        assert_eq!(other_detection.mime_type(), "video/mp4");
+        assert_eq!(other_detection.extension(), "mp4");
+    }
+
+    #[test]
+    fn test_media_type_detection_equality() {
+        let detection1 = MediaTypeDetection::Image(ImageType::Png);
+        let detection2 = MediaTypeDetection::Image(ImageType::Png);
+        let detection3 = MediaTypeDetection::Image(ImageType::Jpeg);
+        assert_eq!(detection1, detection2);
+        assert_ne!(detection1, detection3);
+
+        let other1 = MediaTypeDetection::Other {
+            mime_type: "video/mp4".to_string(),
+            extension: "mp4",
+        };
+        let other2 = MediaTypeDetection::Other {
+            mime_type: "video/mp4".to_string(),
+            extension: "mp4",
+        };
+        assert_eq!(other1, other2);
+    }
+
+    #[test]
+    fn test_explicit_whitelist_comprehensive() {
+        // This test verifies the explicit whitelist approach works correctly
+        // by testing that only approved formats are accepted
+
+        // Approved video formats
+        let mp4 = vec![
+            0x00, 0x00, 0x00, 0x18, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm',
+        ];
+        assert!(detect_media_type(&mp4).is_ok());
+
+        let webm = vec![
+            0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01, 0x42, 0xF7, 0x81, 0x01, 0x42,
+            0xF2, 0x81, 0x04, 0x42, 0xF3, 0x81, 0x08, 0x42, 0x82, 0x88, 0x77, 0x65, 0x62, 0x6D,
+        ];
+        assert!(detect_media_type(&webm).is_ok());
+
+        // Approved audio formats
+        let mp3 = vec![b'I', b'D', b'3', 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert!(detect_media_type(&mp3).is_ok());
+
+        // Approved document format
+        let pdf = vec![b'%', b'P', b'D', b'F', b'-', b'1', b'.', b'4', 0x0A];
+        assert!(detect_media_type(&pdf).is_ok());
+
+        // Rejected formats (detectable but not whitelisted)
+        let bmp = vec![b'B', b'M', 0x46, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert!(detect_media_type(&bmp).is_err());
+
+        let avi = vec![
+            b'R', b'I', b'F', b'F', 0x00, 0x00, 0x00, 0x00, b'A', b'V', b'I', b' ',
+        ];
+        assert!(detect_media_type(&avi).is_err());
     }
 }

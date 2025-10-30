@@ -134,8 +134,8 @@ pub enum WhitenoiseError {
     #[error("Hash verification failed - expected: {expected}, actual: {actual}")]
     HashMismatch { expected: String, actual: String },
 
-    #[error("Unsupported image format: {0}")]
-    UnsupportedImageFormat(String),
+    #[error("Unsupported media format: {0}")]
+    UnsupportedMediaFormat(String),
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {
