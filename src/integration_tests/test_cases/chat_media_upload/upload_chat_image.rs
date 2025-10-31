@@ -4,12 +4,12 @@ use async_trait::async_trait;
 use mdk_core::media_processing::MediaProcessingOptions;
 use nostr_sdk::Url;
 
-pub struct UploadChatMediaTestCase {
+pub struct UploadChatImageTestCase {
     account_name: String,
     group_name: String,
 }
 
-impl UploadChatMediaTestCase {
+impl UploadChatImageTestCase {
     pub fn basic() -> Self {
         Self {
             account_name: String::new(),
@@ -45,10 +45,10 @@ impl UploadChatMediaTestCase {
 }
 
 #[async_trait]
-impl TestCase for UploadChatMediaTestCase {
+impl TestCase for UploadChatImageTestCase {
     async fn run(&self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError> {
         tracing::info!(
-            "Uploading chat media for group {} using account: {}",
+            "Uploading chat image for group {} using account: {}",
             self.group_name,
             self.account_name
         );
@@ -88,7 +88,7 @@ impl TestCase for UploadChatMediaTestCase {
         drop(temp_file);
 
         tracing::info!(
-            "✓ Chat media uploaded successfully: hash={}",
+            "✓ Chat image uploaded successfully: hash={}",
             hex::encode(&media_file.file_hash)
         );
 
@@ -136,7 +136,7 @@ impl TestCase for UploadChatMediaTestCase {
             "Blurhash should be generated with default options"
         );
 
-        tracing::info!("✓ All media file validations passed");
+        tracing::info!("✓ All image file validations passed");
 
         // Store the media file in context for subsequent tests
         context.add_media_file("uploaded_chat_media", media_file);

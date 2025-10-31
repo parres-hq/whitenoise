@@ -651,7 +651,7 @@ impl Whitenoise {
 
         let decrypted_data = Self::decrypt_group_image(&encrypted_data, image_key, image_nonce)?;
         let image_type = ImageType::detect(&decrypted_data).map_err(|e| {
-            WhitenoiseError::UnsupportedImageFormat(format!("Failed to detect image type: {}", e))
+            WhitenoiseError::UnsupportedMediaFormat(format!("Failed to detect image type: {}", e))
         })?;
 
         tracing::debug!(
@@ -782,7 +782,7 @@ impl Whitenoise {
         let file_data = tokio::fs::read(cached_path).await?;
 
         let image_type = ImageType::detect(&file_data).map_err(|e| {
-            WhitenoiseError::UnsupportedImageFormat(format!(
+            WhitenoiseError::UnsupportedMediaFormat(format!(
                 "Failed to detect image type for cached file {}: {}",
                 cached_path.display(),
                 e
@@ -966,7 +966,7 @@ impl Whitenoise {
         // Detect and validate image type from file content
         // This uses the image crate to both detect the format and validate the image
         let image_type = ImageType::detect(&image_data).map_err(|e| {
-            WhitenoiseError::UnsupportedImageFormat(format!(
+            WhitenoiseError::UnsupportedMediaFormat(format!(
                 "Failed to detect or validate image from {}: {}",
                 file_path, e
             ))
@@ -1052,25 +1052,28 @@ impl Whitenoise {
         ))
     }
 
-    /// Uploads a chat image to a Blossom server and returns the media file record.
+    /// Uploads a media file to a Blossom server and returns the media file record.
     ///
-    /// This method is designed for images sent in group chat messages. Unlike
+    /// This method is designed for media files sent in group chat messages. Unlike
     /// `upload_group_image`, it does not require admin privileges since any group
-    /// member can send images in chat.
+    /// member can send media in chat.
+    ///
+    /// Supports images (JPEG, PNG, GIF, WebP), videos (MP4, WebM, MOV), audio
+    /// (MP3, OGG, M4A, WAV), and documents (PDF).
     ///
     /// Uses the encrypted media manager which derives encryption keys from the group secret.
     /// The encryption keys are not returned as they can be re-derived for decryption.
     ///
     /// # Arguments
-    /// * `account` - The account uploading the image
-    /// * `group_id` - The ID of the group where the image will be used
-    /// * `file_path` - Path to the image file to upload
+    /// * `account` - The account uploading the media file
+    /// * `group_id` - The ID of the group where the media will be used
+    /// * `file_path` - Path to the media file to upload
     /// * `blossom_server_url` - Optional Blossom server URL (uses default if None)
     /// * `options` - Optional media processing options (defaults to standard options if None)
     ///
     /// # Returns
     /// * `Ok(MediaFile)` - MediaFile record containing file hash and metadata
-    /// * `Err(WhitenoiseError)` - If image validation, upload, or caching fails
+    /// * `Err(WhitenoiseError)` - If media validation, upload, or caching fails
     pub async fn upload_chat_media(
         &self,
         account: &Account,
@@ -1079,21 +1082,16 @@ impl Whitenoise {
         blossom_server_url: Option<Url>,
         options: Option<MediaProcessingOptions>,
     ) -> Result<MediaFile> {
-        // Read the image file
-        let image_data = tokio::fs::read(file_path).await?;
+        // Read the media file
+        let file_data = tokio::fs::read(file_path).await?;
 
-        // Detect and validate image type from file content
-        let image_type = ImageType::detect(&image_data).map_err(|e| {
-            WhitenoiseError::UnsupportedImageFormat(format!(
-                "Failed to detect or validate image from {}: {}",
-                file_path, e
-            ))
-        })?;
+        // Detect and validate media type from file content
+        let media_detection = crate::types::detect_media_type(&file_data)?;
 
         tracing::debug!(
             target: "whitenoise::groups::upload_chat_media",
-            "Detected and validated image type: {} for file {}",
-            image_type.mime_type(),
+            "Detected and validated media type: {} for file {}",
+            media_detection.mime_type(),
             file_path
         );
 
@@ -1103,7 +1101,7 @@ impl Whitenoise {
             .and_then(|n| n.to_str())
             .ok_or_else(|| WhitenoiseError::Other(anyhow::anyhow!("Invalid file path")))?;
 
-        // Use MDK encrypted media manager to prepare the image for upload
+        // Use MDK encrypted media manager to prepare the media file for upload
         // Wrap in a block to ensure MDK and media_manager are dropped before any await points
         let prepared = {
             let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
@@ -1111,13 +1109,13 @@ impl Whitenoise {
 
             media_manager
                 .encrypt_for_upload_with_options(
-                    &image_data,
-                    image_type.mime_type(),
+                    &file_data,
+                    media_detection.mime_type(),
                     original_filename,
                     &options.unwrap_or_default(),
                 )
                 .map_err(|e| {
-                    WhitenoiseError::Other(anyhow::anyhow!("Failed to encrypt chat image: {}", e))
+                    WhitenoiseError::Other(anyhow::anyhow!("Failed to encrypt chat media: {}", e))
                 })?
         };
 
@@ -1147,16 +1145,16 @@ impl Whitenoise {
 
         tracing::debug!(
             target: "whitenoise::groups::upload_chat_media",
-            "Successfully uploaded chat image for group {} to Blossom server. Hash: {}",
+            "Successfully uploaded chat media for group {} to Blossom server. Hash: {}",
             hex::encode(group_id.as_slice()),
             hex::encode(prepared.encrypted_hash)
         );
 
-        // Cache the decrypted image locally
+        // Cache the decrypted media file locally
         let hash_hex = hex::encode(prepared.encrypted_hash);
-        let cached_filename = format!("{}.{}", hash_hex, image_type.extension());
+        let cached_filename = format!("{}.{}", hash_hex, media_detection.extension());
 
-        // Construct file metadata from the prepared image data
+        // Construct file metadata from the prepared media data
         let file_metadata = if prepared.dimensions.is_some() || prepared.blurhash.is_some() {
             Some(FileMetadata {
                 original_filename: Some(prepared.filename.clone()),
@@ -1168,7 +1166,7 @@ impl Whitenoise {
         };
 
         let upload = MediaFileUpload {
-            data: &image_data,
+            data: &file_data,
             file_hash: prepared.encrypted_hash,
             mime_type: &prepared.mime_type,
             media_type: "chat_media",
