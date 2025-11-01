@@ -26,7 +26,13 @@ pub async fn process_messages(
     // Build internal lookup map for O(1) access during processing
     let media_files_map: HashMap<String, MediaFile> = media_files
         .into_iter()
-        .map(|mf| (hex::encode(&mf.file_hash), mf))
+        .filter_map(|mf| {
+            if let Some(hash) = &mf.original_file_hash {
+                Some((hex::encode(hash), mf))
+            } else {
+                None
+            }
+        })
         .collect();
 
     let mut processed_messages = HashMap::new();

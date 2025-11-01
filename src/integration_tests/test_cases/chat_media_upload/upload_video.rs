@@ -68,6 +68,13 @@ impl TestCase for UploadVideoTestCase {
             .to_str()
             .ok_or_else(|| WhitenoiseError::Other(anyhow::anyhow!("Invalid temp path")))?;
 
+        // Read the file data and compute expected hash
+        let test_video_data = tokio::fs::read(temp_path).await?;
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&test_video_data);
+        let expected_original_hash: [u8; 32] = hasher.finalize().into();
+
         let blossom_url = if cfg!(debug_assertions) {
             Some(Url::parse("http://localhost:3000").unwrap())
         } else {
@@ -82,12 +89,29 @@ impl TestCase for UploadVideoTestCase {
         drop(temp_file);
 
         tracing::info!(
-            "✓ Video uploaded successfully: hash={}",
-            hex::encode(&media_file.file_hash)
+            "✓ Video uploaded successfully: encrypted_hash={}, original_hash={}",
+            hex::encode(&media_file.encrypted_file_hash),
+            media_file
+                .original_file_hash
+                .as_ref()
+                .map(hex::encode)
+                .unwrap_or_else(|| "none".to_string())
         );
 
         // Validate video upload
-        assert!(!media_file.file_hash.is_empty());
+        assert!(!media_file.encrypted_file_hash.is_empty());
+        assert!(
+            media_file.original_file_hash.is_some(),
+            "Chat media should have original_file_hash (MIP-04)"
+        );
+
+        // Verify original_file_hash matches the SHA-256 of the uploaded file
+        assert_eq!(
+            media_file.original_file_hash.as_ref().unwrap().as_slice(),
+            expected_original_hash,
+            "Original file hash should match SHA-256 of uploaded file content"
+        );
+
         assert!(media_file.blossom_url.is_some());
         assert_eq!(media_file.mime_type, "video/mp4");
         assert_eq!(media_file.media_type, "chat_media");
