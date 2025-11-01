@@ -105,10 +105,17 @@ fn extract_hash_from_blossom_url(url: &str) -> Result<[u8; 32]> {
         WhitenoiseError::InvalidInput(format!("Invalid Blossom URL '{}': {}", url, e))
     })?;
 
-    let hash_hex = parsed_url
+    let path = parsed_url
         .path()
         .trim_start_matches('/')
         .trim_end_matches('/');
+
+    // Strip file extension if present (e.g., "hash.png" -> "hash")
+    // Blossom URLs may include extensions like hash.png, hash.jpg, etc.
+    let hash_hex = match path.rfind('.') {
+        Some(dot_idx) => &path[..dot_idx],
+        None => path,
+    };
 
     if hash_hex.is_empty() {
         return Err(WhitenoiseError::InvalidInput(
@@ -305,8 +312,10 @@ impl<'a> MediaFiles<'a> {
 
         tracing::debug!(
             target: "whitenoise::store_media_references",
-            "Found {} imeta tags in message",
-            imeta_tags.len()
+            "Found {} imeta tags in message for account {} in group {:?}",
+            imeta_tags.len(),
+            account_pubkey.to_hex(),
+            group_id
         );
 
         for imeta in imeta_tags {
@@ -392,7 +401,8 @@ impl<'a> MediaFiles<'a> {
 
             tracing::debug!(
                 target: "whitenoise::store_media_references",
-                "Stored media reference: original_hash={}, encrypted_hash={}, mime_type={}",
+                "Stored media reference for account {}: original_hash={}, encrypted_hash={}, mime_type={}",
+                account_pubkey.to_hex(),
                 hex::encode(original_file_hash),
                 hex::encode(encrypted_file_hash),
                 imeta.mime_type

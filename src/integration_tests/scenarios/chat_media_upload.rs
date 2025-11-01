@@ -36,6 +36,11 @@ impl Scenario for ChatMediaUploadScenario {
             .execute(&mut self.context)
             .await?;
 
+        // Accept group invitation for the member account
+        AcceptGroupInviteTestCase::new("media_member")
+            .execute(&mut self.context)
+            .await?;
+
         // Upload image with default options (includes blurhash generation)
         UploadChatImageTestCase::basic()
             .with_account("media_uploader")
@@ -47,6 +52,15 @@ impl Scenario for ChatMediaUploadScenario {
         SendMessageWithMediaTestCase::new("media_uploader", "media_upload_test_group")
             .execute(&mut self.context)
             .await?;
+
+        // Test receiving messages with media and verify MediaFile records are created
+        ReceiveMessageWithMediaTestCase::new(
+            "media_uploader",
+            "media_member",
+            "media_upload_test_group",
+        )
+        .execute(&mut self.context)
+        .await?;
 
         // Test video upload (MP4)
         UploadVideoTestCase::new("media_uploader", "media_upload_test_group")
@@ -74,6 +88,7 @@ impl Scenario for ChatMediaUploadScenario {
         tracing::info!("  • Metadata extraction and storage");
         tracing::info!("  • Message with media reference sent");
         tracing::info!("  • Message aggregation verified media linking");
+        tracing::info!("  • Received message with media creates MediaFile records");
         tracing::info!("  • Video (MP4) upload verified");
         tracing::info!("  • Audio (MP3) upload verified");
         tracing::info!("  • Document (PDF) upload verified");

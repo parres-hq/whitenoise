@@ -1207,6 +1207,31 @@ impl Whitenoise {
         Ok(media_file)
     }
 
+    /// Retrieves all media files for a specific group
+    ///
+    /// Returns all MediaFile records associated with the group, including:
+    /// - Chat media uploaded by any group member
+    /// - Group images
+    /// - Media references from received messages (may have empty file_path if not downloaded)
+    ///
+    /// # Arguments
+    /// * `group_id` - The MLS group ID to fetch media files for
+    ///
+    /// # Returns
+    /// * `Ok(Vec<MediaFile>)` - List of all media files for the group
+    /// * `Err(WhitenoiseError)` - If database query fails
+    ///
+    /// # Example
+    /// ```ignore
+    /// let media_files = whitenoise.get_media_files_for_group(&group_id).await?;
+    /// for file in media_files {
+    ///     println!("Media: {} ({})", file.mime_type, file.media_type);
+    /// }
+    /// ```
+    pub async fn get_media_files_for_group(&self, group_id: &GroupId) -> Result<Vec<MediaFile>> {
+        MediaFile::find_by_group(&self.database, group_id).await
+    }
+
     /// Gets the local file path for a group's current image
     ///
     /// This is the primary method for UI/Flutter to retrieve group images.
