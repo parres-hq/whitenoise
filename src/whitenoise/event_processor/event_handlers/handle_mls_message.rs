@@ -24,6 +24,14 @@ impl Whitenoise {
                   result
                 );
 
+                // Extract and store media references synchronously (fast, ~1-5ms)
+                if let Some((group_id, inner_event)) = Self::extract_message_details(&result) {
+                    self.media_files()
+                        .store_references_from_imeta_tags(&group_id, &account.pubkey, &inner_event)
+                        .await?;
+                }
+
+                // Background sync for group images (existing pattern)
                 if let MessageProcessingResult::Commit { mls_group_id } = result {
                     Whitenoise::background_sync_group_image_cache_if_needed(account, &mls_group_id);
                 }
@@ -38,6 +46,22 @@ impl Whitenoise {
                 );
                 Err(WhitenoiseError::MdkCoreError(e))
             }
+        }
+    }
+
+    /// Extracts group_id and inner_event from MessageProcessingResult
+    ///
+    /// Returns Some if the result contains an application message with inner event content,
+    /// None otherwise (e.g., for commits, proposals, or other non-message results).
+    fn extract_message_details(
+        result: &MessageProcessingResult,
+    ) -> Option<(mdk_core::prelude::GroupId, UnsignedEvent)> {
+        match result {
+            MessageProcessingResult::ApplicationMessage(message) => {
+                // The message.event is the decrypted rumor (UnsignedEvent) from the MLS message
+                Some((message.mls_group_id.clone(), message.event.clone()))
+            }
+            _ => None,
         }
     }
 }

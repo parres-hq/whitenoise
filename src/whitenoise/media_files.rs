@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use mdk_core::GroupId;
-use nostr_sdk::PublicKey;
+use nostr_sdk::{PublicKey, prelude::*};
 
 pub use crate::whitenoise::database::media_files::MediaFile;
 use crate::whitenoise::{
@@ -9,9 +9,128 @@ use crate::whitenoise::{
         Database,
         media_files::{FileMetadata, MediaFileParams},
     },
-    error::Result,
+    error::{Result, WhitenoiseError},
     storage::Storage,
 };
+
+/// Parsed imeta tag following MIP-04 specification
+///
+/// MIP-04 specifies the format for media metadata in Nostr events:
+/// ["imeta", "url <blossom_url>", "x <original_hash>", "m <mime_type>", ...]
+///
+/// See: https://github.com/parres-hq/marmot/blob/master/04.md
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImetaTag {
+    /// Blossom URL where the encrypted media is stored
+    url: String,
+    /// Original file hash (hex-encoded SHA-256 of decrypted content)
+    /// This is the value in the 'x' field per MIP-04
+    x_field: String,
+    /// MIME type of the file
+    mime_type: String,
+    /// Original filename (optional)
+    filename: Option<String>,
+    /// Image dimensions as "widthxheight" (optional)
+    dimensions: Option<String>,
+    /// Blurhash string for image preview (optional)
+    blurhash: Option<String>,
+}
+
+/// Extracts imeta tags from Nostr event tags (MIP-04 format)
+///
+/// Parses tags with the format:
+/// ["imeta", "url <blossom_url>", "x <original_hash>", "m <mime>", "name <filename>", ...]
+///
+/// Returns an empty vector if no valid imeta tags are found.
+fn extract_imeta_tags(tags: &Tags) -> Vec<ImetaTag> {
+    let mut imeta_tags = Vec::new();
+
+    for tag in tags.iter() {
+        if tag.kind() != TagKind::Custom("imeta".into()) {
+            continue;
+        }
+
+        // Parse imeta tag parameters
+        let tag_vec = tag.clone().to_vec();
+        let mut url = None;
+        let mut x_field = None;
+        let mut mime_type = None;
+        let mut filename = None;
+        let mut dimensions = None;
+        let mut blurhash = None;
+
+        // Skip first element (tag name "imeta") and parse remaining key-value pairs
+        for value in tag_vec.iter().skip(1) {
+            if let Some(blossom_url) = value.strip_prefix("url ") {
+                url = Some(blossom_url.to_string());
+            } else if let Some(hash) = value.strip_prefix("x ") {
+                x_field = Some(hash.to_string());
+            } else if let Some(mime) = value.strip_prefix("m ") {
+                mime_type = Some(mime.to_string());
+            } else if let Some(name) = value.strip_prefix("name ") {
+                filename = Some(name.to_string());
+            } else if let Some(dim) = value.strip_prefix("dim ") {
+                dimensions = Some(dim.to_string());
+            } else if let Some(blur) = value.strip_prefix("blurhash ") {
+                blurhash = Some(blur.to_string());
+            }
+        }
+
+        // Only include if required fields are present
+        if let (Some(url), Some(x_field), Some(mime_type)) = (url, x_field, mime_type) {
+            imeta_tags.push(ImetaTag {
+                url,
+                x_field,
+                mime_type,
+                filename,
+                dimensions,
+                blurhash,
+            });
+        }
+    }
+
+    imeta_tags
+}
+
+/// Extracts encrypted hash from Blossom URL
+///
+/// Blossom URL format: https://blossom.server/<hash>
+/// The hash is the encrypted_file_hash (SHA-256 of encrypted blob)
+///
+/// # Returns
+/// * `Ok([u8; 32])` - The encrypted file hash
+/// * `Err(WhitenoiseError)` - If URL is malformed or hash is invalid
+fn extract_hash_from_blossom_url(url: &str) -> Result<[u8; 32]> {
+    let parsed_url = Url::parse(url).map_err(|e| {
+        WhitenoiseError::InvalidInput(format!("Invalid Blossom URL '{}': {}", url, e))
+    })?;
+
+    let hash_hex = parsed_url
+        .path()
+        .trim_start_matches('/')
+        .trim_end_matches('/');
+
+    if hash_hex.is_empty() {
+        return Err(WhitenoiseError::InvalidInput(
+            "Blossom URL contains no hash".to_string(),
+        ));
+    }
+
+    let hash_bytes = hex::decode(hash_hex).map_err(|e| {
+        WhitenoiseError::InvalidInput(format!(
+            "Invalid hex in Blossom URL hash '{}': {}",
+            hash_hex, e
+        ))
+    })?;
+
+    let hash_len = hash_bytes.len();
+    hash_bytes.try_into().map_err(|_| {
+        WhitenoiseError::InvalidInput(format!(
+            "Invalid hash length in Blossom URL: expected 32 bytes, got {}",
+            hash_len
+        ))
+    })
+}
 
 /// Intermediate type for media file storage operations
 ///
@@ -151,6 +270,137 @@ impl<'a> MediaFiles<'a> {
     pub(crate) async fn find_file_with_prefix(&self, prefix: &str) -> Option<PathBuf> {
         self.storage.media_files.find_file_with_prefix(prefix).await
     }
+
+    /// Stores media references from imeta tags into the database
+    ///
+    /// Creates MediaFile records without downloading the actual files.
+    /// The file_path will be empty until download_chat_media() is called.
+    ///
+    /// This method is called synchronously during message processing to ensure
+    /// MediaFile records exist before the message aggregator runs.
+    ///
+    /// # Error Handling
+    /// Individual malformed imeta tags are logged and skipped rather than failing
+    /// the entire message. This ensures one bad attachment doesn't break message delivery.
+    ///
+    /// # Arguments
+    /// * `group_id` - The MLS group ID
+    /// * `account_pubkey` - The account receiving the message
+    /// * `inner_event` - The decrypted inner event (UnsignedEvent) containing imeta tags
+    ///
+    /// # Returns
+    /// * `Ok(())` - All valid imeta tags processed (malformed ones logged and skipped)
+    /// * `Err(WhitenoiseError)` - Database error or other system failure
+    pub(crate) async fn store_references_from_imeta_tags(
+        &self,
+        group_id: &GroupId,
+        account_pubkey: &PublicKey,
+        inner_event: &UnsignedEvent,
+    ) -> Result<()> {
+        let imeta_tags = extract_imeta_tags(&inner_event.tags);
+
+        if imeta_tags.is_empty() {
+            return Ok(());
+        }
+
+        tracing::debug!(
+            target: "whitenoise::store_media_references",
+            "Found {} imeta tags in message",
+            imeta_tags.len()
+        );
+
+        for imeta in imeta_tags {
+            // Parse original_file_hash from x field (MIP-04 compliant)
+            let original_file_hash = match hex::decode(&imeta.x_field) {
+                Ok(bytes) => {
+                    let bytes_len = bytes.len();
+                    match bytes.try_into() {
+                        Ok(hash) => hash,
+                        Err(_) => {
+                            tracing::warn!(
+                                target: "whitenoise::store_media_references",
+                                "Skipping malformed imeta tag: invalid hash length in x field (expected 32 bytes, got {})",
+                                bytes_len
+                            );
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::store_media_references",
+                        "Skipping malformed imeta tag: invalid hex in x field: {}",
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            // Extract encrypted_file_hash from Blossom URL (REQUIRED - NOT NULL in DB)
+            let encrypted_file_hash = match extract_hash_from_blossom_url(&imeta.url) {
+                Ok(hash) => hash,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::store_media_references",
+                        "Skipping malformed imeta tag: failed to extract encrypted hash from Blossom URL '{}': {}",
+                        imeta.url,
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            // Parse dimensions if present
+            let dimensions = imeta.dimensions.as_ref().and_then(|d| {
+                let parts: Vec<&str> = d.split('x').collect();
+                if parts.len() == 2 {
+                    Some(format!("{}x{}", parts[0], parts[1]))
+                } else {
+                    None
+                }
+            });
+
+            // Create file metadata if any metadata fields are present
+            let file_metadata =
+                if imeta.filename.is_some() || dimensions.is_some() || imeta.blurhash.is_some() {
+                    Some(FileMetadata {
+                        original_filename: imeta.filename.clone(),
+                        dimensions,
+                        blurhash: imeta.blurhash.clone(),
+                    })
+                } else {
+                    None
+                };
+
+            // Create MediaFile record (without file yet - empty path until downloaded)
+            MediaFile::save(
+                self.database,
+                group_id,
+                account_pubkey,
+                MediaFileParams {
+                    file_path: &PathBuf::from(""), // Empty until downloaded
+                    original_file_hash: Some(&original_file_hash),
+                    encrypted_file_hash: &encrypted_file_hash,
+                    mime_type: &imeta.mime_type,
+                    media_type: "chat_media",
+                    blossom_url: Some(&imeta.url),
+                    nostr_key: None, // Chat media uses MDK, not key/nonce
+                    file_metadata: file_metadata.as_ref(),
+                },
+            )
+            .await?;
+
+            tracing::debug!(
+                target: "whitenoise::store_media_references",
+                "Stored media reference: original_hash={}, encrypted_hash={}, mime_type={}",
+                hex::encode(original_file_hash),
+                hex::encode(encrypted_file_hash),
+                imeta.mime_type
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -260,5 +510,179 @@ mod tests {
         // Find by prefix
         let found = media_files.find_file_with_prefix("abc123").await.unwrap();
         assert!(found.to_string_lossy().contains("abc123"));
+    }
+
+    #[test]
+    fn test_extract_imeta_tags_valid() {
+        let mut tags = Tags::new();
+        tags.push(
+            Tag::parse(vec![
+                "imeta",
+                "url https://blossom.example.com/abc123",
+                "x 64characterhexhash0123456789abcdef0123456789abcdef0123456789abcdef",
+                "m image/png",
+                "name test.png",
+                "dim 1920x1080",
+                "blurhash LKO2?U%2Tw=w]~RBVZRi};RPxuwH",
+            ])
+            .unwrap(),
+        );
+
+        let imeta_tags = extract_imeta_tags(&tags);
+
+        assert_eq!(imeta_tags.len(), 1);
+        assert_eq!(imeta_tags[0].url, "https://blossom.example.com/abc123");
+        assert_eq!(
+            imeta_tags[0].x_field,
+            "64characterhexhash0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
+        assert_eq!(imeta_tags[0].mime_type, "image/png");
+        assert_eq!(imeta_tags[0].filename, Some("test.png".to_string()));
+        assert_eq!(imeta_tags[0].dimensions, Some("1920x1080".to_string()));
+        assert_eq!(
+            imeta_tags[0].blurhash,
+            Some("LKO2?U%2Tw=w]~RBVZRi};RPxuwH".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_imeta_tags_minimal() {
+        let mut tags = Tags::new();
+        tags.push(
+            Tag::parse(vec![
+                "imeta",
+                "url https://blossom.example.com/hash",
+                "x abc123",
+                "m video/mp4",
+            ])
+            .unwrap(),
+        );
+
+        let imeta_tags = extract_imeta_tags(&tags);
+
+        assert_eq!(imeta_tags.len(), 1);
+        assert_eq!(imeta_tags[0].url, "https://blossom.example.com/hash");
+        assert_eq!(imeta_tags[0].x_field, "abc123");
+        assert_eq!(imeta_tags[0].mime_type, "video/mp4");
+        assert_eq!(imeta_tags[0].filename, None);
+        assert_eq!(imeta_tags[0].dimensions, None);
+        assert_eq!(imeta_tags[0].blurhash, None);
+    }
+
+    #[test]
+    fn test_extract_imeta_tags_missing_required_fields() {
+        // Missing URL
+        let mut tags = Tags::new();
+        tags.push(Tag::parse(vec!["imeta", "x abc123", "m image/png"]).unwrap());
+        assert_eq!(extract_imeta_tags(&tags).len(), 0);
+
+        // Missing x field
+        let mut tags = Tags::new();
+        tags.push(
+            Tag::parse(vec!["imeta", "url https://example.com/hash", "m image/png"]).unwrap(),
+        );
+        assert_eq!(extract_imeta_tags(&tags).len(), 0);
+
+        // Missing mime type
+        let mut tags = Tags::new();
+        tags.push(Tag::parse(vec!["imeta", "url https://example.com/hash", "x abc123"]).unwrap());
+        assert_eq!(extract_imeta_tags(&tags).len(), 0);
+    }
+
+    #[test]
+    fn test_extract_imeta_tags_empty() {
+        let tags = Tags::new();
+        assert_eq!(extract_imeta_tags(&tags).len(), 0);
+    }
+
+    #[test]
+    fn test_extract_imeta_tags_multiple() {
+        let mut tags = Tags::new();
+        tags.push(
+            Tag::parse(vec![
+                "imeta",
+                "url https://example.com/hash1",
+                "x hash1",
+                "m image/png",
+            ])
+            .unwrap(),
+        );
+        tags.push(
+            Tag::parse(vec![
+                "imeta",
+                "url https://example.com/hash2",
+                "x hash2",
+                "m video/mp4",
+            ])
+            .unwrap(),
+        );
+
+        let imeta_tags = extract_imeta_tags(&tags);
+
+        assert_eq!(imeta_tags.len(), 2);
+        assert_eq!(imeta_tags[0].x_field, "hash1");
+        assert_eq!(imeta_tags[1].x_field, "hash2");
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_valid() {
+        let url = "https://blossom.example.com/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_ok());
+        let hash = result.unwrap();
+        assert_eq!(hash.len(), 32);
+        assert_eq!(
+            hex::encode(hash),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_with_trailing_slash() {
+        let url = "https://blossom.example.com/abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234/";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_invalid_hex() {
+        let url = "https://blossom.example.com/notahexstring";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid hex"));
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_wrong_length() {
+        let url = "https://blossom.example.com/abc123"; // Too short
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid hash length")
+        );
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_no_hash() {
+        let url = "https://blossom.example.com/";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("contains no hash"));
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_invalid_url() {
+        let url = "not-a-url";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid Blossom URL")
+        );
     }
 }
