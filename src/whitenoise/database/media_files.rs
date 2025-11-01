@@ -338,6 +338,61 @@ impl MediaFile {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
+    /// Finds a media file by original hash and group ID (MIP-04 compliant lookup)
+    ///
+    /// This is the primary lookup method for media files referenced in imeta tags,
+    /// as MIP-04 requires the 'x' field to contain the original content hash.
+    ///
+    /// The query is scoped to a specific group for security and correctness - a file
+    /// hash might exist in multiple groups, and we want to ensure we get the correct
+    /// one for the user's context.
+    ///
+    /// # Arguments
+    /// * `database` - The database connection
+    /// * `original_file_hash` - The SHA-256 hash of the decrypted file content
+    /// * `group_id` - The MLS group ID to scope the search to
+    ///
+    /// # Returns
+    /// * `Ok(Some(MediaFile))` - The matching media file
+    /// * `Ok(None)` - No matching media file found
+    /// * `Err(WhitenoiseError)` - Database error
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Look up media file from imeta tag
+    /// let original_hash = hex::decode(&imeta_x_field)?;
+    /// if let Some(media_file) = MediaFile::find_by_original_hash_and_group(
+    ///     &db, &original_hash, &group_id
+    /// ).await? {
+    ///     // Download and decrypt the file
+    /// }
+    /// ```
+    #[allow(dead_code)] // Will be used in download_chat_media implementation
+    pub(crate) async fn find_by_original_hash_and_group(
+        database: &Database,
+        original_file_hash: &[u8; 32],
+        group_id: &GroupId,
+    ) -> Result<Option<Self>, WhitenoiseError> {
+        let hash_hex = hex::encode(original_file_hash);
+
+        let row_opt = sqlx::query_as::<_, MediaFileRow>(
+            "SELECT id, mls_group_id, account_pubkey, file_path,
+                    original_file_hash, encrypted_file_hash,
+                    mime_type, media_type, blossom_url, nostr_key,
+                    file_metadata, created_at
+             FROM media_files
+             WHERE original_file_hash = ? AND mls_group_id = ?
+             LIMIT 1",
+        )
+        .bind(&hash_hex)
+        .bind(group_id.as_slice())
+        .fetch_optional(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(row_opt.map(Into::into))
+    }
+
     /// Check if this media file is an image
     pub fn is_image(&self) -> bool {
         self.mime_type.starts_with("image/")
@@ -1040,5 +1095,153 @@ mod tests {
         assert!(!media_file.is_video());
         assert!(!media_file.is_audio());
         assert!(!media_file.is_document());
+    }
+
+    #[tokio::test]
+    async fn test_find_by_original_hash_and_group() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        // Create test data
+        let group_id1 = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let group_id2 = mdk_core::GroupId::from_slice(&[2u8; 8]);
+        let pubkey = PublicKey::from_slice(&[10u8; 32]).unwrap();
+        let original_hash1 = [11u8; 32];
+        let original_hash2 = [12u8; 32];
+        let encrypted_hash1 = [111u8; 32];
+        let encrypted_hash2 = [121u8; 32];
+        let file_path1 = temp_dir.path().join("chat_media1.jpg");
+        let file_path2 = temp_dir.path().join("chat_media2.png");
+
+        create_test_account(&db, &pubkey).await;
+
+        // Create metadata for first file
+        let metadata = FileMetadata::new()
+            .with_filename("test_image.jpg".to_string())
+            .with_dimensions("1920x1080".to_string());
+
+        // Save first chat media file in group 1 with original hash
+        let saved_file1 = MediaFile::save(
+            &db,
+            &group_id1,
+            &pubkey,
+            MediaFileParams {
+                file_path: &file_path1,
+                original_file_hash: Some(&original_hash1),
+                encrypted_file_hash: &encrypted_hash1,
+                mime_type: "image/jpeg",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob1"),
+                nostr_key: Some("test_key_1"),
+                file_metadata: Some(&metadata),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Save second chat media file in group 2 with different original hash
+        MediaFile::save(
+            &db,
+            &group_id2,
+            &pubkey,
+            MediaFileParams {
+                file_path: &file_path2,
+                original_file_hash: Some(&original_hash2),
+                encrypted_file_hash: &encrypted_hash2,
+                mime_type: "image/png",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob2"),
+                nostr_key: None,
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Save a group image (without original_file_hash) in group 1
+        let encrypted_hash_group_image = [99u8; 32];
+        let file_path_group_image = temp_dir.path().join("group_image.jpg");
+        MediaFile::save(
+            &db,
+            &group_id1,
+            &pubkey,
+            MediaFileParams {
+                file_path: &file_path_group_image,
+                original_file_hash: None, // Group images don't have original_file_hash
+                encrypted_file_hash: &encrypted_hash_group_image,
+                mime_type: "image/jpeg",
+                media_type: "group_image",
+                blossom_url: Some("https://example.com/group_img"),
+                nostr_key: Some("group_key"),
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Test 1: Find file with correct original hash and group
+        let found = MediaFile::find_by_original_hash_and_group(&db, &original_hash1, &group_id1)
+            .await
+            .unwrap();
+
+        assert!(
+            found.is_some(),
+            "Should find file with correct hash and group"
+        );
+        let media_file = found.unwrap();
+        assert_eq!(media_file.id, saved_file1.id);
+        assert_eq!(media_file.original_file_hash, Some(original_hash1.to_vec()));
+        assert_eq!(media_file.encrypted_file_hash, encrypted_hash1.to_vec());
+        assert_eq!(media_file.mls_group_id, group_id1);
+        assert_eq!(media_file.mime_type, "image/jpeg");
+        assert_eq!(media_file.media_type, "chat_media");
+        assert!(media_file.file_metadata.is_some());
+
+        // Test 2: Should not find file with correct hash but wrong group
+        let not_found =
+            MediaFile::find_by_original_hash_and_group(&db, &original_hash1, &group_id2)
+                .await
+                .unwrap();
+
+        assert!(
+            not_found.is_none(),
+            "Should not find file with correct hash but wrong group"
+        );
+
+        // Test 3: Should not find file with wrong hash but correct group
+        let wrong_hash = [255u8; 32];
+        let not_found = MediaFile::find_by_original_hash_and_group(&db, &wrong_hash, &group_id1)
+            .await
+            .unwrap();
+
+        assert!(not_found.is_none(), "Should not find file with wrong hash");
+
+        // Test 4: Find second file in different group
+        let found = MediaFile::find_by_original_hash_and_group(&db, &original_hash2, &group_id2)
+            .await
+            .unwrap();
+
+        assert!(found.is_some(), "Should find second file in group 2");
+        let media_file2 = found.unwrap();
+        assert_eq!(
+            media_file2.original_file_hash,
+            Some(original_hash2.to_vec())
+        );
+        assert_eq!(media_file2.mls_group_id, group_id2);
+        assert_eq!(media_file2.mime_type, "image/png");
+
+        // Test 5: Verify this method is MIP-04 specific (uses original_file_hash)
+        // The group image has no original_file_hash, so it should not be found
+        let nonexistent_hash = [100u8; 32];
+        let not_found =
+            MediaFile::find_by_original_hash_and_group(&db, &nonexistent_hash, &group_id1)
+                .await
+                .unwrap();
+
+        assert!(
+            not_found.is_none(),
+            "Should not find group image when searching by original_file_hash"
+        );
     }
 }
