@@ -63,6 +63,13 @@ impl TestCase for UploadChatImageTestCase {
             .to_str()
             .ok_or_else(|| WhitenoiseError::Other(anyhow::anyhow!("Invalid temp path")))?;
 
+        // Read the file data and compute expected hash
+        let test_image_data = tokio::fs::read(temp_path).await?;
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&test_image_data);
+        let expected_original_hash: [u8; 32] = hasher.finalize().into();
+
         // Use default options (which includes blurhash generation)
         let options = Some(MediaProcessingOptions::default());
 
@@ -88,15 +95,32 @@ impl TestCase for UploadChatImageTestCase {
         drop(temp_file);
 
         tracing::info!(
-            "✓ Chat image uploaded successfully: hash={}",
-            hex::encode(&media_file.file_hash)
+            "✓ Chat image uploaded successfully: encrypted_hash={}, original_hash={}",
+            hex::encode(&media_file.encrypted_file_hash),
+            media_file
+                .original_file_hash
+                .as_ref()
+                .map(hex::encode)
+                .unwrap_or_else(|| "none".to_string())
         );
 
         // Validate upload results
         assert!(
-            !media_file.file_hash.is_empty(),
-            "File hash should not be empty"
+            !media_file.encrypted_file_hash.is_empty(),
+            "Encrypted file hash should not be empty"
         );
+        assert!(
+            media_file.original_file_hash.is_some(),
+            "Original file hash should be populated for chat media (MIP-04)"
+        );
+
+        // Verify original_file_hash matches the SHA-256 of the uploaded file
+        assert_eq!(
+            media_file.original_file_hash.as_ref().unwrap().as_slice(),
+            expected_original_hash,
+            "Original file hash should match SHA-256 of uploaded file content"
+        );
+
         assert!(
             media_file.blossom_url.is_some(),
             "Blossom URL should be present"

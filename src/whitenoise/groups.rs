@@ -749,9 +749,14 @@ impl Whitenoise {
         existing_record: crate::whitenoise::database::media_files::MediaFile,
     ) -> Result<MediaFile> {
         let metadata_ref = existing_record.file_metadata.as_ref();
+        let original_hash_ref = existing_record
+            .original_file_hash
+            .as_ref()
+            .and_then(|hash| hash.as_slice().try_into().ok());
         let upload = MediaFileUpload {
             data: &[], // Empty is OK - file already exists on disk
-            file_hash: *image_hash,
+            original_file_hash: original_hash_ref.as_ref(),
+            encrypted_file_hash: *image_hash,
             mime_type: &existing_record.mime_type,
             media_type: &existing_record.media_type,
             blossom_url: existing_record.blossom_url.as_deref(),
@@ -789,6 +794,11 @@ impl Whitenoise {
             ))
         })?;
 
+        // Compute original_file_hash from the decrypted data
+        let mut hasher = Sha256::new();
+        hasher.update(&file_data);
+        let original_hash: [u8; 32] = hasher.finalize().into();
+
         // Derive the upload keypair from the image key for cleanup purposes
         let upload_keypair = group_image::derive_upload_keypair(image_key).map_err(|e| {
             WhitenoiseError::Other(anyhow::anyhow!("Failed to derive upload keypair: {}", e))
@@ -796,7 +806,8 @@ impl Whitenoise {
 
         let upload = MediaFileUpload {
             data: &[], // Empty is OK - file already exists on disk
-            file_hash: *image_hash,
+            original_file_hash: Some(&original_hash),
+            encrypted_file_hash: *image_hash,
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: None,
@@ -879,6 +890,11 @@ impl Whitenoise {
             WhitenoiseError::Other(anyhow::anyhow!("Failed to construct Blossom URL: {}", e))
         })?;
 
+        // Compute original_file_hash from the decrypted data
+        let mut hasher = Sha256::new();
+        hasher.update(decrypted_data);
+        let original_hash: [u8; 32] = hasher.finalize().into();
+
         // Derive the upload keypair from the image key for cleanup purposes
         let upload_keypair = group_image::derive_upload_keypair(image_key).map_err(|e| {
             WhitenoiseError::Other(anyhow::anyhow!("Failed to derive upload keypair: {}", e))
@@ -886,7 +902,8 @@ impl Whitenoise {
 
         let upload = MediaFileUpload {
             data: decrypted_data,
-            file_hash: *image_hash,
+            original_file_hash: Some(&original_hash),
+            encrypted_file_hash: *image_hash,
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: Some(blossom_url.as_str()),
@@ -1022,9 +1039,15 @@ impl Whitenoise {
         let hash_hex = hex::encode(prepared.encrypted_hash);
         let filename = format!("{}.{}", hash_hex, image_type.extension());
 
+        // Compute original_file_hash from the original image data
+        let mut hasher = Sha256::new();
+        hasher.update(&image_data);
+        let original_hash: [u8; 32] = hasher.finalize().into();
+
         let upload = MediaFileUpload {
             data: &image_data,
-            file_hash: prepared.encrypted_hash,
+            original_file_hash: Some(&original_hash),
+            encrypted_file_hash: prepared.encrypted_hash,
             mime_type: image_type.mime_type(),
             media_type: "group_image",
             blossom_url: Some(descriptor.url.as_str()),
@@ -1167,7 +1190,8 @@ impl Whitenoise {
 
         let upload = MediaFileUpload {
             data: &file_data,
-            file_hash: prepared.encrypted_hash,
+            original_file_hash: Some(&prepared.original_hash),
+            encrypted_file_hash: prepared.encrypted_hash,
             mime_type: &prepared.mime_type,
             media_type: "chat_media",
             blossom_url: Some(descriptor.url.as_str()),
@@ -2092,9 +2116,9 @@ mod tests {
 
         // Verify the media file contains valid data
         assert_ne!(
-            media_file.file_hash,
+            media_file.encrypted_file_hash,
             vec![0u8; 32],
-            "Hash should not be all zeros"
+            "Encrypted hash should not be all zeros"
         );
         assert!(media_file.blossom_url.is_some(), "URL should be present");
         assert!(

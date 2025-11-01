@@ -54,7 +54,8 @@ pub(crate) struct MediaFileRow {
     pub mls_group_id: GroupId,
     pub account_pubkey: PublicKey,
     pub file_path: PathBuf,
-    pub file_hash: Vec<u8>,
+    pub original_file_hash: Option<Vec<u8>>, // SHA-256 of decrypted content (MIP-04 x field, MDK key derivation)
+    pub encrypted_file_hash: Vec<u8>,        // SHA-256 of encrypted blob (Blossom verification)
     pub mime_type: String,
     pub media_type: String,
     pub blossom_url: Option<String>,
@@ -76,7 +77,6 @@ where
         let mls_group_id_bytes: Vec<u8> = row.try_get("mls_group_id")?;
         let account_pubkey_str: String = row.try_get("account_pubkey")?;
         let file_path_str: String = row.try_get("file_path")?;
-        let file_hash_hex: String = row.try_get("file_hash")?;
 
         // Parse MLS group ID
         let mls_group_id = GroupId::from_slice(&mls_group_id_bytes);
@@ -91,11 +91,18 @@ where
         // Parse file path
         let file_path = PathBuf::from(file_path_str);
 
-        // Parse file hash from hex
-        let file_hash = hex::decode(file_hash_hex).map_err(|e| sqlx::Error::ColumnDecode {
-            index: "file_hash".to_string(),
-            source: Box::new(e),
-        })?;
+        // Parse encrypted_file_hash from hex (required)
+        let encrypted_file_hash_hex: String = row.try_get("encrypted_file_hash")?;
+        let encrypted_file_hash =
+            hex::decode(encrypted_file_hash_hex).map_err(|e| sqlx::Error::ColumnDecode {
+                index: "encrypted_file_hash".to_string(),
+                source: Box::new(e),
+            })?;
+
+        // Parse original_file_hash from hex (optional - NULL for old records and group images)
+        let original_file_hash: Option<Vec<u8>> = row
+            .try_get::<Option<String>, _>("original_file_hash")?
+            .and_then(|hex| hex::decode(&hex).ok());
 
         let mime_type: String = row.try_get("mime_type")?;
         let media_type: String = row.try_get("media_type")?;
@@ -116,7 +123,8 @@ where
             mls_group_id,
             account_pubkey,
             file_path,
-            file_hash,
+            original_file_hash,
+            encrypted_file_hash,
             mime_type,
             media_type,
             blossom_url,
@@ -131,7 +139,8 @@ where
 #[derive(Debug, Clone)]
 pub struct MediaFileParams<'a> {
     pub file_path: &'a Path,
-    pub file_hash: &'a [u8; 32],
+    pub original_file_hash: Option<&'a [u8; 32]>, // SHA-256 of decrypted content (for chat_media with MDK)
+    pub encrypted_file_hash: &'a [u8; 32],        // SHA-256 of encrypted blob (for Blossom)
     pub mime_type: &'a str,
     pub media_type: &'a str,
     pub blossom_url: Option<&'a str>,
@@ -146,7 +155,8 @@ pub struct MediaFile {
     pub mls_group_id: GroupId,
     pub account_pubkey: PublicKey,
     pub file_path: PathBuf,
-    pub file_hash: Vec<u8>,
+    pub original_file_hash: Option<Vec<u8>>, // SHA-256 of decrypted content (MIP-04 x field, MDK key derivation)
+    pub encrypted_file_hash: Vec<u8>,        // SHA-256 of encrypted blob (Blossom verification)
     pub mime_type: String,
     pub media_type: String,
     pub blossom_url: Option<String>,
@@ -162,7 +172,8 @@ impl From<MediaFileRow> for MediaFile {
             mls_group_id: val.mls_group_id,
             account_pubkey: val.account_pubkey,
             file_path: val.file_path,
-            file_hash: val.file_hash,
+            original_file_hash: val.original_file_hash,
+            encrypted_file_hash: val.encrypted_file_hash,
             mime_type: val.mime_type,
             media_type: val.media_type,
             blossom_url: val.blossom_url,
@@ -178,29 +189,30 @@ impl MediaFile {
     ///
     /// Returns the first matching media file for any group/account combination.
     /// This is useful for retrieving stored metadata (like blossom_url) when you
-    /// only have the hash.
+    /// only have the encrypted hash.
     ///
     /// # Arguments
     /// * `database` - The database connection
-    /// * `file_hash` - The SHA-256 hash of the encrypted file
+    /// * `encrypted_file_hash` - The SHA-256 hash of the encrypted file
     ///
     /// # Returns
     /// The MediaFile if found, None otherwise
     pub(crate) async fn find_by_hash(
         database: &Database,
-        file_hash: &[u8; 32],
+        encrypted_file_hash: &[u8; 32],
     ) -> Result<Option<Self>, WhitenoiseError> {
-        let file_hash_hex = hex::encode(file_hash);
+        let encrypted_file_hash_hex = hex::encode(encrypted_file_hash);
 
         let row_opt = sqlx::query_as::<_, MediaFileRow>(
-            "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
+            "SELECT id, mls_group_id, account_pubkey, file_path,
+                    original_file_hash, encrypted_file_hash,
                     mime_type, media_type, blossom_url, nostr_key,
                     file_metadata, created_at
              FROM media_files
-             WHERE file_hash = ?
+             WHERE encrypted_file_hash = ?
              LIMIT 1",
         )
-        .bind(&file_hash_hex)
+        .bind(&encrypted_file_hash_hex)
         .fetch_optional(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)?;
@@ -211,13 +223,13 @@ impl MediaFile {
     /// Saves a cached media file to the database
     ///
     /// Inserts a new row or ignores if the record already exists
-    /// (based on unique constraint on mls_group_id, file_hash, account_pubkey)
+    /// (based on unique constraint on mls_group_id, encrypted_file_hash, account_pubkey)
     ///
     /// # Arguments
     /// * `database` - The database connection
     /// * `mls_group_id` - The MLS group ID
     /// * `account_pubkey` - The account public key accessing this media
-    /// * `params` - Media file parameters (path, hash, mime type, etc.)
+    /// * `params` - Media file parameters (path, hashes, mime type, etc.)
     ///
     /// # Returns
     /// The MediaFile with the database-assigned ID
@@ -231,7 +243,8 @@ impl MediaFile {
         params: MediaFileParams<'_>,
     ) -> Result<Self, WhitenoiseError> {
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let file_hash_hex = hex::encode(params.file_hash);
+        let encrypted_file_hash_hex = hex::encode(params.encrypted_file_hash);
+        let original_file_hash_hex = params.original_file_hash.map(hex::encode);
         let file_path_str = params
             .file_path
             .to_str()
@@ -245,21 +258,24 @@ impl MediaFile {
 
         let row_opt = sqlx::query_as::<_, MediaFileRow>(
             "INSERT INTO media_files (
-                mls_group_id, account_pubkey, file_path, file_hash,
+                mls_group_id, account_pubkey, file_path,
+                original_file_hash, encrypted_file_hash,
                 mime_type, media_type, blossom_url, nostr_key,
                 file_metadata, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (mls_group_id, file_hash, account_pubkey)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (mls_group_id, encrypted_file_hash, account_pubkey)
             DO NOTHING
-            RETURNING id, mls_group_id, account_pubkey, file_path, file_hash,
+            RETURNING id, mls_group_id, account_pubkey, file_path,
+                      original_file_hash, encrypted_file_hash,
                       mime_type, media_type, blossom_url, nostr_key,
                       file_metadata, created_at",
         )
         .bind(mls_group_id.as_slice())
         .bind(&account_pubkey_hex)
         .bind(file_path_str)
-        .bind(&file_hash_hex)
+        .bind(original_file_hash_hex.as_ref())
+        .bind(&encrypted_file_hash_hex)
         .bind(params.mime_type)
         .bind(params.media_type)
         .bind(params.blossom_url)
@@ -276,15 +292,16 @@ impl MediaFile {
 
         // Conflict occurred - select existing row
         let existing = sqlx::query_as::<_, MediaFileRow>(
-            "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
+            "SELECT id, mls_group_id, account_pubkey, file_path,
+                    original_file_hash, encrypted_file_hash,
                     mime_type, media_type, blossom_url, nostr_key,
                     file_metadata, created_at
              FROM media_files
-             WHERE mls_group_id = ? AND file_hash = ? AND account_pubkey = ?
+             WHERE mls_group_id = ? AND encrypted_file_hash = ? AND account_pubkey = ?
              LIMIT 1",
         )
         .bind(mls_group_id.as_slice())
-        .bind(&file_hash_hex)
+        .bind(&encrypted_file_hash_hex)
         .bind(&account_pubkey_hex)
         .fetch_one(&database.pool)
         .await
@@ -306,7 +323,8 @@ impl MediaFile {
         group_id: &GroupId,
     ) -> Result<Vec<Self>, WhitenoiseError> {
         let rows = sqlx::query_as::<_, MediaFileRow>(
-            "SELECT id, mls_group_id, account_pubkey, file_path, file_hash,
+            "SELECT id, mls_group_id, account_pubkey, file_path,
+                    original_file_hash, encrypted_file_hash,
                     mime_type, media_type, blossom_url, nostr_key,
                     file_metadata, created_at
              FROM media_files
@@ -383,20 +401,22 @@ mod tests {
         // Create a test group ID
         let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = [3u8; 32];
+        let encrypted_file_hash = [3u8; 32];
         let file_path = temp_dir.path().join("test.jpg");
 
         // Create test account to satisfy foreign key constraint
         create_test_account(&db, &pubkey).await;
 
         // Save media - the save method returns the persisted record
+        // Group images don't have original_file_hash (they use key/nonce encryption)
         let media_file = MediaFile::save(
             &db,
             &group_id,
             &pubkey,
             MediaFileParams {
                 file_path: &file_path,
-                file_hash: &file_hash,
+                original_file_hash: None,
+                encrypted_file_hash: &encrypted_file_hash,
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: None,
@@ -410,7 +430,8 @@ mod tests {
         // Verify the returned record has correct data
         assert!(media_file.id.is_some());
         assert!(media_file.id.unwrap() > 0);
-        assert_eq!(media_file.file_hash, file_hash.to_vec());
+        assert_eq!(media_file.encrypted_file_hash, encrypted_file_hash.to_vec());
+        assert_eq!(media_file.original_file_hash, None);
         assert_eq!(media_file.mime_type, "image/jpeg");
         assert_eq!(media_file.media_type, "group_image");
         assert_eq!(media_file.mls_group_id, group_id);
@@ -426,7 +447,7 @@ mod tests {
         // Create a test group ID
         let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = [3u8; 32];
+        let encrypted_file_hash = [3u8; 32];
         let file_path = temp_dir.path().join("test.jpg");
 
         // Create test account to satisfy foreign key constraint
@@ -439,7 +460,8 @@ mod tests {
             &pubkey,
             MediaFileParams {
                 file_path: &file_path,
-                file_hash: &file_hash,
+                original_file_hash: None,
+                encrypted_file_hash: &encrypted_file_hash,
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: Some("https://example.com/blob1"),
@@ -460,7 +482,8 @@ mod tests {
             &pubkey,
             MediaFileParams {
                 file_path: &file_path,
-                file_hash: &file_hash,
+                original_file_hash: None,
+                encrypted_file_hash: &encrypted_file_hash,
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: Some("https://example.com/blob2"),
@@ -489,12 +512,12 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let db = Database::new(db_path).await.unwrap();
 
-        // Test with multiple records having same hash (different groups/accounts)
+        // Test with multiple records having same encrypted hash (different groups/accounts)
         let group_id1 = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let group_id2 = mdk_core::GroupId::from_slice(&[2u8; 8]);
         let pubkey1 = PublicKey::from_slice(&[10u8; 32]).unwrap();
         let pubkey2 = PublicKey::from_slice(&[20u8; 32]).unwrap();
-        let file_hash = [42u8; 32];
+        let encrypted_file_hash = [42u8; 32];
         let file_path1 = temp_dir.path().join("test1.jpg");
         let file_path2 = temp_dir.path().join("test2.jpg");
 
@@ -514,7 +537,8 @@ mod tests {
             &pubkey1,
             MediaFileParams {
                 file_path: &file_path1,
-                file_hash: &file_hash,
+                original_file_hash: None,
+                encrypted_file_hash: &encrypted_file_hash,
                 mime_type: "image/jpeg",
                 media_type: "group_image",
                 blossom_url: Some("https://blossom.example.com/hash42"),
@@ -525,14 +549,15 @@ mod tests {
         .await
         .unwrap();
 
-        // Save second record with same hash but different details
+        // Save second record with same encrypted hash but different details
         MediaFile::save(
             &db,
             &group_id2,
             &pubkey2,
             MediaFileParams {
                 file_path: &file_path2,
-                file_hash: &file_hash,
+                original_file_hash: None,
+                encrypted_file_hash: &encrypted_file_hash,
                 mime_type: "image/png",
                 media_type: "group_image",
                 blossom_url: Some("https://another-server.com/hash42"),
@@ -544,14 +569,16 @@ mod tests {
         .unwrap();
 
         // Find by hash should return the first inserted record
-        let found = MediaFile::find_by_hash(&db, &file_hash).await.unwrap();
+        let found = MediaFile::find_by_hash(&db, &encrypted_file_hash)
+            .await
+            .unwrap();
 
         assert!(found.is_some());
         let media_file = found.unwrap();
 
         // Verify it returns the first record
         assert_eq!(media_file.id, first_save.id);
-        assert_eq!(media_file.file_hash, file_hash.to_vec());
+        assert_eq!(media_file.encrypted_file_hash, encrypted_file_hash.to_vec());
         assert_eq!(media_file.mls_group_id, group_id1);
         assert_eq!(media_file.account_pubkey, pubkey1);
         assert_eq!(media_file.mime_type, "image/jpeg");
@@ -627,8 +654,11 @@ mod tests {
             .with_dimensions("1920x1080".to_string());
 
         // Save multiple media files for group 1 (different accounts)
-        let file_hash1a = [11u8; 32];
-        let file_hash1b = [12u8; 32];
+        // For chat_media, we have both original and encrypted hashes
+        let original_hash1a = [11u8; 32];
+        let encrypted_hash1a = [111u8; 32];
+        let original_hash1b = [12u8; 32];
+        let encrypted_hash1b = [121u8; 32];
         let file_path1a = temp_dir.path().join("group1_file1.jpg");
         let file_path1b = temp_dir.path().join("group1_file2.png");
 
@@ -638,7 +668,8 @@ mod tests {
             &pubkey1,
             MediaFileParams {
                 file_path: &file_path1a,
-                file_hash: &file_hash1a,
+                original_file_hash: Some(&original_hash1a),
+                encrypted_file_hash: &encrypted_hash1a,
                 mime_type: "image/jpeg",
                 media_type: "chat_media",
                 blossom_url: Some("https://example.com/blob1a"),
@@ -655,7 +686,8 @@ mod tests {
             &pubkey2,
             MediaFileParams {
                 file_path: &file_path1b,
-                file_hash: &file_hash1b,
+                original_file_hash: Some(&original_hash1b),
+                encrypted_file_hash: &encrypted_hash1b,
                 mime_type: "image/png",
                 media_type: "chat_media",
                 blossom_url: Some("https://example.com/blob1b"),
@@ -667,7 +699,8 @@ mod tests {
         .unwrap();
 
         // Save one media file for group 2
-        let file_hash2 = [22u8; 32];
+        let original_hash2 = [22u8; 32];
+        let encrypted_hash2 = [222u8; 32];
         let file_path2 = temp_dir.path().join("group2_file.jpg");
 
         MediaFile::save(
@@ -676,7 +709,8 @@ mod tests {
             &pubkey1,
             MediaFileParams {
                 file_path: &file_path2,
-                file_hash: &file_hash2,
+                original_file_hash: Some(&original_hash2),
+                encrypted_file_hash: &encrypted_hash2,
                 mime_type: "image/jpeg",
                 media_type: "chat_media",
                 blossom_url: Some("https://example.com/blob2"),
@@ -693,14 +727,14 @@ mod tests {
         // Should return both files from group 1 regardless of account
         assert_eq!(media_files_group1.len(), 2);
 
-        // Verify we got both files from group 1
-        let hashes1: Vec<Vec<u8>> = media_files_group1
+        // Verify we got both files from group 1 (checking encrypted_file_hash)
+        let encrypted_hashes1: Vec<Vec<u8>> = media_files_group1
             .iter()
-            .map(|mf| mf.file_hash.clone())
+            .map(|mf| mf.encrypted_file_hash.clone())
             .collect();
-        assert!(hashes1.contains(&file_hash1a.to_vec()));
-        assert!(hashes1.contains(&file_hash1b.to_vec()));
-        assert!(!hashes1.contains(&file_hash2.to_vec())); // Should not contain group 2 file
+        assert!(encrypted_hashes1.contains(&encrypted_hash1a.to_vec()));
+        assert!(encrypted_hashes1.contains(&encrypted_hash1b.to_vec()));
+        assert!(!encrypted_hashes1.contains(&encrypted_hash2.to_vec())); // Should not contain group 2 file
 
         // Verify all files have correct group_id
         assert!(
@@ -712,7 +746,7 @@ mod tests {
         // Verify metadata is preserved for the file that has it
         let file_with_metadata = media_files_group1
             .iter()
-            .find(|mf| mf.file_hash == file_hash1a.to_vec())
+            .find(|mf| mf.encrypted_file_hash == encrypted_hash1a.to_vec())
             .unwrap();
         assert!(file_with_metadata.file_metadata.is_some());
         assert_eq!(
@@ -723,14 +757,21 @@ mod tests {
                 .original_filename,
             Some("image1.jpg".to_string())
         );
+        // Verify chat_media has both hashes
+        assert!(file_with_metadata.original_file_hash.is_some());
 
         // Test: Find all media files for group 2
         let media_files_group2 = MediaFile::find_by_group(&db, &group_id2).await.unwrap();
 
         // Should return only one file from group 2
         assert_eq!(media_files_group2.len(), 1);
-        assert_eq!(media_files_group2[0].file_hash, file_hash2.to_vec());
+        assert_eq!(
+            media_files_group2[0].encrypted_file_hash,
+            encrypted_hash2.to_vec()
+        );
         assert_eq!(media_files_group2[0].mls_group_id, group_id2);
+        // Verify chat_media has original_file_hash
+        assert!(media_files_group2[0].original_file_hash.is_some());
 
         // Verify groups are properly isolated
         assert_ne!(
@@ -738,19 +779,19 @@ mod tests {
             media_files_group2.len(),
             "Different groups should have different file counts"
         );
-        let hashes2: Vec<Vec<u8>> = media_files_group2
+        let encrypted_hashes2: Vec<Vec<u8>> = media_files_group2
             .iter()
-            .map(|mf| mf.file_hash.clone())
+            .map(|mf| mf.encrypted_file_hash.clone())
             .collect();
-        assert!(!hashes2.contains(&file_hash1a.to_vec()));
-        assert!(!hashes2.contains(&file_hash1b.to_vec()));
+        assert!(!encrypted_hashes2.contains(&encrypted_hash1a.to_vec()));
+        assert!(!encrypted_hashes2.contains(&encrypted_hash1b.to_vec()));
     }
 
     #[test]
     fn test_is_image() {
         let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = vec![3u8; 32];
+        let encrypted_file_hash = vec![3u8; 32];
 
         // Test various image MIME types
         let image_types = vec!["image/jpeg", "image/png", "image/gif", "image/webp"];
@@ -760,7 +801,8 @@ mod tests {
                 mls_group_id: group_id.clone(),
                 account_pubkey: pubkey,
                 file_path: PathBuf::from("/test.jpg"),
-                file_hash: file_hash.clone(),
+                original_file_hash: None,
+                encrypted_file_hash: encrypted_file_hash.clone(),
                 mime_type: mime_type.to_string(),
                 media_type: "test".to_string(),
                 blossom_url: None,
@@ -779,7 +821,8 @@ mod tests {
                 mls_group_id: group_id.clone(),
                 account_pubkey: pubkey,
                 file_path: PathBuf::from("/test.file"),
-                file_hash: file_hash.clone(),
+                original_file_hash: None,
+                encrypted_file_hash: encrypted_file_hash.clone(),
                 mime_type: mime_type.to_string(),
                 media_type: "test".to_string(),
                 blossom_url: None,
@@ -799,7 +842,7 @@ mod tests {
     fn test_is_video() {
         let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = vec![3u8; 32];
+        let encrypted_file_hash = vec![3u8; 32];
 
         // Test various video MIME types
         let video_types = vec!["video/mp4", "video/webm", "video/quicktime"];
@@ -809,7 +852,8 @@ mod tests {
                 mls_group_id: group_id.clone(),
                 account_pubkey: pubkey,
                 file_path: PathBuf::from("/test.mp4"),
-                file_hash: file_hash.clone(),
+                original_file_hash: None,
+                encrypted_file_hash: encrypted_file_hash.clone(),
                 mime_type: mime_type.to_string(),
                 media_type: "test".to_string(),
                 blossom_url: None,
@@ -828,7 +872,8 @@ mod tests {
                 mls_group_id: group_id.clone(),
                 account_pubkey: pubkey,
                 file_path: PathBuf::from("/test.file"),
-                file_hash: file_hash.clone(),
+                original_file_hash: None,
+                encrypted_file_hash: encrypted_file_hash.clone(),
                 mime_type: mime_type.to_string(),
                 media_type: "test".to_string(),
                 blossom_url: None,
@@ -848,7 +893,7 @@ mod tests {
     fn test_is_audio() {
         let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = vec![3u8; 32];
+        let encrypted_file_hash = vec![3u8; 32];
 
         // Test various audio MIME types
         let audio_types = vec![
@@ -865,7 +910,8 @@ mod tests {
                 mls_group_id: group_id.clone(),
                 account_pubkey: pubkey,
                 file_path: PathBuf::from("/test.mp3"),
-                file_hash: file_hash.clone(),
+                original_file_hash: None,
+                encrypted_file_hash: encrypted_file_hash.clone(),
                 mime_type: mime_type.to_string(),
                 media_type: "test".to_string(),
                 blossom_url: None,
@@ -884,7 +930,8 @@ mod tests {
                 mls_group_id: group_id.clone(),
                 account_pubkey: pubkey,
                 file_path: PathBuf::from("/test.file"),
-                file_hash: file_hash.clone(),
+                original_file_hash: None,
+                encrypted_file_hash: encrypted_file_hash.clone(),
                 mime_type: mime_type.to_string(),
                 media_type: "test".to_string(),
                 blossom_url: None,
@@ -904,7 +951,7 @@ mod tests {
     fn test_is_document() {
         let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = vec![3u8; 32];
+        let encrypted_file_hash = vec![3u8; 32];
 
         // Test PDF
         let media_file = MediaFile {
@@ -912,7 +959,8 @@ mod tests {
             mls_group_id: group_id.clone(),
             account_pubkey: pubkey,
             file_path: PathBuf::from("/test.pdf"),
-            file_hash: file_hash.clone(),
+            original_file_hash: None,
+            encrypted_file_hash: encrypted_file_hash.clone(),
             mime_type: "application/pdf".to_string(),
             media_type: "test".to_string(),
             blossom_url: None,
@@ -930,7 +978,8 @@ mod tests {
                 mls_group_id: group_id.clone(),
                 account_pubkey: pubkey,
                 file_path: PathBuf::from("/test.file"),
-                file_hash: file_hash.clone(),
+                original_file_hash: None,
+                encrypted_file_hash: encrypted_file_hash.clone(),
                 mime_type: mime_type.to_string(),
                 media_type: "test".to_string(),
                 blossom_url: None,
@@ -950,7 +999,7 @@ mod tests {
     fn test_media_type_edge_cases() {
         let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = vec![3u8; 32];
+        let encrypted_file_hash = vec![3u8; 32];
 
         // Test empty MIME type
         let media_file = MediaFile {
@@ -958,7 +1007,8 @@ mod tests {
             mls_group_id: group_id.clone(),
             account_pubkey: pubkey,
             file_path: PathBuf::from("/test.file"),
-            file_hash: file_hash.clone(),
+            original_file_hash: None,
+            encrypted_file_hash: encrypted_file_hash.clone(),
             mime_type: "".to_string(),
             media_type: "test".to_string(),
             blossom_url: None,
@@ -977,7 +1027,8 @@ mod tests {
             mls_group_id: group_id.clone(),
             account_pubkey: pubkey,
             file_path: PathBuf::from("/test.file"),
-            file_hash: file_hash.clone(),
+            original_file_hash: None,
+            encrypted_file_hash: encrypted_file_hash.clone(),
             mime_type: "notamimetype".to_string(),
             media_type: "test".to_string(),
             blossom_url: None,

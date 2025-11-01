@@ -20,8 +20,11 @@ use crate::whitenoise::{
 pub(crate) struct MediaFileUpload<'a> {
     /// The decrypted file data to store
     pub data: &'a [u8],
-    /// Hash of the encrypted file (SHA-256)
-    pub file_hash: [u8; 32],
+    /// SHA-256 hash of the original/decrypted content (for MIP-04 x field, MDK key derivation)
+    /// None for group images (which use key/nonce encryption), Some for chat media (MDK)
+    pub original_file_hash: Option<&'a [u8; 32]>,
+    /// SHA-256 hash of the encrypted file (for Blossom verification)
+    pub encrypted_file_hash: [u8; 32],
     /// MIME type of the file
     pub mime_type: &'a str,
     /// Type of media (e.g., "group_image", "chat_media")
@@ -122,7 +125,8 @@ impl<'a> MediaFiles<'a> {
             account_pubkey,
             MediaFileParams {
                 file_path,
-                file_hash: &upload.file_hash,
+                original_file_hash: upload.original_file_hash,
+                encrypted_file_hash: &upload.encrypted_file_hash,
                 mime_type: upload.mime_type,
                 media_type: upload.media_type,
                 blossom_url: upload.blossom_url,
@@ -165,7 +169,7 @@ mod tests {
 
         let group_id = GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = [3u8; 32];
+        let encrypted_file_hash = [3u8; 32];
         let test_data = b"test file content";
 
         // Create test account to satisfy foreign key constraint
@@ -197,7 +201,8 @@ mod tests {
         // Store and record
         let upload = MediaFileUpload {
             data: test_data,
-            file_hash,
+            original_file_hash: None,
+            encrypted_file_hash,
             mime_type: "image/jpeg",
             media_type: "test_media",
             blossom_url: None,
@@ -219,7 +224,8 @@ mod tests {
         // Verify idempotency: calling store_and_record again should succeed
         let upload2 = MediaFileUpload {
             data: test_data,
-            file_hash,
+            original_file_hash: None,
+            encrypted_file_hash,
             mime_type: "image/jpeg",
             media_type: "test_media",
             blossom_url: None,
