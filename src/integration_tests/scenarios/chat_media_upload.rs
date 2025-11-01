@@ -77,6 +77,11 @@ impl Scenario for ChatMediaUploadScenario {
             .execute(&mut self.context)
             .await?;
 
+        // Test download_chat_media API (download → decrypt → cache)
+        DownloadChatMediaTestCase::new("media_uploader", "media_upload_test_group")
+            .execute(&mut self.context)
+            .await?;
+
         // Test unsupported format rejection (BMP)
         UnsupportedFormatTestCase::new("media_uploader", "media_upload_test_group")
             .execute(&mut self.context)
@@ -92,6 +97,7 @@ impl Scenario for ChatMediaUploadScenario {
         tracing::info!("  • Video (MP4) upload verified");
         tracing::info!("  • Audio (MP3) upload verified");
         tracing::info!("  • Document (PDF) upload verified");
+        tracing::info!("  • Chat media download API verified (MIP-04 compliant)");
         tracing::info!("  • Unsupported format (BMP) rejection verified");
 
         Ok(())
