@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use mdk_core::encrypted_media::types::MediaReference;
 use mdk_core::extension::group_image;
 use mdk_core::media_processing::MediaProcessingOptions;
 use mdk_core::prelude::*;
@@ -871,6 +872,69 @@ impl Whitenoise {
         group_image::decrypt_group_image(encrypted_data, image_key, image_nonce).map_err(|e| {
             WhitenoiseError::ImageDecryptionFailed(format!("Failed to decrypt group image: {}", e))
         })
+    }
+
+    /// Decrypts chat media using MDK (Marmot Development Kit)
+    ///
+    /// This helper handles the MDK decryption process which uses HKDF key derivation
+    /// with the original_file_hash as input. The original hash is required because
+    /// MDK derives the decryption key from it, ensuring that the decryption key is
+    /// bound to the original content.
+    ///
+    /// The decryption process:
+    /// 1. Constructs a MediaReference with the original hash and metadata
+    /// 2. Uses HKDF to derive the decryption key from the original hash
+    /// 3. Decrypts using ChaCha20-Poly1305 AEAD with AAD binding
+    /// 4. Automatically verifies the hash of decrypted content matches original_file_hash
+    ///
+    /// # Arguments
+    /// * `account_pubkey` - The account decrypting the media
+    /// * `data_dir` - The data directory for MDK storage
+    /// * `group_id` - The MLS group ID
+    /// * `encrypted_data` - The encrypted blob from Blossom server
+    /// * `original_file_hash` - SHA-256 of original content (required for key derivation per MIP-04)
+    /// * `mime_type` - MIME type for AAD (Additional Authenticated Data) binding
+    /// * `filename` - Filename for AAD binding
+    /// * `dimensions` - Optional dimensions as (width, height) tuple for AAD binding
+    ///
+    /// # Returns
+    /// * `Ok(Vec<u8>)` - Decrypted file data
+    /// * `Err(WhitenoiseError)` - If decryption fails or hash verification fails
+    ///
+    /// # Notes
+    /// - Follows MIP-04 specification for key derivation
+    /// - AAD binding provides additional security by binding metadata to ciphertext
+    /// - Hash verification ensures content integrity
+    #[allow(dead_code)] // Will be used in download_chat_media implementation
+    fn decrypt_chat_media(
+        account_pubkey: &PublicKey,
+        data_dir: &Path,
+        group_id: &GroupId,
+        encrypted_data: &[u8],
+        original_file_hash: [u8; 32],
+        mime_type: &str,
+        filename: &str,
+        dimensions: Option<(u32, u32)>,
+    ) -> Result<Vec<u8>> {
+        // Create MDK instance and get media manager for this group
+        let mdk = Account::create_mdk(*account_pubkey, data_dir)?;
+        let media_manager = mdk.media_manager(group_id.clone());
+
+        // Construct MediaReference for MDK decryption
+        let reference = MediaReference {
+            url: String::new(), // Not needed for decryption
+            original_hash: original_file_hash,
+            mime_type: mime_type.to_string(),
+            filename: filename.to_string(),
+            dimensions,
+        };
+
+        // Decrypt using MDK (includes automatic hash verification)
+        media_manager
+            .decrypt_from_download(encrypted_data, &reference)
+            .map_err(|e| {
+                WhitenoiseError::Other(anyhow::anyhow!("Failed to decrypt chat media: {}", e))
+            })
     }
 
     /// Stores decrypted image to cache and records it in database
