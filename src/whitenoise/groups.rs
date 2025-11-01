@@ -874,64 +874,79 @@ impl Whitenoise {
         })
     }
 
-    /// Decrypts chat media using MDK (Marmot Development Kit)
+    /// Downloads and decrypts a chat media blob
     ///
-    /// This helper handles the MDK decryption process which uses HKDF key derivation
-    /// with the original_file_hash as input. The original hash is required because
-    /// MDK derives the decryption key from it, ensuring that the decryption key is
-    /// bound to the original content.
-    ///
-    /// The decryption process:
-    /// 1. Constructs a MediaReference with the original hash and metadata
-    /// 2. Uses HKDF to derive the decryption key from the original hash
-    /// 3. Decrypts using ChaCha20-Poly1305 AEAD with AAD binding
-    /// 4. Automatically verifies the hash of decrypted content matches original_file_hash
+    /// This helper orchestrates the download from Blossom, hash verification,
+    /// and MDK decryption in a single focused operation.
     ///
     /// # Arguments
-    /// * `account_pubkey` - The account decrypting the media
+    /// * `account_pubkey` - The account downloading the media
     /// * `data_dir` - The data directory for MDK storage
     /// * `group_id` - The MLS group ID
-    /// * `encrypted_data` - The encrypted blob from Blossom server
-    /// * `original_file_hash` - SHA-256 of original content (required for key derivation per MIP-04)
-    /// * `mime_type` - MIME type for AAD (Additional Authenticated Data) binding
-    /// * `filename` - Filename for AAD binding
-    /// * `dimensions` - Optional dimensions as (width, height) tuple for AAD binding
+    /// * `media_file` - The MediaFile record containing URLs, hashes, and metadata
+    /// * `original_file_hash` - SHA-256 of original content (for MDK decryption)
     ///
     /// # Returns
     /// * `Ok(Vec<u8>)` - Decrypted file data
-    /// * `Err(WhitenoiseError)` - If decryption fails or hash verification fails
-    ///
-    /// # Notes
-    /// - Follows MIP-04 specification for key derivation
-    /// - AAD binding provides additional security by binding metadata to ciphertext
-    /// - Hash verification ensures content integrity
-    #[allow(dead_code)] // Will be used in download_chat_media implementation
-    fn decrypt_chat_media(
+    /// * `Err(WhitenoiseError)` - If download, verification, or decryption fails
+    async fn download_and_decrypt_chat_media_blob(
         account_pubkey: &PublicKey,
         data_dir: &Path,
         group_id: &GroupId,
-        encrypted_data: &[u8],
-        original_file_hash: [u8; 32],
-        mime_type: &str,
-        filename: &str,
-        dimensions: Option<(u32, u32)>,
+        media_file: &MediaFile,
+        original_file_hash: &[u8; 32],
     ) -> Result<Vec<u8>> {
-        // Create MDK instance and get media manager for this group
+        // Extract filename required for MDK AAD (cryptographically bound)
+        let filename = media_file
+            .file_metadata
+            .as_ref()
+            .and_then(|m| m.original_filename.as_deref())
+            .ok_or_else(|| {
+                WhitenoiseError::MediaCache("Missing required filename metadata".to_string())
+            })?;
+        // Parse encrypted_file_hash for download verification
+        let encrypted_hash: [u8; 32] = media_file
+            .encrypted_file_hash
+            .as_slice()
+            .try_into()
+            .map_err(|_| {
+                WhitenoiseError::MediaCache("Invalid encrypted_file_hash length".to_string())
+            })?;
+
+        // Parse Blossom URL
+        let blossom_url_str = media_file
+            .blossom_url
+            .as_ref()
+            .ok_or_else(|| WhitenoiseError::MediaCache("No Blossom URL".to_string()))?;
+
+        let blossom_url = Url::parse(blossom_url_str).map_err(|e| {
+            WhitenoiseError::MediaCache(format!("Invalid Blossom URL '{}': {}", blossom_url_str, e))
+        })?;
+
+        tracing::debug!(
+            target: "whitenoise::groups::download_and_decrypt",
+            "Downloading encrypted blob from: {}",
+            blossom_url
+        );
+
+        // Download encrypted blob (includes hash verification)
+        let encrypted_data =
+            Self::download_blob_from_blossom(&blossom_url, &encrypted_hash).await?;
+
+        // Decrypt using MDK
         let mdk = Account::create_mdk(*account_pubkey, data_dir)?;
         let media_manager = mdk.media_manager(group_id.clone());
 
-        // Construct MediaReference for MDK decryption
         let reference = MediaReference {
-            url: String::new(), // Not needed for decryption
-            original_hash: original_file_hash,
-            mime_type: mime_type.to_string(),
+            url: String::new(),
+            original_hash: *original_file_hash,
+            mime_type: media_file.mime_type.clone(),
             filename: filename.to_string(),
-            dimensions,
+            dimensions: None, // Not used in decryption (only display metadata)
         };
 
-        // Decrypt using MDK (includes automatic hash verification)
         media_manager
-            .decrypt_from_download(encrypted_data, &reference)
+            .decrypt_from_download(&encrypted_data, &reference)
             .map_err(|e| {
                 WhitenoiseError::Other(anyhow::anyhow!("Failed to decrypt chat media: {}", e))
             })
@@ -1269,6 +1284,126 @@ impl Whitenoise {
             .await?;
 
         Ok(media_file)
+    }
+
+    /// Downloads a chat media file and returns the updated MediaFile record
+    ///
+    /// This method downloads and decrypts media files sent in group chat messages.
+    /// It uses the original file hash from the imeta 'x' field per MIP-04 specification.
+    ///
+    /// **On-demand download**: If the file is already cached, returns immediately.
+    /// **Idempotent**: Safe to call multiple times.
+    ///
+    /// # Arguments
+    /// * `account` - The account downloading the media
+    /// * `group_id` - The MLS group ID where the media was shared
+    /// * `original_file_hash` - The SHA-256 hash of the original file (from imeta 'x' field)
+    ///
+    /// # Returns
+    /// * `Ok(MediaFile)` - MediaFile record with the local file path
+    /// * `Err(WhitenoiseError)` - If download, decryption, or database operation fails
+    ///
+    /// # Errors
+    /// * `MediaCache("MediaFile not found")` - No record exists for this hash in this group
+    /// * `MediaCache("Not chat media")` - The MediaFile is not a chat_media type
+    /// * `MediaCache("Missing required metadata")` - Required filename/dimensions are missing
+    /// * `MediaCache("No Blossom URL")` - MediaFile has no Blossom download URL
+    /// * `HashMismatch` - Downloaded blob doesn't match expected hash
+    /// * Network errors during download
+    /// * MDK decryption errors
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Extract hash from imeta tag's 'x' field
+    /// let original_hash: [u8; 32] = hex::decode(imeta_x_field)?.try_into()?;
+    /// let media_file = whitenoise
+    ///     .download_chat_media(&account, &group_id, &original_hash)
+    ///     .await?;
+    /// display_media(&media_file.file_path);
+    /// ```
+    pub async fn download_chat_media(
+        &self,
+        account: &Account,
+        group_id: &GroupId,
+        original_file_hash: &[u8; 32],
+    ) -> Result<MediaFile> {
+        // Find MediaFile record by original_file_hash + group (MIP-04 compliant)
+        let media_file = MediaFile::find_by_original_hash_and_group(
+            &self.database,
+            original_file_hash,
+            group_id,
+        )
+        .await?
+        .ok_or_else(|| {
+            WhitenoiseError::MediaCache(format!(
+                "MediaFile not found for original_hash={} in group",
+                hex::encode(original_file_hash)
+            ))
+        })?;
+
+        // Check if already cached (early return for idempotency)
+        if !media_file.file_path.as_os_str().is_empty() && media_file.file_path.exists() {
+            tracing::debug!(
+                target: "whitenoise::groups::download_chat_media",
+                "Media file already cached at: {}",
+                media_file.file_path.display()
+            );
+            return Ok(media_file);
+        }
+
+        // Verify this is chat_media (not group_image or other types)
+        if media_file.media_type != "chat_media" {
+            return Err(WhitenoiseError::MediaCache(format!(
+                "Not chat media: media_type={}",
+                media_file.media_type
+            )));
+        }
+
+        // Download and decrypt the media blob
+        let decrypted_data = Self::download_and_decrypt_chat_media_blob(
+            &account.pubkey,
+            &self.config.data_dir,
+            group_id,
+            &media_file,
+            original_file_hash,
+        )
+        .await?;
+
+        // Detect MIME type and extension from decrypted content
+        let media_detection = crate::types::detect_media_type(&decrypted_data)?;
+
+        tracing::debug!(
+            target: "whitenoise::groups::download_chat_media",
+            "Decrypted media: {} ({})",
+            media_detection.mime_type(),
+            media_detection.extension()
+        );
+
+        // Store decrypted file to cache
+        let hash_hex = hex::encode(&media_file.encrypted_file_hash);
+        let cached_filename = format!("{}.{}", hash_hex, media_detection.extension());
+
+        let cache_path = self
+            .storage
+            .media_files
+            .store_file(&cached_filename, &decrypted_data)
+            .await?;
+
+        tracing::debug!(
+            target: "whitenoise::groups::download_chat_media",
+            "Cached to: {}",
+            cache_path.display()
+        );
+
+        // Update database record with file path
+        let media_file_id = media_file.id.ok_or_else(|| {
+            WhitenoiseError::MediaCache("MediaFile record missing id".to_string())
+        })?;
+
+        let updated_file =
+            MediaFile::update_file_path(&self.database, media_file_id, &cache_path).await?;
+
+        Ok(updated_file)
     }
 
     /// Retrieves all media files for a specific group
