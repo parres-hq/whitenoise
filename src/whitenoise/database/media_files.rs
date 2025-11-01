@@ -393,6 +393,60 @@ impl MediaFile {
         Ok(row_opt.map(Into::into))
     }
 
+    /// Updates the file_path for an existing media file record
+    ///
+    /// This method is called after downloading and caching a media file to update
+    /// the database record with the local file path. It performs an atomic update
+    /// and returns the complete updated record.
+    ///
+    /// # Arguments
+    /// * `database` - The database connection
+    /// * `id` - The media file ID to update
+    /// * `new_path` - The new file path to set
+    ///
+    /// # Returns
+    /// * `Ok(MediaFile)` - The updated media file record
+    /// * `Err(WhitenoiseError)` - If the record doesn't exist or database error
+    ///
+    /// # Example
+    /// ```ignore
+    /// // After downloading and caching a file
+    /// let cached_path = PathBuf::from("/cache/media/abc123.jpg");
+    /// let updated = MediaFile::update_file_path(&db, media_file.id.unwrap(), &cached_path).await?;
+    /// ```
+    #[allow(dead_code)] // Will be used in download_chat_media implementation
+    pub(crate) async fn update_file_path(
+        database: &Database,
+        id: i64,
+        new_path: &Path,
+    ) -> Result<Self, WhitenoiseError> {
+        let path_str = new_path
+            .to_str()
+            .ok_or_else(|| WhitenoiseError::MediaCache("Invalid file path".to_string()))?;
+
+        let row = sqlx::query_as::<_, MediaFileRow>(
+            "UPDATE media_files
+             SET file_path = ?
+             WHERE id = ?
+             RETURNING id, mls_group_id, account_pubkey, file_path,
+                       original_file_hash, encrypted_file_hash,
+                       mime_type, media_type, blossom_url, nostr_key,
+                       file_metadata, created_at",
+        )
+        .bind(path_str)
+        .bind(id)
+        .fetch_one(&database.pool)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => {
+                WhitenoiseError::MediaCache(format!("MediaFile with id {} not found", id))
+            }
+            _ => DatabaseError::Sqlx(e).into(),
+        })?;
+
+        Ok(row.into())
+    }
+
     /// Check if this media file is an image
     pub fn is_image(&self) -> bool {
         self.mime_type.starts_with("image/")
@@ -1095,6 +1149,112 @@ mod tests {
         assert!(!media_file.is_video());
         assert!(!media_file.is_audio());
         assert!(!media_file.is_document());
+    }
+
+    #[tokio::test]
+    async fn test_update_file_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let pubkey = PublicKey::from_slice(&[10u8; 32]).unwrap();
+        let original_hash = [11u8; 32];
+        let encrypted_hash = [111u8; 32];
+        let initial_path = temp_dir.path().join("initial.jpg");
+        let new_path = temp_dir.path().join("updated.jpg");
+
+        create_test_account(&db, &pubkey).await;
+
+        // Create metadata to verify it's preserved
+        let metadata = FileMetadata::new()
+            .with_filename("test.jpg".to_string())
+            .with_dimensions("800x600".to_string());
+
+        // Create initial media file record
+        let media_file = MediaFile::save(
+            &db,
+            &group_id,
+            &pubkey,
+            MediaFileParams {
+                file_path: &initial_path,
+                original_file_hash: Some(&original_hash),
+                encrypted_file_hash: &encrypted_hash,
+                mime_type: "image/jpeg",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob"),
+                nostr_key: Some("test_key"),
+                file_metadata: Some(&metadata),
+            },
+        )
+        .await
+        .unwrap();
+
+        let original_id = media_file.id.unwrap();
+
+        // Verify initial state
+        assert_eq!(media_file.file_path, initial_path);
+        assert_eq!(media_file.original_file_hash, Some(original_hash.to_vec()));
+        assert_eq!(media_file.encrypted_file_hash, encrypted_hash.to_vec());
+
+        // Update the file path
+        let updated = MediaFile::update_file_path(&db, original_id, &new_path)
+            .await
+            .unwrap();
+
+        // Verify path was updated
+        assert_eq!(updated.file_path, new_path);
+
+        // Verify ID is preserved
+        assert_eq!(updated.id, Some(original_id));
+
+        // Verify all other fields remain unchanged
+        assert_eq!(updated.mls_group_id, group_id);
+        assert_eq!(updated.account_pubkey, pubkey);
+        assert_eq!(updated.original_file_hash, Some(original_hash.to_vec()));
+        assert_eq!(updated.encrypted_file_hash, encrypted_hash.to_vec());
+        assert_eq!(updated.mime_type, "image/jpeg");
+        assert_eq!(updated.media_type, "chat_media");
+        assert_eq!(
+            updated.blossom_url,
+            Some("https://example.com/blob".to_string())
+        );
+        assert_eq!(updated.nostr_key, Some("test_key".to_string()));
+        assert!(updated.file_metadata.is_some());
+        assert_eq!(
+            updated.file_metadata.as_ref().unwrap().original_filename,
+            Some("test.jpg".to_string())
+        );
+
+        // Verify the update persisted by fetching again
+        let fetched = MediaFile::find_by_original_hash_and_group(&db, &original_hash, &group_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(fetched.file_path, new_path);
+        assert_eq!(fetched.id, Some(original_id));
+    }
+
+    #[tokio::test]
+    async fn test_update_file_path_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        let nonexistent_id = 99999;
+        let new_path = temp_dir.path().join("new.jpg");
+
+        // Try to update a nonexistent record
+        let result = MediaFile::update_file_path(&db, nonexistent_id, &new_path).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(WhitenoiseError::MediaCache(msg)) => {
+                assert!(msg.contains("not found"));
+            }
+            _ => panic!("Expected MediaCache error for nonexistent record"),
+        }
     }
 
     #[tokio::test]
