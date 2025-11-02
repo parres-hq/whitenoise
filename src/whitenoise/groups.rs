@@ -1327,17 +1327,19 @@ impl Whitenoise {
         group_id: &GroupId,
         original_file_hash: &[u8; 32],
     ) -> Result<MediaFile> {
-        // Find MediaFile record by original_file_hash + group (MIP-04 compliant)
+        // Find MediaFile record by original_file_hash + group + account (MIP-04 compliant)
         let media_file = MediaFile::find_by_original_hash_and_group(
             &self.database,
             original_file_hash,
             group_id,
+            &account.pubkey,
         )
         .await?
         .ok_or_else(|| {
             WhitenoiseError::MediaCache(format!(
-                "MediaFile not found for original_hash={} in group",
-                hex::encode(original_file_hash)
+                "MediaFile not found for original_hash={} in group for account {}",
+                hex::encode(original_file_hash),
+                account.pubkey.to_hex()
             ))
         })?;
 

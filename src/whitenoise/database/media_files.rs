@@ -338,23 +338,25 @@ impl MediaFile {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// Finds a media file by original hash and group ID (MIP-04 compliant lookup)
+    /// Finds a media file by original hash, group ID, and account (MIP-04 compliant lookup)
     ///
     /// This is the primary lookup method for media files referenced in imeta tags,
     /// as MIP-04 requires the 'x' field to contain the original content hash.
     ///
-    /// The query is scoped to a specific group for security and correctness - a file
-    /// hash might exist in multiple groups, and we want to ensure we get the correct
-    /// one for the user's context.
+    /// The query is scoped to a specific group and account for security and correctness.
+    /// In multi-account setups, the same file hash can exist in the same group but with
+    /// separate records per account, so we must filter by account_pubkey to prevent
+    /// cross-account cache corruption.
     ///
     /// # Arguments
     /// * `database` - The database connection
     /// * `original_file_hash` - The SHA-256 hash of the decrypted file content
     /// * `group_id` - The MLS group ID to scope the search to
+    /// * `account_pubkey` - The account public key (ensures account-scoped lookup)
     ///
     /// # Returns
-    /// * `Ok(Some(MediaFile))` - The matching media file
-    /// * `Ok(None)` - No matching media file found
+    /// * `Ok(Some(MediaFile))` - The matching media file for this account
+    /// * `Ok(None)` - No matching media file found for this account
     /// * `Err(WhitenoiseError)` - Database error
     ///
     /// # Example
@@ -362,18 +364,19 @@ impl MediaFile {
     /// // Look up media file from imeta tag
     /// let original_hash = hex::decode(&imeta_x_field)?;
     /// if let Some(media_file) = MediaFile::find_by_original_hash_and_group(
-    ///     &db, &original_hash, &group_id
+    ///     &db, &original_hash, &group_id, &account_pubkey
     /// ).await? {
     ///     // Download and decrypt the file
     /// }
     /// ```
-    #[allow(dead_code)] // Will be used in download_chat_media implementation
     pub(crate) async fn find_by_original_hash_and_group(
         database: &Database,
         original_file_hash: &[u8; 32],
         group_id: &GroupId,
+        account_pubkey: &PublicKey,
     ) -> Result<Option<Self>, WhitenoiseError> {
         let hash_hex = hex::encode(original_file_hash);
+        let account_hex = account_pubkey.to_hex();
 
         let row_opt = sqlx::query_as::<_, MediaFileRow>(
             "SELECT id, mls_group_id, account_pubkey, file_path,
@@ -381,11 +384,12 @@ impl MediaFile {
                     mime_type, media_type, blossom_url, nostr_key,
                     file_metadata, created_at
              FROM media_files
-             WHERE original_file_hash = ? AND mls_group_id = ?
+             WHERE original_file_hash = ? AND mls_group_id = ? AND account_pubkey = ?
              LIMIT 1",
         )
         .bind(&hash_hex)
         .bind(group_id.as_slice())
+        .bind(&account_hex)
         .fetch_optional(&database.pool)
         .await
         .map_err(DatabaseError::Sqlx)?;
@@ -1227,10 +1231,11 @@ mod tests {
         );
 
         // Verify the update persisted by fetching again
-        let fetched = MediaFile::find_by_original_hash_and_group(&db, &original_hash, &group_id)
-            .await
-            .unwrap()
-            .unwrap();
+        let fetched =
+            MediaFile::find_by_original_hash_and_group(&db, &original_hash, &group_id, &pubkey)
+                .await
+                .unwrap()
+                .unwrap();
 
         assert_eq!(fetched.file_path, new_path);
         assert_eq!(fetched.id, Some(original_id));
@@ -1340,14 +1345,15 @@ mod tests {
         .await
         .unwrap();
 
-        // Test 1: Find file with correct original hash and group
-        let found = MediaFile::find_by_original_hash_and_group(&db, &original_hash1, &group_id1)
-            .await
-            .unwrap();
+        // Test 1: Find file with correct original hash, group, and account
+        let found =
+            MediaFile::find_by_original_hash_and_group(&db, &original_hash1, &group_id1, &pubkey)
+                .await
+                .unwrap();
 
         assert!(
             found.is_some(),
-            "Should find file with correct hash and group"
+            "Should find file with correct hash, group, and account"
         );
         let media_file = found.unwrap();
         assert_eq!(media_file.id, saved_file1.id);
@@ -1358,29 +1364,31 @@ mod tests {
         assert_eq!(media_file.media_type, "chat_media");
         assert!(media_file.file_metadata.is_some());
 
-        // Test 2: Should not find file with correct hash but wrong group
+        // Test 2: Should not find file with correct hash and account but wrong group
         let not_found =
-            MediaFile::find_by_original_hash_and_group(&db, &original_hash1, &group_id2)
+            MediaFile::find_by_original_hash_and_group(&db, &original_hash1, &group_id2, &pubkey)
                 .await
                 .unwrap();
 
         assert!(
             not_found.is_none(),
-            "Should not find file with correct hash but wrong group"
+            "Should not find file with correct hash and account but wrong group"
         );
 
-        // Test 3: Should not find file with wrong hash but correct group
+        // Test 3: Should not find file with wrong hash but correct group and account
         let wrong_hash = [255u8; 32];
-        let not_found = MediaFile::find_by_original_hash_and_group(&db, &wrong_hash, &group_id1)
-            .await
-            .unwrap();
+        let not_found =
+            MediaFile::find_by_original_hash_and_group(&db, &wrong_hash, &group_id1, &pubkey)
+                .await
+                .unwrap();
 
         assert!(not_found.is_none(), "Should not find file with wrong hash");
 
-        // Test 4: Find second file in different group
-        let found = MediaFile::find_by_original_hash_and_group(&db, &original_hash2, &group_id2)
-            .await
-            .unwrap();
+        // Test 4: Find second file in different group with same account
+        let found =
+            MediaFile::find_by_original_hash_and_group(&db, &original_hash2, &group_id2, &pubkey)
+                .await
+                .unwrap();
 
         assert!(found.is_some(), "Should find second file in group 2");
         let media_file2 = found.unwrap();
@@ -1395,13 +1403,127 @@ mod tests {
         // The group image has no original_file_hash, so it should not be found
         let nonexistent_hash = [100u8; 32];
         let not_found =
-            MediaFile::find_by_original_hash_and_group(&db, &nonexistent_hash, &group_id1)
+            MediaFile::find_by_original_hash_and_group(&db, &nonexistent_hash, &group_id1, &pubkey)
                 .await
                 .unwrap();
 
         assert!(
             not_found.is_none(),
             "Should not find group image when searching by original_file_hash"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_find_by_original_hash_and_group_multi_account() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let db = Database::new(db_path).await.unwrap();
+
+        // Create test data for multi-account scenario
+        let group_id = mdk_core::GroupId::from_slice(&[1u8; 8]);
+        let account1_pubkey = PublicKey::from_slice(&[10u8; 32]).unwrap();
+        let account2_pubkey = PublicKey::from_slice(&[20u8; 32]).unwrap();
+        let original_hash = [11u8; 32]; // Same media file
+        let encrypted_hash = [111u8; 32]; // Same encrypted hash
+        let file_path1 = temp_dir.path().join("account1_media.jpg");
+        let file_path2 = temp_dir.path().join("account2_media.jpg");
+
+        create_test_account(&db, &account1_pubkey).await;
+        create_test_account(&db, &account2_pubkey).await;
+
+        // Account 1 saves media file (e.g., after uploading)
+        let saved_file1 = MediaFile::save(
+            &db,
+            &group_id,
+            &account1_pubkey,
+            MediaFileParams {
+                file_path: &file_path1,
+                original_file_hash: Some(&original_hash),
+                encrypted_file_hash: &encrypted_hash,
+                mime_type: "image/jpeg",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob"),
+                nostr_key: None,
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Account 2 saves reference to same media file (e.g., after receiving message)
+        let saved_file2 = MediaFile::save(
+            &db,
+            &group_id,
+            &account2_pubkey,
+            MediaFileParams {
+                file_path: &file_path2, // Different file path for account 2
+                original_file_hash: Some(&original_hash),
+                encrypted_file_hash: &encrypted_hash,
+                mime_type: "image/jpeg",
+                media_type: "chat_media",
+                blossom_url: Some("https://example.com/blob"),
+                nostr_key: None,
+                file_metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Verify that querying with account1 returns account1's record
+        let found1 = MediaFile::find_by_original_hash_and_group(
+            &db,
+            &original_hash,
+            &group_id,
+            &account1_pubkey,
+        )
+        .await
+        .unwrap()
+        .expect("Should find account1's record");
+
+        assert_eq!(found1.id, saved_file1.id);
+        assert_eq!(found1.account_pubkey, account1_pubkey);
+        assert_eq!(found1.file_path, file_path1);
+
+        // Verify that querying with account2 returns account2's record (not account1's!)
+        let found2 = MediaFile::find_by_original_hash_and_group(
+            &db,
+            &original_hash,
+            &group_id,
+            &account2_pubkey,
+        )
+        .await
+        .unwrap()
+        .expect("Should find account2's record");
+
+        assert_eq!(found2.id, saved_file2.id);
+        assert_eq!(found2.account_pubkey, account2_pubkey);
+        assert_eq!(found2.file_path, file_path2);
+
+        // Verify the two records are different
+        assert_ne!(
+            found1.id, found2.id,
+            "Different accounts should have different records"
+        );
+        assert_ne!(
+            found1.file_path, found2.file_path,
+            "Each account should have their own file_path"
+        );
+
+        // Verify a third account cannot find records for the other accounts
+        let account3_pubkey = PublicKey::from_slice(&[30u8; 32]).unwrap();
+        create_test_account(&db, &account3_pubkey).await;
+        let not_found = MediaFile::find_by_original_hash_and_group(
+            &db,
+            &original_hash,
+            &group_id,
+            &account3_pubkey,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            not_found.is_none(),
+            "Account 3 should not find records belonging to other accounts"
         );
     }
 }
