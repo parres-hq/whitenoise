@@ -105,16 +105,25 @@ fn extract_hash_from_blossom_url(url: &str) -> Result<[u8; 32]> {
         WhitenoiseError::InvalidInput(format!("Invalid Blossom URL '{}': {}", url, e))
     })?;
 
-    let path = parsed_url
-        .path()
-        .trim_start_matches('/')
-        .trim_end_matches('/');
+    let segments = parsed_url.path_segments().ok_or_else(|| {
+        WhitenoiseError::InvalidInput(format!(
+            "Invalid Blossom URL '{}': missing hash segment",
+            url
+        ))
+    })?;
+
+    // Collect non-empty segments and get the last one
+    // (Filtering handles trailing slashes which create empty segments)
+    let non_empty_segments: Vec<_> = segments.filter(|s| !s.is_empty()).collect();
+    let last_segment = non_empty_segments
+        .last()
+        .ok_or_else(|| WhitenoiseError::InvalidInput("Blossom URL contains no hash".to_string()))?;
 
     // Strip file extension if present (e.g., "hash.png" -> "hash")
     // Blossom URLs may include extensions like hash.png, hash.jpg, etc.
-    let hash_hex = match path.rfind('.') {
-        Some(dot_idx) => &path[..dot_idx],
-        None => path,
+    let hash_hex = match last_segment.rfind('.') {
+        Some(dot_idx) => &last_segment[..dot_idx],
+        None => last_segment,
     };
 
     if hash_hex.is_empty() {
@@ -652,6 +661,19 @@ mod tests {
         let url = "https://blossom.example.com/abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234/";
         let result = extract_hash_from_blossom_url(url);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_with_path_prefix() {
+        let url = "https://blossom.example.com/api/v1/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_ok());
+        let hash = result.unwrap();
+        assert_eq!(hash.len(), 32);
+        assert_eq!(
+            hex::encode(hash),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
     }
 
     #[test]
