@@ -24,10 +24,20 @@ impl Whitenoise {
                   result
                 );
 
-                // Extract and store media references synchronously (fast, ~1-5ms)
+                // Extract and store media references synchronously
                 if let Some((group_id, inner_event)) = Self::extract_message_details(&result) {
+                    let parsed_references = {
+                        let media_manager = mdk.media_manager(group_id.clone());
+                        self.media_files()
+                            .parse_imeta_tags_from_event(&inner_event, &media_manager)?
+                    };
+
                     self.media_files()
-                        .store_references_from_imeta_tags(&group_id, &account.pubkey, &inner_event)
+                        .store_parsed_media_references(
+                            &group_id,
+                            &account.pubkey,
+                            parsed_references,
+                        )
                         .await?;
                 }
 

@@ -29,7 +29,8 @@ impl ReceiveMessageWithMediaTestCase {
     }
 
     /// Build imeta tag per MIP-04 spec
-    /// Format: `["imeta", "url <blossom_url>", "x <hash>", "m <mime_type>", ...]`
+    /// Format: `["imeta", "url <blossom_url>", "x <hash>", "m <mime_type>", "filename <name>", "v <version>"]`
+    /// Note: MIP-04 requires filename and version fields
     fn build_imeta_tag(
         &self,
         original_hash_hex: &str,
@@ -37,16 +38,14 @@ impl ReceiveMessageWithMediaTestCase {
         mime_type: &str,
         filename: Option<&str>,
     ) -> Result<Tag, WhitenoiseError> {
-        let mut parts = vec![
+        let parts = vec![
             "imeta".to_string(),
             format!("url {}", blossom_url),
-            format!("x {}", original_hash_hex),
             format!("m {}", mime_type),
+            format!("filename {}", filename.unwrap_or("image.jpg")),
+            format!("x {}", original_hash_hex),
+            format!("v mip04-v1"),
         ];
-
-        if let Some(name) = filename {
-            parts.push(format!("name {}", name));
-        }
 
         Tag::parse(parts).map_err(|e| {
             WhitenoiseError::Other(anyhow::anyhow!("Failed to create imeta tag: {}", e))

@@ -418,7 +418,6 @@ impl MediaFile {
     /// let cached_path = PathBuf::from("/cache/media/abc123.jpg");
     /// let updated = MediaFile::update_file_path(&db, media_file.id.unwrap(), &cached_path).await?;
     /// ```
-    #[allow(dead_code)] // Will be used in download_chat_media implementation
     pub(crate) async fn update_file_path(
         database: &Database,
         id: i64,
