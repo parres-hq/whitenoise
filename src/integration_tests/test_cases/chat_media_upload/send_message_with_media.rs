@@ -20,7 +20,8 @@ impl SendMessageWithMediaTestCase {
     }
 
     /// Build imeta tag per MIP-04 spec
-    /// Format: `["imeta", "url <blossom_url>", "x <hash>", "m <mime_type>", ...]`
+    /// Format: `["imeta", "url <blossom_url>", "m <mime_type>", "filename <name>", "x <hash>", "v <version>"]`
+    /// Note: MIP-04 requires filename and version fields
     fn build_imeta_tag(
         &self,
         hash_hex: &str,
@@ -30,8 +31,10 @@ impl SendMessageWithMediaTestCase {
         Tag::parse(vec![
             "imeta",
             &format!("url {}", blossom_url),
-            &format!("x {}", hash_hex),
             &format!("m {}", mime_type),
+            "filename image.jpg",
+            &format!("x {}", hash_hex),
+            "v mip04-v1",
         ])
         .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Failed to create imeta tag: {}", e)))
     }
@@ -51,7 +54,14 @@ impl TestCase for SendMessageWithMediaTestCase {
 
         // Get the uploaded media file from context
         let media_file = context.get_media_file("uploaded_chat_media")?;
-        let media_hash_hex = hex::encode(&media_file.file_hash);
+
+        // MIP-04: imeta 'x' field must contain original_file_hash
+        let original_hash = media_file.original_file_hash.as_ref().ok_or_else(|| {
+            WhitenoiseError::Configuration(
+                "Chat media must have original_file_hash for MIP-04".to_string(),
+            )
+        })?;
+        let media_hash_hex = hex::encode(original_hash);
 
         let blossom_url = media_file.blossom_url.as_ref().ok_or_else(|| {
             WhitenoiseError::Configuration("Uploaded media has no blossom URL".to_string())
@@ -130,10 +140,16 @@ impl TestCase for SendMessageWithMediaTestCase {
         );
 
         let attached_media = &message_with_media.media_attachments[0];
-        let attached_hash_hex = hex::encode(&attached_media.file_hash);
+        // MIP-04: Message aggregator links media using original_file_hash from imeta 'x' field
+        let attached_original_hash = attached_media
+            .original_file_hash
+            .as_ref()
+            .expect("Attached media should have original_file_hash");
+
+        let attached_hash_hex = hex::encode(attached_original_hash);
         assert_eq!(
             attached_hash_hex, media_hash_hex,
-            "Attached media hash should match uploaded file hash"
+            "Attached media original hash should match imeta 'x' field (MIP-04)"
         );
 
         assert_eq!(

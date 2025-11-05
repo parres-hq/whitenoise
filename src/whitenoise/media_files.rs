@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use mdk_core::GroupId;
-use nostr_sdk::PublicKey;
+use mdk_core::{
+    GroupId,
+    encrypted_media::{manager::EncryptedMediaManager, types::MediaReference},
+    prelude::MdkStorageProvider,
+};
+use nostr_sdk::prelude::*;
 
 pub use crate::whitenoise::database::media_files::MediaFile;
 use crate::whitenoise::{
@@ -9,9 +13,78 @@ use crate::whitenoise::{
         Database,
         media_files::{FileMetadata, MediaFileParams},
     },
-    error::Result,
+    error::{Result, WhitenoiseError},
     storage::Storage,
 };
+
+/// Parsed media reference with additional fields not in MDK's MediaReference
+///
+/// Wraps MDK's MediaReference and adds fields we need that MDK doesn't parse
+#[derive(Debug, Clone)]
+pub(crate) struct ParsedMediaReference {
+    /// MDK's parsed reference (url, original_hash, mime_type, filename, dimensions)
+    reference: MediaReference,
+    /// Encrypted hash extracted from Blossom URL (needed for our DB schema)
+    encrypted_hash: [u8; 32],
+    /// Blurhash for image preview (optional, not parsed by MDK)
+    blurhash: Option<String>,
+}
+
+/// Extracts encrypted hash from Blossom URL
+///
+/// Blossom URL format: https://blossom.server/<hash>
+/// The hash is the encrypted_file_hash (SHA-256 of encrypted blob)
+///
+/// # Returns
+/// * `Ok([u8; 32])` - The encrypted file hash
+/// * `Err(WhitenoiseError)` - If URL is malformed or hash is invalid
+fn extract_hash_from_blossom_url(url: &str) -> Result<[u8; 32]> {
+    let parsed_url = Url::parse(url).map_err(|e| {
+        WhitenoiseError::InvalidInput(format!("Invalid Blossom URL '{}': {}", url, e))
+    })?;
+
+    let segments = parsed_url.path_segments().ok_or_else(|| {
+        WhitenoiseError::InvalidInput(format!(
+            "Invalid Blossom URL '{}': missing hash segment",
+            url
+        ))
+    })?;
+
+    // Collect non-empty segments and get the last one
+    // (Filtering handles trailing slashes which create empty segments)
+    let non_empty_segments: Vec<_> = segments.filter(|s| !s.is_empty()).collect();
+    let last_segment = non_empty_segments
+        .last()
+        .ok_or_else(|| WhitenoiseError::InvalidInput("Blossom URL contains no hash".to_string()))?;
+
+    // Strip file extension if present (e.g., "hash.png" -> "hash")
+    // Blossom URLs may include extensions like hash.png, hash.jpg, etc.
+    let hash_hex = match last_segment.rfind('.') {
+        Some(dot_idx) => &last_segment[..dot_idx],
+        None => last_segment,
+    };
+
+    if hash_hex.is_empty() {
+        return Err(WhitenoiseError::InvalidInput(
+            "Blossom URL contains no hash".to_string(),
+        ));
+    }
+
+    let hash_bytes = hex::decode(hash_hex).map_err(|e| {
+        WhitenoiseError::InvalidInput(format!(
+            "Invalid hex in Blossom URL hash '{}': {}",
+            hash_hex, e
+        ))
+    })?;
+
+    let hash_len = hash_bytes.len();
+    hash_bytes.try_into().map_err(|_| {
+        WhitenoiseError::InvalidInput(format!(
+            "Invalid hash length in Blossom URL: expected 32 bytes, got {}",
+            hash_len
+        ))
+    })
+}
 
 /// Intermediate type for media file storage operations
 ///
@@ -20,8 +93,11 @@ use crate::whitenoise::{
 pub(crate) struct MediaFileUpload<'a> {
     /// The decrypted file data to store
     pub data: &'a [u8],
-    /// Hash of the encrypted file (SHA-256)
-    pub file_hash: [u8; 32],
+    /// SHA-256 hash of the original/decrypted content (for MIP-04 x field, MDK key derivation)
+    /// None for group images (which use key/nonce encryption), Some for chat media (MDK)
+    pub original_file_hash: Option<&'a [u8; 32]>,
+    /// SHA-256 hash of the encrypted file (for Blossom verification)
+    pub encrypted_file_hash: [u8; 32],
     /// MIME type of the file
     pub mime_type: &'a str,
     /// Type of media (e.g., "group_image", "chat_media")
@@ -122,7 +198,8 @@ impl<'a> MediaFiles<'a> {
             account_pubkey,
             MediaFileParams {
                 file_path,
-                file_hash: &upload.file_hash,
+                original_file_hash: upload.original_file_hash,
+                encrypted_file_hash: &upload.encrypted_file_hash,
                 mime_type: upload.mime_type,
                 media_type: upload.media_type,
                 blossom_url: upload.blossom_url,
@@ -147,6 +224,163 @@ impl<'a> MediaFiles<'a> {
     pub(crate) async fn find_file_with_prefix(&self, prefix: &str) -> Option<PathBuf> {
         self.storage.media_files.find_file_with_prefix(prefix).await
     }
+
+    /// Parses imeta tags from an event using MDK's MIP-04 compliant parser
+    ///
+    /// This is a synchronous operation that doesn't involve I/O.
+    /// Individual malformed imeta tags are logged and skipped.
+    ///
+    /// Uses MDK's `parse_imeta_tag` which validates:
+    /// - Required fields (url, m, filename, x, v)
+    /// - MIME type canonicalization
+    /// - Filename validation
+    /// - Version compatibility
+    ///
+    /// Additionally extracts fields that MDK doesn't parse:
+    /// - encrypted_hash (from Blossom URL)
+    /// - blurhash (optional field for image previews)
+    ///
+    /// # Arguments
+    /// * `inner_event` - The decrypted inner event containing imeta tags
+    /// * `media_manager` - MDK's EncryptedMediaManager for parsing
+    ///
+    /// # Returns
+    /// Vector of ParsedMediaReference ready for storage
+    pub(crate) fn parse_imeta_tags_from_event<S>(
+        &self,
+        inner_event: &UnsignedEvent,
+        media_manager: &EncryptedMediaManager<'_, S>,
+    ) -> Result<Vec<ParsedMediaReference>>
+    where
+        S: MdkStorageProvider,
+    {
+        let mut parsed = Vec::new();
+
+        // Filter for imeta tags and parse using MDK
+        for tag in inner_event.tags.iter() {
+            if tag.kind() != TagKind::Custom("imeta".into()) {
+                continue;
+            }
+
+            // Parse using MDK's MIP-04 compliant parser
+            let reference = match media_manager.parse_imeta_tag(tag) {
+                Ok(ref_) => ref_,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::store_media_references",
+                        "Skipping malformed imeta tag: {}",
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            // Extract encrypted_file_hash from Blossom URL (REQUIRED - NOT NULL in DB)
+            // MDK's MediaReference stores URL as-is, but we need the hash for our database schema
+            let encrypted_file_hash = match extract_hash_from_blossom_url(&reference.url) {
+                Ok(hash) => hash,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "whitenoise::store_media_references",
+                        "Skipping imeta tag: failed to extract encrypted hash from Blossom URL '{}': {}",
+                        reference.url,
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            // Extract blurhash (optional field that MDK doesn't parse)
+            let blurhash = Self::extract_blurhash_from_tag(tag);
+
+            parsed.push(ParsedMediaReference {
+                reference,
+                encrypted_hash: encrypted_file_hash,
+                blurhash,
+            });
+        }
+
+        Ok(parsed)
+    }
+
+    /// Extracts blurhash from an imeta tag
+    ///
+    /// MDK's parser doesn't extract blurhash, so we do it ourselves.
+    /// Format: "blurhash <blurhash_string>"
+    fn extract_blurhash_from_tag(tag: &Tag) -> Option<String> {
+        let tag_vec = tag.clone().to_vec();
+        for value in tag_vec.iter().skip(1) {
+            if let Some(blur) = value.strip_prefix("blurhash ") {
+                return Some(blur.to_string());
+            }
+        }
+        None
+    }
+
+    /// Stores parsed media references to the database
+    ///
+    /// Creates MediaFile records without downloading the actual files.
+    /// The file_path will be empty until download_chat_media() is called.
+    ///
+    /// # Arguments
+    /// * `group_id` - The MLS group ID
+    /// * `account_pubkey` - The account receiving the message
+    /// * `parsed_references` - ParsedMediaReference from parse_imeta_tags_from_event
+    ///
+    /// # Returns
+    /// * `Ok(())` - All references stored successfully
+    /// * `Err(WhitenoiseError)` - Database error
+    pub(crate) async fn store_parsed_media_references(
+        &self,
+        group_id: &GroupId,
+        account_pubkey: &PublicKey,
+        parsed_references: Vec<ParsedMediaReference>,
+    ) -> Result<()> {
+        for parsed in parsed_references {
+            let reference = parsed.reference;
+            let encrypted_hash = parsed.encrypted_hash;
+
+            // Convert dimensions from MDK format (width, height) to our string format
+            let dimensions = reference.dimensions.map(|(w, h)| format!("{}x{}", w, h));
+
+            // Create file metadata
+            // MIP-04 requires filename, so it's always present
+            let file_metadata = Some(FileMetadata {
+                original_filename: Some(reference.filename.clone()),
+                dimensions,
+                blurhash: parsed.blurhash,
+            });
+
+            // Create MediaFile record (without file yet - empty path until downloaded)
+            MediaFile::save(
+                self.database,
+                group_id,
+                account_pubkey,
+                MediaFileParams {
+                    file_path: &PathBuf::from(""), // Empty until downloaded
+                    original_file_hash: Some(&reference.original_hash),
+                    encrypted_file_hash: &encrypted_hash,
+                    mime_type: &reference.mime_type,
+                    media_type: "chat_media",
+                    blossom_url: Some(&reference.url),
+                    nostr_key: None, // Chat media uses MDK, not key/nonce
+                    file_metadata: file_metadata.as_ref(),
+                },
+            )
+            .await?;
+
+            tracing::debug!(
+                target: "whitenoise::store_media_references",
+                "Stored media reference for account {}: original_hash={}, encrypted_hash={}, mime_type={}",
+                account_pubkey.to_hex(),
+                hex::encode(reference.original_hash),
+                hex::encode(encrypted_hash),
+                reference.mime_type
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -165,7 +399,7 @@ mod tests {
 
         let group_id = GroupId::from_slice(&[1u8; 8]);
         let pubkey = PublicKey::from_slice(&[2u8; 32]).unwrap();
-        let file_hash = [3u8; 32];
+        let encrypted_file_hash = [3u8; 32];
         let test_data = b"test file content";
 
         // Create test account to satisfy foreign key constraint
@@ -197,7 +431,8 @@ mod tests {
         // Store and record
         let upload = MediaFileUpload {
             data: test_data,
-            file_hash,
+            original_file_hash: None,
+            encrypted_file_hash,
             mime_type: "image/jpeg",
             media_type: "test_media",
             blossom_url: None,
@@ -219,7 +454,8 @@ mod tests {
         // Verify idempotency: calling store_and_record again should succeed
         let upload2 = MediaFileUpload {
             data: test_data,
-            file_hash,
+            original_file_hash: None,
+            encrypted_file_hash,
             mime_type: "image/jpeg",
             media_type: "test_media",
             blossom_url: None,
@@ -254,5 +490,80 @@ mod tests {
         // Find by prefix
         let found = media_files.find_file_with_prefix("abc123").await.unwrap();
         assert!(found.to_string_lossy().contains("abc123"));
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_valid() {
+        let url = "https://blossom.example.com/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_ok());
+        let hash = result.unwrap();
+        assert_eq!(hash.len(), 32);
+        assert_eq!(
+            hex::encode(hash),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_with_trailing_slash() {
+        let url = "https://blossom.example.com/abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234/";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_with_path_prefix() {
+        let url = "https://blossom.example.com/api/v1/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_ok());
+        let hash = result.unwrap();
+        assert_eq!(hash.len(), 32);
+        assert_eq!(
+            hex::encode(hash),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_invalid_hex() {
+        let url = "https://blossom.example.com/notahexstring";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid hex"));
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_wrong_length() {
+        let url = "https://blossom.example.com/abc123"; // Too short
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid hash length")
+        );
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_no_hash() {
+        let url = "https://blossom.example.com/";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("contains no hash"));
+    }
+
+    #[test]
+    fn test_extract_hash_from_blossom_url_invalid_url() {
+        let url = "not-a-url";
+        let result = extract_hash_from_blossom_url(url);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid Blossom URL")
+        );
     }
 }
