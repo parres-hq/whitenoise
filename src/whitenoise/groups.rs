@@ -234,6 +234,23 @@ impl Whitenoise {
             .collect::<Vec<group_types::Group>>())
     }
 
+    /// Retrieves a single group by its MLS group ID
+    ///
+    /// # Arguments
+    /// * `account` - The account that has access to the group
+    /// * `group_id` - The MLS group ID to retrieve
+    ///
+    /// # Returns
+    /// * `Ok(Group)` - The group if found
+    /// * `Err(WhitenoiseError::GroupNotFound)` - If the group doesn't exist
+    /// * `Err(WhitenoiseError)` - If there's an error accessing storage
+    pub async fn group(&self, account: &Account, group_id: &GroupId) -> Result<group_types::Group> {
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        mdk.get_group(group_id)
+            .map_err(WhitenoiseError::from)?
+            .ok_or(WhitenoiseError::GroupNotFound)
+    }
+
     pub async fn group_members(
         &self,
         account: &Account,
@@ -1994,6 +2011,60 @@ mod tests {
         );
 
         // All groups should be in a valid state (exact verification depends on state enum implementation)
+    }
+
+    #[tokio::test]
+    async fn test_group() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Setup creator account
+        let creator_account = whitenoise.create_identity().await.unwrap();
+
+        // Setup member accounts
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkeys = vec![members[0].0.pubkey];
+
+        // Create a group
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys.clone());
+        let created_group = whitenoise
+            .create_group(
+                &creator_account,
+                member_pubkeys.clone(),
+                config.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Test: Successfully retrieve the created group
+        let retrieved_group = whitenoise
+            .group(&creator_account, &created_group.mls_group_id)
+            .await;
+
+        assert!(
+            retrieved_group.is_ok(),
+            "Failed to retrieve group: {:?}",
+            retrieved_group.unwrap_err()
+        );
+
+        let retrieved_group = retrieved_group.unwrap();
+        assert_eq!(retrieved_group.mls_group_id, created_group.mls_group_id);
+        assert_eq!(retrieved_group.name, config.name);
+        assert_eq!(retrieved_group.description, config.description);
+        assert_eq!(retrieved_group.admin_pubkeys, created_group.admin_pubkeys);
+
+        // Test: Attempt to retrieve non-existent group
+        let fake_group_id = GroupId::from_slice(&[255u8; 32]);
+        let result = whitenoise.group(&creator_account, &fake_group_id).await;
+
+        assert!(result.is_err(), "Expected error for non-existent group");
+        match result.unwrap_err() {
+            WhitenoiseError::GroupNotFound => {
+                // Expected error type
+            }
+            other => panic!("Expected GroupNotFound error, got: {:?}", other),
+        }
     }
 
     #[tokio::test]
