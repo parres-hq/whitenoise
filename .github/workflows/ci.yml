@@ -83,6 +83,9 @@ jobs:
   # Build and test matrix
   test:
     name: Test (${{ matrix.os }})
+    permissions:
+      contents: read
+      pull-requests: write # Required for PR coverage comments
     strategy:
       fail-fast: false
       matrix:
@@ -106,6 +109,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
+
+      - name: Install cargo-llvm-cov (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -139,15 +146,24 @@ jobs:
       - name: Build
         run: cargo build --all-targets --all-features
 
-      - name: Test (Linux only - requires Docker)
+      - name: Test with Coverage (Linux only - requires Docker)
         if: runner.os == 'Linux'
-        run: cargo test --all-features --all-targets
-        env:
-          RUST_LOG: error
+        run: |
+          # Clean and run tests with coverage (library only, no integration-tests feature)
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
 
-      - name: Test Docs (Linux only - requires Docker)
-        if: runner.os == 'Linux'
-        run: cargo test --all-features --doc
+          # Also run doc tests (without coverage - requires nightly for coverage)
+          cargo test --workspace --doc
+
+          # Generate HTML and summary for artifacts
+          mkdir -p coverage
+          cargo llvm-cov report --html --output-dir coverage/html
+          cargo llvm-cov report | tee coverage/summary.txt
+
+          echo ""
+          echo "=== Coverage Summary ==="
+          cat coverage/summary.txt
         env:
           RUST_LOG: error
 
@@ -159,6 +175,141 @@ jobs:
           cargo run --bin integration_test --features integration-tests -- \
           --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
           rm -rf ./dev/data/integration_test/
+
+      - name: Extract coverage percentage
+        if: matrix.run-integration
+        id: coverage
+        run: |
+          chmod +x scripts/extract-coverage.sh
+          COVERAGE=$(./scripts/extract-coverage.sh lcov.info)
+          echo "percentage=$COVERAGE" >> "$GITHUB_OUTPUT"
+          echo "Current coverage: $COVERAGE%"
+
+      - name: Get master branch coverage (for PRs)
+        if: matrix.run-integration && github.event_name == 'pull_request'
+        id: master_coverage
+        run: |
+          echo "🔍 Searching for baseline from master branch..."
+
+          # Get the latest completed CI workflow run ID from master
+          RUN_ID=$(gh run list \
+            --repo ${{ github.repository }} \
+            --workflow=ci.yml \
+            --branch master \
+            --status completed \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "baseline=0" >> "$GITHUB_OUTPUT"
+            echo "⚠️  No completed CI run found on master"
+            exit 0
+          fi
+
+          echo "Found workflow run ID: $RUN_ID"
+
+          # Download the baseline artifact
+          if gh run download "$RUN_ID" \
+            --repo ${{ github.repository }} \
+            --name coverage-baseline \
+            --dir master-coverage; then
+
+            if [ -f master-coverage/coverage-baseline.txt ]; then
+              MASTER_COV=$(cat master-coverage/coverage-baseline.txt)
+              echo "baseline=$MASTER_COV" >> "$GITHUB_OUTPUT"
+              echo "✓ Master branch coverage: $MASTER_COV%"
+            else
+              echo "baseline=0" >> "$GITHUB_OUTPUT"
+              echo "⚠️  Baseline file not found in artifact"
+            fi
+          else
+            echo "baseline=0" >> "$GITHUB_OUTPUT"
+            echo "⚠️  Failed to download baseline artifact"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Compare coverage
+        if: matrix.run-integration && github.event_name == 'pull_request' && steps.master_coverage.outputs.baseline != '0'
+        run: |
+          CURRENT=${{ steps.coverage.outputs.percentage }}
+          BASELINE=${{ steps.master_coverage.outputs.baseline }}
+
+          echo "=== Coverage Comparison ==="
+          echo "Master branch: $BASELINE%"
+          echo "This PR:       $CURRENT%"
+
+          DIFF=$(awk "BEGIN {printf \"%.2f\", $CURRENT - $BASELINE}")
+
+          if (( $(awk "BEGIN {print ($CURRENT < $BASELINE)}") )); then
+            echo "❌ Coverage decreased by $DIFF%"
+            echo "::error::Coverage regression detected. Coverage decreased from $BASELINE% to $CURRENT% (-$DIFF%)"
+            exit 1
+          elif (( $(awk "BEGIN {print ($CURRENT > $BASELINE)}") )); then
+            echo "✅ Coverage improved by $DIFF%"
+          else
+            echo "✅ Coverage maintained at $BASELINE%"
+          fi
+
+      - name: Comment PR with coverage change
+        if: always() && matrix.run-integration && github.event_name == 'pull_request' && steps.master_coverage.outputs.baseline != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const current = parseFloat('${{ steps.coverage.outputs.percentage }}');
+            const baseline = parseFloat('${{ steps.master_coverage.outputs.baseline }}');
+            const diff = (current - baseline).toFixed(2);
+
+            let emoji = current > baseline ? '✅' : current < baseline ? '❌' : '⚠️';
+
+            const body = `## ${emoji} Coverage: ${baseline}% → ${current}% (${diff > 0 ? '+' : ''}${diff}%)`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Save coverage baseline (master only)
+        if: matrix.run-integration && github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          mkdir -p coverage-baseline
+          echo "${{ steps.coverage.outputs.percentage }}" > coverage-baseline/coverage-baseline.txt
+          echo "Saved baseline: ${{ steps.coverage.outputs.percentage }}%"
+
+      - name: Upload coverage baseline (master only)
+        if: matrix.run-integration && github.ref == 'refs/heads/master' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline
+          path: coverage-baseline/coverage-baseline.txt
+          retention-days: 90
+
+      - name: Upload HTML coverage report
+        if: matrix.run-integration
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-html
+          path: coverage/html/
+          retention-days: 90
+
+      - name: Upload lcov coverage report
+        if: matrix.run-integration
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-lcov
+          path: lcov.info
+          retention-days: 90
+
+      - name: Upload coverage summary
+        if: matrix.run-integration
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage/summary.txt
+          retention-days: 90
 
       - name: Stop Docker Compose services (Linux)
         if: always() && runner.os == 'Linux'

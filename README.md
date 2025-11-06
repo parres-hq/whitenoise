@@ -106,6 +106,24 @@ just outdated        # Check for outdated dependencies
 just deny-check      # Check licenses and dependencies
 ```
 
+### Test Coverage
+
+**Prerequisites**: Docker must be running for coverage tests.
+
+```bash
+# Start required services
+docker compose up -d
+
+# Generate coverage
+just coverage        # Generate lcov.info report
+just coverage-html   # Generate HTML report
+
+# View HTML report
+open target/llvm-cov/html/index.html
+```
+
+Coverage is automatically tracked in CI as part of the test suite. PRs that decrease coverage will be blocked.
+
 ## License
 
 White Noise is free and open source software, released under the Gnu AGPL v3 license. See the [LICENSE](LICENSE) file for details.
