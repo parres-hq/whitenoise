@@ -139,7 +139,10 @@ impl TestCase for FindOrCreateUserTestCase {
                         )))
                     }
                 },
-                &format!("wait for background metadata fetch for user {}", &test_pubkey.to_hex()[..8]),
+                &format!(
+                    "wait for background metadata fetch for user {}",
+                    &test_pubkey.to_hex()[..8]
+                ),
             )
             .await?;
         }
@@ -195,7 +198,10 @@ impl TestCase for FindOrCreateUserTestCase {
                         Ok(relays)
                     }
                 },
-                &format!("wait for background relay fetch for user {}", &test_pubkey.to_hex()[..8]),
+                &format!(
+                    "wait for background relay fetch for user {}",
+                    &test_pubkey.to_hex()[..8]
+                ),
             )
             .await?;
 
