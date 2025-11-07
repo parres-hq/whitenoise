@@ -125,9 +125,9 @@ impl TestCase for FindOrCreateUserTestCase {
 
         tracing::info!("✓ User can be found by pubkey after creation");
 
-        // If we expect metadata, wait until it arrives (for CI timing issues)
-        if self.should_have_metadata && user.metadata == nostr_sdk::Metadata::default() {
-            tracing::info!("Metadata not yet available, waiting for updates...");
+        // If we expect metadata, wait until it arrives (background fetch is now asynchronous)
+        if self.should_have_metadata {
+            tracing::info!("Waiting for background metadata fetch to complete...");
             user = retry_default(
                 || async {
                     let updated_user = context.whitenoise.find_user_by_pubkey(&test_pubkey).await?;
@@ -135,11 +135,14 @@ impl TestCase for FindOrCreateUserTestCase {
                         Ok(updated_user)
                     } else {
                         Err(WhitenoiseError::Other(anyhow::anyhow!(
-                            "Metadata not yet available"
+                            "Background metadata fetch not yet complete"
                         )))
                     }
                 },
-                &format!("wait for metadata for user {}", &test_pubkey.to_hex()[..8]),
+                &format!(
+                    "wait for background metadata fetch for user {}",
+                    &test_pubkey.to_hex()[..8]
+                ),
             )
             .await?;
         }
@@ -174,12 +177,33 @@ impl TestCase for FindOrCreateUserTestCase {
         }
 
         if self.should_have_relays {
-            let user_relays = user
-                .relays_by_type(
-                    crate::whitenoise::relays::RelayType::Nip65,
-                    context.whitenoise,
-                )
-                .await?;
+            tracing::info!("Waiting for background relay fetch to complete...");
+
+            // Wait for background relay fetching to complete
+            let user_relays = retry_default(
+                || async {
+                    let updated_user = context.whitenoise.find_user_by_pubkey(&test_pubkey).await?;
+                    let relays = updated_user
+                        .relays_by_type(
+                            crate::whitenoise::relays::RelayType::Nip65,
+                            context.whitenoise,
+                        )
+                        .await?;
+
+                    if relays.is_empty() {
+                        Err(WhitenoiseError::Other(anyhow::anyhow!(
+                            "Background relay fetch not yet complete"
+                        )))
+                    } else {
+                        Ok(relays)
+                    }
+                },
+                &format!(
+                    "wait for background relay fetch for user {}",
+                    &test_pubkey.to_hex()[..8]
+                ),
+            )
+            .await?;
 
             let relay_urls: Vec<&RelayUrl> = user_relays.iter().map(|r| &r.url).collect();
             for expected_relay in &self.test_relays {

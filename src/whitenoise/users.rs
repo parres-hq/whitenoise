@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +15,10 @@ use crate::{
     },
 };
 
+/// TTL for user metadata before it's considered stale and needs refreshing
+/// Set to 24 hours - metadata doesn't change frequently for most users
+const METADATA_TTL_HOURS: i64 = 24;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct User {
     pub id: Option<i64>,
@@ -25,6 +29,29 @@ pub struct User {
 }
 
 impl User {
+    /// Checks if the user's metadata is stale and needs refreshing based on TTL.
+    ///
+    /// Returns `true` if the metadata was last updated more than `METADATA_TTL_HOURS` ago,
+    /// or if this is a newly created user with default metadata.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if metadata should be refreshed
+    /// * `false` if metadata is still fresh
+    fn needs_metadata_refresh(&self) -> bool {
+        let now = Utc::now();
+        let ttl_duration = Duration::hours(METADATA_TTL_HOURS);
+        let stale_threshold = now - ttl_duration;
+
+        // Always refresh if metadata is default (empty)
+        if self.metadata == Metadata::new() {
+            return true;
+        }
+
+        // Refresh if updated_at is older than TTL
+        self.updated_at < stale_threshold
+    }
+
     /// Syncs the user's metadata by fetching the latest version from Nostr relays.
     ///
     /// This method queries the user's configured relays (or default relays if none are configured)
@@ -604,33 +631,43 @@ impl Whitenoise {
     /// - There's a database connection or query error
     /// - The public key format is invalid (though this is typically caught at the type level)
     pub async fn find_or_create_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<User> {
-        let (mut user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+        let (user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+
+        // For newly created users, always do background sync
         if created {
-            if let Err(e) = user.update_relay_lists(self).await {
+            if let Err(e) = self.background_fetch_user_data(&user).await {
                 tracing::warn!(
                     target: "whitenoise::users::find_or_create_user_by_pubkey",
-                    "Failed to update relay lists for new user {}: {}",
+                    "Failed to start background fetch for new user {}: {}",
                     user.pubkey,
                     e
                 );
             }
-            if let Err(e) = self.refresh_global_subscription_for_user(&user).await {
-                tracing::warn!(
-                    target: "whitenoise::users::find_or_create_user_by_pubkey",
-                    "Failed to refresh global subscription for new user {}: {}",
-                    user.pubkey,
-                    e
-                );
-            }
-        }
-        if let Err(e) = user.sync_metadata(self).await {
-            tracing::warn!(
+        } else if user.needs_metadata_refresh() {
+            // For existing users, only sync if metadata is stale
+            tracing::debug!(
                 target: "whitenoise::users::find_or_create_user_by_pubkey",
-                "Failed to sync metadata for new user {}: {}",
+                "User {} metadata is stale (updated_at: {}), starting background refresh",
                 user.pubkey,
-                e
+                user.updated_at
+            );
+            if let Err(e) = self.background_fetch_user_data(&user).await {
+                tracing::warn!(
+                    target: "whitenoise::users::find_or_create_user_by_pubkey",
+                    "Failed to start background fetch for stale user {}: {}",
+                    user.pubkey,
+                    e
+                );
+            }
+        } else {
+            tracing::debug!(
+                target: "whitenoise::users::find_or_create_user_by_pubkey",
+                "User {} metadata is fresh (updated_at: {}), skipping sync",
+                user.pubkey,
+                user.updated_at
             );
         }
+
         Ok(user)
     }
 
@@ -1321,6 +1358,69 @@ mod tests {
                 .unwrap();
 
             assert!(result);
+        }
+
+        #[tokio::test]
+        async fn test_needs_metadata_refresh_default_metadata() {
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+            let user = User {
+                id: Some(1),
+                pubkey: test_pubkey,
+                metadata: Metadata::new(), // Default empty metadata
+                created_at: Utc::now(),
+                updated_at: Utc::now(), // Even if recently updated
+            };
+
+            // Should always refresh if metadata is default/empty
+            assert!(user.needs_metadata_refresh());
+        }
+
+        #[tokio::test]
+        async fn test_needs_metadata_refresh_fresh_metadata() {
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+            let user = User {
+                id: Some(1),
+                pubkey: test_pubkey,
+                metadata: Metadata::new().name("Test User"), // Non-default metadata
+                created_at: Utc::now(),
+                updated_at: Utc::now(), // Recently updated
+            };
+
+            // Should not refresh if metadata is fresh and non-default
+            assert!(!user.needs_metadata_refresh());
+        }
+
+        #[tokio::test]
+        async fn test_needs_metadata_refresh_stale_metadata() {
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+            let stale_time = Utc::now() - Duration::hours(METADATA_TTL_HOURS + 1); // Older than TTL
+            let user = User {
+                id: Some(1),
+                pubkey: test_pubkey,
+                metadata: Metadata::new().name("Test User"), // Non-default metadata
+                created_at: stale_time,
+                updated_at: stale_time, // Old update time
+            };
+
+            // Should refresh if metadata is older than TTL
+            assert!(user.needs_metadata_refresh());
+        }
+
+        #[tokio::test]
+        async fn test_needs_metadata_refresh_boundary_case() {
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+            let boundary_time =
+                Utc::now() - Duration::hours(METADATA_TTL_HOURS) + Duration::minutes(1); // Just within TTL
+            let user = User {
+                id: Some(1),
+                pubkey: test_pubkey,
+                metadata: Metadata::new().name("Test User"), // Non-default metadata
+                created_at: boundary_time,
+                updated_at: boundary_time,
+            };
+
+            // Should not refresh if just within TTL boundary
+            assert!(!user.needs_metadata_refresh());
         }
     }
 }
