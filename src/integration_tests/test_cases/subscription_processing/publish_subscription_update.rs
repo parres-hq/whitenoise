@@ -91,7 +91,7 @@ impl PublishSubscriptionUpdateTestCase {
             let pubkey = keys.public_key();
             let initial_user = context
                 .whitenoise
-                .find_or_create_user_by_pubkey(&pubkey)
+                .find_or_create_user_by_pubkey(&pubkey, false)
                 .await?;
 
             // Verify initial state for metadata tests

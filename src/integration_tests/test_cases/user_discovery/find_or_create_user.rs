@@ -107,7 +107,7 @@ impl TestCase for FindOrCreateUserTestCase {
 
         let mut user = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey)
+            .find_or_create_user_by_pubkey(&test_pubkey, true) // Use force_sync=true for integration tests
             .await?;
 
         assert_eq!(user.pubkey, test_pubkey, "User pubkey should match");
@@ -224,7 +224,7 @@ impl TestCase for FindOrCreateUserTestCase {
 
         let user_again = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey)
+            .find_or_create_user_by_pubkey(&test_pubkey, false) // Use fast mode for second call
             .await?;
         assert_eq!(
             user_again.id, user.id,
