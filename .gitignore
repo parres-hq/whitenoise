@@ -22,3 +22,4 @@ cargo-flamegraph.trace
 lcov.info
 *.profraw
 *.profdata
+coverage/

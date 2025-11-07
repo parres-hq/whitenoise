@@ -121,14 +121,15 @@ test-nextest:
 
 # Generate code coverage report
 coverage:
-    cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
-    @echo "Coverage report generated: lcov.info"
+    cargo llvm-cov clean --workspace
+    cargo llvm-cov --workspace --lcov --output-path lcov.info
+    @echo "Coverage report: lcov.info"
 
 # Generate HTML code coverage report
 coverage-html:
-    cargo llvm-cov --all-features --workspace --html
-    @echo "HTML coverage report generated in target/llvm-cov/html/"
-    @echo "Open target/llvm-cov/html/index.html in your browser"
+    cargo llvm-cov clean --workspace
+    cargo llvm-cov --workspace --html
+    @echo "HTML report: target/llvm-cov/html/index.html"
 
 # Check minimum supported Rust version
 check-msrv:
