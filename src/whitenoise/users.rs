@@ -604,7 +604,7 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `pubkey` - The Nostr public key of the user to find or create
-    /// * `force_sync` - If true, forces synchronous metadata/relay syncing (blocking).
+    /// * `force_sync` - If true, forces synchronous metadata syncing (blocking).
     ///   If false, uses background syncing with TTL-based refresh logic.
     ///
     /// # Returns
@@ -657,7 +657,7 @@ impl Whitenoise {
             );
 
             if created {
-                // For new users, sync relay lists first, then metadata
+                // For new users, sync relay lists first so we have a good chance of finding their events
                 if let Err(e) = user.update_relay_lists(self).await {
                     tracing::warn!(
                         target: "whitenoise::users::find_or_create_user_by_pubkey",
@@ -666,6 +666,7 @@ impl Whitenoise {
                         e
                     );
                 }
+                // For new users, we need to add the user to the global subscriptions batches so we get updates on their events
                 if let Err(e) = self.refresh_global_subscription_for_user(&user).await {
                     tracing::warn!(
                         target: "whitenoise::users::find_or_create_user_by_pubkey",
@@ -762,6 +763,53 @@ impl Whitenoise {
 
             Ok::<(), WhitenoiseError>(())
         });
+        Ok(())
+    }
+
+    /// **TEST-ONLY**: Sets the `updated_at` timestamp for a user to a specific value.
+    ///
+    /// This method is only available when the `integration-tests` feature is enabled
+    /// and is intended for testing TTL-based metadata refresh logic.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The public key of the user to update
+    /// * `updated_at` - The new timestamp to set
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if successful, or an error if the user doesn't exist or
+    /// there's a database error.
+    ///
+    /// # Example (in integration tests)
+    ///
+    /// ```rust,ignore
+    /// use chrono::{Utc, Duration};
+    ///
+    /// // Set user's metadata to be 25 hours old (stale)
+    /// let stale_time = Utc::now() - Duration::hours(25);
+    /// whitenoise.set_user_updated_at_for_testing(&pubkey, stale_time).await?;
+    /// ```
+    #[cfg(feature = "integration-tests")]
+    pub async fn set_user_updated_at_for_testing(
+        &self,
+        pubkey: &PublicKey,
+        updated_at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE users SET updated_at = ? WHERE pubkey = ?")
+            .bind(updated_at.timestamp_millis())
+            .bind(pubkey.to_hex())
+            .execute(&self.database.pool)
+            .await
+            .map_err(crate::whitenoise::database::DatabaseError::Sqlx)?;
+
+        tracing::debug!(
+            target: "whitenoise::users::set_user_updated_at_for_testing",
+            "Set updated_at for user {} to {} (TEST ONLY)",
+            pubkey,
+            updated_at
+        );
+
         Ok(())
     }
 }
@@ -1003,60 +1051,6 @@ mod tests {
             final_user.metadata.about,
             Some("Test description".to_string())
         );
-    }
-
-    #[tokio::test]
-    async fn test_find_or_create_user_by_pubkey_existing_user() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let original_user = User {
-            id: None,
-            pubkey: test_pubkey,
-            metadata: Metadata::new()
-                .name("Original User")
-                .about("Original description"),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        let saved_user = original_user.save(&whitenoise.database).await.unwrap();
-        let original_id = saved_user.id.unwrap();
-
-        let found_user = whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, false)
-            .await
-            .unwrap();
-
-        assert_eq!(found_user.id, Some(original_id));
-        assert_eq!(found_user.pubkey, test_pubkey);
-        assert_eq!(found_user.metadata.name, Some("Original User".to_string()));
-        assert_eq!(
-            found_user.metadata.about,
-            Some("Original description".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn test_find_or_create_user_by_pubkey_new_user() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-
-        let user_exists = whitenoise.find_user_by_pubkey(&test_pubkey).await.is_ok();
-        assert!(!user_exists);
-
-        let created_user = whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, false)
-            .await
-            .unwrap();
-
-        assert!(created_user.id.is_some());
-        assert_eq!(created_user.pubkey, test_pubkey);
-        assert_eq!(created_user.metadata.name, None);
-        assert_eq!(created_user.metadata.about, None);
-
-        let found_user = whitenoise.find_user_by_pubkey(&test_pubkey).await.unwrap();
-        assert_eq!(found_user.id, created_user.id);
-        assert_eq!(found_user.pubkey, created_user.pubkey);
     }
 
     #[tokio::test]
@@ -1477,49 +1471,71 @@ mod tests {
             assert!(!user.needs_metadata_refresh());
         }
 
+        // NOTE: The following tests have LIMITED COVERAGE due to lack of mocking.
+        // They can only verify database operations and method completion.
+        // They CANNOT verify that sync methods (sync_metadata, update_relay_lists,
+        // background_fetch_user_data) are actually called vs skipped.
+        // For true behavioral testing, see integration tests in:
+        // src/integration_tests/test_cases/user_discovery/find_or_create_user.rs
+
         #[tokio::test]
-        async fn test_find_or_create_user_by_pubkey_force_sync_true_existing_user() {
+        async fn test_find_or_create_creates_new_user() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let test_pubkey = nostr_sdk::Keys::generate().public_key();
 
-            // Create an existing user first to avoid network calls for new user creation
-            let existing_user = User {
-                id: None,
-                pubkey: test_pubkey,
-                metadata: Metadata::new().name("Existing User"),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            };
-            let saved_user = existing_user.save(&whitenoise.database).await.unwrap();
+            // Verify user doesn't exist
+            assert!(whitenoise.find_user_by_pubkey(&test_pubkey).await.is_err());
 
-            // Test force_sync=true with existing user
-            // This should attempt to sync metadata regardless of TTL
-            let result = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, true)
-                .await;
+            // Create user with force_sync=false to avoid network calls
+            let user = whitenoise
+                .find_or_create_user_by_pubkey(&test_pubkey, false)
+                .await
+                .unwrap();
 
-            // The test should either succeed or fail with a network-related error
-            match result {
-                Ok(user) => {
-                    assert_eq!(user.pubkey, test_pubkey);
-                    assert_eq!(user.id, saved_user.id);
-                    // force_sync=true was called, which attempts synchronous metadata sync
-                }
-                Err(e) => {
-                    // In sandboxed test environments, network calls may fail
-                    // This is expected behavior for force_sync=true
-                    tracing::debug!("Force sync failed as expected in test environment: {}", e);
-                    // The important thing is that force_sync=true was attempted
-                }
-            }
+            // TESTS: User creation and database persistence
+            assert_eq!(user.pubkey, test_pubkey);
+            assert!(user.id.is_some());
+
+            // LIMITATION: Cannot verify if background_fetch_user_data was called
+            // TODO: Find a way to mock or spy on the sync methods to verify they were called
         }
 
         #[tokio::test]
-        async fn test_find_or_create_user_by_pubkey_force_sync_false() {
+        async fn test_find_or_create_returns_existing_user() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let test_pubkey = nostr_sdk::Keys::generate().public_key();
 
-            // Test force_sync=false (background mode)
+            // Create user directly in database
+            let original_user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new().name("Original User"),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = original_user.save(&whitenoise.database).await.unwrap();
+
+            // Call find_or_create
+            let found_user = whitenoise
+                .find_or_create_user_by_pubkey(&test_pubkey, false)
+                .await
+                .unwrap();
+
+            // TESTS: Existing user retrieval
+            assert_eq!(found_user.id, saved_user.id);
+            assert_eq!(found_user.pubkey, test_pubkey);
+            assert_eq!(found_user.metadata.name, Some("Original User".to_string()));
+
+            // LIMITATION: Cannot verify if sync was skipped due to fresh metadata
+            // TODO: Find a way to mock or spy on the sync methods to verify they were called
+        }
+
+        #[tokio::test]
+        async fn test_find_or_create_returns_immediately_with_background_sync() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+
+            // TESTS: Method returns immediately without blocking on network
             let user = whitenoise
                 .find_or_create_user_by_pubkey(&test_pubkey, false)
                 .await
@@ -1527,112 +1543,10 @@ mod tests {
 
             assert_eq!(user.pubkey, test_pubkey);
             assert!(user.id.is_some());
-            // With force_sync=false, background_fetch_user_data is called asynchronously
-            // The method returns immediately without waiting for network calls
-        }
 
-        #[tokio::test]
-        async fn test_find_or_create_user_by_pubkey_existing_user_fresh_metadata() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let test_pubkey = nostr_sdk::Keys::generate().public_key();
-
-            // Create user with fresh metadata
-            let user = User {
-                id: None,
-                pubkey: test_pubkey,
-                metadata: Metadata::new().name("Fresh User"), // Non-default metadata
-                created_at: Utc::now(),
-                updated_at: Utc::now(), // Recently updated
-            };
-            let saved_user = user.save(&whitenoise.database).await.unwrap();
-
-            // Test force_sync=false with fresh metadata - should skip sync
-            let found_user = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, false)
-                .await
-                .unwrap();
-
-            assert_eq!(found_user.id, saved_user.id);
-            assert_eq!(found_user.metadata.name, Some("Fresh User".to_string()));
-        }
-
-        #[tokio::test]
-        async fn test_find_or_create_user_by_pubkey_existing_user_stale_metadata() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let test_pubkey = nostr_sdk::Keys::generate().public_key();
-
-            // Create user with stale metadata
-            let stale_time = Utc::now() - Duration::hours(METADATA_TTL_HOURS + 1);
-            let user = User {
-                id: None,
-                pubkey: test_pubkey,
-                metadata: Metadata::new().name("Stale User"), // Non-default but old
-                created_at: stale_time,
-                updated_at: stale_time, // Old update time
-            };
-            let saved_user = user.save(&whitenoise.database).await.unwrap();
-
-            // Test force_sync=false with stale metadata - should trigger background sync
-            let found_user = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, false)
-                .await
-                .unwrap();
-
-            assert_eq!(found_user.id, saved_user.id);
-            assert_eq!(found_user.metadata.name, Some("Stale User".to_string()));
-            // Note: The background sync happens asynchronously, so the metadata
-            // won't be updated immediately in this test
-        }
-
-        #[tokio::test]
-        async fn test_find_or_create_user_by_pubkey_existing_user_default_metadata() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let test_pubkey = nostr_sdk::Keys::generate().public_key();
-
-            // Create user with default metadata
-            let user = User {
-                id: None,
-                pubkey: test_pubkey,
-                metadata: Metadata::new(), // Default empty metadata
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            };
-            let saved_user = user.save(&whitenoise.database).await.unwrap();
-
-            // Test force_sync=false with default metadata - should trigger background sync
-            let found_user = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, false)
-                .await
-                .unwrap();
-
-            assert_eq!(found_user.id, saved_user.id);
-            assert_eq!(found_user.metadata, Metadata::new());
-            // Background sync should be triggered due to default metadata
-        }
-
-        #[tokio::test]
-        async fn test_find_or_create_user_by_pubkey_force_sync_overrides_ttl() {
-            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-            let test_pubkey = nostr_sdk::Keys::generate().public_key();
-
-            // Create user with fresh metadata
-            let user = User {
-                id: None,
-                pubkey: test_pubkey,
-                metadata: Metadata::new().name("Fresh User"),
-                created_at: Utc::now(),
-                updated_at: Utc::now(), // Recently updated
-            };
-            let saved_user = user.save(&whitenoise.database).await.unwrap();
-
-            // Test force_sync=true - should sync even with fresh metadata
-            let found_user = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, true)
-                .await
-                .unwrap();
-
-            assert_eq!(found_user.id, saved_user.id);
-            // force_sync=true should perform sync regardless of TTL
+            // LIMITATION: Cannot verify background_fetch_user_data was spawned
+            // LIMITATION: Cannot verify it returns before network calls complete
+            // TODO: Find a way to mock or spy on the sync methods to verify they were called
         }
     }
 }

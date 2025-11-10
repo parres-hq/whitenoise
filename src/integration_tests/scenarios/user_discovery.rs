@@ -45,6 +45,21 @@ impl Scenario for UserDiscoveryScenario {
             .execute(&mut self.context)
             .await?;
 
+        tracing::info!("Testing: Background mode (force_sync=false) for new user");
+        FindOrCreateUserBackgroundModeTestCase::new()
+            .execute(&mut self.context)
+            .await?;
+
+        tracing::info!("Testing: Force sync on existing user with updated metadata");
+        FindOrCreateUserForceSyncOnExistingTestCase::new()
+            .execute(&mut self.context)
+            .await?;
+
+        tracing::info!("Testing: Stale metadata refresh (force_sync=false)");
+        FindOrCreateUserStaleMetadataRefreshTestCase::new()
+            .execute(&mut self.context)
+            .await?;
+
         Ok(())
     }
 }
