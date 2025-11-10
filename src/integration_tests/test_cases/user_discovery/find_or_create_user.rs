@@ -117,7 +117,10 @@ impl TestCase for FindOrCreateUserTestCase {
 
         let mut user = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, true) // force synchronous metadata sync
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Blocking,
+            ) // force synchronous metadata sync
             .await?;
 
         assert_eq!(user.pubkey, test_pubkey, "User pubkey should match");
@@ -232,13 +235,16 @@ impl TestCase for FindOrCreateUserTestCase {
             tracing::info!("✓ No relay publication needed for this test case");
         }
 
-        // Second call with force_sync=false to test idempotency
+        // Second call with Background mode to test idempotency
         // NOTE: Since the user was just created/synced, metadata is fresh (<24h),
         // so this call will return immediately without any sync (lines 716-723 in users.rs)
         // However, we CANNOT verify that sync was skipped - we can only verify the user is returned.
         let user_again = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, false)
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Background,
+            )
             .await?;
         assert_eq!(
             user_again.id, user.id,
@@ -255,7 +261,7 @@ impl TestCase for FindOrCreateUserTestCase {
     }
 }
 
-/// Tests find_or_create_user with force_sync=false for a NEW user (background mode)
+/// Tests find_or_create_user with Background mode for a NEW user
 ///
 /// This test verifies:
 /// - User is created immediately in the database
@@ -263,11 +269,11 @@ impl TestCase for FindOrCreateUserTestCase {
 /// - Metadata is empty immediately after the call
 /// - Background fetch eventually completes and populates metadata
 ///
-/// This is the KEY test that shows the difference between force_sync=true and false:
-/// - force_sync=true: blocks until metadata is fetched
-/// - force_sync=false: returns immediately, fetches in background
+/// This is the KEY test that shows the difference between Blocking and Background modes:
+/// - Blocking: blocks until metadata is fetched
+/// - Background: returns immediately, fetches in background
 ///
-/// TESTS CODE PATH: Lines 691-699 in users.rs (created=true, force_sync=false)
+/// TESTS CODE PATH: Lines 691-699 in users.rs (created=true, Background mode)
 pub struct FindOrCreateUserBackgroundModeTestCase {
     test_keys: Keys,
     test_metadata: Metadata,
@@ -333,10 +339,13 @@ impl TestCase for FindOrCreateUserBackgroundModeTestCase {
         publish_relay_lists(&test_client, relay_urls).await?;
         test_client.disconnect().await;
 
-        // Call with force_sync=false (background mode)
+        // Call with Background mode
         let user = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, false)
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Background,
+            )
             .await?;
 
         assert_eq!(user.pubkey, test_pubkey, "User pubkey should match");
@@ -448,10 +457,13 @@ impl TestCase for FindOrCreateUserForceSyncOnExistingTestCase {
             .await?;
         test_client.disconnect().await;
 
-        // Create user with force_sync to get initial metadata
+        // Create user with Blocking mode to get initial metadata
         let initial_user = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, true)
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Blocking,
+            )
             .await?;
 
         assert_eq!(
@@ -476,14 +488,17 @@ impl TestCase for FindOrCreateUserForceSyncOnExistingTestCase {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         test_client2.disconnect().await;
 
-        // Call find_or_create with force_sync=true on existing user
+        // Call find_or_create with Blocking mode on existing user
         // This should force a sync even though metadata was just fetched
         // NOTE: We use retry here because the relay might take a moment to make the event available
         let updated_user = retry_default(
             || async {
                 let user = context
                     .whitenoise
-                    .find_or_create_user_by_pubkey(&test_pubkey, true)
+                    .find_or_create_user_by_pubkey(
+                        &test_pubkey,
+                        crate::whitenoise::users::UserSyncMode::Blocking,
+                    )
                     .await?;
 
                 if user.metadata.name == self.updated_metadata.name {
@@ -497,7 +512,7 @@ impl TestCase for FindOrCreateUserForceSyncOnExistingTestCase {
                 }
             },
             &format!(
-                "wait for force sync to fetch updated metadata for user {}",
+                "wait for blocking sync to fetch updated metadata for user {}",
                 &test_pubkey.to_hex()[..8]
             ),
         )
@@ -583,10 +598,13 @@ impl TestCase for FindOrCreateUserStaleMetadataRefreshTestCase {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         test_client.disconnect().await;
 
-        // Create user with force_sync to get initial metadata
+        // Create user with Blocking mode to get initial metadata
         let initial_user = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, true)
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Blocking,
+            )
             .await?;
 
         // Use detailed error if metadata wasn't fetched
@@ -619,11 +637,14 @@ impl TestCase for FindOrCreateUserStaleMetadataRefreshTestCase {
             .await?;
         test_client2.disconnect().await;
 
-        // Call find_or_create with force_sync=false
+        // Call find_or_create with Background mode
         // This should trigger background refresh because metadata is stale
         let user_before_refresh = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey, false)
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Background,
+            )
             .await?;
 
         // Should return immediately with OLD metadata (background fetch hasn't completed yet)

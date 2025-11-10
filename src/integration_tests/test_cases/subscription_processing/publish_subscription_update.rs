@@ -91,7 +91,10 @@ impl PublishSubscriptionUpdateTestCase {
             let pubkey = keys.public_key();
             let initial_user = context
                 .whitenoise
-                .find_or_create_user_by_pubkey(&pubkey, false)
+                .find_or_create_user_by_pubkey(
+                    &pubkey,
+                    crate::whitenoise::users::UserSyncMode::Background,
+                )
                 .await?;
 
             // Verify initial state for metadata tests

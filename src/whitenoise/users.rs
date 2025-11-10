@@ -19,6 +19,32 @@ use crate::{
 /// Set to 24 hours - metadata doesn't change frequently for most users
 const METADATA_TTL_HOURS: i64 = 24;
 
+/// Specifies how user metadata and relay lists should be synchronized when finding or creating a user.
+///
+/// This enum controls the synchronization behavior in `find_or_create_user_by_pubkey`, allowing
+/// callers to choose between immediate blocking synchronization or background asynchronous updates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UserSyncMode {
+    /// Immediate blocking sync of metadata and relay lists.
+    ///
+    /// This mode performs synchronous network calls to fetch the latest user metadata
+    /// and relay lists before returning. Use this when you need up-to-date information
+    /// immediately (e.g., when displaying user profiles or adding users to groups).
+    ///
+    /// **Note:** This mode blocks the current async task until network operations complete.
+    Blocking,
+
+    /// Background sync with TTL-based refresh.
+    ///
+    /// This mode returns immediately with cached data (if available) and schedules
+    /// background tasks to update stale information. New users or users with stale
+    /// metadata (older than 24 hours) will have their data refreshed asynchronously.
+    ///
+    /// **Note:** This is the recommended mode for most use cases as it provides better
+    /// performance and responsiveness.
+    Background,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct User {
     pub id: Option<i64>,
@@ -598,14 +624,15 @@ impl Whitenoise {
     /// Finds a user by their public key or creates a new one if not found.
     ///
     /// This method looks up a user in the database using their Nostr public key.
-    /// If the user doesn't exist, it creates a new user record and optionally syncs
-    /// their metadata and relay lists.
+    /// If the user doesn't exist, it creates a new user record and synchronizes
+    /// their metadata and relay lists according to the specified sync mode.
     ///
     /// # Arguments
     ///
     /// * `pubkey` - The Nostr public key of the user to find or create
-    /// * `force_sync` - If true, forces synchronous metadata syncing (blocking).
-    ///   If false, uses background syncing with TTL-based refresh logic.
+    /// * `sync_mode` - Controls how user data is synchronized:
+    ///   - `UserSyncMode::Blocking` - Performs immediate blocking sync before returning
+    ///   - `UserSyncMode::Background` - Returns immediately and syncs in the background
     ///
     /// # Returns
     ///
@@ -617,19 +644,19 @@ impl Whitenoise {
     ///
     /// ```rust
     /// use nostr_sdk::PublicKey;
-    /// use whitenoise::Whitenoise;
+    /// use whitenoise::{UserSyncMode, Whitenoise};
     ///
     /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// let pubkey = PublicKey::parse("npub1...")?;
     ///
     /// // Fast, non-blocking call with background sync
     /// let user = whitenoise
-    ///     .find_or_create_user_by_pubkey(&pubkey, false)
+    ///     .find_or_create_user_by_pubkey(&pubkey, UserSyncMode::Background)
     ///     .await?;
     ///
     /// // Slower, blocking call with immediate metadata
     /// let user_with_metadata = whitenoise
-    ///     .find_or_create_user_by_pubkey(&pubkey, true)
+    ///     .find_or_create_user_by_pubkey(&pubkey, UserSyncMode::Blocking)
     ///     .await?;
     /// # Ok(())
     /// # }
@@ -640,15 +667,15 @@ impl Whitenoise {
     /// This method will return an error if:
     /// - There's a database connection or query error
     /// - The public key format is invalid (though this is typically caught at the type level)
-    /// - Network errors occur during forced synchronous syncing
+    /// - Network errors occur during blocking synchronization
     pub async fn find_or_create_user_by_pubkey(
         &self,
         pubkey: &PublicKey,
-        force_sync: bool,
+        sync_mode: UserSyncMode,
     ) -> Result<User> {
         let (mut user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
 
-        if force_sync {
+        if sync_mode == UserSyncMode::Blocking {
             // Force synchronous syncing - blocking network calls
             tracing::debug!(
                 target: "whitenoise::users::find_or_create_user_by_pubkey",
@@ -1486,9 +1513,9 @@ mod tests {
             // Verify user doesn't exist
             assert!(whitenoise.find_user_by_pubkey(&test_pubkey).await.is_err());
 
-            // Create user with force_sync=false to avoid network calls
+            // Create user with Background mode to avoid network calls
             let user = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, false)
+                .find_or_create_user_by_pubkey(&test_pubkey, UserSyncMode::Background)
                 .await
                 .unwrap();
 
@@ -1517,7 +1544,7 @@ mod tests {
 
             // Call find_or_create
             let found_user = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, false)
+                .find_or_create_user_by_pubkey(&test_pubkey, UserSyncMode::Background)
                 .await
                 .unwrap();
 
@@ -1537,7 +1564,7 @@ mod tests {
 
             // TESTS: Method returns immediately without blocking on network
             let user = whitenoise
-                .find_or_create_user_by_pubkey(&test_pubkey, false)
+                .find_or_create_user_by_pubkey(&test_pubkey, UserSyncMode::Background)
                 .await
                 .unwrap();
 
