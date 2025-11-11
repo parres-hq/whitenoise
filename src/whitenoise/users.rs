@@ -673,84 +673,96 @@ impl Whitenoise {
         pubkey: &PublicKey,
         sync_mode: UserSyncMode,
     ) -> Result<User> {
-        let (mut user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
+        let (user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
 
         if sync_mode == UserSyncMode::Blocking {
-            // Force synchronous syncing - blocking network calls
-            tracing::debug!(
-                target: "whitenoise::users::find_or_create_user_by_pubkey",
-                "Force sync requested for user {}, performing blocking metadata and relay sync",
-                user.pubkey
-            );
+            self.sync_user_blocking(&user, created).await?;
+        } else {
+            self.sync_user_background(&user, created).await?;
+        }
 
-            if created {
-                // For new users, sync relay lists first so we have a good chance of finding their events
-                if let Err(e) = user.update_relay_lists(self).await {
-                    tracing::warn!(
-                        target: "whitenoise::users::find_or_create_user_by_pubkey",
-                        "Failed to sync relay lists for new user {}: {}",
-                        user.pubkey,
-                        e
-                    );
-                }
-                // For new users, we need to add the user to the global subscriptions batches so we get updates on their events
-                if let Err(e) = self.refresh_global_subscription_for_user(&user).await {
-                    tracing::warn!(
-                        target: "whitenoise::users::find_or_create_user_by_pubkey",
-                        "Failed to refresh global subscription for new user {}: {}",
-                        user.pubkey,
-                        e
-                    );
-                }
-            }
+        Ok(user)
+    }
 
-            // Always sync metadata when force_sync is true
-            if let Err(e) = user.sync_metadata(self).await {
+    async fn sync_user_blocking(&self, user: &User, is_new: bool) -> Result<()> {
+        tracing::debug!(
+            target: "whitenoise::users::sync_user_blocking",
+            "Force sync requested for user {}, performing blocking metadata and relay sync",
+            user.pubkey
+        );
+
+        let mut user_clone = user.clone();
+
+        if is_new {
+            // For new users, sync relay lists first so we have a good chance of finding their events
+            if let Err(e) = user_clone.update_relay_lists(self).await {
                 tracing::warn!(
-                    target: "whitenoise::users::find_or_create_user_by_pubkey",
-                    "Failed to sync metadata for user {}: {}",
+                    target: "whitenoise::users::sync_user_blocking",
+                    "Failed to sync relay lists for new user {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
+            }
+            // For new users, we need to add the user to the global subscriptions batches so we get updates on their events
+            if let Err(e) = self.refresh_global_subscription_for_user(&user_clone).await {
+                tracing::warn!(
+                    target: "whitenoise::users::sync_user_blocking",
+                    "Failed to refresh global subscription for new user {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
+            }
+        }
+
+        // Always sync metadata when force_sync is true
+        if let Err(e) = user_clone.sync_metadata(self).await {
+            tracing::warn!(
+                target: "whitenoise::users::sync_user_blocking",
+                "Failed to sync metadata for user {}: {}",
+                user_clone.pubkey,
+                e
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn sync_user_background(&self, user: &User, is_new: bool) -> Result<()> {
+        if is_new {
+            if let Err(e) = self.background_fetch_user_data(user).await {
+                tracing::warn!(
+                    target: "whitenoise::users::sync_user_background",
+                    "Failed to start background fetch for new user {}: {}",
+                    user.pubkey,
+                    e
+                );
+            }
+        } else if user.needs_metadata_refresh() {
+            // For existing users, only sync if metadata is stale
+            tracing::debug!(
+                target: "whitenoise::users::sync_user_background",
+                "User {} metadata is stale (updated_at: {}), starting background refresh",
+                user.pubkey,
+                user.updated_at
+            );
+            if let Err(e) = self.background_fetch_user_data(user).await {
+                tracing::warn!(
+                    target: "whitenoise::users::sync_user_background",
+                    "Failed to start background fetch for stale user {}: {}",
                     user.pubkey,
                     e
                 );
             }
         } else {
-            // Use TTL-based background syncing (non-blocking)
-            if created {
-                if let Err(e) = self.background_fetch_user_data(&user).await {
-                    tracing::warn!(
-                        target: "whitenoise::users::find_or_create_user_by_pubkey",
-                        "Failed to start background fetch for new user {}: {}",
-                        user.pubkey,
-                        e
-                    );
-                }
-            } else if user.needs_metadata_refresh() {
-                // For existing users, only sync if metadata is stale
-                tracing::debug!(
-                    target: "whitenoise::users::find_or_create_user_by_pubkey",
-                    "User {} metadata is stale (updated_at: {}), starting background refresh",
-                    user.pubkey,
-                    user.updated_at
-                );
-                if let Err(e) = self.background_fetch_user_data(&user).await {
-                    tracing::warn!(
-                        target: "whitenoise::users::find_or_create_user_by_pubkey",
-                        "Failed to start background fetch for stale user {}: {}",
-                        user.pubkey,
-                        e
-                    );
-                }
-            } else {
-                tracing::debug!(
-                    target: "whitenoise::users::find_or_create_user_by_pubkey",
-                    "User {} metadata is fresh (updated_at: {}), skipping sync",
-                    user.pubkey,
-                    user.updated_at
-                );
-            }
+            tracing::debug!(
+                target: "whitenoise::users::sync_user_background",
+                "User {} metadata is fresh (updated_at: {}), skipping sync",
+                user.pubkey,
+                user.updated_at
+            );
         }
 
-        Ok(user)
+        Ok(())
     }
 
     pub(crate) async fn background_fetch_user_data(&self, user: &User) -> Result<()> {
