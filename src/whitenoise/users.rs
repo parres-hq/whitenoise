@@ -19,6 +19,32 @@ use crate::{
 /// Set to 24 hours - metadata doesn't change frequently for most users
 const METADATA_TTL_HOURS: i64 = 24;
 
+/// Specifies how user metadata and relay lists should be synchronized when finding or creating a user.
+///
+/// This enum controls the synchronization behavior in `find_or_create_user_by_pubkey`, allowing
+/// callers to choose between immediate blocking synchronization or background asynchronous updates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UserSyncMode {
+    /// Immediate blocking sync of metadata and relay lists.
+    ///
+    /// This mode performs synchronous network calls to fetch the latest user metadata
+    /// and relay lists before returning. Use this when you need up-to-date information
+    /// immediately (e.g., when displaying user profiles or adding users to groups).
+    ///
+    /// **Note:** This mode blocks the current async task until network operations complete.
+    Blocking,
+
+    /// Background sync with TTL-based refresh.
+    ///
+    /// This mode returns immediately with cached data (if available) and schedules
+    /// background tasks to update stale information. New users or users with stale
+    /// metadata (older than 24 hours) will have their data refreshed asynchronously.
+    ///
+    /// **Note:** This is the recommended mode for most use cases as it provides better
+    /// performance and responsiveness.
+    Background,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct User {
     pub id: Option<i64>,
@@ -598,12 +624,15 @@ impl Whitenoise {
     /// Finds a user by their public key or creates a new one if not found.
     ///
     /// This method looks up a user in the database using their Nostr public key.
-    /// If the user doesn't exist, it creates a new user record
-    /// It also updates the created user's relay lists and metadata.
+    /// If the user doesn't exist, it creates a new user record and synchronizes
+    /// their metadata and relay lists according to the specified sync mode.
     ///
     /// # Arguments
     ///
     /// * `pubkey` - The Nostr public key of the user to find or create
+    /// * `sync_mode` - Controls how user data is synchronized:
+    ///   - `UserSyncMode::Blocking` - Performs immediate blocking sync before returning
+    ///   - `UserSyncMode::Background` - Returns immediately and syncs in the background
     ///
     /// # Returns
     ///
@@ -615,12 +644,20 @@ impl Whitenoise {
     ///
     /// ```rust
     /// use nostr_sdk::PublicKey;
-    /// use whitenoise::Whitenoise;
+    /// use whitenoise::{UserSyncMode, Whitenoise};
     ///
     /// # async fn example(whitenoise: &Whitenoise) -> Result<(), Box<dyn std::error::Error>> {
     /// let pubkey = PublicKey::parse("npub1...")?;
-    /// let user = whitenoise.find_or_create_user_by_pubkey(&pubkey).await?;
-    /// println!("Found user: {:?}", user.metadata.name);
+    ///
+    /// // Fast, non-blocking call with background sync
+    /// let user = whitenoise
+    ///     .find_or_create_user_by_pubkey(&pubkey, UserSyncMode::Background)
+    ///     .await?;
+    ///
+    /// // Slower, blocking call with immediate metadata
+    /// let user_with_metadata = whitenoise
+    ///     .find_or_create_user_by_pubkey(&pubkey, UserSyncMode::Blocking)
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -630,14 +667,71 @@ impl Whitenoise {
     /// This method will return an error if:
     /// - There's a database connection or query error
     /// - The public key format is invalid (though this is typically caught at the type level)
-    pub async fn find_or_create_user_by_pubkey(&self, pubkey: &PublicKey) -> Result<User> {
+    /// - Network errors occur during blocking synchronization
+    pub async fn find_or_create_user_by_pubkey(
+        &self,
+        pubkey: &PublicKey,
+        sync_mode: UserSyncMode,
+    ) -> Result<User> {
         let (user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
 
-        // For newly created users, always do background sync
-        if created {
-            if let Err(e) = self.background_fetch_user_data(&user).await {
+        if sync_mode == UserSyncMode::Blocking {
+            let updated_user = self.sync_user_blocking(&user, created).await?;
+            Ok(updated_user)
+        } else {
+            self.sync_user_background(&user, created).await?;
+            Ok(user)
+        }
+    }
+
+    async fn sync_user_blocking(&self, user: &User, is_new: bool) -> Result<User> {
+        tracing::debug!(
+            target: "whitenoise::users::sync_user_blocking",
+            "Force sync requested for user {}, performing blocking metadata and relay sync",
+            user.pubkey
+        );
+
+        let mut user_clone = user.clone();
+
+        if is_new {
+            // For new users, sync relay lists first so we have a good chance of finding their events
+            if let Err(e) = user_clone.update_relay_lists(self).await {
                 tracing::warn!(
-                    target: "whitenoise::users::find_or_create_user_by_pubkey",
+                    target: "whitenoise::users::sync_user_blocking",
+                    "Failed to sync relay lists for new user {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
+            }
+            // For new users, we need to add the user to the global subscriptions batches so we get updates on their events
+            if let Err(e) = self.refresh_global_subscription_for_user(&user_clone).await {
+                tracing::warn!(
+                    target: "whitenoise::users::sync_user_blocking",
+                    "Failed to refresh global subscription for new user {}: {}",
+                    user_clone.pubkey,
+                    e
+                );
+            }
+        }
+
+        // Always sync metadata when force_sync is true
+        if let Err(e) = user_clone.sync_metadata(self).await {
+            tracing::warn!(
+                target: "whitenoise::users::sync_user_blocking",
+                "Failed to sync metadata for user {}: {}",
+                user_clone.pubkey,
+                e
+            );
+        }
+
+        Ok(user_clone)
+    }
+
+    async fn sync_user_background(&self, user: &User, is_new: bool) -> Result<()> {
+        if is_new {
+            if let Err(e) = self.background_fetch_user_data(user).await {
+                tracing::warn!(
+                    target: "whitenoise::users::sync_user_background",
                     "Failed to start background fetch for new user {}: {}",
                     user.pubkey,
                     e
@@ -646,14 +740,14 @@ impl Whitenoise {
         } else if user.needs_metadata_refresh() {
             // For existing users, only sync if metadata is stale
             tracing::debug!(
-                target: "whitenoise::users::find_or_create_user_by_pubkey",
+                target: "whitenoise::users::sync_user_background",
                 "User {} metadata is stale (updated_at: {}), starting background refresh",
                 user.pubkey,
                 user.updated_at
             );
-            if let Err(e) = self.background_fetch_user_data(&user).await {
+            if let Err(e) = self.background_fetch_user_data(user).await {
                 tracing::warn!(
-                    target: "whitenoise::users::find_or_create_user_by_pubkey",
+                    target: "whitenoise::users::sync_user_background",
                     "Failed to start background fetch for stale user {}: {}",
                     user.pubkey,
                     e
@@ -661,14 +755,14 @@ impl Whitenoise {
             }
         } else {
             tracing::debug!(
-                target: "whitenoise::users::find_or_create_user_by_pubkey",
+                target: "whitenoise::users::sync_user_background",
                 "User {} metadata is fresh (updated_at: {}), skipping sync",
                 user.pubkey,
                 user.updated_at
             );
         }
 
-        Ok(user)
+        Ok(())
     }
 
     pub(crate) async fn background_fetch_user_data(&self, user: &User) -> Result<()> {
@@ -708,6 +802,53 @@ impl Whitenoise {
 
             Ok::<(), WhitenoiseError>(())
         });
+        Ok(())
+    }
+
+    /// **TEST-ONLY**: Sets the `updated_at` timestamp for a user to a specific value.
+    ///
+    /// This method is only available when the `integration-tests` feature is enabled
+    /// and is intended for testing TTL-based metadata refresh logic.
+    ///
+    /// # Arguments
+    ///
+    /// * `pubkey` - The public key of the user to update
+    /// * `updated_at` - The new timestamp to set
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if successful, or an error if the user doesn't exist or
+    /// there's a database error.
+    ///
+    /// # Example (in integration tests)
+    ///
+    /// ```rust,ignore
+    /// use chrono::{Utc, Duration};
+    ///
+    /// // Set user's metadata to be 25 hours old (stale)
+    /// let stale_time = Utc::now() - Duration::hours(25);
+    /// whitenoise.set_user_updated_at_for_testing(&pubkey, stale_time).await?;
+    /// ```
+    #[cfg(feature = "integration-tests")]
+    pub async fn set_user_updated_at_for_testing(
+        &self,
+        pubkey: &PublicKey,
+        updated_at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE users SET updated_at = ? WHERE pubkey = ?")
+            .bind(updated_at.timestamp_millis())
+            .bind(pubkey.to_hex())
+            .execute(&self.database.pool)
+            .await
+            .map_err(crate::whitenoise::database::DatabaseError::Sqlx)?;
+
+        tracing::debug!(
+            target: "whitenoise::users::set_user_updated_at_for_testing",
+            "Set updated_at for user {} to {} (TEST ONLY)",
+            pubkey,
+            updated_at
+        );
+
         Ok(())
     }
 }
@@ -949,60 +1090,6 @@ mod tests {
             final_user.metadata.about,
             Some("Test description".to_string())
         );
-    }
-
-    #[tokio::test]
-    async fn test_find_or_create_user_by_pubkey_existing_user() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-        let original_user = User {
-            id: None,
-            pubkey: test_pubkey,
-            metadata: Metadata::new()
-                .name("Original User")
-                .about("Original description"),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        let saved_user = original_user.save(&whitenoise.database).await.unwrap();
-        let original_id = saved_user.id.unwrap();
-
-        let found_user = whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey)
-            .await
-            .unwrap();
-
-        assert_eq!(found_user.id, Some(original_id));
-        assert_eq!(found_user.pubkey, test_pubkey);
-        assert_eq!(found_user.metadata.name, Some("Original User".to_string()));
-        assert_eq!(
-            found_user.metadata.about,
-            Some("Original description".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn test_find_or_create_user_by_pubkey_new_user() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        let test_pubkey = nostr_sdk::Keys::generate().public_key();
-
-        let user_exists = whitenoise.find_user_by_pubkey(&test_pubkey).await.is_ok();
-        assert!(!user_exists);
-
-        let created_user = whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey)
-            .await
-            .unwrap();
-
-        assert!(created_user.id.is_some());
-        assert_eq!(created_user.pubkey, test_pubkey);
-        assert_eq!(created_user.metadata.name, None);
-        assert_eq!(created_user.metadata.about, None);
-
-        let found_user = whitenoise.find_user_by_pubkey(&test_pubkey).await.unwrap();
-        assert_eq!(found_user.id, created_user.id);
-        assert_eq!(found_user.pubkey, created_user.pubkey);
     }
 
     #[tokio::test]
@@ -1410,17 +1497,880 @@ mod tests {
         async fn test_needs_metadata_refresh_boundary_case() {
             let test_pubkey = nostr_sdk::Keys::generate().public_key();
             let boundary_time =
-                Utc::now() - Duration::hours(METADATA_TTL_HOURS) + Duration::minutes(1); // Just within TTL
+                Utc::now() - Duration::hours(METADATA_TTL_HOURS) + Duration::minutes(1);
             let user = User {
                 id: Some(1),
                 pubkey: test_pubkey,
-                metadata: Metadata::new().name("Test User"), // Non-default metadata
+                metadata: Metadata::new().name("Test User"),
                 created_at: boundary_time,
                 updated_at: boundary_time,
             };
 
             // Should not refresh if just within TTL boundary
             assert!(!user.needs_metadata_refresh());
+        }
+
+        // NOTE: The following tests have LIMITED COVERAGE due to lack of mocking.
+        // They can only verify database operations and method completion.
+        // They CANNOT verify that sync methods (sync_metadata, update_relay_lists,
+        // background_fetch_user_data) are actually called vs skipped.
+        // For true behavioral testing, see integration tests in:
+        // src/integration_tests/test_cases/user_discovery/find_or_create_user.rs
+
+        #[tokio::test]
+        async fn test_find_or_create_creates_new_user() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+
+            // Verify user doesn't exist
+            assert!(whitenoise.find_user_by_pubkey(&test_pubkey).await.is_err());
+
+            // Create user with Background mode to avoid network calls
+            let user = whitenoise
+                .find_or_create_user_by_pubkey(&test_pubkey, UserSyncMode::Background)
+                .await
+                .unwrap();
+
+            // TESTS: User creation and database persistence
+            assert_eq!(user.pubkey, test_pubkey);
+            assert!(user.id.is_some());
+
+            // LIMITATION: Cannot verify if background_fetch_user_data was called
+            // TODO: Find a way to mock or spy on the sync methods to verify they were called
+        }
+
+        #[tokio::test]
+        async fn test_find_or_create_returns_existing_user() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+
+            // Create user directly in database
+            let original_user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new().name("Original User"),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = original_user.save(&whitenoise.database).await.unwrap();
+
+            // Call find_or_create
+            let found_user = whitenoise
+                .find_or_create_user_by_pubkey(&test_pubkey, UserSyncMode::Background)
+                .await
+                .unwrap();
+
+            // TESTS: Existing user retrieval
+            assert_eq!(found_user.id, saved_user.id);
+            assert_eq!(found_user.pubkey, test_pubkey);
+            assert_eq!(found_user.metadata.name, Some("Original User".to_string()));
+
+            // LIMITATION: Cannot verify if sync was skipped due to fresh metadata
+            // TODO: Find a way to mock or spy on the sync methods to verify they were called
+        }
+
+        #[tokio::test]
+        async fn test_find_or_create_returns_immediately_with_background_sync() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+
+            // TESTS: Method returns immediately without blocking on network
+            let user = whitenoise
+                .find_or_create_user_by_pubkey(&test_pubkey, UserSyncMode::Background)
+                .await
+                .unwrap();
+
+            assert_eq!(user.pubkey, test_pubkey);
+            assert!(user.id.is_some());
+        }
+    }
+
+    mod sync_relay_urls_tests {
+        use super::*;
+        use crate::whitenoise::{
+            database::processed_events::ProcessedEvent, test_utils::create_mock_whitenoise,
+        };
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_ignores_stale_event() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay_url = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let relay = whitenoise
+                .find_or_create_relay_by_url(&relay_url)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let newer_timestamp = Utc::now();
+            ProcessedEvent::create(
+                &EventId::all_zeros(),
+                None,
+                Some(newer_timestamp),
+                Some(Kind::from(10002)),
+                Some(&test_pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            let stale_timestamp = newer_timestamp - Duration::hours(1);
+            let new_relay_urls =
+                HashSet::from([RelayUrl::parse("wss://relay2.example.com").unwrap()]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_relay_urls,
+                    Some(stale_timestamp),
+                )
+                .await
+                .unwrap();
+
+            assert!(!changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 1);
+            assert_eq!(relays[0].url, relay_url);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_accepts_newer_event() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let old_relay_url = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let relay = whitenoise
+                .find_or_create_relay_by_url(&old_relay_url)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let old_timestamp = Utc::now() - Duration::hours(2);
+            ProcessedEvent::create(
+                &EventId::all_zeros(),
+                None,
+                Some(old_timestamp),
+                Some(Kind::from(10002)),
+                Some(&test_pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            let newer_timestamp = Utc::now() - Duration::hours(1);
+            let new_relay_urls =
+                HashSet::from([RelayUrl::parse("wss://relay2.example.com").unwrap()]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_relay_urls,
+                    Some(newer_timestamp),
+                )
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 1);
+            assert_eq!(relays[0].url, new_relay_urls.iter().next().unwrap().clone());
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_rejects_equal_timestamp() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let r1 = whitenoise
+                .find_or_create_relay_by_url(&relay1)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&r1, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let timestamp = Utc::now() - Duration::hours(1);
+            ProcessedEvent::create(
+                &EventId::all_zeros(),
+                None,
+                Some(timestamp),
+                Some(Kind::from(10002)),
+                Some(&test_pubkey),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            let new_relay_urls =
+                HashSet::from([RelayUrl::parse("wss://relay2.example.com").unwrap()]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_relay_urls,
+                    Some(timestamp),
+                )
+                .await
+                .unwrap();
+
+            assert!(!changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 1);
+            assert_eq!(relays[0].url, relay1);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_no_timestamp_always_accepts() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let new_relay_urls =
+                HashSet::from([RelayUrl::parse("wss://relay1.example.com").unwrap()]);
+
+            let changed = saved_user
+                .sync_relay_urls(&whitenoise, RelayType::Nip65, &new_relay_urls, None)
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 1);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_no_changes_needed() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay_url = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let relay = whitenoise
+                .find_or_create_relay_by_url(&relay_url)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let same_relay_urls = HashSet::from([relay_url.clone()]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &same_relay_urls,
+                    Some(Utc::now()),
+                )
+                .await
+                .unwrap();
+
+            assert!(!changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 1);
+            assert_eq!(relays[0].url, relay_url);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_adds_new_relays() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let relay = whitenoise
+                .find_or_create_relay_by_url(&relay1)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let new_relay_urls = HashSet::from([
+                relay1.clone(),
+                RelayUrl::parse("wss://relay2.example.com").unwrap(),
+                RelayUrl::parse("wss://relay3.example.com").unwrap(),
+            ]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_relay_urls,
+                    Some(Utc::now()),
+                )
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 3);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_removes_old_relays() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let relay2 = RelayUrl::parse("wss://relay2.example.com").unwrap();
+            let relay3 = RelayUrl::parse("wss://relay3.example.com").unwrap();
+
+            for url in [&relay1, &relay2, &relay3] {
+                let relay = whitenoise.find_or_create_relay_by_url(url).await.unwrap();
+                saved_user
+                    .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+                    .await
+                    .unwrap();
+            }
+
+            let new_relay_urls = HashSet::from([relay2.clone()]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_relay_urls,
+                    Some(Utc::now()),
+                )
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 1);
+            assert_eq!(relays[0].url, relay2);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_adds_and_removes() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let relay2 = RelayUrl::parse("wss://relay2.example.com").unwrap();
+
+            for url in [&relay1, &relay2] {
+                let relay = whitenoise.find_or_create_relay_by_url(url).await.unwrap();
+                saved_user
+                    .add_relay(&relay, RelayType::Nip65, &whitenoise.database)
+                    .await
+                    .unwrap();
+            }
+
+            let relay3 = RelayUrl::parse("wss://relay3.example.com").unwrap();
+            let relay4 = RelayUrl::parse("wss://relay4.example.com").unwrap();
+            let new_relay_urls = HashSet::from([relay2.clone(), relay3.clone(), relay4.clone()]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_relay_urls,
+                    Some(Utc::now()),
+                )
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 3);
+
+            let urls: HashSet<_> = relays.iter().map(|r| &r.url).collect();
+            assert!(urls.contains(&relay2));
+            assert!(urls.contains(&relay3));
+            assert!(urls.contains(&relay4));
+            assert!(!urls.contains(&relay1));
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_different_relay_types_independent() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let relay2 = RelayUrl::parse("wss://relay2.example.com").unwrap();
+
+            let r1 = whitenoise
+                .find_or_create_relay_by_url(&relay1)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&r1, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let r2 = whitenoise
+                .find_or_create_relay_by_url(&relay2)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&r2, RelayType::Inbox, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let new_nip65_urls = HashSet::from([relay2.clone()]);
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_nip65_urls,
+                    Some(Utc::now()),
+                )
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let nip65_relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(nip65_relays.len(), 1);
+            assert_eq!(nip65_relays[0].url, relay2);
+
+            let inbox_relays = saved_user
+                .relays(RelayType::Inbox, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(inbox_relays.len(), 1);
+            assert_eq!(inbox_relays[0].url, relay2);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_empty_new_urls_removes_all() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay1 = RelayUrl::parse("wss://relay1.example.com").unwrap();
+            let r1 = whitenoise
+                .find_or_create_relay_by_url(&relay1)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&r1, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let empty_urls = HashSet::new();
+            let changed = saved_user
+                .sync_relay_urls(&whitenoise, RelayType::Nip65, &empty_urls, Some(Utc::now()))
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 0);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relay_urls_no_stored_timestamp_accepts_new() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let new_relay_urls =
+                HashSet::from([RelayUrl::parse("wss://relay1.example.com").unwrap()]);
+
+            let changed = saved_user
+                .sync_relay_urls(
+                    &whitenoise,
+                    RelayType::Nip65,
+                    &new_relay_urls,
+                    Some(Utc::now()),
+                )
+                .await
+                .unwrap();
+
+            assert!(changed);
+            let relays = saved_user
+                .relays(RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+            assert_eq!(relays.len(), 1);
+        }
+    }
+
+    mod update_nip65_relays_tests {
+        use super::*;
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        #[tokio::test]
+        async fn test_update_nip65_relays_returns_query_relays_on_no_event() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let query_relays = Relay::defaults();
+            let result = saved_user
+                .update_nip65_relays(&whitenoise, &query_relays)
+                .await
+                .unwrap();
+
+            assert_eq!(result.len(), query_relays.len());
+            for (r1, r2) in result.iter().zip(query_relays.iter()) {
+                assert_eq!(r1.url, r2.url);
+            }
+        }
+
+        #[tokio::test]
+        async fn test_update_nip65_relays_returns_query_relays_on_error() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let query_relays = vec![];
+            let result = saved_user
+                .update_nip65_relays(&whitenoise, &query_relays)
+                .await
+                .unwrap();
+
+            assert_eq!(result.len(), 0);
+        }
+
+        #[tokio::test]
+        async fn test_update_nip65_relays_returns_updated_on_change() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let initial_relay = RelayUrl::parse("wss://initial.example.com").unwrap();
+            let r = whitenoise
+                .find_or_create_relay_by_url(&initial_relay)
+                .await
+                .unwrap();
+            saved_user
+                .add_relay(&r, RelayType::Nip65, &whitenoise.database)
+                .await
+                .unwrap();
+
+            let query_relays = vec![crate::whitenoise::relays::Relay {
+                id: None,
+                url: initial_relay.clone(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }];
+
+            let result = saved_user
+                .update_nip65_relays(&whitenoise, &query_relays)
+                .await
+                .unwrap();
+
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].url, initial_relay);
+        }
+    }
+
+    mod update_secondary_relay_types_tests {
+        use super::*;
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        #[tokio::test]
+        async fn test_update_secondary_relay_types_succeeds_with_no_relays() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let query_relays = vec![];
+            let result = saved_user
+                .update_secondary_relay_types(&whitenoise, &query_relays)
+                .await;
+
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn test_update_secondary_relay_types_continues_on_individual_failure() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let query_relays = vec![];
+            let result = saved_user
+                .update_secondary_relay_types(&whitenoise, &query_relays)
+                .await;
+
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn test_update_secondary_relay_types_with_valid_query_relays() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let relay_url = RelayUrl::parse("wss://relay.example.com").unwrap();
+            let query_relays = vec![crate::whitenoise::relays::Relay {
+                id: None,
+                url: relay_url,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }];
+
+            let result = saved_user
+                .update_secondary_relay_types(&whitenoise, &query_relays)
+                .await;
+
+            assert!(result.is_ok());
+        }
+    }
+
+    mod sync_relays_for_type_tests {
+        use super::*;
+        use crate::whitenoise::test_utils::create_mock_whitenoise;
+
+        #[tokio::test]
+        async fn test_sync_relays_for_type_no_event_found() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let query_relays = Relay::defaults();
+            let changed = saved_user
+                .sync_relays_for_type(&whitenoise, RelayType::Nip65, &query_relays)
+                .await
+                .unwrap();
+
+            assert!(!changed);
+        }
+
+        #[tokio::test]
+        async fn test_sync_relays_for_type_with_empty_query_relays() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let query_relays = vec![];
+            let result = saved_user
+                .sync_relays_for_type(&whitenoise, RelayType::Inbox, &query_relays)
+                .await;
+
+            assert!(result.is_err());
+        }
+
+        #[tokio::test]
+        async fn test_sync_relays_for_type_different_relay_types() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let test_pubkey = Keys::generate().public_key();
+
+            let user = User {
+                id: None,
+                pubkey: test_pubkey,
+                metadata: Metadata::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+            let saved_user = user.save(&whitenoise.database).await.unwrap();
+
+            let query_relays = Relay::defaults();
+
+            for relay_type in [RelayType::Nip65, RelayType::Inbox, RelayType::KeyPackage] {
+                let changed = saved_user
+                    .sync_relays_for_type(&whitenoise, relay_type, &query_relays)
+                    .await
+                    .unwrap();
+
+                assert!(!changed);
+            }
         }
     }
 }

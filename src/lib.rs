@@ -23,7 +23,7 @@ pub use whitenoise::error::WhitenoiseError;
 
 // Account and user management
 pub use whitenoise::accounts::Account;
-pub use whitenoise::users::User;
+pub use whitenoise::users::{User, UserSyncMode};
 
 // Settings and configuration
 pub use whitenoise::app_settings::{AppSettings, ThemeMode};

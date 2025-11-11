@@ -4,6 +4,16 @@ use crate::integration_tests::core::*;
 use async_trait::async_trait;
 use nostr_sdk::{Keys, Metadata, RelayUrl};
 
+/// Tests find_or_create_user with force_sync=true (synchronous/blocking mode)
+///
+/// This test verifies:
+/// - User creation when user doesn't exist
+/// - Synchronous metadata fetching (blocking until complete)
+/// - Synchronous relay list fetching (blocking until complete)
+/// - Idempotency (calling twice returns the same user)
+///
+/// LIMITATION: This test only covers force_sync=true. For force_sync=false
+/// (background mode), see FindOrCreateUserBackgroundModeTestCase.
 pub struct FindOrCreateUserTestCase {
     test_keys: Keys,
     should_have_metadata: bool,
@@ -107,7 +117,10 @@ impl TestCase for FindOrCreateUserTestCase {
 
         let mut user = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey)
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Blocking,
+            ) // force synchronous metadata sync
             .await?;
 
         assert_eq!(user.pubkey, test_pubkey, "User pubkey should match");
@@ -222,9 +235,16 @@ impl TestCase for FindOrCreateUserTestCase {
             tracing::info!("✓ No relay publication needed for this test case");
         }
 
+        // Second call with Background mode to test idempotency
+        // NOTE: Since the user was just created/synced, metadata is fresh (<24h),
+        // so this call will return immediately without any sync (lines 716-723 in users.rs)
+        // However, we CANNOT verify that sync was skipped - we can only verify the user is returned.
         let user_again = context
             .whitenoise
-            .find_or_create_user_by_pubkey(&test_pubkey)
+            .find_or_create_user_by_pubkey(
+                &test_pubkey,
+                crate::whitenoise::users::UserSyncMode::Background,
+            )
             .await?;
         assert_eq!(
             user_again.id, user.id,
@@ -233,6 +253,10 @@ impl TestCase for FindOrCreateUserTestCase {
         assert_eq!(
             user_again.pubkey, user.pubkey,
             "Should return same user pubkey"
+        );
+        assert_eq!(
+            user_again.metadata, user.metadata,
+            "Should return same user metadata"
         );
 
         tracing::info!("✓ find_or_create returns existing user on second call");
