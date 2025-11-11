@@ -676,15 +676,15 @@ impl Whitenoise {
         let (user, created) = User::find_or_create_by_pubkey(pubkey, &self.database).await?;
 
         if sync_mode == UserSyncMode::Blocking {
-            self.sync_user_blocking(&user, created).await?;
+            let updated_user = self.sync_user_blocking(&user, created).await?;
+            Ok(updated_user)
         } else {
             self.sync_user_background(&user, created).await?;
+            Ok(user)
         }
-
-        Ok(user)
     }
 
-    async fn sync_user_blocking(&self, user: &User, is_new: bool) -> Result<()> {
+    async fn sync_user_blocking(&self, user: &User, is_new: bool) -> Result<User> {
         tracing::debug!(
             target: "whitenoise::users::sync_user_blocking",
             "Force sync requested for user {}, performing blocking metadata and relay sync",
@@ -724,7 +724,7 @@ impl Whitenoise {
             );
         }
 
-        Ok(())
+        Ok(user_clone)
     }
 
     async fn sync_user_background(&self, user: &User, is_new: bool) -> Result<()> {

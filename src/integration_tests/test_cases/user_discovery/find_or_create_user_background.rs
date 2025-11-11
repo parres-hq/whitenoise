@@ -63,7 +63,7 @@ impl TestCase for FindOrCreateUserBackgroundModeTestCase {
     async fn run(&self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError> {
         let test_pubkey = self.test_keys.public_key();
         tracing::info!(
-            "Testing find_or_create_user with force_sync=false for pubkey: {}",
+            "Testing find_or_create_user with UserSyncMode::Background for pubkey: {}",
             test_pubkey
         );
 
