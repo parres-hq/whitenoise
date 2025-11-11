@@ -1,0 +1,80 @@
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+
+use super::benchmark_config::BenchmarkConfig;
+use super::benchmark_result::BenchmarkResult;
+use crate::integration_tests::core::ScenarioContext;
+use crate::{Whitenoise, WhitenoiseError};
+
+/// Trait for benchmark scenarios using the template method pattern.
+///
+/// Implement `setup()` and `single_iteration()` to create a benchmark.
+/// The default `run_benchmark()` implementation handles warmup, timing, and statistics.
+#[async_trait]
+pub trait BenchmarkScenario {
+    /// Name of the benchmark scenario
+    fn name(&self) -> &str;
+
+    /// Configuration for this benchmark
+    fn config(&self) -> BenchmarkConfig {
+        BenchmarkConfig::default()
+    }
+
+    /// Setup phase - create accounts, groups, and any test data needed.
+    /// This is NOT timed and runs once before warmup iterations.
+    async fn setup(&mut self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError>;
+
+    /// Run a single iteration of the benchmark operation.
+    /// This should perform the operation being benchmarked and return its duration.
+    async fn single_iteration(
+        &self,
+        context: &mut ScenarioContext,
+    ) -> Result<Duration, WhitenoiseError>;
+
+    /// Run the benchmark with standard warmup, timing, and statistics collection.
+    /// Override this method only if you need custom orchestration (Level 3).
+    async fn run_benchmark(
+        &mut self,
+        whitenoise: &'static Whitenoise,
+    ) -> Result<BenchmarkResult, WhitenoiseError> {
+        let config = self.config();
+        let mut context = ScenarioContext::new(whitenoise);
+
+        tracing::info!("Setting up benchmark: {}", self.name());
+        self.setup(&mut context).await?;
+
+        // Warmup phase (skip if warmup_iterations == 0)
+        if config.warmup_iterations > 0 {
+            tracing::info!("Running {} warmup iterations...", config.warmup_iterations);
+            for _ in 0..config.warmup_iterations {
+                self.single_iteration(&mut context).await?;
+                tokio::time::sleep(config.cooldown_between_iterations).await;
+            }
+
+            // Reset counter for actual benchmark
+            context.tests_count = 0;
+        }
+
+        // Benchmark phase
+        tracing::info!("Running {} benchmark iterations...", config.iterations);
+        let mut timings = Vec::with_capacity(config.iterations as usize);
+        let overall_start = Instant::now();
+
+        for _ in 0..config.iterations {
+            let duration = self.single_iteration(&mut context).await?;
+            timings.push(duration);
+            tokio::time::sleep(config.cooldown_between_iterations).await;
+        }
+
+        let total_duration = overall_start.elapsed();
+
+        // Calculate and return results
+        Ok(BenchmarkResult::from_timings(
+            self.name().to_string(),
+            &config,
+            timings,
+            total_duration,
+        ))
+    }
+}

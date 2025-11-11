@@ -64,7 +64,7 @@ ScenarioContext enables TestCases within the same scenario to share data.
 src/integration_tests/
 ├── mod.rs                    # Main module exports
 ├── registry.rs               # ScenarioRegistry - runs all scenarios
-├── core/                     # Core framework components
+├── core/                     # Core framework components (shared by tests & benchmarks)
 │   ├── mod.rs
 │   ├── context.rs           # ScenarioContext for data passing
 │   ├── scenario_result.rs   # Test result tracking
@@ -75,20 +75,38 @@ src/integration_tests/
 │   ├── account_management.rs # Account creation, login, logout
 │   ├── basic_messaging.rs   # Simple messaging workflows
 │   └── ...                  # Additional scenario files
-└── test_cases/              # Reusable atomic test operations
-    ├── mod.rs
-    ├── account_management/   # Account-specific operations
+├── test_cases/              # Reusable atomic test operations
+│   ├── mod.rs
+│   ├── account_management/   # Account-specific operations
+│   │   ├── mod.rs
+│   │   ├── login.rs
+│   │   └── logout_account.rs
+│   ├── messaging/            # Message-specific operations
+│   │   ├── mod.rs
+│   │   └── send_message.rs
+│   ├── shared/              # Cross-scenario reusable operations
+│   │   ├── mod.rs
+│   │   ├── create_accounts.rs
+│   │   └── create_group.rs
+│   └── ...                  # Additional test case directories
+└── benchmarks/              # Performance benchmarks (feature-gated)
+    ├── mod.rs               # Module exports and re-exports
+    ├── core/                # Core benchmark infrastructure
     │   ├── mod.rs
-    │   ├── login.rs
-    │   └── logout_account.rs
-    ├── messaging/            # Message-specific operations
+    │   ├── benchmark_config.rs      # BenchmarkConfig type
+    │   ├── benchmark_result.rs      # BenchmarkResult type
+    │   ├── benchmark_scenario.rs    # BenchmarkScenario trait
+    │   └── benchmark_test_case.rs   # BenchmarkTestCase trait
+    ├── registry.rs          # BenchmarkRegistry - runs all benchmarks
+    ├── stats.rs             # Statistical utilities
+    ├── scenarios/           # Benchmark scenarios
     │   ├── mod.rs
-    │   └── send_message.rs
-    ├── shared/              # Cross-scenario reusable operations
-    │   ├── mod.rs
-    │   ├── create_accounts.rs
-    │   └── create_group.rs
-    └── ...                  # Additional test case directories
+    │   └── messaging_performance.rs
+    └── test_cases/          # Benchmark test cases
+        ├── mod.rs
+        └── messaging/
+            ├── mod.rs
+            └── send_message_benchmark.rs
 ```
 
 ## Adding New Tests
@@ -207,3 +225,229 @@ src/integration_tests/
        }
    }
    ```
+
+## Performance Benchmarks
+
+Performance benchmarks are a separate category of tests designed to measure and track performance characteristics over time. They reuse the integration test infrastructure but are gated behind the `benchmark-tests` feature flag.
+
+### Key Differences from Integration Tests
+
+| Aspect             | Integration Tests        | Performance Benchmarks |
+| ------------------ | ------------------------ | ---------------------- |
+| **Purpose**        | Verify correctness       | Measure performance    |
+| **Feature Flag**   | `integration-tests`      | `benchmark-tests`      |
+| **Binary**         | `integration_test`       | `benchmark_test`       |
+| **CI Execution**   | ✅ Always runs           | ❌ Never runs          |
+| **Build Mode**     | Debug                    | Release (for accuracy) |
+| **Output**         | Pass/fail results        | Timing statistics      |
+| **Infrastructure** | Own scenarios/test cases | Reuses + extends       |
+
+### Running Benchmarks
+
+**Prerequisites:**
+
+- Docker Compose services must be running: `docker compose up -d`
+
+**Commands:**
+
+```bash
+# Run all performance benchmarks once
+just benchmark
+
+# Run benchmarks and save results with timestamp
+just benchmark-save
+```
+
+Benchmark results are saved to `./benchmark_results/` (git-ignored).
+
+### Benchmark Architecture
+
+Benchmarks use the same infrastructure as integration tests but with performance-focused traits using the **template method pattern**:
+
+```rust
+// BenchmarkScenario trait - uses template method pattern
+#[async_trait]
+pub trait BenchmarkScenario {
+    fn name(&self) -> &str;
+    fn config(&self) -> BenchmarkConfig { /* default */ }
+
+    // Implementers define these two methods:
+    async fn setup(&mut self, context: &mut ScenarioContext) -> Result<(), WhitenoiseError>;
+    async fn single_iteration(&self, context: &mut ScenarioContext) -> Result<Duration, WhitenoiseError>;
+
+    // Default implementation handles all orchestration:
+    async fn run_benchmark(&mut self, whitenoise: &'static Whitenoise) -> Result<BenchmarkResult, WhitenoiseError> {
+        // Warmup + benchmark loops + statistics calculation
+        // No need to override unless you need custom orchestration
+    }
+}
+
+// BenchmarkTestCase trait - atomic timed operation
+#[async_trait]
+pub trait BenchmarkTestCase {
+    async fn run_iteration(&self, context: &mut ScenarioContext)
+        -> Result<Duration, WhitenoiseError>;
+}
+```
+
+The template method pattern eliminates boilerplate - scenarios only implement `setup()` and `single_iteration()`, while the trait's default `run_benchmark(whitenoise)` implementation handles all orchestration automatically.
+
+### Benchmark Lifecycle
+
+The default `run_benchmark()` implementation provides this lifecycle:
+
+1. **Setup** (not timed): Calls `setup()` to create accounts, groups, and necessary data
+2. **Warmup**: Run operations to warm caches and connections
+3. **Benchmark**: Execute timed iterations with cooldown between each
+4. **Statistics**: Calculate mean, median, p95, p99, throughput, etc.
+5. **Output**: Display comprehensive performance metrics
+
+You can override `run_benchmark()` for custom orchestration if needed (rare).
+
+### Adding a New Benchmark
+
+Benchmarks use the **template method pattern** - implement `setup()` and `single_iteration()`, and the trait handles all orchestration automatically.
+
+1. **Create a Benchmark Test Case** in `benchmarks/test_cases/`:
+
+   ```rust
+   use crate::integration_tests::benchmarks::BenchmarkTestCase;
+   use crate::integration_tests::core::ScenarioContext;
+   use crate::WhitenoiseError;
+   use async_trait::async_trait;
+   use std::time::{Duration, Instant};
+
+   pub struct YourOperationBenchmark {
+       // Configuration fields
+   }
+
+   impl YourOperationBenchmark {
+       pub fn new(/* params */) -> Self {
+           Self { /* ... */ }
+       }
+   }
+
+   #[async_trait]
+   impl BenchmarkTestCase for YourOperationBenchmark {
+       async fn run_iteration(&self, context: &mut ScenarioContext)
+           -> Result<Duration, WhitenoiseError> {
+           let start = Instant::now();
+
+           // Perform the operation to benchmark
+
+           Ok(start.elapsed())
+       }
+   }
+   ```
+
+2. **Create a Benchmark Scenario** in `benchmarks/scenarios/`:
+
+   ```rust
+   use std::time::Duration;
+   use async_trait::async_trait;
+   use crate::integration_tests::benchmarks::{
+       BenchmarkConfig, BenchmarkScenario, BenchmarkTestCase,
+   };
+   use crate::integration_tests::core::{ScenarioContext, TestCase};
+   use crate::integration_tests::test_cases::shared::CreateAccountsTestCase;
+   use crate::{Whitenoise, WhitenoiseError};
+
+   pub struct YourBenchmarkScenario {
+       test_case: YourOperationBenchmark,
+   }
+
+   impl YourBenchmarkScenario {
+       pub fn new(test_case: YourOperationBenchmark) -> Self {
+           Self { test_case }
+       }
+   }
+
+   impl Default for YourBenchmarkScenario {
+       fn default() -> Self {
+           Self::new(YourOperationBenchmark::new(/* params */))
+       }
+   }
+
+   #[async_trait]
+   impl BenchmarkScenario for YourBenchmarkScenario {
+       fn name(&self) -> &str {
+           "Your Benchmark Name"
+       }
+
+       fn config(&self) -> BenchmarkConfig {
+           BenchmarkConfig {
+               iterations: 100,
+               warmup_iterations: 10,
+               cooldown_between_iterations: Duration::from_millis(50),
+           }
+       }
+
+       async fn setup(&mut self, context: &mut ScenarioContext)
+           -> Result<(), WhitenoiseError> {
+           // Create accounts, groups, and test data
+           // This is NOT timed
+           CreateAccountsTestCase::with_names(vec!["alice", "bob"])
+               .run(context)
+               .await?;
+
+           Ok(())
+       }
+
+       async fn single_iteration(&self, context: &mut ScenarioContext)
+           -> Result<Duration, WhitenoiseError> {
+           self.test_case.run_iteration(context).await
+       }
+
+       // run_benchmark(whitenoise) uses default implementation automatically!
+       // Only override if you need custom orchestration (rare)
+   }
+   ```
+
+3. **Register in BenchmarkRegistry** (`benchmarks/registry.rs`):
+
+   ```rust
+   match YourBenchmarkScenario::default().run_benchmark(whitenoise).await {
+       Ok(result) => results.push(result),
+       Err(e) => {
+           tracing::error!("Benchmark failed: {}", e);
+           if first_error.is_none() {
+               first_error = Some(e);
+           }
+       }
+   }
+   ```
+
+**Key Points:**
+
+- Implement only 2 methods: `setup()` and `single_iteration()`
+- The `setup()` method is NOT timed - do all preparation there
+- The `single_iteration()` method is timed - this is your benchmark operation
+  - Be mindful of what you call here, as it will be repeated and timed for each iteration
+- No need to implement `run_benchmark()` - the default handles warmup, timing, statistics
+- Override `run_benchmark()` only for custom orchestration needs
+
+### Example Output
+
+```text
+=== Running Performance Benchmarks ===
+
+Benchmark: Message Sending Performance
+  Iterations:  100
+  Total Time:  4.52s
+
+  Statistics:
+    Mean:      45.2ms
+    Median:    44.8ms
+    Std Dev:   3.1ms
+    Min:       38.5ms
+    Max:       58.3ms
+    P95:       51.2ms
+    P99:       56.1ms
+
+  Throughput:  22.12 ops/sec
+
+---
+
+Total Benchmarks: 1
+Overall Duration: 4.52s
+```

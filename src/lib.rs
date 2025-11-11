@@ -7,8 +7,8 @@ mod nostr_manager;
 mod types;
 pub mod whitenoise;
 
-// Include integration tests module only when the integration-tests feature is enabled
-// This provides IDE support without including tests in production builds
+// Integration tests module - included when integration-tests feature is enabled
+// This provides IDE support.
 #[cfg(feature = "integration-tests")]
 pub mod integration_tests;
 
