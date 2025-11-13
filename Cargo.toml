@@ -99,11 +99,18 @@ mockito = "1.2"
 default = []
 # Feature flag for integration tests - enables IDE support without including in production
 integration-tests = []
+# Feature flag for performance benchmarks - depends on integration-tests to reuse infrastructure
+benchmark-tests = ["integration-tests"]
 
 [[bin]]
 name = "integration_test"
 path = "src/bin/integration_test.rs"
 required-features = ["integration-tests"]
+
+[[bin]]
+name = "benchmark_test"
+path = "src/bin/benchmark_test.rs"
+required-features = ["benchmark-tests"]
 
 [profile.release]
 debug = false

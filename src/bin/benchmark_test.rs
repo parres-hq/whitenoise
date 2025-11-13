@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use ::whitenoise::integration_tests::registry::ScenarioRegistry;
+use ::whitenoise::integration_tests::benchmarks::registry::BenchmarkRegistry;
 use ::whitenoise::*;
 
 #[derive(Parser, Debug)]
@@ -19,7 +19,7 @@ struct Args {
 async fn main() -> Result<(), WhitenoiseError> {
     let args = Args::parse();
 
-    tracing::info!("=== Starting Whitenoise Integration Test Suite ===");
+    tracing::info!("=== Starting Whitenoise Performance Benchmark Suite ===");
 
     let config = WhitenoiseConfig::new(&args.data_dir, &args.logs_dir);
     if let Err(err) = Whitenoise::initialize_whitenoise(config).await {
@@ -29,9 +29,9 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let whitenoise = Whitenoise::get_instance()?;
 
-    ScenarioRegistry::run_all_scenarios(whitenoise).await?;
+    BenchmarkRegistry::run_all_benchmarks(whitenoise).await?;
 
-    tracing::info!("=== All Integration Test Scenarios Completed Successfully ===");
+    tracing::info!("=== All Performance Benchmarks Completed Successfully ===");
 
     Ok(())
 }

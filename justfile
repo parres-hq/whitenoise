@@ -39,6 +39,29 @@ int-test-flamegraph:
     CARGO_PROFILE_RELEASE_STRIP=false \
     cargo flamegraph --release --bin integration_test --features integration-tests --deterministic -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
+# Run performance benchmarks (not included in CI)
+benchmark:
+    rm -rf ./dev/data/benchmark_test/
+    RUST_LOG=warn,benchmark_test=info,whitenoise=info \
+    cargo run --bin benchmark_test --features benchmark-tests --release -- --data-dir ./dev/data/benchmark_test/ --logs-dir ./dev/data/benchmark_test/
+    rm -rf ./dev/data/benchmark_test/
+
+# Run benchmarks and save results with timestamp
+benchmark-save:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p ./benchmark_results
+    rm -rf ./dev/data/benchmark_test/
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    echo "Running benchmarks and saving to ./benchmark_results/benchmark_${TIMESTAMP}.log"
+    RUST_LOG=warn,benchmark_test=info,whitenoise=info \
+    cargo run --bin benchmark_test --features benchmark-tests --release -- \
+    --data-dir ./dev/data/benchmark_test/ \
+    --logs-dir ./dev/data/benchmark_test/ \
+    | tee ./benchmark_results/benchmark_${TIMESTAMP}.log
+    rm -rf ./dev/data/benchmark_test/
+    echo "Results saved to ./benchmark_results/benchmark_${TIMESTAMP}.log"
+
 # Run all tests (unit tests, integration tests, and doc tests)
 # Uses nextest for faster parallel execution if available, falls back to cargo test
 test:
