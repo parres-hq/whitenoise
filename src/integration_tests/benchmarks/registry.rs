@@ -1,4 +1,6 @@
-use crate::integration_tests::benchmarks::scenarios::MessagingPerformanceBenchmark;
+use crate::integration_tests::benchmarks::scenarios::{
+    MessagingPerformanceBenchmark, UserDiscoveryBenchmark,
+};
 use crate::integration_tests::benchmarks::{BenchmarkResult, BenchmarkScenario};
 use crate::{Whitenoise, WhitenoiseError};
 use std::time::{Duration, Instant};
@@ -15,19 +17,23 @@ impl BenchmarkRegistry {
 
         tracing::info!("=== Running Performance Benchmarks ===");
 
-        // Run messaging performance benchmark
-        match MessagingPerformanceBenchmark::default()
-            .run_benchmark(whitenoise)
-            .await
-        {
-            Ok(result) => results.push(result),
-            Err(e) => {
-                tracing::error!("Benchmark failed: {}", e);
-                if first_error.is_none() {
-                    first_error = Some(e);
+        macro_rules! run_benchmark {
+            ($benchmark_expr:expr) => {
+                match $benchmark_expr.run_benchmark(whitenoise).await {
+                    Ok(result) => results.push(result),
+                    Err(e) => {
+                        tracing::error!("Benchmark failed: {}", e);
+                        if first_error.is_none() {
+                            first_error = Some(e);
+                        }
+                    }
                 }
-            }
+            };
         }
+
+        run_benchmark!(MessagingPerformanceBenchmark::default());
+        run_benchmark!(UserDiscoveryBenchmark::with_blocking_mode());
+        run_benchmark!(UserDiscoveryBenchmark::with_background_mode());
 
         Self::print_summary(&results, overall_start.elapsed()).await;
 
