@@ -1,5 +1,5 @@
 use crate::integration_tests::benchmarks::scenarios::{
-    MessagingPerformanceBenchmark, UserDiscoveryBenchmark,
+    MessageAggregationBenchmark, MessagingPerformanceBenchmark, UserDiscoveryBenchmark,
 };
 use crate::integration_tests::benchmarks::{BenchmarkResult, BenchmarkScenario};
 use crate::{Whitenoise, WhitenoiseError};
@@ -32,6 +32,7 @@ impl BenchmarkRegistry {
         }
 
         run_benchmark!(MessagingPerformanceBenchmark::default());
+        run_benchmark!(MessageAggregationBenchmark::default());
         run_benchmark!(UserDiscoveryBenchmark::with_blocking_mode());
         run_benchmark!(UserDiscoveryBenchmark::with_background_mode());
 
