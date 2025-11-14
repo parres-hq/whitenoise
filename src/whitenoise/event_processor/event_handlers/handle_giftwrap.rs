@@ -121,15 +121,24 @@ impl Whitenoise {
 mod tests {
     use super::*;
     use crate::whitenoise::{relays::Relay, test_utils::*};
+    use nostr_sdk::Url;
     use tokio::time::{Duration, sleep};
 
     async fn relays_running() -> bool {
         let relay_urls = ["ws://localhost:8080", "ws://localhost:7777"];
         for relay in relay_urls {
             if let Ok(url) = RelayUrl::parse(relay) {
-                let host = url.host();
-                let port = url.port();
-                let addr = format!("{}:{}", host, port);
+                let parsed_url: &Url = (&url).into();
+                // RelayUrl no longer exposes host/port helpers; derive them from the underlying Url.
+                let host = match parsed_url.host_str() {
+                    Some(host) => host,
+                    None => return false,
+                };
+                let port = match parsed_url.port_or_known_default() {
+                    Some(port) => port,
+                    None => return false,
+                };
+                let addr = format!("{host}:{port}");
                 if tokio::time::timeout(
                     Duration::from_millis(200),
                     tokio::net::TcpStream::connect(&addr),
