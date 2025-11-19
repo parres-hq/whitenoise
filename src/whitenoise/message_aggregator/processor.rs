@@ -123,7 +123,7 @@ pub async fn process_messages(
 }
 
 /// Process a regular chat message (kind 9)
-async fn process_regular_message(
+pub(crate) async fn process_regular_message(
     message: &Message,
     parser: &dyn Parser,
     media_files_map: &HashMap<String, MediaFile>,
