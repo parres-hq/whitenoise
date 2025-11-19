@@ -12,6 +12,7 @@ use sqlx::{
 use thiserror::Error;
 
 pub mod accounts;
+pub mod aggregated_messages;
 pub mod app_settings;
 pub mod group_information;
 pub mod media_files;
@@ -21,6 +22,8 @@ pub mod relays;
 pub mod user_relays;
 pub mod users;
 pub mod utils;
+
+pub use aggregated_messages::{AggregatedMessage, AggregatedMessageRow};
 
 pub static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| sqlx::migrate!("./db_migrations"));
 
