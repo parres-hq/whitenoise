@@ -254,8 +254,15 @@ Performance benchmarks are a separate category of tests designed to measure and 
 # Run all performance benchmarks once
 just benchmark
 
+# Run a specific benchmark scenario
+just benchmark messaging-performance
+just benchmark message-aggregation
+just benchmark user-discovery-blocking
+just benchmark user-discovery-background
+
 # Run benchmarks and save results with timestamp
-just benchmark-save
+just benchmark-save                      # All benchmarks
+just benchmark-save messaging-performance  # Specific benchmark
 ```
 
 Benchmark results are saved to `./benchmark_results/` (git-ignored).

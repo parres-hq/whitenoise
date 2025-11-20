@@ -164,6 +164,7 @@ impl BenchmarkScenario for MessageAggregationBenchmark {
                 .with_message_id_key(&format!("msg_{}", i))
                 .run(context)
                 .await?;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
         // 4. Upload media once and send messages referencing it
@@ -183,6 +184,7 @@ impl BenchmarkScenario for MessageAggregationBenchmark {
                 SendMessageWithMediaTestCase::new("alice", "benchmark_group")
                     .run(context)
                     .await?;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
 
@@ -218,6 +220,8 @@ impl BenchmarkScenario for MessageAggregationBenchmark {
                 reactions_added += 1;
                 emoji_idx += 1;
 
+                tokio::time::sleep(Duration::from_millis(10)).await;
+
                 // Some messages get multiple reactions from different users
                 if msg_idx % 3 == 0 && reactions_added < cfg.reactions_count {
                     SendMessageTestCase::basic()
@@ -227,6 +231,7 @@ impl BenchmarkScenario for MessageAggregationBenchmark {
                         .run(context)
                         .await?;
                     reactions_added += 1;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
         }
@@ -240,6 +245,7 @@ impl BenchmarkScenario for MessageAggregationBenchmark {
                     DeleteMessageTestCase::new("alice", "benchmark_group", &msg_id)
                         .run(context)
                         .await?;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
         }
@@ -256,6 +262,7 @@ impl BenchmarkScenario for MessageAggregationBenchmark {
                         .into_reply(&format!("Reply to message {}", i), &target_msg_id)
                         .run(context)
                         .await?;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
         }

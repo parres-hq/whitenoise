@@ -104,7 +104,7 @@ impl Whitenoise {
         pubkey: &PublicKey,
         group_id: &GroupId,
     ) -> Result<Vec<ChatMessage>> {
-        Account::find_by_pubkey(pubkey, &self.database).await?;  // Verify account exists (security check)
+        Account::find_by_pubkey(pubkey, &self.database).await?; // Verify account exists (security check)
 
         AggregatedMessage::find_messages_by_group(group_id, &self.database)
             .await

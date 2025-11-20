@@ -90,7 +90,8 @@ impl TestCase for SendMessageWithMediaTestCase {
         // Wait for message processing
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-        // Fetch aggregated messages and verify media is linked
+        // Fetch aggregated messages and verify our message is present
+        let sent_message_id = send_result.message.id.to_string();
         let aggregated_messages = retry(
             15,
             std::time::Duration::from_millis(100),
@@ -109,23 +110,25 @@ impl TestCase for SendMessageWithMediaTestCase {
                     )));
                 }
 
+                // Verify our specific message is in the cache
+                if !messages.iter().any(|msg| msg.id == sent_message_id) {
+                    return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                        "Sent message {} not found in aggregated messages yet",
+                        sent_message_id
+                    )));
+                }
+
                 Ok(messages)
             },
             "fetch aggregated messages with media",
         )
         .await?;
 
-        // Find the message we just sent
-        let sent_message_id = send_result.message.id.to_string();
+        // Find the message we just sent (we know it's there due to retry check)
         let message_with_media = aggregated_messages
             .iter()
             .find(|msg| msg.id == sent_message_id)
-            .ok_or_else(|| {
-                WhitenoiseError::Other(anyhow::anyhow!(
-                    "Sent message {} not found in aggregated messages",
-                    sent_message_id
-                ))
-            })?;
+            .expect("Message should exist after retry");
 
         // Verify media is attached
         assert!(
