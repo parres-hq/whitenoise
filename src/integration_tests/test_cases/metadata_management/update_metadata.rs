@@ -53,9 +53,6 @@ impl TestCase for UpdateMetadataTestCase {
             .update_metadata(&self.metadata, context.whitenoise)
             .await?;
 
-        // Wait for the event to be published and processed
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
         // Verify the update worked
         let updated_metadata = account.metadata(context.whitenoise).await?;
         assert_eq!(

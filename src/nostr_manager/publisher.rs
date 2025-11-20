@@ -198,12 +198,8 @@ impl NostrManager {
         }
 
         // Build EventDeletionRequest with all event IDs
-        let mut deletion_request = EventDeletionRequest::new();
-        for event_id in event_ids {
-            deletion_request = deletion_request.id(*event_id);
-        }
-
-        let event_deletion_event_builder = EventBuilder::delete(deletion_request);
+        let event_deletion_event_builder =
+            EventBuilder::delete(EventDeletionRequest::new().ids(event_ids.iter().copied()));
         self.publish_event_builder_with_signer(event_deletion_event_builder, relays, signer)
             .await
     }
@@ -275,7 +271,7 @@ impl NostrManager {
 #[cfg(test)]
 mod publish_tests {
     use super::*;
-    use std::sync::Arc;
+    use std::{collections::HashSet, sync::Arc};
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -490,6 +486,49 @@ mod publish_tests {
             "Failed to publish batch deletion: {:?}",
             result.unwrap_err()
         );
+
+        let deletion_event_id = *result.as_ref().unwrap().id();
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let filter = Filter::new().ids([deletion_event_id]);
+        let fetched_events = nostr_manager
+            .client
+            .fetch_events_from(&test_relays, filter, nostr_manager.timeout)
+            .await
+            .expect("Failed to fetch published deletion event");
+
+        let deletion_event = fetched_events
+            .into_iter()
+            .next()
+            .expect("Expected deletion event to be returned by relays");
+
+        assert_eq!(
+            deletion_event.kind,
+            Kind::EventDeletion,
+            "Fetched event was not a deletion event"
+        );
+
+        let deleted_ids: HashSet<EventId> = deletion_event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::e())
+            .filter_map(|tag| tag.content().and_then(|hex| EventId::from_hex(hex).ok()))
+            .collect();
+
+        assert_eq!(
+            deleted_ids.len(),
+            event_ids.len(),
+            "Deletion event tag count did not match targets"
+        );
+
+        for expected_id in &event_ids {
+            assert!(
+                deleted_ids.contains(expected_id),
+                "Deletion event missing target id {}",
+                expected_id
+            );
+        }
     }
 
     #[tokio::test]
