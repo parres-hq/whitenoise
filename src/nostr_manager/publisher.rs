@@ -352,6 +352,147 @@ mod publish_tests {
     }
 
     #[tokio::test]
+    async fn test_publish_batch_event_deletion_with_empty_list() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        let event_ids: Vec<EventId> = vec![];
+        let relays: Vec<RelayUrl> = vec![RelayUrl::parse("wss://relay.example.com").unwrap()];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&event_ids, &relays, keys)
+            .await;
+
+        assert!(result.is_err(), "Should fail with empty event_ids list");
+        match result.unwrap_err() {
+            NostrManagerError::WhitenoiseInstance(msg) => {
+                assert!(
+                    msg.contains("empty event_ids list"),
+                    "Expected empty list error, got: {}",
+                    msg
+                );
+            }
+            other => panic!("Expected WhitenoiseInstance error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_event_deletion_with_no_relays() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        let event_id =
+            EventId::from_hex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+                .unwrap();
+        let event_ids = vec![event_id];
+        let relays: Vec<RelayUrl> = vec![];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&event_ids, &relays, keys)
+            .await;
+
+        assert!(result.is_err(), "Should fail with no relays");
+        let error_message = format!("{:?}", result.unwrap_err());
+        assert!(
+            error_message.contains("NoRelaysSpecified"),
+            "Expected NoRelaysSpecified error, got: {}",
+            error_message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_event_deletion_single_event() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(10))
+                .await
+                .unwrap();
+
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        let keys = Keys::generate();
+
+        // First publish an event to delete
+        let metadata = Metadata::new().name("test_for_deletion");
+        let publish_result = nostr_manager
+            .publish_metadata_with_signer(&metadata, &test_relays, keys.clone())
+            .await
+            .expect("Failed to publish metadata. Are test relays running?");
+
+        let event_id = *publish_result.id();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Now publish batch deletion for that single event
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&[event_id], &test_relays, keys)
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to publish batch deletion: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_event_deletion_multiple_events() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(10))
+                .await
+                .unwrap();
+
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        let keys = Keys::generate();
+
+        // Publish multiple events to delete
+        let mut event_ids = Vec::new();
+        for i in 0..3 {
+            let metadata = Metadata::new().name(format!("test_for_deletion_{}", i));
+            let publish_result = nostr_manager
+                .publish_metadata_with_signer(&metadata, &test_relays, keys.clone())
+                .await;
+
+            let event_id = *publish_result
+                .expect("Failed to publish metadata. Are test relays running?")
+                .id();
+            event_ids.push(event_id);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        // Now publish batch deletion for all events
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&event_ids, &test_relays, keys)
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to publish batch deletion: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
     async fn test_publish_follow_list_with_signer_empty_follow_list_non_empty_relays() {
         let (sender, _receiver) = mpsc::channel(100);
         let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
