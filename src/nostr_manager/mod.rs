@@ -358,8 +358,42 @@ impl NostrManager {
             .iter()
             .map(|relay_url| self.ensure_relay_in_client(relay_url));
         let results = futures::future::join_all(relay_futures).await;
-        for result in results {
-            result?;
+
+        let mut successful_relays = 0usize;
+        let mut last_error: Option<NostrManagerError> = None;
+
+        for (relay_url, result) in relay_urls.iter().zip(results.into_iter()) {
+            match result {
+                Ok(_) => successful_relays += 1,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "whitenoise::nostr_manager::ensure_relays_connected",
+                        "Continuing without relay {}: {}",
+                        relay_url,
+                        err
+                    );
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        if successful_relays == 0 {
+            let err = last_error.unwrap_or(NostrManagerError::NoRelayConnections);
+            tracing::error!(
+                target: "whitenoise::nostr_manager::ensure_relays_connected",
+                "Failed to ensure any relays connected: {}",
+                err
+            );
+            return Err(err);
+        }
+
+        if successful_relays < relay_urls.len() {
+            tracing::debug!(
+                target: "whitenoise::nostr_manager::ensure_relays_connected",
+                "Ensured {} of {} relay connections; continuing best-effort",
+                successful_relays,
+                relay_urls.len()
+            );
         }
 
         self.client.connect().await;
@@ -401,7 +435,7 @@ impl NostrManager {
                         Ok(())
                     }
                     Err(e) => {
-                        tracing::warn!(
+                        tracing::debug!(
                             target: "whitenoise::nostr_manager::ensure_relays_connected",
                             "Failed to add relay {}: {}",
                             relay_url,

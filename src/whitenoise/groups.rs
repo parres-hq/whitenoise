@@ -1588,6 +1588,7 @@ mod tests {
     use super::*;
     use crate::whitenoise::Whitenoise;
     use crate::whitenoise::test_utils::*;
+    use nostr_sdk::RelayUrl;
 
     #[tokio::test]
     async fn test_create_group() {
@@ -2031,6 +2032,184 @@ mod tests {
         );
         assert_eq!(updated_group.image_hash, new_group_data.image_hash.unwrap());
         assert_eq!(updated_group.image_key, new_group_data.image_key.unwrap());
+    }
+
+    #[cfg(test)]
+    async fn set_user_relays(
+        whitenoise: &Whitenoise,
+        user: &User,
+        relay_type: RelayType,
+        relay_urls: &[&str],
+    ) -> Vec<RelayUrl> {
+        let existing_relays = user.relays(relay_type, &whitenoise.database).await.unwrap();
+        for relay in existing_relays {
+            user.remove_relay(&relay, relay_type, &whitenoise.database)
+                .await
+                .unwrap();
+        }
+
+        let mut configured_urls = Vec::new();
+        for url in relay_urls {
+            let relay_url = RelayUrl::parse(url).unwrap();
+            let relay = whitenoise
+                .find_or_create_relay_by_url(&relay_url)
+                .await
+                .unwrap();
+            user.add_relay(&relay, relay_type, &whitenoise.database)
+                .await
+                .unwrap();
+            configured_urls.push(relay_url);
+        }
+
+        configured_urls
+    }
+
+    #[tokio::test]
+    async fn test_resolve_member_delivery_relays_prefers_inbox_relays() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let fallback_account = whitenoise.create_identity().await.unwrap();
+        let member_account = whitenoise.create_identity().await.unwrap();
+
+        let fallback_user = fallback_account.user(&whitenoise.database).await.unwrap();
+        set_user_relays(
+            &whitenoise,
+            &fallback_user,
+            RelayType::Nip65,
+            &["wss://fallback.example.com"],
+        )
+        .await;
+
+        let member_user = member_account.user(&whitenoise.database).await.unwrap();
+        set_user_relays(
+            &whitenoise,
+            &member_user,
+            RelayType::Nip65,
+            &["wss://member-nip65.example.com"],
+        )
+        .await;
+        let inbox_urls = set_user_relays(
+            &whitenoise,
+            &member_user,
+            RelayType::Inbox,
+            &[
+                "wss://member-inbox-1.example.com",
+                "wss://member-inbox-2.example.com",
+            ],
+        )
+        .await;
+
+        let resolved_relays = whitenoise
+            .resolve_member_delivery_relays(
+                &member_user,
+                &fallback_account,
+                "tests::resolve_member_delivery_relays_prefers_inbox",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(Relay::urls(&resolved_relays), inbox_urls);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_member_delivery_relays_uses_nip65_when_inbox_missing() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let fallback_account = whitenoise.create_identity().await.unwrap();
+        let member_account = whitenoise.create_identity().await.unwrap();
+
+        let fallback_user = fallback_account.user(&whitenoise.database).await.unwrap();
+        set_user_relays(
+            &whitenoise,
+            &fallback_user,
+            RelayType::Nip65,
+            &["wss://fallback.example.com"],
+        )
+        .await;
+
+        let member_user = member_account.user(&whitenoise.database).await.unwrap();
+        let nip65_urls = set_user_relays(
+            &whitenoise,
+            &member_user,
+            RelayType::Nip65,
+            &["wss://member-nip65-only.example.com"],
+        )
+        .await;
+        set_user_relays(&whitenoise, &member_user, RelayType::Inbox, &[]).await;
+
+        let resolved_relays = whitenoise
+            .resolve_member_delivery_relays(
+                &member_user,
+                &fallback_account,
+                "tests::resolve_member_delivery_relays_uses_nip65_when_inbox_missing",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(Relay::urls(&resolved_relays), nip65_urls);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_member_delivery_relays_falls_back_to_account_relays() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let fallback_account = whitenoise.create_identity().await.unwrap();
+        let member_account = whitenoise.create_identity().await.unwrap();
+
+        let member_user = member_account.user(&whitenoise.database).await.unwrap();
+        set_user_relays(&whitenoise, &member_user, RelayType::Inbox, &[]).await;
+        set_user_relays(&whitenoise, &member_user, RelayType::Nip65, &[]).await;
+
+        let fallback_user = fallback_account.user(&whitenoise.database).await.unwrap();
+        let fallback_urls = set_user_relays(
+            &whitenoise,
+            &fallback_user,
+            RelayType::Nip65,
+            &["wss://account-fallback.example.com"],
+        )
+        .await;
+
+        let resolved_relays = whitenoise
+            .resolve_member_delivery_relays(
+                &member_user,
+                &fallback_account,
+                "tests::resolve_member_delivery_relays_falls_back_to_account",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(Relay::urls(&resolved_relays), fallback_urls);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_member_delivery_relays_errors_without_any_relays() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let fallback_account = whitenoise.create_identity().await.unwrap();
+        let member_account = whitenoise.create_identity().await.unwrap();
+
+        let member_user = member_account.user(&whitenoise.database).await.unwrap();
+        set_user_relays(&whitenoise, &member_user, RelayType::Inbox, &[]).await;
+        set_user_relays(&whitenoise, &member_user, RelayType::Nip65, &[]).await;
+
+        let fallback_user = fallback_account.user(&whitenoise.database).await.unwrap();
+        set_user_relays(&whitenoise, &fallback_user, RelayType::Nip65, &[]).await;
+
+        let error = whitenoise
+            .resolve_member_delivery_relays(
+                &member_user,
+                &fallback_account,
+                "tests::resolve_member_delivery_relays_errors_without_any_relays",
+            )
+            .await
+            .unwrap_err();
+
+        match error {
+            WhitenoiseError::MissingWelcomeRelays {
+                member_pubkey,
+                account_pubkey,
+            } => {
+                assert_eq!(member_pubkey, member_account.pubkey);
+                assert_eq!(account_pubkey, fallback_account.pubkey);
+            }
+            other => panic!("Expected MissingWelcomeRelays error, got {:?}", other),
+        }
     }
 
     #[tokio::test]
