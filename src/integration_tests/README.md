@@ -58,6 +58,27 @@ ScenarioContext enables TestCases within the same scenario to share data.
 - Long-lived caches or state mirrors
 - Complex business logic
 
+## Running Integration Tests
+
+**Prerequisites:**
+
+- Docker Compose services must be running: `docker compose up -d`
+
+**Commands:**
+
+```bash
+# Run all integration test scenarios
+just int-test
+
+# Run a specific integration test scenario
+just int-test account-management
+just int-test basic-messaging
+just int-test advanced-messaging
+just int-test group-membership
+just int-test chat-media-upload
+just int-test user-discovery
+```
+
 ## Directory Structure
 
 ```text

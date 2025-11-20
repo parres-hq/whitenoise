@@ -11,17 +11,39 @@ clear-dev-data:
     rm -rf ./dev/data/*
 
 # Run integration_test binary using the local relays and data dirs
-int-test:
+# Usage:
+#   just int-test                      # Run all integration tests
+#   just int-test basic-messaging      # Run specific scenario
+int-test scenario="":
+    #!/usr/bin/env bash
+    set -euo pipefail
     rm -rf ./dev/data/integration_test/
-    RUST_LOG=debug,\
-    sqlx=info,\
-    refinery_core=error,\
-    keyring=info,\
-    nostr_relay_pool=error,\
-    mdk_sqlite_storage=error,\
-    tungstenite=error,\
-    integration_test=debug \
-    cargo run --bin integration_test --features integration-tests -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+    if [ -z "{{scenario}}" ]; then
+        echo "Running all integration test scenarios..."
+        RUST_LOG=debug,\
+        sqlx=info,\
+        refinery_core=error,\
+        keyring=info,\
+        nostr_relay_pool=error,\
+        mdk_sqlite_storage=error,\
+        tungstenite=error,\
+        integration_test=debug \
+        cargo run --bin integration_test --features integration-tests -- \
+        --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+    else
+        echo "Running integration test scenario: {{scenario}}"
+        RUST_LOG=debug,\
+        sqlx=info,\
+        refinery_core=error,\
+        keyring=info,\
+        nostr_relay_pool=error,\
+        mdk_sqlite_storage=error,\
+        tungstenite=error,\
+        integration_test=debug \
+        cargo run --bin integration_test --features integration-tests -- \
+        --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/ \
+        "{{scenario}}"
+    fi
 
 # Run integration_test binary with flamegraph to analyze performance
 int-test-flamegraph:

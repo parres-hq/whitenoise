@@ -13,6 +13,11 @@ struct Args {
 
     #[clap(long, value_name = "PATH", required = true)]
     logs_dir: PathBuf,
+
+    /// Optional scenario name to run a specific test scenario.
+    /// If not provided, runs all scenarios.
+    #[clap(value_name = "SCENARIO")]
+    scenario: Option<String>,
 }
 
 #[tokio::main]
@@ -29,9 +34,15 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let whitenoise = Whitenoise::get_instance()?;
 
-    ScenarioRegistry::run_all_scenarios(whitenoise).await?;
-
-    tracing::info!("=== All Integration Test Scenarios Completed Successfully ===");
+    match args.scenario {
+        Some(scenario_name) => {
+            ScenarioRegistry::run_scenario(&scenario_name, whitenoise).await?;
+        }
+        None => {
+            ScenarioRegistry::run_all_scenarios(whitenoise).await?;
+            tracing::info!("=== All Integration Test Scenarios Completed Successfully ===");
+        }
+    }
 
     Ok(())
 }
