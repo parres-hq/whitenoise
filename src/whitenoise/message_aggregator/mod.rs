@@ -90,7 +90,6 @@ impl MessageAggregator {
     /// * `message` - The raw message to process (must be kind 9)
     /// * `parser` - Reference to the nostr parser for tokenizing message content
     /// * `media_files` - Vector of MediaFile records for linking media to this message
-    #[allow(dead_code)] // Will be used by event processor in upcoming commit
     pub(crate) async fn process_single_message(
         &self,
         message: &Message,

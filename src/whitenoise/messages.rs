@@ -137,8 +137,6 @@ impl Whitenoise {
     ///
     /// MUST be called BEFORE event processor starts to avoid race conditions.
     /// Uses simple count comparison to detect sync needs, then incrementally syncs missing events.
-    /// Not yet called during initialization - will be wired in a future commit.
-    #[allow(dead_code)] // Will be called from Whitenoise::new() in upcoming commit
     pub(crate) async fn sync_message_cache_on_startup(&self) -> Result<()> {
         tracing::info!(
             target: "whitenoise::cache",
@@ -291,38 +289,242 @@ impl Whitenoise {
 
         Ok(())
     }
-
-    #[allow(dead_code)]
-    pub(crate) async fn rebuild_message_cache_for_group(
-        &self,
-        pubkey: &PublicKey,
-        group_id: &GroupId,
-    ) -> Result<()> {
-        tracing::info!(
-            target: "whitenoise::cache",
-            "Rebuilding message cache for group {}",
-            hex::encode(group_id.as_slice())
-        );
-
-        AggregatedMessage::delete_by_group(group_id, &self.database)
-            .await
-            .map_err(|e| {
-                WhitenoiseError::from(anyhow::anyhow!("Failed to delete cached events: {}", e))
-            })?;
-
-        let account = Account::find_by_pubkey(pubkey, &self.database).await?;
-        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
-        let mdk_messages = mdk.get_messages(group_id)?;
-
-        self.sync_cache_for_group(pubkey, group_id, mdk_messages)
-            .await
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::whitenoise::test_utils::create_mock_whitenoise;
+    use crate::whitenoise::test_utils::*;
+    use std::time::Duration;
+
+    /// Test successful message sending with various scenarios:
+    /// - Default tags (None)
+    /// - Custom tags (e.g., reply tags)
+    /// - Token parsing (URLs and other special content)
+    #[tokio::test]
+    async fn test_send_message_to_group_success() {
+        // Arrange: Setup whitenoise and create a group
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkey = members[0].0.pubkey;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let group = whitenoise
+            .create_group(&creator_account, vec![member_pubkey], config, None)
+            .await
+            .unwrap();
+
+        // Test 1: Basic message with no tags
+        let basic_message = "Hello, world!".to_string();
+        let result = whitenoise
+            .send_message_to_group(
+                &creator_account,
+                &group.mls_group_id,
+                basic_message.clone(),
+                9,
+                None,
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "Failed to send basic message: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap().message.content, basic_message);
+
+        // Test 2: Message with custom tags (reply scenario)
+        let reply_message = "This is a reply".to_string();
+        let tags = Some(vec![Tag::parse(vec!["e", "original_message_id"]).unwrap()]);
+        let result = whitenoise
+            .send_message_to_group(
+                &creator_account,
+                &group.mls_group_id,
+                reply_message.clone(),
+                9,
+                tags,
+            )
+            .await;
+        assert!(
+            result.is_ok(),
+            "Failed to send message with tags: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap().message.content, reply_message);
+
+        // Test 3: Message with URL (token parsing)
+        let url_message = "Check out https://example.com for info".to_string();
+        let result = whitenoise
+            .send_message_to_group(
+                &creator_account,
+                &group.mls_group_id,
+                url_message.clone(),
+                9,
+                None,
+            )
+            .await;
+        assert!(result.is_ok(), "Failed to send message with URL");
+        let message_with_tokens = result.unwrap();
+        assert_eq!(message_with_tokens.message.content, url_message);
+        assert!(
+            !message_with_tokens.tokens.is_empty(),
+            "Expected URL to be parsed as token"
+        );
+    }
+
+    /// Test error handling when sending to non-existent group
+    #[tokio::test]
+    async fn test_send_message_to_group_error_handling() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
+
+        // Try to send message to a non-existent group
+        let fake_group_id = GroupId::from_slice(&[255u8; 32]);
+        let result = whitenoise
+            .send_message_to_group(
+                &creator_account,
+                &fake_group_id,
+                "Test".to_string(),
+                9,
+                None,
+            )
+            .await;
+
+        assert!(result.is_err(), "Expected error for non-existent group");
+    }
+
+    /// Test edge cases: empty content, long content, different event kinds
+    #[tokio::test]
+    async fn test_send_message_to_group_edge_cases() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkey = members[0].0.pubkey;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let group = whitenoise
+            .create_group(&creator_account, vec![member_pubkey], config, None)
+            .await
+            .unwrap();
+
+        // Test empty content
+        let empty_result = whitenoise
+            .send_message_to_group(
+                &creator_account,
+                &group.mls_group_id,
+                String::new(),
+                9,
+                None,
+            )
+            .await;
+        assert!(empty_result.is_ok(), "Empty message should be allowed");
+
+        // Test long content
+        let long_content = "A".repeat(10000);
+        let long_result = whitenoise
+            .send_message_to_group(
+                &creator_account,
+                &group.mls_group_id,
+                long_content.clone(),
+                9,
+                None,
+            )
+            .await;
+        assert!(long_result.is_ok(), "Long message should be sendable");
+        assert_eq!(
+            long_result.unwrap().message.content.len(),
+            long_content.len()
+        );
+
+        // Test different event kinds
+        for kind in [7, 9, 10] {
+            let result = whitenoise
+                .send_message_to_group(
+                    &creator_account,
+                    &group.mls_group_id,
+                    format!("Kind {}", kind),
+                    kind,
+                    None,
+                )
+                .await;
+            assert!(result.is_ok(), "Message with kind {} should succeed", kind);
+        }
+    }
+
+    /// Test helper method: create_unsigned_nostr_event
+    #[tokio::test]
+    async fn test_create_unsigned_nostr_event() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let test_keys = create_test_keys();
+        let pubkey = test_keys.public_key();
+
+        // Test without tags
+        let result = whitenoise.create_unsigned_nostr_event(&pubkey, &"Test".to_string(), 1, None);
+        assert!(result.is_ok());
+        let (event, event_id) = result.unwrap();
+        assert_eq!(event.pubkey, pubkey);
+        assert_eq!(event.content, "Test");
+        assert!(event.tags.is_empty());
+        assert_eq!(event.id.unwrap(), event_id);
+
+        // Test with tags
+        let tags = Some(vec![Tag::parse(vec!["e", "test_id"]).unwrap()]);
+        let result = whitenoise.create_unsigned_nostr_event(&pubkey, &"Test".to_string(), 1, tags);
+        assert!(result.is_ok());
+        let (event, _) = result.unwrap();
+        assert_eq!(event.tags.len(), 1);
+    }
+
+    /// Test message sending and retrieval integration
+    #[tokio::test]
+    async fn test_send_and_retrieve_message() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkey = members[0].0.pubkey;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let admin_pubkeys = vec![creator_account.pubkey];
+        let config = create_nostr_group_config_data(admin_pubkeys);
+        let group = whitenoise
+            .create_group(&creator_account, vec![member_pubkey], config, None)
+            .await
+            .unwrap();
+
+        // Send a message
+        let message_content = "Test message for retrieval".to_string();
+        let sent_result = whitenoise
+            .send_message_to_group(
+                &creator_account,
+                &group.mls_group_id,
+                message_content.clone(),
+                9,
+                None,
+            )
+            .await;
+        assert!(sent_result.is_ok());
+
+        // Retrieve and verify
+        let messages = whitenoise
+            .fetch_messages_for_group(&creator_account, &group.mls_group_id)
+            .await
+            .unwrap();
+
+        assert!(!messages.is_empty(), "Should have at least one message");
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.message.content == message_content),
+            "Sent message should be retrievable"
+        );
+    }
 
     #[tokio::test]
     async fn test_cache_needs_sync_empty_mdk() {
@@ -537,73 +739,6 @@ mod tests {
         assert!(contents.contains(&"First".to_string()));
         assert!(contents.contains(&"Second".to_string()));
         assert!(contents.contains(&"Third".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_rebuild_message_cache() {
-        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
-
-        // Create accounts and group
-        let creator = whitenoise.create_identity().await.unwrap();
-        let member = whitenoise.create_identity().await.unwrap();
-
-        let group = whitenoise
-            .create_group(
-                &creator,
-                vec![member.pubkey],
-                crate::whitenoise::test_utils::create_nostr_group_config_data(vec![creator.pubkey]),
-                None,
-            )
-            .await
-            .unwrap();
-
-        // Send messages
-        whitenoise
-            .send_message_to_group(&creator, &group.mls_group_id, "Test 1".to_string(), 9, None)
-            .await
-            .unwrap();
-
-        whitenoise
-            .send_message_to_group(&creator, &group.mls_group_id, "Test 2".to_string(), 9, None)
-            .await
-            .unwrap();
-
-        // Sync cache
-        let mdk = Account::create_mdk(creator.pubkey, &whitenoise.config.data_dir).unwrap();
-        let mdk_messages = mdk.get_messages(&group.mls_group_id).unwrap();
-        whitenoise
-            .sync_cache_for_group(&creator.pubkey, &group.mls_group_id, mdk_messages)
-            .await
-            .unwrap();
-
-        // Verify cache has 2 messages
-        let cached_count =
-            AggregatedMessage::count_by_group(&group.mls_group_id, &whitenoise.database)
-                .await
-                .unwrap();
-        assert_eq!(cached_count, 2);
-
-        // Rebuild the cache
-        whitenoise
-            .rebuild_message_cache_for_group(&creator.pubkey, &group.mls_group_id)
-            .await
-            .unwrap();
-
-        // Cache should still have 2 messages
-        let cached_count =
-            AggregatedMessage::count_by_group(&group.mls_group_id, &whitenoise.database)
-                .await
-                .unwrap();
-        assert_eq!(cached_count, 2);
-
-        // Messages should be the same
-        let messages =
-            AggregatedMessage::find_messages_by_group(&group.mls_group_id, &whitenoise.database)
-                .await
-                .unwrap();
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, "Test 1");
-        assert_eq!(messages[1].content, "Test 2");
     }
 
     #[tokio::test]
