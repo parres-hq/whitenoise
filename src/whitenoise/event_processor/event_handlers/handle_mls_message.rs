@@ -115,10 +115,7 @@ impl Whitenoise {
                 let chat_message = self
                     .message_aggregator
                     .process_single_message(&message, &self.nostr, media_files)
-                    .await
-                    .map_err(|e| {
-                        WhitenoiseError::Other(anyhow::anyhow!("Failed to process message: {}", e))
-                    })?;
+                    .await?;
 
                 AggregatedMessage::insert_message(&chat_message, group_id, &self.database).await?;
 
@@ -141,7 +138,7 @@ impl Whitenoise {
                 {
                     tracing::debug!(
                         target: "whitenoise::cache",
-                        "Could not apply reaction {} immediately (target not cached yet): {}",
+                        "Could not apply reaction {} immediately: {}",
                         message.id,
                         e
                     );
@@ -163,7 +160,7 @@ impl Whitenoise {
                 {
                     tracing::debug!(
                         target: "whitenoise::cache",
-                        "Could not apply deletion {} immediately (targets not cached yet): {}",
+                        "Could not apply deletion {} immediately: {}",
                         message.id,
                         e
                     );
@@ -200,10 +197,7 @@ impl Whitenoise {
         let reaction_emoji = emoji_utils::validate_and_normalize_reaction(
             &reaction_msg.content,
             self.message_aggregator.config().normalize_emoji,
-        )
-        .map_err(|e| {
-            WhitenoiseError::Other(anyhow::anyhow!("Failed to validate reaction: {}", e))
-        })?;
+        )?;
 
         reaction_handler::add_reaction_to_message(
             &mut msg,
@@ -259,23 +253,11 @@ impl Whitenoise {
     ) -> Result<()> {
         let orphaned_reactions =
             AggregatedMessage::find_orphaned_reactions(message_id, group_id, &self.database)
-                .await
-                .map_err(|e| {
-                    WhitenoiseError::from(anyhow::anyhow!(
-                        "Failed to find orphaned reactions: {}",
-                        e
-                    ))
-                })?;
+                .await?;
 
         let orphaned_deletions =
             AggregatedMessage::find_orphaned_deletions(message_id, group_id, &self.database)
-                .await
-                .map_err(|e| {
-                    WhitenoiseError::from(anyhow::anyhow!(
-                        "Failed to find orphaned deletions: {}",
-                        e
-                    ))
-                })?;
+                .await?;
 
         if !orphaned_reactions.is_empty() || !orphaned_deletions.is_empty() {
             tracing::info!(
@@ -291,19 +273,25 @@ impl Whitenoise {
             let reaction_timestamp = Timestamp::from(reaction_row.created_at.timestamp() as u64);
 
             if let Some(mut msg) =
-                AggregatedMessage::find_by_id(message_id, group_id, &self.database)
-                    .await
-                    .map_err(|e| {
-                        WhitenoiseError::from(anyhow::anyhow!("Failed to find message: {}", e))
-                    })?
+                AggregatedMessage::find_by_id(message_id, group_id, &self.database).await?
             {
-                let reaction_emoji = emoji_utils::validate_and_normalize_reaction(
+                let reaction_emoji = match emoji_utils::validate_and_normalize_reaction(
                     &reaction_row.content,
                     self.message_aggregator.config().normalize_emoji,
-                )
-                .map_err(|e| {
-                    WhitenoiseError::Other(anyhow::anyhow!("Failed to validate reaction: {}", e))
-                })?;
+                ) {
+                    Ok(emoji) => emoji,
+                    Err(e) => {
+                        tracing::debug!(
+                            target: "whitenoise::cache",
+                            "Skipping orphaned reaction {} from {} with invalid content '{}': {}",
+                            reaction_row.message_id,
+                            reaction_row.author,
+                            reaction_row.content,
+                            e
+                        );
+                        continue;
+                    }
+                };
 
                 reaction_handler::add_reaction_to_message(
                     &mut msg,
@@ -318,13 +306,7 @@ impl Whitenoise {
                     &msg.reactions,
                     &self.database,
                 )
-                .await
-                .map_err(|e| {
-                    WhitenoiseError::from(anyhow::anyhow!(
-                        "Failed to update reactions in cache: {}",
-                        e
-                    ))
-                })?;
+                .await?;
             }
         }
 
@@ -335,13 +317,7 @@ impl Whitenoise {
                 &deletion_row.message_id.to_string(),
                 &self.database,
             )
-            .await
-            .map_err(|e| {
-                WhitenoiseError::from(anyhow::anyhow!(
-                    "Failed to mark message deleted in cache: {}",
-                    e
-                ))
-            })?;
+            .await?;
         }
 
         Ok(())
@@ -351,23 +327,21 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::whitenoise::test_utils::*;
+    use crate::whitenoise::{database::AggregatedMessage, test_utils::*};
     use std::time::Duration;
 
+    /// Test handling of different MLS message types: regular messages, reactions, and deletions
     #[tokio::test]
-    async fn test_handle_mls_message_success() {
-        // Arrange: Whitenoise and accounts
+    async fn test_handle_mls_message_different_types() {
+        // Arrange: Setup whitenoise and create a group
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
         let creator_account = whitenoise.create_identity().await.unwrap();
-        // Create one member account, set contact, publish key package
         let members = setup_multiple_test_accounts(&whitenoise, 1).await;
         let member_pubkey = members[0].0.pubkey;
 
-        // Give time for key package publish to propagate in test relays
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
 
-        // Create the group via high-level API
-        let _group = whitenoise
+        let group = whitenoise
             .create_group(
                 &creator_account,
                 vec![member_pubkey],
@@ -377,45 +351,96 @@ mod tests {
             .await
             .unwrap();
 
-        // Build a valid MLS group message event for the new group
         let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
-        let groups = mdk.get_groups().unwrap();
-        let group_id = groups
-            .first()
-            .expect("group must exist")
-            .mls_group_id
-            .clone();
+        let group_id = &group.mls_group_id;
 
+        // Test 1: Regular message (Kind 9)
         let mut inner = UnsignedEvent::new(
             creator_account.pubkey,
             Timestamp::now(),
-            Kind::TextNote,
+            Kind::Custom(9),
             vec![],
-            "hello from test".to_string(),
+            "Test message".to_string(),
         );
         inner.ensure_id();
-        let message_event = mdk.create_message(&group_id, inner).unwrap();
+        let message_id = inner.id.unwrap();
+        let message_event = mdk.create_message(group_id, inner).unwrap();
 
-        // Act
         let result = whitenoise
             .handle_mls_message(&creator_account, message_event)
             .await;
+        assert!(result.is_ok(), "Failed to handle regular message");
 
-        // Assert
-        assert!(result.is_ok());
+        // Verify message was cached
+        let cached_msg =
+            AggregatedMessage::find_by_id(&message_id.to_string(), group_id, &whitenoise.database)
+                .await
+                .unwrap();
+        assert!(cached_msg.is_some(), "Message should be cached");
+
+        // Test 2: Reaction message (Kind 7)
+        let mut reaction_inner = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::Reaction,
+            vec![Tag::parse(vec!["e", &message_id.to_string()]).unwrap()],
+            "👍".to_string(),
+        );
+        reaction_inner.ensure_id();
+        let reaction_event = mdk.create_message(group_id, reaction_inner).unwrap();
+
+        let result = whitenoise
+            .handle_mls_message(&creator_account, reaction_event)
+            .await;
+        assert!(result.is_ok(), "Failed to handle reaction");
+
+        // Verify reaction was applied to cached message
+        let cached_msg =
+            AggregatedMessage::find_by_id(&message_id.to_string(), group_id, &whitenoise.database)
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(
+            !cached_msg.reactions.by_emoji.is_empty(),
+            "Reaction should be applied"
+        );
+
+        // Test 3: Deletion message (Kind 5)
+        let mut deletion_inner = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::EventDeletion,
+            vec![Tag::parse(vec!["e", &message_id.to_string()]).unwrap()],
+            String::new(),
+        );
+        deletion_inner.ensure_id();
+        let deletion_event = mdk.create_message(group_id, deletion_inner).unwrap();
+
+        let result = whitenoise
+            .handle_mls_message(&creator_account, deletion_event)
+            .await;
+        assert!(result.is_ok(), "Failed to handle deletion");
+
+        // Verify message was marked as deleted
+        let cached_msg =
+            AggregatedMessage::find_by_id(&message_id.to_string(), group_id, &whitenoise.database)
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(cached_msg.is_deleted, "Message should be marked as deleted");
     }
 
+    /// Test error handling for invalid MLS messages
     #[tokio::test]
-    async fn test_handle_mls_message_error_path() {
-        // Arrange: Whitenoise and accounts
+    async fn test_handle_mls_message_error_handling() {
         let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
         let creator_account = whitenoise.create_identity().await.unwrap();
         let members = setup_multiple_test_accounts(&whitenoise, 1).await;
         let member_pubkey = members[0].0.pubkey;
-        tokio::time::sleep(Duration::from_millis(300)).await;
 
-        // Create the group via high-level API
-        let _group = whitenoise
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let group = whitenoise
             .create_group(
                 &creator_account,
                 vec![member_pubkey],
@@ -425,38 +450,356 @@ mod tests {
             .await
             .unwrap();
 
-        // Create a valid MLS message event for that group
         let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
-        let groups = mdk.get_groups().unwrap();
-        let group_id = groups
-            .first()
-            .expect("group must exist")
-            .mls_group_id
-            .clone();
         let mut inner = UnsignedEvent::new(
             creator_account.pubkey,
             Timestamp::now(),
-            Kind::TextNote,
+            Kind::Custom(9),
             vec![],
-            "msg".to_string(),
+            "Valid message".to_string(),
         );
         inner.ensure_id();
-        let valid_event = mdk.create_message(&group_id, inner).unwrap();
+        let valid_event = mdk.create_message(&group.mls_group_id, inner).unwrap();
 
-        // Corrupt it by changing the kind so MLS processing fails
-        let mut bad_event = valid_event.clone();
+        // Corrupt the event by changing its kind (MLS processing should fail)
+        let mut bad_event = valid_event;
         bad_event.kind = Kind::TextNote;
 
-        // Act
         let result = whitenoise
             .handle_mls_message(&creator_account, bad_event)
             .await;
 
-        // Assert
-        assert!(result.is_err());
+        assert!(result.is_err(), "Expected error for corrupted event");
         match result.err().unwrap() {
             WhitenoiseError::MdkCoreError(_) => {}
             other => panic!("Expected MdkCoreError, got: {:?}", other),
         }
+    }
+
+    /// Test orphaned reactions and deletions are applied when target message arrives later
+    #[tokio::test]
+    async fn test_handle_mls_message_orphaned_reactions_and_deletions() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkey = members[0].0.pubkey;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let group = whitenoise
+            .create_group(
+                &creator_account,
+                vec![member_pubkey],
+                create_nostr_group_config_data(vec![creator_account.pubkey]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let group_id = &group.mls_group_id;
+
+        // Create a message ID that doesn't exist yet (simulating out-of-order delivery)
+        let future_message_id = EventId::all_zeros();
+
+        // Send reaction to non-existent message (orphaned reaction)
+        let mut orphaned_reaction = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::Reaction,
+            vec![Tag::parse(vec!["e", &future_message_id.to_string()]).unwrap()],
+            "+".to_string(), // Use simple emoji that won't be normalized
+        );
+        orphaned_reaction.ensure_id();
+        let reaction_event = mdk.create_message(group_id, orphaned_reaction).unwrap();
+
+        let result = whitenoise
+            .handle_mls_message(&creator_account, reaction_event)
+            .await;
+        assert!(result.is_ok(), "Orphaned reaction should be stored");
+
+        // Verify orphaned reaction is stored
+        let orphaned_reactions = AggregatedMessage::find_orphaned_reactions(
+            &future_message_id.to_string(),
+            group_id,
+            &whitenoise.database,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            orphaned_reactions.len(),
+            1,
+            "Should have one orphaned reaction"
+        );
+
+        // Now send the actual message with the matching ID
+        let mut actual_message = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::Custom(9),
+            vec![],
+            "Late message".to_string(),
+        );
+        actual_message.id = Some(future_message_id);
+        let message_event = mdk.create_message(group_id, actual_message).unwrap();
+
+        let result = whitenoise
+            .handle_mls_message(&creator_account, message_event)
+            .await;
+        assert!(
+            result.is_ok(),
+            "Message with orphaned reaction should succeed"
+        );
+
+        // Verify the orphaned reaction was applied
+        let cached_msg = AggregatedMessage::find_by_id(
+            &future_message_id.to_string(),
+            group_id,
+            &whitenoise.database,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            !cached_msg.reactions.by_emoji.is_empty(),
+            "Orphaned reaction should be applied to message"
+        );
+        // Verify total reaction count instead of specific emoji (due to normalization)
+        let total_reactions: usize = cached_msg
+            .reactions
+            .by_emoji
+            .values()
+            .map(|v| v.count)
+            .sum();
+        assert_eq!(total_reactions, 1, "Should have one reaction applied");
+    }
+
+    /// Test that invalid orphaned reactions are skipped gracefully without failing the entire method
+    #[tokio::test]
+    async fn test_invalid_orphaned_reactions_are_skipped() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+        let member_pubkey = members[0].0.pubkey;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let group = whitenoise
+            .create_group(
+                &creator_account,
+                vec![member_pubkey],
+                create_nostr_group_config_data(vec![creator_account.pubkey]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+        let group_id = &group.mls_group_id;
+
+        let future_message_id = EventId::all_zeros();
+
+        // Send a VALID orphaned reaction
+        let mut valid_reaction = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::Reaction,
+            vec![Tag::parse(vec!["e", &future_message_id.to_string()]).unwrap()],
+            "👍".to_string(),
+        );
+        valid_reaction.ensure_id();
+        let valid_event = mdk.create_message(group_id, valid_reaction).unwrap();
+
+        whitenoise
+            .handle_mls_message(&creator_account, valid_event)
+            .await
+            .unwrap();
+
+        // Send an INVALID orphaned reaction (empty content - not a valid emoji)
+        let mut invalid_reaction = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::Reaction,
+            vec![Tag::parse(vec!["e", &future_message_id.to_string()]).unwrap()],
+            "".to_string(), // Empty content is invalid
+        );
+        invalid_reaction.ensure_id();
+        let invalid_event = mdk.create_message(group_id, invalid_reaction).unwrap();
+
+        whitenoise
+            .handle_mls_message(&creator_account, invalid_event)
+            .await
+            .unwrap();
+
+        // Now send the target message - this should succeed despite invalid orphaned reaction
+        let mut actual_message = UnsignedEvent::new(
+            creator_account.pubkey,
+            Timestamp::now(),
+            Kind::Custom(9),
+            vec![],
+            "Target message".to_string(),
+        );
+        actual_message.id = Some(future_message_id);
+        let message_event = mdk.create_message(group_id, actual_message).unwrap();
+
+        let result = whitenoise
+            .handle_mls_message(&creator_account, message_event)
+            .await;
+
+        // The critical assertion: message processing should succeed
+        assert!(
+            result.is_ok(),
+            "Message processing should succeed despite invalid orphaned reaction"
+        );
+
+        // Verify only the valid reaction was applied
+        let cached_msg = AggregatedMessage::find_by_id(
+            &future_message_id.to_string(),
+            group_id,
+            &whitenoise.database,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let total_reactions: usize = cached_msg
+            .reactions
+            .by_emoji
+            .values()
+            .map(|v| v.count)
+            .sum();
+        assert_eq!(
+            total_reactions, 1,
+            "Should have exactly one valid reaction applied (invalid one skipped)"
+        );
+    }
+
+    /// Test helper methods: extract_message_details, extract_reaction_target_id, etc.
+    #[tokio::test]
+    async fn test_helper_methods() {
+        let pubkey = nostr_sdk::Keys::generate().public_key();
+        let group_id = GroupId::from_slice(&[1; 32]);
+
+        // Test extract_message_details with ApplicationMessage
+        let mut inner_event = UnsignedEvent::new(
+            pubkey,
+            Timestamp::now(),
+            Kind::Custom(9),
+            vec![],
+            "Test".to_string(),
+        );
+        inner_event.ensure_id();
+
+        let message = mdk_core::prelude::message_types::Message {
+            id: inner_event.id.unwrap(),
+            pubkey,
+            created_at: Timestamp::now(),
+            kind: Kind::Custom(9),
+            tags: Tags::new(),
+            content: "Test".to_string(),
+            mls_group_id: group_id.clone(),
+            event: inner_event.clone(),
+            wrapper_event_id: EventId::all_zeros(),
+            state: mdk_core::prelude::message_types::MessageState::Processed,
+        };
+
+        let result = MessageProcessingResult::ApplicationMessage(message);
+        let extracted = Whitenoise::extract_message_details(&result);
+        assert!(extracted.is_some(), "Should extract application message");
+        let (extracted_group_id, extracted_event) = extracted.unwrap();
+        assert_eq!(extracted_group_id, group_id);
+        assert_eq!(extracted_event.content, "Test");
+
+        // Test extract_message_details with non-ApplicationMessage
+        let commit_result = MessageProcessingResult::Commit {
+            mls_group_id: group_id,
+        };
+        let extracted = Whitenoise::extract_message_details(&commit_result);
+        assert!(extracted.is_none(), "Should not extract commit");
+
+        // Test extract_reaction_target_id
+        let mut tags = Tags::new();
+        tags.push(Tag::parse(vec!["e", "test_event_id"]).unwrap());
+        let target_id = Whitenoise::extract_reaction_target_id(&tags).unwrap();
+        assert_eq!(target_id, "test_event_id");
+
+        // Test extract_reaction_target_id with missing e-tag
+        let empty_tags = Tags::new();
+        let result = Whitenoise::extract_reaction_target_id(&empty_tags);
+        assert!(result.is_err(), "Should fail with missing e-tag");
+
+        // Test extract_deletion_target_ids with multiple targets
+        let mut tags = Tags::new();
+        tags.push(Tag::parse(vec!["e", "id1"]).unwrap());
+        tags.push(Tag::parse(vec!["e", "id2"]).unwrap());
+        tags.push(Tag::parse(vec!["p", "some_pubkey"]).unwrap()); // Should be ignored
+
+        let target_ids = Whitenoise::extract_deletion_target_ids(&tags);
+        assert_eq!(target_ids.len(), 2);
+        assert!(target_ids.contains(&"id1".to_string()));
+        assert!(target_ids.contains(&"id2".to_string()));
+    }
+
+    /// Test message cache integration with real message flow
+    #[tokio::test]
+    async fn test_handle_mls_message_cache_integration() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+        let creator_account = whitenoise.create_identity().await.unwrap();
+        let members = setup_multiple_test_accounts(&whitenoise, 1).await;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let group = whitenoise
+            .create_group(
+                &creator_account,
+                vec![members[0].0.pubkey],
+                create_nostr_group_config_data(vec![creator_account.pubkey]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mdk = Account::create_mdk(creator_account.pubkey, &whitenoise.config.data_dir).unwrap();
+
+        // Send multiple messages
+        for i in 1..=3 {
+            let mut inner = UnsignedEvent::new(
+                creator_account.pubkey,
+                Timestamp::now(),
+                Kind::Custom(9),
+                vec![],
+                format!("Message {}", i),
+            );
+            inner.ensure_id();
+            let event = mdk.create_message(&group.mls_group_id, inner).unwrap();
+
+            whitenoise
+                .handle_mls_message(&creator_account, event)
+                .await
+                .unwrap();
+        }
+
+        // Verify all messages are in cache
+        let messages =
+            AggregatedMessage::find_messages_by_group(&group.mls_group_id, &whitenoise.database)
+                .await
+                .unwrap();
+
+        assert_eq!(messages.len(), 3, "All messages should be cached");
+        for (i, msg) in messages.iter().enumerate() {
+            assert!(
+                msg.content.contains(&format!("Message {}", i + 1)),
+                "Message {} content should be correct",
+                i + 1
+            );
+        }
+
+        // Verify messages are accessible via public API
+        let fetched = whitenoise
+            .fetch_aggregated_messages_for_group(&creator_account.pubkey, &group.mls_group_id)
+            .await
+            .unwrap();
+        assert_eq!(fetched.len(), 3, "Should fetch all cached messages");
     }
 }

@@ -4,7 +4,8 @@ use thiserror::Error;
 use crate::{
     nostr_manager::NostrManagerError,
     whitenoise::{
-        accounts::AccountError, database::DatabaseError, secrets_store::SecretsStoreError,
+        accounts::AccountError, database::DatabaseError, message_aggregator::ProcessingError,
+        secrets_store::SecretsStoreError,
     },
 };
 
@@ -113,6 +114,9 @@ pub enum WhitenoiseError {
 
     #[error("Event handler error: {0}")]
     EventProcessor(String),
+
+    #[error("Message aggregation error: {0}")]
+    MessageAggregation(#[from] ProcessingError),
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
