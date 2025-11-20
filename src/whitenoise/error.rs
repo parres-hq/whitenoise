@@ -152,3 +152,43 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {
         WhitenoiseError::Other(anyhow::anyhow!(err.to_string()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn io_errors_convert_into_filesystem_variant() {
+        let io_error = std::io::Error::other("disk error");
+        let err: WhitenoiseError = io_error.into();
+        assert!(matches!(err, WhitenoiseError::Filesystem(_)));
+    }
+
+    #[test]
+    fn boxed_errors_map_to_other_variant() {
+        let boxed: Box<dyn std::error::Error + Send + Sync> = std::io::Error::other("boom").into();
+        let err = WhitenoiseError::from(boxed);
+        assert!(matches!(err, WhitenoiseError::Other(_)));
+        assert!(format!("{err}").contains("boom"));
+    }
+
+    #[test]
+    fn missing_welcome_relays_format_includes_pubkeys() {
+        let member =
+            PublicKey::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+        let account =
+            PublicKey::from_str("2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap();
+
+        let message = WhitenoiseError::MissingWelcomeRelays {
+            member_pubkey: member,
+            account_pubkey: account,
+        }
+        .to_string();
+
+        assert!(message.contains(&member.to_string()));
+        assert!(message.contains(&account.to_string()));
+    }
+}
