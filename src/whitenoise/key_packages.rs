@@ -160,8 +160,9 @@ impl Whitenoise {
     /// Deletes all key package events from relays for the given account.
     ///
     /// This method finds all key package events authored by the account and publishes
-    /// deletion events to remove them from the relays. Optionally, it can also delete
-    /// the MLS stored keys from local storage.
+    /// a batch deletion event to efficiently remove them from the relays. It then verifies
+    /// the deletions by refetching and returns the actual count of deleted key packages.
+    /// Optionally, it can also delete the MLS stored keys from local storage.
     ///
     /// # Arguments
     ///
@@ -170,7 +171,7 @@ impl Whitenoise {
     ///
     /// # Returns
     ///
-    /// Returns the number of key packages that were deleted.
+    /// Returns the number of key packages that were successfully deleted.
     ///
     /// # Errors
     ///
@@ -179,12 +180,13 @@ impl Whitenoise {
     /// - Failed to retrieve account's key package relays
     /// - Failed to get signing keys for the account
     /// - Network error while fetching or publishing events
-    /// - Failed to delete MLS keys from storage (if requested)
+    /// - Batch deletion event publishing failed
     pub async fn delete_all_key_packages_for_account(
         &self,
         account: &Account,
         delete_mls_stored_keys: bool,
     ) -> Result<usize> {
+        // Fetch all key packages once upfront
         let key_package_events = self.fetch_all_key_packages_for_account(account).await?;
 
         if key_package_events.is_empty() {
@@ -196,6 +198,50 @@ impl Whitenoise {
             return Ok(0);
         }
 
+        let initial_count = key_package_events.len();
+        tracing::debug!(
+            target: "whitenoise::delete_all_key_packages_for_account",
+            "Found {} key package events to delete for account {}",
+            initial_count,
+            account.pubkey.to_hex()
+        );
+
+        let (signer, key_package_relays_urls) =
+            self.prepare_key_package_deletion_context(account).await?;
+
+        if delete_mls_stored_keys {
+            self.delete_key_packages_from_storage(account, &key_package_events, initial_count)?;
+        }
+
+        let event_ids: Vec<EventId> = key_package_events.iter().map(|e| e.id).collect();
+
+        tracing::debug!(
+            target: "whitenoise::delete_all_key_packages_for_account",
+            "Publishing batch deletion event for {} key packages",
+            event_ids.len()
+        );
+
+        self.publish_key_package_deletion_with_context(
+            &event_ids,
+            &key_package_relays_urls,
+            signer.clone(),
+            "",
+        )
+        .await?;
+
+        self.verify_and_retry_key_package_deletion(
+            account,
+            initial_count,
+            &key_package_relays_urls,
+            signer,
+        )
+        .await
+    }
+
+    async fn prepare_key_package_deletion_context(
+        &self,
+        account: &Account,
+    ) -> Result<(Keys, Vec<RelayUrl>)> {
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
@@ -205,63 +251,35 @@ impl Whitenoise {
             return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
         }
 
-        let mut deleted_count = 0;
+        Ok((signer, Relay::urls(&key_package_relays)))
+    }
 
-        if delete_mls_stored_keys {
-            // Create NostrMls instance once for MLS storage deletion
-            let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+    fn delete_key_packages_from_storage(
+        &self,
+        account: &Account,
+        key_package_events: &[Event],
+        initial_count: usize,
+    ) -> Result<()> {
+        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
+        let mut storage_delete_count = 0;
 
-            for event in &key_package_events {
-                // Delete from MLS storage
-                match mdk.parse_key_package(event) {
-                    Ok(key_package) => {
-                        if let Err(e) = mdk.delete_key_package_from_storage(&key_package) {
-                            tracing::warn!(
-                                target: "whitenoise::delete_all_key_packages_for_account",
-                                "Failed to delete key package from storage for event {}: {}",
-                                event.id,
-                                e
-                            );
-                        }
-                    }
+        for event in key_package_events {
+            match mdk.parse_key_package(event) {
+                Ok(key_package) => match mdk.delete_key_package_from_storage(&key_package) {
+                    Ok(_) => storage_delete_count += 1,
                     Err(e) => {
                         tracing::warn!(
                             target: "whitenoise::delete_all_key_packages_for_account",
-                            "Failed to parse key package for event {}: {}",
+                            "Failed to delete key package from storage for event {}: {}",
                             event.id,
                             e
                         );
                     }
-                }
-            }
-        }
-
-        let key_package_relays_urls = Relay::urls(&key_package_relays);
-
-        // Delete from relays (always happens regardless of delete_mls_stored_keys)
-        for event in &key_package_events {
-            // Publish deletion event
-            match self
-                .nostr
-                .publish_event_deletion_with_signer(
-                    &event.id,
-                    &key_package_relays_urls,
-                    signer.clone(),
-                )
-                .await
-            {
-                Ok(_) => {
-                    deleted_count += 1;
-                    tracing::debug!(
-                        target: "whitenoise::delete_all_key_packages_for_account",
-                        "Published deletion event for key package {}",
-                        event.id
-                    );
-                }
+                },
                 Err(e) => {
-                    tracing::error!(
+                    tracing::warn!(
                         target: "whitenoise::delete_all_key_packages_for_account",
-                        "Failed to publish deletion event for key package {}: {}",
+                        "Failed to parse key package for event {}: {}",
                         event.id,
                         e
                     );
@@ -269,14 +287,119 @@ impl Whitenoise {
             }
         }
 
-        tracing::info!(
+        tracing::debug!(
             target: "whitenoise::delete_all_key_packages_for_account",
-            "Deleted {} out of {} key package events for account {}",
-            deleted_count,
-            key_package_events.len(),
+            "Deleted {} out of {} key packages from MLS storage",
+            storage_delete_count,
+            initial_count
+        );
+
+        Ok(())
+    }
+
+    async fn publish_key_package_deletion_with_context(
+        &self,
+        event_ids: &[EventId],
+        relay_urls: &[RelayUrl],
+        signer: Keys,
+        context: &str,
+    ) -> Result<()> {
+        match self
+            .nostr
+            .publish_batch_event_deletion_with_signer(event_ids, relay_urls, signer)
+            .await
+        {
+            Ok(result) => {
+                if result.success.is_empty() {
+                    tracing::error!(
+                        target: "whitenoise::delete_all_key_packages_for_account",
+                        "{}Batch deletion event was not accepted by any relay",
+                        context
+                    );
+                } else {
+                    tracing::info!(
+                        target: "whitenoise::delete_all_key_packages_for_account",
+                        "{}Published batch deletion event to {} relay(s) for {} key packages",
+                        context,
+                        result.success.len(),
+                        event_ids.len()
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "whitenoise::delete_all_key_packages_for_account",
+                    "{}Failed to publish batch deletion event: {}",
+                    context,
+                    e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn verify_and_retry_key_package_deletion(
+        &self,
+        account: &Account,
+        initial_count: usize,
+        relay_urls: &[RelayUrl],
+        signer: Keys,
+    ) -> Result<usize> {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let remaining_events = self.fetch_all_key_packages_for_account(account).await?;
+        let actually_deleted = initial_count.saturating_sub(remaining_events.len());
+
+        if remaining_events.is_empty() {
+            tracing::info!(
+                target: "whitenoise::delete_all_key_packages_for_account",
+                "Successfully deleted all {} key package events for account {}",
+                actually_deleted,
+                account.pubkey.to_hex()
+            );
+            return Ok(actually_deleted);
+        }
+
+        tracing::warn!(
+            target: "whitenoise::delete_all_key_packages_for_account",
+            "After deletion, {} key package(s) still remain for account {}. Will retry with batch deletion.",
+            remaining_events.len(),
             account.pubkey.to_hex()
         );
 
-        Ok(deleted_count)
+        let remaining_ids: Vec<EventId> = remaining_events.iter().map(|e| e.id).collect();
+        self.publish_key_package_deletion_with_context(
+            &remaining_ids,
+            relay_urls,
+            signer.clone(),
+            "Retry: ",
+        )
+        .await?;
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let final_remaining = self.fetch_all_key_packages_for_account(account).await?;
+        let final_deleted = initial_count.saturating_sub(final_remaining.len());
+
+        if !final_remaining.is_empty() {
+            tracing::error!(
+                target: "whitenoise::delete_all_key_packages_for_account",
+                "After retry, {} key package(s) still remain for account {}. Event IDs: {:?}",
+                final_remaining.len(),
+                account.pubkey.to_hex(),
+                final_remaining
+                    .iter()
+                    .map(|e| e.id.to_hex())
+                    .collect::<Vec<_>>()
+            );
+        } else {
+            tracing::info!(
+                target: "whitenoise::delete_all_key_packages_for_account",
+                "Successfully deleted all {} key packages after retry",
+                final_deleted
+            );
+        }
+
+        Ok(final_deleted)
     }
 }

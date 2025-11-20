@@ -95,3 +95,29 @@ impl Whitenoise {
         AppSettings::update_theme_mode(theme_mode, &self.database).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn theme_mode_display_round_trips_via_from_str() {
+        for variant in [ThemeMode::Light, ThemeMode::Dark, ThemeMode::System] {
+            let round_trip = ThemeMode::from_str(&variant.to_string()).unwrap();
+            assert_eq!(round_trip, variant);
+        }
+    }
+
+    #[test]
+    fn theme_mode_from_str_rejects_unknown_value() {
+        assert!(ThemeMode::from_str("neon").is_err());
+    }
+
+    #[test]
+    fn app_settings_new_sets_id_and_theme() {
+        let settings = AppSettings::new(ThemeMode::Dark);
+        assert_eq!(settings.id, 1);
+        assert_eq!(settings.theme_mode, ThemeMode::Dark);
+    }
+}

@@ -179,6 +179,31 @@ impl NostrManager {
             .await
     }
 
+    /// Publishes a batch deletion event for multiple event IDs using the provided signer.
+    ///
+    /// This is more efficient than publishing individual deletion events when deleting
+    /// multiple events, as it creates a single deletion event with multiple e-tags.
+    ///
+    /// The deletion event is automatically tracked in the database if published successfully.
+    pub(crate) async fn publish_batch_event_deletion_with_signer(
+        &self,
+        event_ids: &[EventId],
+        relays: &[RelayUrl],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<Output<EventId>> {
+        if event_ids.is_empty() {
+            return Err(NostrManagerError::WhitenoiseInstance(
+                "Cannot publish batch deletion with empty event_ids list".to_string(),
+            ));
+        }
+
+        // Build EventDeletionRequest with all event IDs
+        let event_deletion_event_builder =
+            EventBuilder::delete(EventDeletionRequest::new().ids(event_ids.iter().copied()));
+        self.publish_event_builder_with_signer(event_deletion_event_builder, relays, signer)
+            .await
+    }
+
     /// Publishes an already signed Nostr event to the specified relays.
     ///
     /// This method publishes a pre-signed event to a list of relay URLs. It ensures that the client
@@ -246,7 +271,7 @@ impl NostrManager {
 #[cfg(test)]
 mod publish_tests {
     use super::*;
-    use std::sync::Arc;
+    use std::{collections::HashSet, sync::Arc};
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -319,6 +344,190 @@ mod publish_tests {
             assert_eq!(event_metadata.name, metadata.name);
             assert_eq!(event_metadata.display_name, metadata.display_name);
             assert_eq!(event_metadata.about, metadata.about);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_event_deletion_with_empty_list() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        let event_ids: Vec<EventId> = vec![];
+        let relays: Vec<RelayUrl> = vec![RelayUrl::parse("wss://relay.example.com").unwrap()];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&event_ids, &relays, keys)
+            .await;
+
+        assert!(result.is_err(), "Should fail with empty event_ids list");
+        match result.unwrap_err() {
+            NostrManagerError::WhitenoiseInstance(msg) => {
+                assert!(
+                    msg.contains("empty event_ids list"),
+                    "Expected empty list error, got: {}",
+                    msg
+                );
+            }
+            other => panic!("Expected WhitenoiseInstance error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_event_deletion_with_no_relays() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(5))
+                .await
+                .unwrap();
+
+        let event_id =
+            EventId::from_hex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+                .unwrap();
+        let event_ids = vec![event_id];
+        let relays: Vec<RelayUrl> = vec![];
+        let keys = Keys::generate();
+
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&event_ids, &relays, keys)
+            .await;
+
+        assert!(result.is_err(), "Should fail with no relays");
+        let error_message = format!("{:?}", result.unwrap_err());
+        assert!(
+            error_message.contains("NoRelaysSpecified"),
+            "Expected NoRelaysSpecified error, got: {}",
+            error_message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_event_deletion_single_event() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(10))
+                .await
+                .unwrap();
+
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        let keys = Keys::generate();
+
+        // First publish an event to delete
+        let metadata = Metadata::new().name("test_for_deletion");
+        let publish_result = nostr_manager
+            .publish_metadata_with_signer(&metadata, &test_relays, keys.clone())
+            .await
+            .expect("Failed to publish metadata. Are test relays running?");
+
+        let event_id = *publish_result.id();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Now publish batch deletion for that single event
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&[event_id], &test_relays, keys)
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to publish batch deletion: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_event_deletion_multiple_events() {
+        let (sender, _receiver) = mpsc::channel(100);
+        let event_tracker = Arc::new(crate::whitenoise::event_tracker::NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(sender, event_tracker, std::time::Duration::from_secs(10))
+                .await
+                .unwrap();
+
+        let test_relays = vec![
+            RelayUrl::parse("ws://localhost:8080").unwrap(),
+            RelayUrl::parse("ws://localhost:7777").unwrap(),
+        ];
+
+        let keys = Keys::generate();
+
+        // Publish multiple events to delete
+        let mut event_ids = Vec::new();
+        for i in 0..3 {
+            let metadata = Metadata::new().name(format!("test_for_deletion_{}", i));
+            let publish_result = nostr_manager
+                .publish_metadata_with_signer(&metadata, &test_relays, keys.clone())
+                .await;
+
+            let event_id = *publish_result
+                .expect("Failed to publish metadata. Are test relays running?")
+                .id();
+            event_ids.push(event_id);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        // Now publish batch deletion for all events
+        let result = nostr_manager
+            .publish_batch_event_deletion_with_signer(&event_ids, &test_relays, keys)
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to publish batch deletion: {:?}",
+            result.unwrap_err()
+        );
+
+        let deletion_event_id = *result.as_ref().unwrap().id();
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let filter = Filter::new().ids([deletion_event_id]);
+        let fetched_events = nostr_manager
+            .client
+            .fetch_events_from(&test_relays, filter, nostr_manager.timeout)
+            .await
+            .expect("Failed to fetch published deletion event");
+
+        let deletion_event = fetched_events
+            .into_iter()
+            .next()
+            .expect("Expected deletion event to be returned by relays");
+
+        assert_eq!(
+            deletion_event.kind,
+            Kind::EventDeletion,
+            "Fetched event was not a deletion event"
+        );
+
+        let deleted_ids: HashSet<EventId> = deletion_event
+            .tags
+            .iter()
+            .filter(|tag| tag.kind() == TagKind::e())
+            .filter_map(|tag| tag.content().and_then(|hex| EventId::from_hex(hex).ok()))
+            .collect();
+
+        assert_eq!(
+            deleted_ids.len(),
+            event_ids.len(),
+            "Deletion event tag count did not match targets"
+        );
+
+        for expected_id in &event_ids {
+            assert!(
+                deleted_ids.contains(expected_id),
+                "Deletion event missing target id {}",
+                expected_id
+            );
         }
     }
 
