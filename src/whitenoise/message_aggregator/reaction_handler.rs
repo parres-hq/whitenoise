@@ -75,7 +75,8 @@ fn extract_target_message_id(tags: &Tags) -> Result<String, ProcessingError> {
 }
 
 /// Add a reaction to a message's reaction summary
-fn add_reaction_to_message(
+/// Assumes the emoji has already been validated and normalized
+pub(crate) fn add_reaction_to_message(
     target_message: &mut ChatMessage,
     user: &PublicKey,
     emoji: &str,
@@ -226,15 +227,15 @@ mod tests {
         add_reaction_to_message(&mut chat_message, &user, "👍", created_at);
 
         // Replace with different reaction
-        add_reaction_to_message(&mut chat_message, &user, "❤️", created_at);
+        add_reaction_to_message(&mut chat_message, &user, "❤", created_at);
 
         // Should have only one user reaction
         assert_eq!(chat_message.reactions.user_reactions.len(), 1);
-        assert_eq!(chat_message.reactions.user_reactions[0].emoji, "❤️");
+        assert_eq!(chat_message.reactions.user_reactions[0].emoji, "❤");
 
         // Should have only the new emoji
         assert_eq!(chat_message.reactions.by_emoji.len(), 1);
-        assert!(chat_message.reactions.by_emoji.contains_key("❤️"));
+        assert!(chat_message.reactions.by_emoji.contains_key("❤"));
         assert!(!chat_message.reactions.by_emoji.contains_key("👍"));
     }
 
@@ -269,7 +270,7 @@ mod tests {
         let later_time = Timestamp::from(2000);
 
         add_reaction_to_message(&mut chat_message, &user1, "👍", later_time);
-        add_reaction_to_message(&mut chat_message, &user2, "❤️", early_time);
+        add_reaction_to_message(&mut chat_message, &user2, "❤", early_time);
 
         // Should be sorted by timestamp
         assert_eq!(chat_message.reactions.user_reactions.len(), 2);
@@ -294,11 +295,11 @@ mod tests {
         assert_eq!(chat_message.reactions.by_emoji.len(), 1);
 
         // Replace with different reaction (should remove the old one completely)
-        add_reaction_to_message(&mut chat_message, &user, "❤️", created_at);
+        add_reaction_to_message(&mut chat_message, &user, "❤", created_at);
 
         // The 👍 emoji should be completely removed since count reached 0
         assert!(!chat_message.reactions.by_emoji.contains_key("👍"));
-        assert!(chat_message.reactions.by_emoji.contains_key("❤️"));
+        assert!(chat_message.reactions.by_emoji.contains_key("❤"));
         assert_eq!(chat_message.reactions.by_emoji.len(), 1);
     }
 }

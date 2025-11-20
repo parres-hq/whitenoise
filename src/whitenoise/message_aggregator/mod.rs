@@ -4,9 +4,9 @@
 //! ChatMessage objects suitable for frontend display. It handles message types including
 //! regular chat messages, reactions, deletions, and replies.
 
-mod emoji_utils;
+pub(crate) mod emoji_utils;
 mod processor;
-mod reaction_handler;
+pub(crate) mod reaction_handler;
 mod types;
 // mod state;  // Future: For Phase 2 stateful implementation
 
