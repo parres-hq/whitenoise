@@ -91,37 +91,25 @@ impl Whitenoise {
     }
 
     /// Fetch and aggregate messages for a group - Main consumer API
-    /// This is the primary method that consumers should use to get chat messages
+    ///
+    /// Returns pre-aggregated messages from the cache. The cache is kept up-to-date by:
+    /// - Event processor: Caches messages as they arrive (real-time updates)
+    /// - Startup sync: Populates cache with existing messages on initialization
     ///
     /// # Arguments
     /// * `pubkey` - The public key of the user requesting messages
-    /// * `group_id` - The group to fetch and aggregate messages for
+    /// * `group_id` - The group to fetch messages for
     pub async fn fetch_aggregated_messages_for_group(
         &self,
         pubkey: &PublicKey,
         group_id: &GroupId,
     ) -> Result<Vec<ChatMessage>> {
-        // Get account to access mdk instance
-        let account = Account::find_by_pubkey(pubkey, &self.database).await?;
+        Account::find_by_pubkey(pubkey, &self.database).await?;  // Verify account exists (security check)
 
-        let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
-        let raw_messages = mdk.get_messages(group_id)?;
-
-        // Fetch all media files for this group upfront
-        let media_files = MediaFile::find_by_group(&self.database, group_id).await?;
-
-        // Use the aggregator to process the messages
-        self.message_aggregator
-            .aggregate_messages_for_group(
-                pubkey,
-                group_id,
-                raw_messages,
-                &self.nostr, // For token parsing
-                media_files,
-            )
+        AggregatedMessage::find_messages_by_group(group_id, &self.database)
             .await
             .map_err(|e| {
-                WhitenoiseError::from(anyhow::anyhow!("Message aggregation failed: {}", e))
+                WhitenoiseError::from(anyhow::anyhow!("Failed to read cached messages: {}", e))
             })
     }
 
@@ -685,5 +673,129 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(cached_count, 5);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_aggregated_messages_reads_from_cache() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create accounts and group
+        let creator = whitenoise.create_identity().await.unwrap();
+        let member = whitenoise.create_identity().await.unwrap();
+
+        let group = whitenoise
+            .create_group(
+                &creator,
+                vec![member.pubkey],
+                crate::whitenoise::test_utils::create_nostr_group_config_data(vec![creator.pubkey]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Send messages
+        for i in 1..=3 {
+            whitenoise
+                .send_message_to_group(
+                    &creator,
+                    &group.mls_group_id,
+                    format!("Cache test {}", i),
+                    9,
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Populate cache
+        let mdk = Account::create_mdk(creator.pubkey, &whitenoise.config.data_dir).unwrap();
+        let mdk_messages = mdk.get_messages(&group.mls_group_id).unwrap();
+        whitenoise
+            .sync_cache_for_group(&creator.pubkey, &group.mls_group_id, mdk_messages)
+            .await
+            .unwrap();
+
+        // Fetch messages via the main API - should read from cache
+        let fetched_messages = whitenoise
+            .fetch_aggregated_messages_for_group(&creator.pubkey, &group.mls_group_id)
+            .await
+            .unwrap();
+
+        // Verify we got all 3 messages
+        assert_eq!(fetched_messages.len(), 3);
+
+        // Verify content
+        for (i, msg) in fetched_messages.iter().enumerate() {
+            assert!(
+                msg.content.contains(&format!("Cache test {}", i + 1)),
+                "Message {} should contain 'Cache test {}'",
+                i,
+                i + 1
+            );
+        }
+
+        // Verify messages are ordered by created_at
+        for i in 0..fetched_messages.len() - 1 {
+            assert!(
+                fetched_messages[i].created_at.as_u64()
+                    <= fetched_messages[i + 1].created_at.as_u64(),
+                "Messages should be ordered by timestamp"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_with_reactions_and_media() {
+        let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+        // Create accounts and group
+        let creator = whitenoise.create_identity().await.unwrap();
+        let member = whitenoise.create_identity().await.unwrap();
+
+        let group = whitenoise
+            .create_group(
+                &creator,
+                vec![member.pubkey],
+                crate::whitenoise::test_utils::create_nostr_group_config_data(vec![creator.pubkey]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Send a message
+        whitenoise
+            .send_message_to_group(
+                &creator,
+                &group.mls_group_id,
+                "Message with reactions".to_string(),
+                9,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Populate cache
+        let mdk = Account::create_mdk(creator.pubkey, &whitenoise.config.data_dir).unwrap();
+        let mdk_messages = mdk.get_messages(&group.mls_group_id).unwrap();
+        whitenoise
+            .sync_cache_for_group(&creator.pubkey, &group.mls_group_id, mdk_messages)
+            .await
+            .unwrap();
+
+        // Fetch messages - should include empty reactions and media
+        let messages = whitenoise
+            .fetch_aggregated_messages_for_group(&creator.pubkey, &group.mls_group_id)
+            .await
+            .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "Message with reactions");
+
+        // Verify reactions summary exists (even if empty)
+        assert_eq!(messages[0].reactions.by_emoji.len(), 0);
+        assert_eq!(messages[0].reactions.user_reactions.len(), 0);
+
+        // Verify media attachments exists (even if empty)
+        assert_eq!(messages[0].media_attachments.len(), 0);
     }
 }
