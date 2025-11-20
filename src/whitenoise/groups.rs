@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    ops::Add,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -70,6 +69,48 @@ impl Whitenoise {
         Ok(group_relays.into_iter().collect())
     }
 
+    async fn resolve_member_delivery_relays(
+        &self,
+        member: &User,
+        fallback_account: &Account,
+        context: &'static str,
+    ) -> Result<Vec<Relay>> {
+        let inbox_relays = member.relays(RelayType::Inbox, &self.database).await?;
+        if !inbox_relays.is_empty() {
+            return Ok(inbox_relays);
+        }
+
+        let nip65_relays = member.relays(RelayType::Nip65, &self.database).await?;
+        if !nip65_relays.is_empty() {
+            return Ok(nip65_relays);
+        }
+
+        let fallback_relays = fallback_account.nip65_relays(self).await?;
+        if fallback_relays.is_empty() {
+            tracing::error!(
+                target: "whitenoise::accounts::groups::relay_selection",
+                context = context,
+                "User {} has no inbox or NIP-65 relays and account {} has no fallback relays configured",
+                member.pubkey,
+                fallback_account.pubkey
+            );
+            return Err(WhitenoiseError::MissingWelcomeRelays {
+                member_pubkey: member.pubkey,
+                account_pubkey: fallback_account.pubkey,
+            });
+        } else {
+            tracing::warn!(
+                target: "whitenoise::accounts::groups::relay_selection",
+                context = context,
+                "User {} has no inbox or NIP-65 relays, using account {} fallback relays",
+                member.pubkey,
+                fallback_account.pubkey
+            );
+        }
+
+        Ok(fallback_relays)
+    }
+
     /// Creates a new MLS group with the specified members and settings
     ///
     /// # Arguments
@@ -114,7 +155,24 @@ impl Whitenoise {
                     // Continue with group creation even if metadata sync fails
                 }
             }
-            let kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
+            let mut kp_relays = user.relays(RelayType::KeyPackage, &self.database).await?;
+            if kp_relays.is_empty() {
+                tracing::warn!(
+                    target: "whitenoise::accounts::groups::create_group",
+                    "User {} has no key package relays configured, falling back to account {} relays",
+                    user.pubkey,
+                    creator_account.pubkey
+                );
+                kp_relays = creator_account.nip65_relays(self).await?;
+                if kp_relays.is_empty() {
+                    tracing::warn!(
+                        target: "whitenoise::accounts::groups::create_group",
+                        "Account {} has no fallback relays configured, using defaults",
+                        creator_account.pubkey
+                    );
+                    kp_relays = Relay::defaults();
+                }
+            }
             let kp_relays_urls = Relay::urls(&kp_relays);
             let some_event = self
                 .nostr
@@ -171,14 +229,14 @@ impl Whitenoise {
                 )))?;
 
             // Create a timestamp 1 month in the future
-            let one_month_future = Timestamp::now().add(30 * 24 * 60 * 60);
-            // If the member has no inbox relays configured, use their nip65 relays
-            let member_inbox_relays = member.relays(RelayType::Inbox, &self.database).await?;
-            let relays_to_use = if member_inbox_relays.is_empty() {
-                member.relays(RelayType::Nip65, &self.database).await?
-            } else {
-                member_inbox_relays
-            };
+            let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
+            let relays_to_use = self
+                .resolve_member_delivery_relays(
+                    member,
+                    creator_account,
+                    "whitenoise::accounts::groups::create_group",
+                )
+                .await?;
 
             self.nostr
                 .publish_gift_wrap_to(
@@ -392,13 +450,13 @@ impl Whitenoise {
             // Create a timestamp 1 month in the future
             let one_month_future = Timestamp::now() + Duration::from_secs(30 * 24 * 60 * 60);
 
-            // If the user has no inbox relays configured, use their nip65 relays
-            let user_inbox_relays = user.relays(RelayType::Inbox, &self.database).await?;
-            let relays_to_use = if user_inbox_relays.is_empty() {
-                user.relays(RelayType::Nip65, &self.database).await?
-            } else {
-                user_inbox_relays
-            };
+            let relays_to_use = self
+                .resolve_member_delivery_relays(
+                    &user,
+                    account,
+                    "whitenoise::accounts::groups::add_members_to_group",
+                )
+                .await?;
 
             let relay_urls = Relay::urls(&relays_to_use);
 

@@ -1,3 +1,4 @@
+use nostr_sdk::prelude::PublicKey;
 use thiserror::Error;
 
 use crate::{
@@ -136,6 +137,14 @@ pub enum WhitenoiseError {
 
     #[error("Unsupported media format: {0}")]
     UnsupportedMediaFormat(String),
+
+    #[error(
+        "Cannot deliver MLS welcome for {member_pubkey}: no inbox/NIP-65 relays configured and account {account_pubkey} has no fallback relays"
+    )]
+    MissingWelcomeRelays {
+        member_pubkey: PublicKey,
+        account_pubkey: PublicKey,
+    },
 }
 
 impl From<Box<dyn std::error::Error + Send + Sync>> for WhitenoiseError {

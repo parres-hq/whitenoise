@@ -179,6 +179,35 @@ impl NostrManager {
             .await
     }
 
+    /// Publishes a batch deletion event for multiple event IDs using the provided signer.
+    ///
+    /// This is more efficient than publishing individual deletion events when deleting
+    /// multiple events, as it creates a single deletion event with multiple e-tags.
+    ///
+    /// The deletion event is automatically tracked in the database if published successfully.
+    pub(crate) async fn publish_batch_event_deletion_with_signer(
+        &self,
+        event_ids: &[EventId],
+        relays: &[RelayUrl],
+        signer: impl NostrSigner + 'static,
+    ) -> Result<Output<EventId>> {
+        if event_ids.is_empty() {
+            return Err(NostrManagerError::WhitenoiseInstance(
+                "Cannot publish batch deletion with empty event_ids list".to_string(),
+            ));
+        }
+
+        // Build EventDeletionRequest with all event IDs
+        let mut deletion_request = EventDeletionRequest::new();
+        for event_id in event_ids {
+            deletion_request = deletion_request.id(*event_id);
+        }
+
+        let event_deletion_event_builder = EventBuilder::delete(deletion_request);
+        self.publish_event_builder_with_signer(event_deletion_event_builder, relays, signer)
+            .await
+    }
+
     /// Publishes an already signed Nostr event to the specified relays.
     ///
     /// This method publishes a pre-signed event to a list of relay URLs. It ensures that the client

@@ -357,7 +357,10 @@ impl NostrManager {
         let relay_futures = relay_urls
             .iter()
             .map(|relay_url| self.ensure_relay_in_client(relay_url));
-        futures::future::join_all(relay_futures).await;
+        let results = futures::future::join_all(relay_futures).await;
+        for result in results {
+            result?;
+        }
 
         self.client.connect().await;
 
