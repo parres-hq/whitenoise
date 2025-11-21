@@ -91,6 +91,7 @@ uuid = { version = "1.16.0", features = ["v4"] }
 base64ct = "=1.7.3"
 dotenvy = "0.15"
 tempfile = "3.19.1"
+indicatif = { version = "0.18.3", optional = true }
 
 [dev-dependencies]
 mockito = "1.2"
@@ -100,7 +101,7 @@ default = []
 # Feature flag for integration tests - enables IDE support without including in production
 integration-tests = []
 # Feature flag for performance benchmarks - depends on integration-tests to reuse infrastructure
-benchmark-tests = ["integration-tests"]
+benchmark-tests = ["integration-tests", "indicatif"]
 
 [[bin]]
 name = "integration_test"
