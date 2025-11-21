@@ -216,6 +216,19 @@ impl Whitenoise {
         }).await;
 
         let whitenoise_ref = whitenoise_res?;
+
+        tracing::info!(
+            target: "whitenoise::initialize_whitenoise",
+            "Synchronizing message cache with MDK..."
+        );
+        // Synchronize message cache BEFORE starting event processor
+        // This eliminates race conditions between startup sync and real-time cache updates
+        whitenoise_ref.sync_message_cache_on_startup().await?;
+        tracing::info!(
+            target: "whitenoise::initialize_whitenoise",
+            "Message cache synchronization complete"
+        );
+
         tracing::debug!(
             target: "whitenoise::initialize_whitenoise",
             "Starting event processing loop for loaded accounts"
@@ -1031,22 +1044,25 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn test_fetch_aggregated_messages_basic_error() {
+        async fn test_fetch_aggregated_messages_for_nonexistent_group() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
             let account = whitenoise.create_identity().await.unwrap();
 
-            // Mock group ID for testing
+            // Non-existent group ID
             let group_id = GroupId::from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
-            // Since create_identity initializes mdk, we should get a different error
-            // The error should be about the group not existing, not mdk not being initialized
+            // Fetching messages for a non-existent group should return empty list (no error)
             let result = whitenoise
                 .fetch_aggregated_messages_for_group(&account.pubkey, &group_id)
                 .await;
 
-            // Should return an error (group not found or similar), but not MdkCoreNotInitialized
-            assert!(result.is_err());
-            // The specific error will be about the group not being found since we're using a fake group ID
+            assert!(result.is_ok(), "Should succeed with empty list");
+            let messages = result.unwrap();
+            assert_eq!(
+                messages.len(),
+                0,
+                "Should return empty list for non-existent group"
+            );
         }
     }
 
@@ -1088,6 +1104,46 @@ mod tests {
                 !is_operational,
                 "Global subscriptions should not be operational without setup"
             );
+        }
+    }
+
+    // Cache Synchronization Tests
+    mod cache_sync_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_sync_message_cache_on_startup_with_empty_database() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Verify method can be called on empty database without panicking
+            let result = whitenoise.sync_message_cache_on_startup().await;
+            assert!(result.is_ok(), "Sync should succeed on empty database");
+        }
+
+        #[tokio::test]
+        async fn test_sync_message_cache_on_startup_with_account_no_groups() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let _account = whitenoise.create_identity().await.unwrap();
+
+            // Verify method can be called with account but no groups
+            let result = whitenoise.sync_message_cache_on_startup().await;
+            assert!(
+                result.is_ok(),
+                "Sync should succeed with account but no groups"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_sync_is_idempotent() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let _account = whitenoise.create_identity().await.unwrap();
+
+            // Run sync multiple times
+            whitenoise.sync_message_cache_on_startup().await.unwrap();
+            whitenoise.sync_message_cache_on_startup().await.unwrap();
+            whitenoise.sync_message_cache_on_startup().await.unwrap();
+
+            // Should not panic or error
         }
     }
 

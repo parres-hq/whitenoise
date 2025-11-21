@@ -58,6 +58,27 @@ ScenarioContext enables TestCases within the same scenario to share data.
 - Long-lived caches or state mirrors
 - Complex business logic
 
+## Running Integration Tests
+
+**Prerequisites:**
+
+- Docker Compose services must be running: `docker compose up -d`
+
+**Commands:**
+
+```bash
+# Run all integration test scenarios
+just int-test
+
+# Run a specific integration test scenario
+just int-test account-management
+just int-test basic-messaging
+just int-test advanced-messaging
+just int-test group-membership
+just int-test chat-media-upload
+just int-test user-discovery
+```
+
 ## Directory Structure
 
 ```text
@@ -254,8 +275,15 @@ Performance benchmarks are a separate category of tests designed to measure and 
 # Run all performance benchmarks once
 just benchmark
 
+# Run a specific benchmark scenario
+just benchmark messaging-performance
+just benchmark message-aggregation
+just benchmark user-discovery-blocking
+just benchmark user-discovery-background
+
 # Run benchmarks and save results with timestamp
-just benchmark-save
+just benchmark-save                      # All benchmarks
+just benchmark-save messaging-performance  # Specific benchmark
 ```
 
 Benchmark results are saved to `./benchmark_results/` (git-ignored).

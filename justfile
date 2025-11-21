@@ -11,17 +11,39 @@ clear-dev-data:
     rm -rf ./dev/data/*
 
 # Run integration_test binary using the local relays and data dirs
-int-test:
+# Usage:
+#   just int-test                      # Run all integration tests
+#   just int-test basic-messaging      # Run specific scenario
+int-test scenario="":
+    #!/usr/bin/env bash
+    set -euo pipefail
     rm -rf ./dev/data/integration_test/
-    RUST_LOG=debug,\
-    sqlx=info,\
-    refinery_core=error,\
-    keyring=info,\
-    nostr_relay_pool=error,\
-    mdk_sqlite_storage=error,\
-    tungstenite=error,\
-    integration_test=debug \
-    cargo run --bin integration_test --features integration-tests -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+    if [ -z "{{scenario}}" ]; then
+        echo "Running all integration test scenarios..."
+        RUST_LOG=debug,\
+        sqlx=info,\
+        refinery_core=error,\
+        keyring=info,\
+        nostr_relay_pool=error,\
+        mdk_sqlite_storage=error,\
+        tungstenite=error,\
+        integration_test=debug \
+        cargo run --bin integration_test --features integration-tests -- \
+        --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
+    else
+        echo "Running integration test scenario: {{scenario}}"
+        RUST_LOG=debug,\
+        sqlx=info,\
+        refinery_core=error,\
+        keyring=info,\
+        nostr_relay_pool=error,\
+        mdk_sqlite_storage=error,\
+        tungstenite=error,\
+        integration_test=debug \
+        cargo run --bin integration_test --features integration-tests -- \
+        --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/ \
+        "{{scenario}}"
+    fi
 
 # Run integration_test binary with flamegraph to analyze performance
 int-test-flamegraph:
@@ -40,27 +62,59 @@ int-test-flamegraph:
     cargo flamegraph --release --bin integration_test --features integration-tests --deterministic -- --data-dir ./dev/data/integration_test/ --logs-dir ./dev/data/integration_test/
 
 # Run performance benchmarks (not included in CI)
-benchmark:
+# Usage:
+#   just benchmark                      # Run all benchmarks
+#   just benchmark messaging-performance  # Run specific benchmark
+benchmark scenario="":
+    #!/usr/bin/env bash
+    set -euo pipefail
     rm -rf ./dev/data/benchmark_test/
-    RUST_LOG=warn,benchmark_test=info,whitenoise=info \
-    cargo run --bin benchmark_test --features benchmark-tests --release -- --data-dir ./dev/data/benchmark_test/ --logs-dir ./dev/data/benchmark_test/
+    if [ -z "{{scenario}}" ]; then
+        echo "Running all benchmarks..."
+        RUST_LOG=warn,benchmark_test=info,whitenoise=info \
+        cargo run --bin benchmark_test --features benchmark-tests --release -- \
+        --data-dir ./dev/data/benchmark_test/ --logs-dir ./dev/data/benchmark_test/
+    else
+        echo "Running benchmark: {{scenario}}"
+        RUST_LOG=warn,benchmark_test=info,whitenoise=info \
+        cargo run --bin benchmark_test --features benchmark-tests --release -- \
+        --data-dir ./dev/data/benchmark_test/ --logs-dir ./dev/data/benchmark_test/ \
+        "{{scenario}}"
+    fi
     rm -rf ./dev/data/benchmark_test/
 
 # Run benchmarks and save results with timestamp
-benchmark-save:
+# Usage:
+#   just benchmark-save                      # Save all benchmarks
+#   just benchmark-save messaging-performance  # Save specific benchmark
+benchmark-save scenario="":
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p ./benchmark_results
     rm -rf ./dev/data/benchmark_test/
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    echo "Running benchmarks and saving to ./benchmark_results/benchmark_${TIMESTAMP}.log"
-    RUST_LOG=warn,benchmark_test=info,whitenoise=info \
-    cargo run --bin benchmark_test --features benchmark-tests --release -- \
-    --data-dir ./dev/data/benchmark_test/ \
-    --logs-dir ./dev/data/benchmark_test/ \
-    | tee ./benchmark_results/benchmark_${TIMESTAMP}.log
+
+    if [ -z "{{scenario}}" ]; then
+        FILENAME="benchmark_${TIMESTAMP}.log"
+        echo "Running all benchmarks and saving to ./benchmark_results/${FILENAME}"
+        RUST_LOG=warn,benchmark_test=info,whitenoise=info \
+        cargo run --bin benchmark_test --features benchmark-tests --release -- \
+        --data-dir ./dev/data/benchmark_test/ \
+        --logs-dir ./dev/data/benchmark_test/ \
+        | tee ./benchmark_results/${FILENAME}
+    else
+        FILENAME="benchmark_{{scenario}}_${TIMESTAMP}.log"
+        echo "Running benchmark '{{scenario}}' and saving to ./benchmark_results/${FILENAME}"
+        RUST_LOG=warn,benchmark_test=info,whitenoise=info \
+        cargo run --bin benchmark_test --features benchmark-tests --release -- \
+        --data-dir ./dev/data/benchmark_test/ \
+        --logs-dir ./dev/data/benchmark_test/ \
+        "{{scenario}}" \
+        | tee ./benchmark_results/${FILENAME}
+    fi
+
     rm -rf ./dev/data/benchmark_test/
-    echo "Results saved to ./benchmark_results/benchmark_${TIMESTAMP}.log"
+    echo "Results saved to ./benchmark_results/${FILENAME}"
 
 # Run all tests (unit tests, integration tests, and doc tests)
 # Uses nextest for faster parallel execution if available, falls back to cargo test

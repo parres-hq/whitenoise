@@ -13,6 +13,11 @@ struct Args {
 
     #[clap(long, value_name = "PATH", required = true)]
     logs_dir: PathBuf,
+
+    /// Optional scenario name to run a specific benchmark.
+    /// If not provided, runs all benchmarks.
+    #[clap(value_name = "SCENARIO")]
+    scenario: Option<String>,
 }
 
 #[tokio::main]
@@ -29,9 +34,15 @@ async fn main() -> Result<(), WhitenoiseError> {
 
     let whitenoise = Whitenoise::get_instance()?;
 
-    BenchmarkRegistry::run_all_benchmarks(whitenoise).await?;
-
-    tracing::info!("=== All Performance Benchmarks Completed Successfully ===");
+    match args.scenario {
+        Some(scenario_name) => {
+            BenchmarkRegistry::run_scenario(&scenario_name, whitenoise).await?;
+        }
+        None => {
+            BenchmarkRegistry::run_all_benchmarks(whitenoise).await?;
+            tracing::info!("=== All Performance Benchmarks Completed Successfully ===");
+        }
+    }
 
     Ok(())
 }

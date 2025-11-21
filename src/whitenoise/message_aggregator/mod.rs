@@ -4,9 +4,9 @@
 //! ChatMessage objects suitable for frontend display. It handles message types including
 //! regular chat messages, reactions, deletions, and replies.
 
-mod emoji_utils;
+pub(crate) mod emoji_utils;
 mod processor;
-mod reaction_handler;
+pub(crate) mod reaction_handler;
 mod types;
 // mod state;  // Future: For Phase 2 stateful implementation
 
@@ -81,6 +81,35 @@ impl MessageAggregator {
 
         // Use the processor module to handle the actual processing
         processor::process_messages(messages, parser, &self.config, media_files).await
+    }
+
+    /// Process a single message (kind 9) into a ChatMessage
+    /// Used by the event processor to cache messages in real-time as they arrive
+    ///
+    /// # Arguments
+    /// * `message` - The raw message to process (must be kind 9)
+    /// * `parser` - Reference to the nostr parser for tokenizing message content
+    /// * `media_files` - Vector of MediaFile records for linking media to this message
+    pub(crate) async fn process_single_message(
+        &self,
+        message: &Message,
+        parser: &dyn Parser,
+        media_files: Vec<MediaFile>,
+    ) -> Result<ChatMessage, ProcessingError> {
+        // Build media files lookup map
+        let media_files_map: std::collections::HashMap<String, MediaFile> = media_files
+            .into_iter()
+            .filter_map(|mf| {
+                if let Some(hash) = &mf.original_file_hash {
+                    Some((hex::encode(hash), mf))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Process the message using the core processor logic
+        processor::process_regular_message(message, parser, &media_files_map).await
     }
 
     /// Get the current configuration
