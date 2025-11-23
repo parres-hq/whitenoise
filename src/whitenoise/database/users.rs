@@ -402,6 +402,62 @@ impl User {
         Ok(())
     }
 
+    /// Adds multiple relay associations for this user in a batch operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `relays` - A slice of `Relay` references to add
+    /// * `relay_type` - The type of relay association for all relays
+    /// * `database` - A reference to the `Database` instance for database operations
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WhitenoiseError`] if the database operation fails.
+    pub(crate) async fn add_relays(
+        &self,
+        relays: &[Relay],
+        relay_type: RelayType,
+        database: &Database,
+    ) -> Result<(), WhitenoiseError> {
+        if relays.is_empty() {
+            return Ok(());
+        }
+
+        let user_id: i64 = self.id.ok_or(WhitenoiseError::UserNotPersisted)?;
+        let relay_type_str = String::from(relay_type);
+        let created_at = self.created_at.timestamp_millis();
+        let updated_at = self.updated_at.timestamp_millis();
+
+        // Build a single batch insert query for all relays
+        let mut query_builder = sqlx::QueryBuilder::new(
+            "INSERT INTO user_relays (user_id, relay_id, relay_type, created_at, updated_at) ",
+        );
+
+        query_builder.push_values(relays, |mut b, relay| {
+            let relay_id = relay.id.expect("Relay should have ID after save");
+            b.push_bind(user_id)
+                .push_bind(relay_id)
+                .push_bind(&relay_type_str)
+                .push_bind(created_at)
+                .push_bind(updated_at);
+        });
+
+        query_builder.push(" ON CONFLICT(user_id, relay_id, relay_type) DO UPDATE SET updated_at = excluded.updated_at");
+
+        query_builder
+            .build()
+            .execute(&database.pool)
+            .await
+            .map_err(DatabaseError::Sqlx)
+            .map_err(WhitenoiseError::Database)?;
+
+        Ok(())
+    }
+
     /// Removes a relay association for this user.
     ///
     /// # Arguments

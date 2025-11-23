@@ -545,4 +545,75 @@ mod tests {
         let none_result = adjust_since_for_giftwrap(None);
         assert!(none_result.is_none());
     }
+
+    #[tokio::test]
+    async fn test_setup_batched_relay_subscriptions_with_empty_users() {
+        let (event_sender, _) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        let keys = Keys::generate();
+        let users_with_relays: Vec<(PublicKey, Vec<RelayUrl>)> = vec![];
+        let default_relays: Vec<RelayUrl> = vec![];
+
+        // With empty users and no relays, should fail with NoRelayConnections
+        let result = nostr_manager
+            .setup_batched_relay_subscriptions_with_signer(
+                users_with_relays,
+                &default_relays,
+                keys.clone(),
+                None,
+            )
+            .await;
+
+        // Should error because there are no relay connections to establish
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            NostrManagerError::NoRelayConnections
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_calculate_batch_count() {
+        let (event_sender, _) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        // Test edge cases
+        assert_eq!(nostr_manager.calculate_batch_count(0), 1);
+        assert_eq!(nostr_manager.calculate_batch_count(1), 1);
+        assert_eq!(nostr_manager.calculate_batch_count(999), 1);
+        assert_eq!(nostr_manager.calculate_batch_count(1000), 1);
+        assert_eq!(nostr_manager.calculate_batch_count(1001), 2);
+        assert_eq!(nostr_manager.calculate_batch_count(2000), 2);
+        assert_eq!(nostr_manager.calculate_batch_count(2001), 3);
+    }
+
+    #[tokio::test]
+    async fn test_user_to_batch_id_deterministic() {
+        let (event_sender, _) = mpsc::channel(100);
+        let event_tracker = Arc::new(NoEventTracker);
+        let nostr_manager =
+            NostrManager::new(event_sender, event_tracker, NostrManager::default_timeout())
+                .await
+                .unwrap();
+
+        let pubkey = Keys::generate().public_key();
+        let batch_count = 5;
+
+        // Same pubkey should always map to same batch
+        let batch_id_1 = nostr_manager.user_to_batch_id(&pubkey, batch_count);
+        let batch_id_2 = nostr_manager.user_to_batch_id(&pubkey, batch_count);
+        assert_eq!(batch_id_1, batch_id_2);
+
+        // Batch ID should be within valid range
+        assert!(batch_id_1 < batch_count);
+    }
 }

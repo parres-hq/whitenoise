@@ -329,8 +329,13 @@ impl Whitenoise {
     async fn setup_accounts_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
         let accounts = Account::all(&whitenoise_ref.database).await?;
         for account in accounts {
+            let nip65_relays = account.nip65_relays(whitenoise_ref).await?;
+            let inbox_relays = account.inbox_relays(whitenoise_ref).await?;
             // Setup subscriptions for this account
-            match whitenoise_ref.setup_subscriptions(&account).await {
+            match whitenoise_ref
+                .setup_subscriptions(&account, &nip65_relays, &inbox_relays)
+                .await
+            {
                 Ok(()) => {
                     tracing::debug!(
                         target: "whitenoise::initialize_whitenoise",
@@ -842,7 +847,11 @@ pub mod test_utils {
                 .unwrap();
             accounts.push((account.clone(), keys.clone()));
             // publish keypackage to relays
-            let (ekp, tags) = whitenoise.encoded_key_package(&account).await.unwrap();
+            let key_package_relays = account.key_package_relays(whitenoise).await.unwrap();
+            let (ekp, tags) = whitenoise
+                .encoded_key_package(&account, &key_package_relays)
+                .await
+                .unwrap();
 
             let key_package_relays_urls =
                 Relay::urls(&account.key_package_relays(whitenoise).await.unwrap());

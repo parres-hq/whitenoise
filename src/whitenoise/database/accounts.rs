@@ -389,7 +389,7 @@ impl Account {
         Ok(newly_created_users)
     }
 
-    /// Saves this account to the database.
+    /// Saves this account to the database and returns the saved account with up-to-date values.
     ///
     /// # Arguments
     ///
@@ -397,23 +397,33 @@ impl Account {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success.
+    /// Returns the saved `Account` with values as stored in the database, including the
+    /// database-assigned `id` and the actual `updated_at` timestamp.
     ///
     /// # Errors
     ///
     /// Returns a [`WhitenoiseError`] if the database operation fails.
-    pub(crate) async fn save(&self, database: &Database) -> Result<(), WhitenoiseError> {
-        sqlx::query("INSERT INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(pubkey) DO UPDATE SET user_id = excluded.user_id, last_synced_at = excluded.last_synced_at, updated_at = ?")
-            .bind(self.pubkey.to_hex().as_str())
-            .bind(self.user_id)
-            .bind(self.last_synced_at.map(|ts| ts.timestamp_millis()))
-            .bind(self.created_at.timestamp_millis())
-            .bind(self.updated_at.timestamp_millis())
-            .bind(Utc::now().timestamp_millis())
-            .execute(&database.pool)
-            .await
-            .map_err(DatabaseError::Sqlx)?;
-        Ok(())
+    pub(crate) async fn save(&self, database: &Database) -> Result<Account, WhitenoiseError> {
+        let account_row = sqlx::query_as::<_, AccountRow>(
+            "INSERT INTO accounts (pubkey, user_id, last_synced_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(pubkey) DO UPDATE
+             SET user_id = excluded.user_id,
+                 last_synced_at = excluded.last_synced_at,
+                 updated_at = ?
+             RETURNING *",
+        )
+        .bind(self.pubkey.to_hex().as_str())
+        .bind(self.user_id)
+        .bind(self.last_synced_at.map(|ts| ts.timestamp_millis()))
+        .bind(self.created_at.timestamp_millis())
+        .bind(self.updated_at.timestamp_millis())
+        .bind(Utc::now().timestamp_millis())
+        .fetch_one(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        account_row.into_account()
     }
 
     /// Deletes this account from the database.

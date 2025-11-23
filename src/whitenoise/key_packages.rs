@@ -10,15 +10,11 @@ impl Whitenoise {
     pub(crate) async fn encoded_key_package(
         &self,
         account: &Account,
+        key_package_relays: &[Relay],
     ) -> Result<(String, [Tag; 4])> {
         let mdk = Account::create_mdk(account.pubkey, &self.config.data_dir)?;
-        let key_package_relays = account.key_package_relays(self).await?;
 
-        if key_package_relays.is_empty() {
-            return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
-        }
-
-        let key_package_relay_urls = Relay::urls(&key_package_relays);
+        let key_package_relay_urls = Relay::urls(key_package_relays);
         let result = mdk
             .create_key_package_for_event(&account.pubkey, key_package_relay_urls)
             .map_err(|e| WhitenoiseError::Configuration(format!("NostrMls error: {}", e)))?;
@@ -28,14 +24,23 @@ impl Whitenoise {
 
     /// Publishes the MLS key package for the given account to its key package relays.
     pub async fn publish_key_package_for_account(&self, account: &Account) -> Result<()> {
-        // Extract key package data while holding the lock
-        let (encoded_key_package, tags) = self.encoded_key_package(account).await?;
         let relays = account.key_package_relays(self).await?;
 
         if relays.is_empty() {
             return Err(WhitenoiseError::AccountMissingKeyPackageRelays);
         }
-        let relays_urls = Relay::urls(&relays);
+        self.publish_key_package_to_relays(account, &relays).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn publish_key_package_to_relays(
+        &self,
+        account: &Account,
+        relays: &[Relay],
+    ) -> Result<()> {
+        let (encoded_key_package, tags) = self.encoded_key_package(account, relays).await?;
+        let relays_urls = Relay::urls(relays);
         let signer = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
@@ -44,7 +49,7 @@ impl Whitenoise {
             .publish_key_package_with_signer(&encoded_key_package, &relays_urls, &tags, signer)
             .await?;
 
-        tracing::debug!(target: "whitenoise::publish_key_package_for_account", "Published key package to relays: {:?}", result);
+        tracing::debug!(target: "whitenoise::publish_key_package_to_relays", "Published key package to relays: {:?}", result);
 
         Ok(())
     }
