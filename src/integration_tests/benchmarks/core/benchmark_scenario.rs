@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use super::benchmark_config::BenchmarkConfig;
 use super::benchmark_result::BenchmarkResult;
@@ -47,10 +48,23 @@ pub trait BenchmarkScenario {
         // Warmup phase (skip if warmup_iterations == 0)
         if config.warmup_iterations > 0 {
             tracing::info!("Running {} warmup iterations...", config.warmup_iterations);
+
+            let pb = ProgressBar::new(config.warmup_iterations as u64);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                    .unwrap()
+                    .progress_chars("=>-"),
+            );
+            pb.set_message("Warmup");
+
             for _ in 0..config.warmup_iterations {
                 self.single_iteration(&mut context).await?;
+                pb.inc(1);
                 tokio::time::sleep(config.cooldown_between_iterations).await;
             }
+
+            pb.finish_with_message("Warmup complete");
 
             // Reset counter for actual benchmark
             context.tests_count = 0;
@@ -61,12 +75,23 @@ pub trait BenchmarkScenario {
         let mut timings = Vec::with_capacity(config.iterations as usize);
         let overall_start = Instant::now();
 
+        let pb = ProgressBar::new(config.iterations as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{msg} [{bar:40.green/blue}] {pos}/{len} ({percent}%) - ETA: {eta}")
+                .unwrap()
+                .progress_chars("##-"),
+        );
+        pb.set_message("Benchmarking");
+
         for _ in 0..config.iterations {
             let duration = self.single_iteration(&mut context).await?;
             timings.push(duration);
+            pb.inc(1);
             tokio::time::sleep(config.cooldown_between_iterations).await;
         }
 
+        pb.finish_with_message("Benchmark complete");
         let total_duration = overall_start.elapsed();
 
         // Calculate and return results

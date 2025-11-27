@@ -153,7 +153,7 @@ impl Account {
         user.add_relay(relay, relay_type, &whitenoise.database)
             .await?;
         whitenoise
-            .background_publish_account_relay_list(self, relay_type)
+            .background_publish_account_relay_list(self, relay_type, None)
             .await?;
         tracing::debug!(target: "whitenoise::accounts::add_relay", "Added relay to account: {:?}", relay.url);
 
@@ -184,7 +184,7 @@ impl Account {
         user.remove_relay(relay, relay_type, &whitenoise.database)
             .await?;
         whitenoise
-            .background_publish_account_relay_list(self, relay_type)
+            .background_publish_account_relay_list(self, relay_type, None)
             .await?;
         tracing::debug!(target: "whitenoise::accounts::remove_relay", "Removed relay from account: {:?}", relay.url);
         Ok(())
@@ -268,18 +268,6 @@ impl Account {
         let storage = MdkSqliteStorage::new(mls_storage_dir)?;
         Ok(MDK::new(storage))
     }
-
-    pub(crate) async fn connect_relays(&self, whitenoise: &Whitenoise) -> Result<()> {
-        let mut relays = HashSet::new();
-        relays.extend(self.nip65_relays(whitenoise).await?);
-        relays.extend(self.inbox_relays(whitenoise).await?);
-        let urls: Vec<RelayUrl> = Relay::urls(&relays);
-        for url in urls {
-            whitenoise.nostr.client.add_relay(url).await?;
-        }
-        whitenoise.nostr.client.connect().await;
-        Ok(())
-    }
 }
 
 impl Whitenoise {
@@ -295,16 +283,18 @@ impl Whitenoise {
         let mut account = self.create_base_account_with_private_key(&keys).await?;
         tracing::debug!(target: "whitenoise::create_identity", "Keys stored in secret store and account saved to database");
 
-        self.setup_relays_for_new_account(&mut account).await?;
-        tracing::debug!(target: "whitenoise::create_identity", "Relays setup");
-        tracing::debug!(target: "whitenoise::create_identity", "Nip65 relays: {:?}", account.nip65_relays(self).await?);
-        tracing::debug!(target: "whitenoise::create_identity", "Inbox relays: {:?}", account.inbox_relays(self).await?);
-        tracing::debug!(target: "whitenoise::create_identity", "Key package relays: {:?}", account.key_package_relays(self).await?);
+        let mut user = account.user(&self.database).await?;
 
-        self.activate_account(&account).await?;
+        let relays = self
+            .setup_relays_for_new_account(&mut account, &user)
+            .await?;
+        tracing::debug!(target: "whitenoise::create_identity", "Relays setup");
+
+        self.activate_account(&account, &user, true, &relays, &relays, &relays)
+            .await?;
         tracing::debug!(target: "whitenoise::create_identity", "Account persisted and activated");
 
-        self.setup_metadata(&account).await?;
+        self.setup_metadata(&account, &mut user).await?;
         tracing::debug!(target: "whitenoise::create_identity", "Metadata setup");
 
         tracing::debug!(target: "whitenoise::create_identity", "Successfully created new identity: {}", account.pubkey.to_hex());
@@ -331,13 +321,20 @@ impl Whitenoise {
         // Always check for existing relay lists when logging in, even if the user is
         // newly created in our database, because the keypair might already exist in
         // the Nostr ecosystem with published relay lists from other apps
-        self.setup_relays_for_existing_account(&mut account).await?;
+        let (nip65_relays, inbox_relays, key_package_relays) =
+            self.setup_relays_for_existing_account(&mut account).await?;
         tracing::debug!(target: "whitenoise::login", "Relays setup");
-        tracing::debug!(target: "whitenoise::login", "Nip65 relays: {:?}", account.nip65_relays(self).await?);
-        tracing::debug!(target: "whitenoise::login", "Inbox relays: {:?}", account.inbox_relays(self).await?);
-        tracing::debug!(target: "whitenoise::login", "Key package relays: {:?}", account.key_package_relays(self).await?);
 
-        self.activate_account(&account).await?;
+        let user = account.user(&self.database).await?;
+        self.activate_account(
+            &account,
+            &user,
+            false,
+            &nip65_relays,
+            &inbox_relays,
+            &key_package_relays,
+        )
+        .await?;
         tracing::debug!(target: "whitenoise::login", "Account persisted and activated");
 
         tracing::debug!(target: "whitenoise::login", "Successfully logged in: {}", account.pubkey.to_hex());
@@ -427,11 +424,24 @@ impl Whitenoise {
         Ok(account)
     }
 
-    async fn activate_account(&self, account: &Account) -> Result<()> {
-        account.connect_relays(self).await?;
+    async fn activate_account(
+        &self,
+        account: &Account,
+        user: &User,
+        is_new_account: bool,
+        nip65_relays: &[Relay],
+        inbox_relays: &[Relay],
+        key_package_relays: &[Relay],
+    ) -> Result<()> {
+        let relay_urls: Vec<RelayUrl> = Relay::urls(
+            nip65_relays
+                .iter()
+                .chain(inbox_relays)
+                .chain(key_package_relays),
+        );
+        self.nostr.ensure_relays_connected(&relay_urls).await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Relays connected");
-        let user = account.user(&self.database).await?;
-        if let Err(e) = self.refresh_global_subscription_for_user(&user).await {
+        if let Err(e) = self.refresh_global_subscription_for_user(user).await {
             tracing::warn!(
                 target: "whitenoise::persist_and_activate_account",
                 "Failed to refresh global subscription for new user {}: {}",
@@ -440,14 +450,16 @@ impl Whitenoise {
             );
         }
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Global subscription refreshed for account user");
-        self.setup_subscriptions(account).await?;
+        self.setup_subscriptions(account, nip65_relays, inbox_relays)
+            .await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Subscriptions setup");
-        self.setup_key_package(account).await?;
+        self.setup_key_package(account, is_new_account, key_package_relays)
+            .await?;
         tracing::debug!(target: "whitenoise::persist_and_activate_account", "Key package setup");
         Ok(())
     }
 
-    async fn setup_metadata(&self, account: &Account) -> Result<()> {
+    async fn setup_metadata(&self, account: &Account, user: &mut User) -> Result<()> {
         let petname = petname::petname(2, " ")
             .unwrap_or_else(|| "Anonymous User".to_string())
             .split_whitespace()
@@ -461,14 +473,17 @@ impl Whitenoise {
             ..Default::default()
         };
 
-        account.update_metadata(&metadata, self).await?;
+        user.metadata = metadata.clone();
+        user.save(&self.database).await?;
+        self.background_publish_account_metadata(account).await?;
+
         let default_name = "Unknown".to_string();
         tracing::debug!(target: "whitenoise::setup_metadata", "Created and published metadata with petname: {}", metadata.name.as_ref().unwrap_or(&default_name));
         Ok(())
     }
 
     async fn persist_account(&self, account: &Account) -> Result<Account> {
-        account.save(&self.database).await.map_err(|e| {
+        let saved_account = account.save(&self.database).await.map_err(|e| {
             tracing::error!(target: "whitenoise::setup_account", "Failed to save account: {}", e);
             // Try to clean up stored private key
             if let Err(cleanup_err) = self.secrets_store.remove_private_key_for_pubkey(&account.pubkey) {
@@ -477,20 +492,27 @@ impl Whitenoise {
             e
         })?;
         tracing::debug!(target: "whitenoise::setup_account", "Account saved to database");
-        let account = Account::find_by_pubkey(&account.pubkey, &self.database).await?;
-        Ok(account)
+        Ok(saved_account)
     }
 
-    async fn setup_key_package(&self, account: &Account) -> Result<()> {
-        let relays = account.key_package_relays(self).await?;
-        tracing::debug!(target: "whitenoise::setup_key_package", "Found {} key package relays", relays.len());
-        let relays_urls = Relay::urls(&relays);
-        let key_package_event = self
-            .nostr
-            .fetch_user_key_package(account.pubkey, &relays_urls)
-            .await?;
+    async fn setup_key_package(
+        &self,
+        account: &Account,
+        is_new_account: bool,
+        key_package_relays: &[Relay],
+    ) -> Result<()> {
+        let mut key_package_event = None;
+        if !is_new_account {
+            tracing::debug!(target: "whitenoise::setup_key_package", "Found {} key package relays", key_package_relays.len());
+            let relays_urls = Relay::urls(key_package_relays);
+            key_package_event = self
+                .nostr
+                .fetch_user_key_package(account.pubkey, &relays_urls)
+                .await?;
+        }
         if key_package_event.is_none() {
-            self.publish_key_package_for_account(account).await?;
+            self.publish_key_package_to_relays(account, key_package_relays)
+                .await?;
             tracing::debug!(target: "whitenoise::setup_account", "Published key package");
         }
         Ok(())
@@ -505,40 +527,55 @@ impl Whitenoise {
         Ok(default_relays)
     }
 
-    async fn setup_relays_for_new_account(&self, account: &mut Account) -> Result<()> {
+    /// Sets up the relays for a new account.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account to setup the relays for
+    /// * `user` - The user to setup the relays for
+    ///
+    /// # Returns
+    /// Returns the default relays for the account.
+    async fn setup_relays_for_new_account(
+        &self,
+        account: &mut Account,
+        user: &User,
+    ) -> Result<Vec<Relay>> {
         let default_relays = self.load_default_relays().await?;
-        let keys = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
 
-        // New accounts: Setup relays with defaults and always publish
-        let nip65_relays = self
-            .setup_new_account_relay_type(account, RelayType::Nip65, &default_relays)
+        user.add_relays(&default_relays, RelayType::Nip65, &self.database)
             .await?;
-        let inbox_relays = self
-            .setup_new_account_relay_type(account, RelayType::Inbox, &default_relays)
+        user.add_relays(&default_relays, RelayType::Inbox, &self.database)
             .await?;
-        let key_package_relays = self
-            .setup_new_account_relay_type(account, RelayType::KeyPackage, &default_relays)
+        user.add_relays(&default_relays, RelayType::KeyPackage, &self.database)
             .await?;
 
-        // Always publish all relay lists for new accounts
-        self.publish_relay_list(&nip65_relays, RelayType::Nip65, &nip65_relays, &keys)
-            .await?;
-        self.publish_relay_list(&inbox_relays, RelayType::Inbox, &nip65_relays, &keys)
-            .await?;
-        self.publish_relay_list(
-            &key_package_relays,
+        self.background_publish_account_relay_list(
+            account,
+            RelayType::Nip65,
+            Some(&default_relays),
+        )
+        .await?;
+        self.background_publish_account_relay_list(
+            account,
+            RelayType::Inbox,
+            Some(&default_relays),
+        )
+        .await?;
+        self.background_publish_account_relay_list(
+            account,
             RelayType::KeyPackage,
-            &nip65_relays,
-            &keys,
+            Some(&default_relays),
         )
         .await?;
 
-        Ok(())
+        Ok(default_relays)
     }
 
-    async fn setup_relays_for_existing_account(&self, account: &mut Account) -> Result<()> {
+    async fn setup_relays_for_existing_account(
+        &self,
+        account: &mut Account,
+    ) -> Result<(Vec<Relay>, Vec<Relay>, Vec<Relay>)> {
         let default_relays = self.load_default_relays().await?;
         let keys = self
             .secrets_store
@@ -591,19 +628,7 @@ impl Whitenoise {
             .await?;
         }
 
-        Ok(())
-    }
-
-    async fn setup_new_account_relay_type(
-        &self,
-        account: &mut Account,
-        relay_type: RelayType,
-        default_relays: &[Relay],
-    ) -> Result<Vec<Relay>> {
-        // New accounts: always use defaults (no fetching needed)
-        self.add_relays_to_account(account, default_relays, relay_type)
-            .await?;
-        Ok(default_relays.to_vec())
+        Ok((nip65_relays, inbox_relays, key_package_relays))
     }
 
     async fn setup_existing_account_relay_type(
@@ -625,7 +650,8 @@ impl Whitenoise {
             Ok((default_relays.to_vec(), true))
         } else {
             // Found existing relay lists - use them, no publishing needed
-            self.add_relays_to_account(account, &fetched_relays, relay_type)
+            let user = account.user(&self.database).await?;
+            user.add_relays(&fetched_relays, relay_type, &self.database)
                 .await?;
             Ok((fetched_relays, false))
         }
@@ -657,13 +683,22 @@ impl Whitenoise {
 
     async fn add_relays_to_account(
         &self,
-        account: &mut Account,
+        account: &Account,
         relays: &[Relay],
         relay_type: RelayType,
     ) -> Result<()> {
-        for relay in relays {
-            account.add_relay(relay, relay_type, self).await?;
+        if relays.is_empty() {
+            return Ok(());
         }
+
+        let user = account.user(&self.database).await?;
+        user.add_relays(relays, relay_type, &self.database).await?;
+
+        self.background_publish_account_relay_list(account, relay_type, Some(relays))
+            .await?;
+
+        tracing::debug!(target: "whitenoise::add_relays_to_account", "Added {} relays of type {:?} to account", relays.len(), relay_type);
+
         Ok(())
     }
 
@@ -714,14 +749,26 @@ impl Whitenoise {
         Ok(())
     }
 
+    /// Publishes the relay list for the account to the Nostr network.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account to publish the relay list for
+    /// * `relay_type` - The type of relay list to publish
+    /// * `relays` - The relays to publish the relay list to, if None, the relays will be fetched from the account
     pub(crate) async fn background_publish_account_relay_list(
         &self,
         account: &Account,
         relay_type: RelayType,
+        relays: Option<&[Relay]>,
     ) -> Result<()> {
         let account_clone = account.clone();
         let nostr = self.nostr.clone();
-        let relays = account.relays(relay_type, self).await?;
+        let relays = if let Some(relays) = relays {
+            relays.to_vec()
+        } else {
+            account.relays(relay_type, self).await?
+        };
         let keys = self
             .secrets_store
             .get_nostr_keys_for_pubkey(&account.pubkey)?;
@@ -795,16 +842,21 @@ impl Whitenoise {
         Ok((group_relays_urls, group_ids))
     }
 
-    pub(crate) async fn setup_subscriptions(&self, account: &Account) -> Result<()> {
+    pub(crate) async fn setup_subscriptions(
+        &self,
+        account: &Account,
+        nip65_relays: &[Relay],
+        inbox_relays: &[Relay],
+    ) -> Result<()> {
         tracing::debug!(
             target: "whitenoise::setup_subscriptions",
             "Setting up subscriptions for account: {:?}",
             account
         );
 
-        let user_relays: Vec<RelayUrl> = Relay::urls(&account.nip65_relays(self).await?);
+        let user_relays: Vec<RelayUrl> = Relay::urls(nip65_relays);
 
-        let inbox_relays: Vec<RelayUrl> = Relay::urls(&account.inbox_relays(self).await?);
+        let inbox_relays: Vec<RelayUrl> = Relay::urls(inbox_relays);
 
         let (group_relays_urls, nostr_group_ids) =
             self.extract_groups_relays_and_ids(account).await?;
@@ -1320,12 +1372,10 @@ mod tests {
         whitenoise.secrets_store.store_private_key(&keys).unwrap();
 
         let default_relays = whitenoise.load_default_relays().await.unwrap();
-        for relay in &default_relays {
-            account
-                .add_relay(relay, RelayType::Nip65, &whitenoise)
-                .await
-                .unwrap();
-        }
+        whitenoise
+            .add_relays_to_account(&account, &default_relays, RelayType::Nip65)
+            .await
+            .unwrap();
 
         let test_timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
