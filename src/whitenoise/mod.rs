@@ -23,6 +23,7 @@ pub mod media_files;
 pub mod message_aggregator;
 pub mod messages;
 pub mod relays;
+mod scheduled_tasks;
 pub mod secrets_store;
 pub mod storage;
 pub mod users;
