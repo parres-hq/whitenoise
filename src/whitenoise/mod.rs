@@ -149,7 +149,7 @@ impl Whitenoise {
         let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
 
         // Create scheduler shutdown channel
-        let (scheduler_shutdown, _scheduler_shutdown_rx) = watch::channel(false);
+        let (scheduler_shutdown, scheduler_shutdown_rx) = watch::channel(false);
 
         let whitenoise_res: Result<&'static Whitenoise> = GLOBAL_WHITENOISE.get_or_try_init(|| async {
         let data_dir = &config.data_dir;
@@ -249,6 +249,15 @@ impl Whitenoise {
         );
 
         Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
+
+        // Start scheduled tasks (empty task list until tasks are registered in Commit 5)
+        let scheduler_handles = scheduled_tasks::start_scheduled_tasks(
+            whitenoise_ref,
+            scheduler_shutdown_rx,
+            None,
+            vec![],
+        );
+        *whitenoise_ref.scheduler_handles.lock().await = scheduler_handles;
 
         // Fetch events and setup subscriptions after event processing has started
         Self::setup_all_subscriptions(whitenoise_ref).await?;
@@ -1381,6 +1390,50 @@ mod tests {
                 account2_operational,
                 "Account2 should remain operational after ensure_all"
             );
+        }
+    }
+
+    // Scheduler Lifecycle Tests
+    mod scheduler_lifecycle_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_scheduler_handles_stored_after_init() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Scheduler handles should be accessible (empty since no tasks registered yet)
+            let handles = whitenoise.scheduler_handles.lock().await;
+            assert!(
+                handles.is_empty(),
+                "Scheduler handles should be empty when no tasks are registered"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_scheduler_shutdown_completes() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Shutdown should complete without hanging
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                whitenoise.shutdown_scheduled_tasks(),
+            )
+            .await;
+
+            assert!(
+                result.is_ok(),
+                "Scheduler shutdown should complete within timeout"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_scheduler_shutdown_is_idempotent() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Multiple shutdowns should not panic
+            whitenoise.shutdown_scheduled_tasks().await;
+            whitenoise.shutdown_scheduled_tasks().await;
+            whitenoise.shutdown_scheduled_tasks().await;
         }
     }
 }
