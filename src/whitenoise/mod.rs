@@ -395,6 +395,31 @@ impl Whitenoise {
             .ok_or(WhitenoiseError::Initialization)
     }
 
+    /// Gracefully shuts down all background tasks without deleting data.
+    ///
+    /// This should be called when the app is being closed or going into the background.
+    /// Shuts down the event processor and all scheduled tasks.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use whitenoise::Whitenoise;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let whitenoise = Whitenoise::get_instance()?;
+    /// whitenoise.shutdown().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn shutdown(&self) -> Result<()> {
+        tracing::info!(target: "whitenoise::shutdown", "Initiating graceful shutdown");
+
+        self.shutdown_event_processing().await?;
+        self.shutdown_scheduled_tasks().await;
+
+        tracing::info!(target: "whitenoise::shutdown", "Graceful shutdown complete");
+        Ok(())
+    }
+
     /// Deletes all application data, including the database, MLS data, and log files.
     ///
     /// This asynchronous method removes all persistent data associated with the Whitenoise instance.
@@ -404,7 +429,10 @@ impl Whitenoise {
     pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
-        // Remove nostr cache first
+        // Shutdown gracefully before deleting data
+        self.shutdown().await?;
+
+        // Remove nostr cache
         self.nostr.delete_all_data().await?;
 
         // Remove database (accounts and media) data
@@ -439,9 +467,6 @@ impl Whitenoise {
             }
         }
 
-        // Shutdown the event processing loop
-        self.shutdown_event_processing().await?;
-
         Ok(())
     }
 
@@ -449,9 +474,7 @@ impl Whitenoise {
     ///
     /// Sends shutdown signal to all running tasks and waits for them to complete.
     /// Any panicked tasks are logged but do not cause this method to fail.
-    // TODO: Remove allow(dead_code) once scheduler is wired up
-    #[allow(dead_code)]
-    pub(crate) async fn shutdown_scheduled_tasks(&self) {
+    async fn shutdown_scheduled_tasks(&self) {
         tracing::info!(target: "whitenoise::scheduler", "Initiating scheduler shutdown");
 
         // Signal all tasks to stop
@@ -1410,30 +1433,34 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn test_scheduler_shutdown_completes() {
+        async fn test_shutdown_returns_ok() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
-            // Shutdown should complete without hanging
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                whitenoise.shutdown_scheduled_tasks(),
-            )
-            .await;
-
-            assert!(
-                result.is_ok(),
-                "Scheduler shutdown should complete within timeout"
-            );
+            // Shutdown should succeed
+            let result = whitenoise.shutdown().await;
+            assert!(result.is_ok(), "Shutdown should return Ok");
         }
 
         #[tokio::test]
-        async fn test_scheduler_shutdown_is_idempotent() {
+        async fn test_shutdown_completes_within_timeout() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Shutdown should complete without hanging
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(100), whitenoise.shutdown())
+                    .await;
+
+            assert!(result.is_ok(), "Shutdown should complete within timeout");
+        }
+
+        #[tokio::test]
+        async fn test_shutdown_is_idempotent() {
             let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
 
             // Multiple shutdowns should not panic
-            whitenoise.shutdown_scheduled_tasks().await;
-            whitenoise.shutdown_scheduled_tasks().await;
-            whitenoise.shutdown_scheduled_tasks().await;
+            whitenoise.shutdown().await.unwrap();
+            whitenoise.shutdown().await.unwrap();
+            whitenoise.shutdown().await.unwrap();
         }
     }
 }
