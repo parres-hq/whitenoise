@@ -5,9 +5,11 @@ use anyhow::Context;
 use dashmap::DashMap;
 use nostr_sdk::{PublicKey, RelayUrl, ToBech32};
 use tokio::sync::{
-    OnceCell, Semaphore,
+    Mutex, OnceCell, Semaphore,
     mpsc::{self, Sender},
+    watch,
 };
+use tokio::task::JoinHandle;
 
 pub mod accounts;
 pub mod app_settings;
@@ -105,6 +107,10 @@ pub struct Whitenoise {
     shutdown_sender: Sender<()>,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
     contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
+    /// Shutdown signal for scheduled tasks
+    scheduler_shutdown: watch::Sender<bool>,
+    /// Handles for spawned scheduler tasks
+    scheduler_handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
 static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
@@ -121,6 +127,8 @@ impl std::fmt::Debug for Whitenoise {
             .field("event_sender", &"<REDACTED>")
             .field("shutdown_sender", &"<REDACTED>")
             .field("contact_list_guards", &"<REDACTED>")
+            .field("scheduler_shutdown", &"<REDACTED>")
+            .field("scheduler_handles", &"<REDACTED>")
             .finish()
     }
 }
@@ -139,6 +147,9 @@ impl Whitenoise {
         // Create event processing channels
         let (event_sender, event_receiver) = mpsc::channel(500);
         let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
+
+        // Create scheduler shutdown channel
+        let (scheduler_shutdown, _scheduler_shutdown_rx) = watch::channel(false);
 
         let whitenoise_res: Result<&'static Whitenoise> = GLOBAL_WHITENOISE.get_or_try_init(|| async {
         let data_dir = &config.data_dir;
@@ -187,6 +198,8 @@ impl Whitenoise {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            scheduler_shutdown,
+            scheduler_handles: Mutex::new(Vec::new()),
         };
 
         // Create default relays in the database if they don't exist
@@ -421,6 +434,47 @@ impl Whitenoise {
         self.shutdown_event_processing().await?;
 
         Ok(())
+    }
+
+    /// Gracefully shuts down all scheduled tasks.
+    ///
+    /// Sends shutdown signal to all running tasks and waits for them to complete.
+    /// Any panicked tasks are logged but do not cause this method to fail.
+    // TODO: Remove allow(dead_code) once scheduler is wired up
+    #[allow(dead_code)]
+    pub(crate) async fn shutdown_scheduled_tasks(&self) {
+        tracing::info!(target: "whitenoise::scheduler", "Initiating scheduler shutdown");
+
+        // Signal all tasks to stop
+        let _ = self.scheduler_shutdown.send(true);
+
+        // Drain and await all handles
+        let mut handles = self.scheduler_handles.lock().await;
+
+        if handles.is_empty() {
+            tracing::debug!(target: "whitenoise::scheduler", "No scheduler tasks to await");
+            return;
+        }
+
+        for handle in handles.drain(..) {
+            if let Err(e) = handle.await {
+                if e.is_panic() {
+                    tracing::error!(
+                        target: "whitenoise::scheduler",
+                        "Scheduler task panicked: {:?}",
+                        e
+                    );
+                } else {
+                    tracing::warn!(
+                        target: "whitenoise::scheduler",
+                        "Scheduler task cancelled: {:?}",
+                        e
+                    );
+                }
+            }
+        }
+
+        tracing::info!(target: "whitenoise::scheduler", "Scheduler shutdown complete");
     }
 
     pub async fn export_account_nsec(&self, account: &Account) -> Result<String> {
@@ -685,6 +739,7 @@ pub mod test_utils {
         // Create channels but don't start processing loop to avoid network calls
         let (event_sender, _event_receiver) = mpsc::channel(10);
         let (shutdown_sender, _shutdown_receiver) = mpsc::channel(1);
+        let (scheduler_shutdown, _scheduler_shutdown_rx) = watch::channel(false);
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
@@ -721,6 +776,8 @@ pub mod test_utils {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            scheduler_shutdown,
+            scheduler_handles: Mutex::new(Vec::new()),
         };
 
         (whitenoise, data_temp, logs_temp)
