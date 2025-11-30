@@ -25,7 +25,7 @@ pub mod media_files;
 pub mod message_aggregator;
 pub mod messages;
 pub mod relays;
-mod scheduled_tasks;
+pub mod scheduled_tasks;
 pub mod secrets_store;
 pub mod storage;
 pub mod users;
@@ -509,6 +509,13 @@ impl Whitenoise {
         }
 
         tracing::info!(target: "whitenoise::scheduler", "Scheduler shutdown complete");
+    }
+
+    /// Returns the number of currently running scheduler tasks.
+    ///
+    /// This is primarily useful for integration testing to verify the scheduler is running.
+    pub(crate) async fn scheduler_task_count(&self) -> usize {
+        self.scheduler_handles.lock().await.len()
     }
 
     pub async fn export_account_nsec(&self, account: &Account) -> Result<String> {

@@ -6,6 +6,7 @@ pub mod chat_media_upload;
 pub mod follow_management;
 pub mod group_membership;
 pub mod metadata_management;
+pub mod scheduler;
 pub mod subscription_processing;
 pub mod user_discovery;
 
@@ -17,5 +18,6 @@ pub use chat_media_upload::*;
 pub use follow_management::*;
 pub use group_membership::*;
 pub use metadata_management::*;
+pub use scheduler::*;
 pub use subscription_processing::*;
 pub use user_discovery::*;
