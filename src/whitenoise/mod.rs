@@ -5,9 +5,11 @@ use anyhow::Context;
 use dashmap::DashMap;
 use nostr_sdk::{PublicKey, RelayUrl, ToBech32};
 use tokio::sync::{
-    OnceCell, Semaphore,
+    Mutex, OnceCell, Semaphore,
     mpsc::{self, Sender},
+    watch,
 };
+use tokio::task::JoinHandle;
 
 pub mod accounts;
 pub mod app_settings;
@@ -23,6 +25,7 @@ pub mod media_files;
 pub mod message_aggregator;
 pub mod messages;
 pub mod relays;
+pub mod scheduled_tasks;
 pub mod secrets_store;
 pub mod storage;
 pub mod users;
@@ -104,6 +107,10 @@ pub struct Whitenoise {
     shutdown_sender: Sender<()>,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
     contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
+    /// Shutdown signal for scheduled tasks
+    scheduler_shutdown: watch::Sender<bool>,
+    /// Handles for spawned scheduler tasks
+    scheduler_handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
 static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
@@ -120,6 +127,8 @@ impl std::fmt::Debug for Whitenoise {
             .field("event_sender", &"<REDACTED>")
             .field("shutdown_sender", &"<REDACTED>")
             .field("contact_list_guards", &"<REDACTED>")
+            .field("scheduler_shutdown", &"<REDACTED>")
+            .field("scheduler_handles", &"<REDACTED>")
             .finish()
     }
 }
@@ -138,6 +147,9 @@ impl Whitenoise {
         // Create event processing channels
         let (event_sender, event_receiver) = mpsc::channel(500);
         let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
+
+        // Create scheduler shutdown channel
+        let (scheduler_shutdown, scheduler_shutdown_rx) = watch::channel(false);
 
         let whitenoise_res: Result<&'static Whitenoise> = GLOBAL_WHITENOISE.get_or_try_init(|| async {
         let data_dir = &config.data_dir;
@@ -186,6 +198,8 @@ impl Whitenoise {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            scheduler_shutdown,
+            scheduler_handles: Mutex::new(Vec::new()),
         };
 
         // Create default relays in the database if they don't exist
@@ -235,6 +249,17 @@ impl Whitenoise {
         );
 
         Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
+
+        // Register and start scheduled background tasks
+        let tasks: Vec<Arc<dyn scheduled_tasks::Task>> =
+            vec![Arc::new(scheduled_tasks::KeyPackageMaintenance)];
+        let scheduler_handles = scheduled_tasks::start_scheduled_tasks(
+            whitenoise_ref,
+            scheduler_shutdown_rx,
+            None,
+            tasks,
+        );
+        *whitenoise_ref.scheduler_handles.lock().await = scheduler_handles;
 
         // Fetch events and setup subscriptions after event processing has started
         Self::setup_all_subscriptions(whitenoise_ref).await?;
@@ -372,6 +397,31 @@ impl Whitenoise {
             .ok_or(WhitenoiseError::Initialization)
     }
 
+    /// Gracefully shuts down all background tasks without deleting data.
+    ///
+    /// This should be called when the app is being closed or going into the background.
+    /// Shuts down the event processor and all scheduled tasks.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use whitenoise::Whitenoise;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let whitenoise = Whitenoise::get_instance()?;
+    /// whitenoise.shutdown().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn shutdown(&self) -> Result<()> {
+        tracing::info!(target: "whitenoise::shutdown", "Initiating graceful shutdown");
+
+        self.shutdown_event_processing().await?;
+        self.shutdown_scheduled_tasks().await;
+
+        tracing::info!(target: "whitenoise::shutdown", "Graceful shutdown complete");
+        Ok(())
+    }
+
     /// Deletes all application data, including the database, MLS data, and log files.
     ///
     /// This asynchronous method removes all persistent data associated with the Whitenoise instance.
@@ -381,7 +431,10 @@ impl Whitenoise {
     pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
-        // Remove nostr cache first
+        // Shutdown gracefully before deleting data
+        self.shutdown().await?;
+
+        // Remove nostr cache
         self.nostr.delete_all_data().await?;
 
         // Remove database (accounts and media) data
@@ -416,10 +469,53 @@ impl Whitenoise {
             }
         }
 
-        // Shutdown the event processing loop
-        self.shutdown_event_processing().await?;
-
         Ok(())
+    }
+
+    /// Gracefully shuts down all scheduled tasks.
+    ///
+    /// Sends shutdown signal to all running tasks and waits for them to complete.
+    /// Any panicked tasks are logged but do not cause this method to fail.
+    async fn shutdown_scheduled_tasks(&self) {
+        tracing::info!(target: "whitenoise::scheduler", "Initiating scheduler shutdown");
+
+        // Signal all tasks to stop
+        let _ = self.scheduler_shutdown.send(true);
+
+        // Drain and await all handles
+        let mut handles = self.scheduler_handles.lock().await;
+
+        if handles.is_empty() {
+            tracing::debug!(target: "whitenoise::scheduler", "No scheduler tasks to await");
+            return;
+        }
+
+        for handle in handles.drain(..) {
+            if let Err(e) = handle.await {
+                if e.is_panic() {
+                    tracing::error!(
+                        target: "whitenoise::scheduler",
+                        "Scheduler task panicked: {:?}",
+                        e
+                    );
+                } else {
+                    tracing::warn!(
+                        target: "whitenoise::scheduler",
+                        "Scheduler task cancelled: {:?}",
+                        e
+                    );
+                }
+            }
+        }
+
+        tracing::info!(target: "whitenoise::scheduler", "Scheduler shutdown complete");
+    }
+
+    /// Returns the number of currently running scheduler tasks.
+    ///
+    /// This is primarily useful for integration testing to verify the scheduler is running.
+    pub(crate) async fn scheduler_task_count(&self) -> usize {
+        self.scheduler_handles.lock().await.len()
     }
 
     pub async fn export_account_nsec(&self, account: &Account) -> Result<String> {
@@ -684,6 +780,7 @@ pub mod test_utils {
         // Create channels but don't start processing loop to avoid network calls
         let (event_sender, _event_receiver) = mpsc::channel(10);
         let (shutdown_sender, _shutdown_receiver) = mpsc::channel(1);
+        let (scheduler_shutdown, _scheduler_shutdown_rx) = watch::channel(false);
 
         // Create NostrManager for testing - now with actual relay connections
         // to use the local development relays running in docker
@@ -720,6 +817,8 @@ pub mod test_utils {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            scheduler_shutdown,
+            scheduler_handles: Mutex::new(Vec::new()),
         };
 
         (whitenoise, data_temp, logs_temp)
@@ -1323,6 +1422,54 @@ mod tests {
                 account2_operational,
                 "Account2 should remain operational after ensure_all"
             );
+        }
+    }
+
+    // Scheduler Lifecycle Tests
+    mod scheduler_lifecycle_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_scheduler_handles_stored_after_init() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Scheduler handles should be accessible (empty since no tasks registered yet)
+            let handles = whitenoise.scheduler_handles.lock().await;
+            assert!(
+                handles.is_empty(),
+                "Scheduler handles should be empty when no tasks are registered"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_shutdown_returns_ok() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Shutdown should succeed
+            let result = whitenoise.shutdown().await;
+            assert!(result.is_ok(), "Shutdown should return Ok");
+        }
+
+        #[tokio::test]
+        async fn test_shutdown_completes_within_timeout() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Shutdown should complete without hanging
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(100), whitenoise.shutdown())
+                    .await;
+
+            assert!(result.is_ok(), "Shutdown should complete within timeout");
+        }
+
+        #[tokio::test]
+        async fn test_shutdown_is_idempotent() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+
+            // Multiple shutdowns should not panic
+            whitenoise.shutdown().await.unwrap();
+            whitenoise.shutdown().await.unwrap();
+            whitenoise.shutdown().await.unwrap();
         }
     }
 }

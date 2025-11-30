@@ -5,6 +5,7 @@ pub mod chat_media_upload;
 pub mod follow_management;
 pub mod group_membership;
 pub mod metadata_management;
+pub mod scheduler;
 pub mod shared;
 pub mod subscription_processing;
 pub mod user_discovery;
