@@ -9,12 +9,14 @@ use tokio::time::MissedTickBehavior;
 use super::Whitenoise;
 use crate::WhitenoiseError;
 
+mod tasks;
+
+pub(crate) use self::tasks::KeyPackageMaintenance;
+
 /// Trait for implementing scheduled background tasks.
 ///
 /// Tasks are executed on startup and periodically thereafter based on their configured interval.
 /// Implementations should be idempotent and handle transient failures gracefully.
-// TODO: Remove allow(dead_code) once scheduler is wired up
-#[allow(dead_code)]
 #[async_trait]
 pub trait Task: Send + Sync {
     /// Returns the unique name of this task for logging and identification.
@@ -33,8 +35,6 @@ pub trait Task: Send + Sync {
 }
 
 /// Configuration for the scheduler.
-// TODO: Remove allow(dead_code) once scheduler is wired up
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SchedulerConfig {
     /// Whether the scheduler is enabled.
@@ -52,8 +52,6 @@ impl Default for SchedulerConfig {
 /// Each task runs in its own spawned tokio task. The first execution happens
 /// immediately (tokio interval first-tick behavior), then repeats at the
 /// configured interval.
-// TODO: Remove allow(dead_code) once scheduler is wired up
-#[allow(dead_code)]
 pub(super) fn start_scheduled_tasks(
     whitenoise: &'static Whitenoise,
     shutdown_rx: watch::Receiver<bool>,

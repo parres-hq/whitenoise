@@ -191,56 +191,118 @@ impl Whitenoise {
         account: &Account,
         delete_mls_stored_keys: bool,
     ) -> Result<usize> {
-        // Fetch all key packages once upfront
         let key_package_events = self.fetch_all_key_packages_for_account(account).await?;
+        self.delete_key_packages_for_account(account, key_package_events, delete_mls_stored_keys, 1)
+            .await
+    }
 
+    /// Deletes the specified key package events from relays for the given account.
+    ///
+    /// This method publishes batch deletion events and retries up to `max_retries` times
+    /// if some packages fail to delete. Storage deletion happens only on the initial attempt.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account the key packages belong to
+    /// * `key_package_events` - The key package events to delete
+    /// * `delete_mls_stored_keys` - Whether to also delete MLS keys from local storage
+    /// * `max_retries` - Maximum number of retries after the initial attempt (0 = no retries)
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of key packages that were successfully deleted.
+    pub(crate) async fn delete_key_packages_for_account(
+        &self,
+        account: &Account,
+        key_package_events: Vec<Event>,
+        delete_mls_stored_keys: bool,
+        max_retries: u32,
+    ) -> Result<usize> {
         if key_package_events.is_empty() {
-            tracing::info!(
-                target: "whitenoise::delete_all_key_packages_for_account",
-                "No key package events found for account {}",
+            tracing::debug!(
+                target: "whitenoise::key_packages",
+                "No key package events to delete for account {}",
                 account.pubkey.to_hex()
             );
             return Ok(0);
         }
 
-        let initial_count = key_package_events.len();
+        let original_count = key_package_events.len();
+        let original_ids: std::collections::HashSet<EventId> =
+            key_package_events.iter().map(|e| e.id).collect();
+
         tracing::debug!(
-            target: "whitenoise::delete_all_key_packages_for_account",
-            "Found {} key package events to delete for account {}",
-            initial_count,
+            target: "whitenoise::key_packages",
+            "Deleting {} key package events for account {}",
+            original_count,
             account.pubkey.to_hex()
         );
 
-        let (signer, key_package_relays_urls) =
-            self.prepare_key_package_deletion_context(account).await?;
+        let (signer, relay_urls) = self.prepare_key_package_deletion_context(account).await?;
 
+        // Delete from local storage on initial attempt only
         if delete_mls_stored_keys {
-            self.delete_key_packages_from_storage(account, &key_package_events, initial_count)?;
+            self.delete_key_packages_from_storage(account, &key_package_events, original_count)?;
         }
 
-        let event_ids: Vec<EventId> = key_package_events.iter().map(|e| e.id).collect();
+        let mut pending_ids: Vec<EventId> = key_package_events.iter().map(|e| e.id).collect();
 
-        tracing::debug!(
-            target: "whitenoise::delete_all_key_packages_for_account",
-            "Publishing batch deletion event for {} key packages",
-            event_ids.len()
-        );
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                tracing::debug!(
+                    target: "whitenoise::key_packages",
+                    "Retry {}/{} for {} remaining key package(s)",
+                    attempt,
+                    max_retries,
+                    pending_ids.len()
+                );
+            }
 
-        self.publish_key_package_deletion_with_context(
-            &event_ids,
-            &key_package_relays_urls,
-            signer.clone(),
-            "",
-        )
-        .await?;
+            self.publish_key_package_deletion_with_context(
+                &pending_ids,
+                &relay_urls,
+                signer.clone(),
+                "",
+            )
+            .await?;
 
-        self.verify_and_retry_key_package_deletion(
-            account,
-            initial_count,
-            &key_package_relays_urls,
-            signer,
-        )
-        .await
+            // Wait for relays to process
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // Check which of our original packages are still present
+            let remaining_events = self.fetch_all_key_packages_for_account(account).await?;
+            pending_ids = remaining_events
+                .iter()
+                .filter(|e| original_ids.contains(&e.id))
+                .map(|e| e.id)
+                .collect();
+
+            if pending_ids.is_empty() {
+                break;
+            }
+        }
+
+        let deleted_count = original_count - pending_ids.len();
+
+        if pending_ids.is_empty() {
+            tracing::info!(
+                target: "whitenoise::key_packages",
+                "Successfully deleted {} key package(s) for account {}",
+                deleted_count,
+                account.pubkey.to_hex()
+            );
+        } else {
+            tracing::warn!(
+                target: "whitenoise::key_packages",
+                "After {} retries, {} of {} key package(s) still not deleted for account {}",
+                max_retries,
+                pending_ids.len(),
+                original_count,
+                account.pubkey.to_hex()
+            );
+        }
+
+        Ok(deleted_count)
     }
 
     async fn prepare_key_package_deletion_context(
@@ -274,7 +336,7 @@ impl Whitenoise {
                     Ok(_) => storage_delete_count += 1,
                     Err(e) => {
                         tracing::warn!(
-                            target: "whitenoise::delete_all_key_packages_for_account",
+                            target: "whitenoise::key_packages",
                             "Failed to delete key package from storage for event {}: {}",
                             event.id,
                             e
@@ -283,7 +345,7 @@ impl Whitenoise {
                 },
                 Err(e) => {
                     tracing::warn!(
-                        target: "whitenoise::delete_all_key_packages_for_account",
+                        target: "whitenoise::key_packages",
                         "Failed to parse key package for event {}: {}",
                         event.id,
                         e
@@ -293,7 +355,7 @@ impl Whitenoise {
         }
 
         tracing::debug!(
-            target: "whitenoise::delete_all_key_packages_for_account",
+            target: "whitenoise::key_packages",
             "Deleted {} out of {} key packages from MLS storage",
             storage_delete_count,
             initial_count
@@ -317,13 +379,13 @@ impl Whitenoise {
             Ok(result) => {
                 if result.success.is_empty() {
                     tracing::error!(
-                        target: "whitenoise::delete_all_key_packages_for_account",
+                        target: "whitenoise::key_packages",
                         "{}Batch deletion event was not accepted by any relay",
                         context
                     );
                 } else {
                     tracing::info!(
-                        target: "whitenoise::delete_all_key_packages_for_account",
+                        target: "whitenoise::key_packages",
                         "{}Published batch deletion event to {} relay(s) for {} key packages",
                         context,
                         result.success.len(),
@@ -334,7 +396,7 @@ impl Whitenoise {
             }
             Err(e) => {
                 tracing::error!(
-                    target: "whitenoise::delete_all_key_packages_for_account",
+                    target: "whitenoise::key_packages",
                     "{}Failed to publish batch deletion event: {}",
                     context,
                     e
@@ -342,69 +404,5 @@ impl Whitenoise {
                 Err(e.into())
             }
         }
-    }
-
-    async fn verify_and_retry_key_package_deletion(
-        &self,
-        account: &Account,
-        initial_count: usize,
-        relay_urls: &[RelayUrl],
-        signer: Keys,
-    ) -> Result<usize> {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        let remaining_events = self.fetch_all_key_packages_for_account(account).await?;
-        let actually_deleted = initial_count.saturating_sub(remaining_events.len());
-
-        if remaining_events.is_empty() {
-            tracing::info!(
-                target: "whitenoise::delete_all_key_packages_for_account",
-                "Successfully deleted all {} key package events for account {}",
-                actually_deleted,
-                account.pubkey.to_hex()
-            );
-            return Ok(actually_deleted);
-        }
-
-        tracing::warn!(
-            target: "whitenoise::delete_all_key_packages_for_account",
-            "After deletion, {} key package(s) still remain for account {}. Will retry with batch deletion.",
-            remaining_events.len(),
-            account.pubkey.to_hex()
-        );
-
-        let remaining_ids: Vec<EventId> = remaining_events.iter().map(|e| e.id).collect();
-        self.publish_key_package_deletion_with_context(
-            &remaining_ids,
-            relay_urls,
-            signer.clone(),
-            "Retry: ",
-        )
-        .await?;
-
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let final_remaining = self.fetch_all_key_packages_for_account(account).await?;
-        let final_deleted = initial_count.saturating_sub(final_remaining.len());
-
-        if !final_remaining.is_empty() {
-            tracing::error!(
-                target: "whitenoise::delete_all_key_packages_for_account",
-                "After retry, {} key package(s) still remain for account {}. Event IDs: {:?}",
-                final_remaining.len(),
-                account.pubkey.to_hex(),
-                final_remaining
-                    .iter()
-                    .map(|e| e.id.to_hex())
-                    .collect::<Vec<_>>()
-            );
-        } else {
-            tracing::info!(
-                target: "whitenoise::delete_all_key_packages_for_account",
-                "Successfully deleted all {} key packages after retry",
-                final_deleted
-            );
-        }
-
-        Ok(final_deleted)
     }
 }

@@ -250,12 +250,14 @@ impl Whitenoise {
 
         Self::start_event_processing_loop(whitenoise_ref, event_receiver, shutdown_receiver).await;
 
-        // Start scheduled tasks (empty task list until tasks are registered in Commit 5)
+        // Register and start scheduled background tasks
+        let tasks: Vec<Arc<dyn scheduled_tasks::Task>> =
+            vec![Arc::new(scheduled_tasks::KeyPackageMaintenance)];
         let scheduler_handles = scheduled_tasks::start_scheduled_tasks(
             whitenoise_ref,
             scheduler_shutdown_rx,
             None,
-            vec![],
+            tasks,
         );
         *whitenoise_ref.scheduler_handles.lock().await = scheduler_handles;
 
