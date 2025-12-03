@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::nostr_manager::NostrManager;
 
 /// Parser trait for parsing content into tokens
-/// This trait is designed to be thread-safe for use with Flutter Rust Bridge (FRB)
 pub trait Parser: Send + Sync {
     fn parse(
         &self,

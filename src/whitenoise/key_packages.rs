@@ -41,9 +41,7 @@ impl Whitenoise {
     ) -> Result<()> {
         let (encoded_key_package, tags) = self.encoded_key_package(account, relays).await?;
         let relays_urls = Relay::urls(relays);
-        let signer = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&account.pubkey)?;
+        let signer = self.get_signer_for_account(account).await?;
         let result = self
             .nostr
             .publish_key_package_with_signer(&encoded_key_package, &relays_urls, &tags, signer)

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- NIP-55 Android Signer support (Amber, etc.) ([dannym-arx])
 - Search for contacts by npub or hex pubkey ([erskingardner])
 - Copy npub button in settings page([josefinalliende])
 - Basic NWC support for paying invoices in messages ([a-mpch], [F3r10], [jgmontoya], [josefinalliende])
@@ -97,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [jgmontoya]: <https://github.com/jgmontoya> (nostr:npub1jgm0ntzjr03wuzj5788llhed7l6fst05um4ej2r86ueaa08etv6sgd669p)
 [a-mpch]: <https://github.com/a-mpch> (nostr:npub1mpchxagw3kaglylnyajzjmghdj63vly9q5eu7d62fl72f2gz8xfqk6nwkd)
 [F3r10]: <https://github.com/F3r10>
-
+[dannym-arx]: <https://github.com/dannym-arx> (nostr:npub1ven4zk8xxw873876gx8y9g9l9fazkye9qnwnglcptgvfwxmygscqsxddfh)
 
 
 <!-- Tags -->

@@ -5,7 +5,7 @@ use anyhow::Context;
 use dashmap::DashMap;
 use nostr_sdk::{PublicKey, RelayUrl, ToBech32};
 use tokio::sync::{
-    OnceCell, Semaphore,
+    OnceCell, RwLock, Semaphore,
     mpsc::{self, Sender},
 };
 
@@ -22,6 +22,7 @@ pub mod key_packages;
 pub mod media_files;
 pub mod message_aggregator;
 pub mod messages;
+pub mod nip55_signer;
 pub mod relays;
 pub mod secrets_store;
 pub mod storage;
@@ -104,6 +105,10 @@ pub struct Whitenoise {
     shutdown_sender: Sender<()>,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
     contact_list_guards: DashMap<PublicKey, Arc<Semaphore>>,
+    /// Optional NIP-55 Flutter callback for Android signer integration
+    nip55_flutter_callback: Arc<RwLock<Option<Arc<dyn nip55_signer::Nip55FlutterCallback>>>>,
+    /// Per-account NIP-55 signer instances (cached)
+    nip55_signers: DashMap<PublicKey, Arc<nip55_signer::Nip55Signer>>,
 }
 
 static GLOBAL_WHITENOISE: OnceCell<Whitenoise> = OnceCell::const_new();
@@ -186,6 +191,8 @@ impl Whitenoise {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            nip55_flutter_callback: Arc::new(RwLock::new(None)),
+            nip55_signers: DashMap::new(),
         };
 
         // Create default relays in the database if they don't exist
@@ -265,9 +272,9 @@ impl Whitenoise {
             return Ok(());
         };
 
-        let keys = whitenoise_ref
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&signer_account.pubkey)?;
+        let signer = whitenoise_ref
+            .get_signer_for_account(&signer_account)
+            .await?;
 
         // Compute shared since for global user subscriptions with 10s lookback buffer
         let since = Self::compute_global_since_timestamp(whitenoise_ref).await?;
@@ -277,7 +284,7 @@ impl Whitenoise {
             .setup_batched_relay_subscriptions_with_signer(
                 users_with_relays,
                 &default_relays,
-                keys,
+                signer,
                 since,
             )
             .await?;
@@ -461,16 +468,14 @@ impl Whitenoise {
             return Ok(());
         };
 
-        let keys = self
-            .secrets_store
-            .get_nostr_keys_for_pubkey(&signer_account.pubkey)?;
+        let signer = self.get_signer_for_account(&signer_account).await?;
 
         self.nostr
             .refresh_user_global_subscriptions_with_signer(
                 user.pubkey,
                 users_with_relays,
                 &default_relays,
-                keys,
+                signer,
             )
             .await?;
         Ok(())
@@ -622,6 +627,130 @@ impl Whitenoise {
         self.nostr.client.reset().await;
         Ok(())
     }
+
+    /// Set the NIP-55 Flutter callback for Android signer integration
+    ///
+    /// This should be called by the Flutter layer when initializing the app on Android.
+    /// The callback will be used to communicate with external signer apps like Amber.
+    ///
+    /// Note: This uses interior mutability via Arc<RwLock<>> to allow setting it after
+    /// Whitenoise initialization, which is necessary for Flutter integration.
+    pub async fn set_nip55_flutter_callback(
+        &self,
+        callback: Arc<dyn nip55_signer::Nip55FlutterCallback>,
+    ) {
+        let mut cb = self.nip55_flutter_callback.write().await;
+        *cb = Some(callback);
+        tracing::debug!(
+            target: "whitenoise::set_nip55_flutter_callback",
+            "NIP-55 Flutter callback set"
+        );
+    }
+
+    /// Enable NIP-55 signing for an account
+    ///
+    /// This creates a NIP-55 signer instance for the account and caches it.
+    /// The signer will be used for all signing operations for this account.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account to enable NIP-55 signing for
+    ///
+    /// # Returns
+    ///
+    /// Returns an error if the Flutter callback is not set
+    pub async fn enable_nip55_signer(&self, account: &Account) -> Result<()> {
+        let callback = {
+            let cb = self.nip55_flutter_callback.read().await;
+            cb.as_ref()
+                .ok_or_else(|| {
+                    WhitenoiseError::InvalidInput(
+                        "NIP-55 Flutter callback not set. Call set_nip55_flutter_callback first."
+                            .to_string(),
+                    )
+                })?
+                .clone()
+        };
+
+        let signer = nip55_signer::Nip55Signer::new(callback);
+        signer.set_current_user(account.pubkey).await;
+
+        // Cache the signer
+        self.nip55_signers.insert(account.pubkey, Arc::new(signer));
+
+        tracing::info!(
+            target: "whitenoise::enable_nip55_signer",
+            "Enabled NIP-55 signer for account {}",
+            account.pubkey.to_hex()
+        );
+
+        Ok(())
+    }
+
+    /// Disable NIP-55 signing for an account
+    ///
+    /// This removes the NIP-55 signer for the account, causing it to fall back
+    /// to using the stored private key for signing.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account to disable NIP-55 signing for
+    pub async fn disable_nip55_signer(&self, account: &Account) {
+        if let Some((_, signer)) = self.nip55_signers.remove(&account.pubkey) {
+            signer.clear_cache().await;
+            tracing::info!(
+                target: "whitenoise::disable_nip55_signer",
+                "Disabled NIP-55 signer for account {}",
+                account.pubkey.to_hex()
+            );
+        }
+    }
+
+    /// Check if NIP-55 signing is enabled for an account
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if NIP-55 signing is enabled, `false` otherwise
+    pub fn is_nip55_enabled(&self, account: &Account) -> bool {
+        self.nip55_signers.contains_key(&account.pubkey)
+    }
+
+    /// Get a signer for an account
+    ///
+    /// Returns a NIP-55 signer if enabled for the account, otherwise returns
+    /// the account's keys from the secrets store. The returned signer implements
+    /// the `NostrSigner` trait and can be used for all signing operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account to get a signer for
+    ///
+    /// # Returns
+    ///
+    /// A `WhitenoiseSigner` enum that can be used for signing and implements Clone
+    pub async fn get_signer_for_account(
+        &self,
+        account: &Account,
+    ) -> Result<nip55_signer::WhitenoiseSigner> {
+        // Check if NIP-55 is enabled for this account
+        if let Some(nip55_signer) = self.nip55_signers.get(&account.pubkey) {
+            // Clone the signer (Nip55Signer implements Clone)
+            let signer_clone = (**nip55_signer).clone();
+            return Ok(nip55_signer::WhitenoiseSigner::Nip55(signer_clone));
+        }
+
+        // Fall back to using keys from secrets store
+        let keys = self
+            .secrets_store
+            .get_nostr_keys_for_pubkey(&account.pubkey)
+            .map_err(WhitenoiseError::SecretsStore)?;
+
+        Ok(nip55_signer::WhitenoiseSigner::Keys(keys))
+    }
 }
 
 #[cfg(test)]
@@ -720,6 +849,8 @@ pub mod test_utils {
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
+            nip55_flutter_callback: Arc::new(RwLock::new(None)),
+            nip55_signers: DashMap::new(),
         };
 
         (whitenoise, data_temp, logs_temp)
