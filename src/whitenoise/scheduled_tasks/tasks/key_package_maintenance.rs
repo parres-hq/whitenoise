@@ -12,6 +12,9 @@ use crate::whitenoise::scheduled_tasks::Task;
 /// Maximum age for a key package before it should be rotated (30 days).
 const KEY_PACKAGE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
+/// Maximum number of accounts to process concurrently.
+const MAX_CONCURRENT_ACCOUNTS: usize = 5;
+
 pub(crate) struct KeyPackageMaintenance;
 
 #[async_trait]
@@ -46,10 +49,9 @@ impl Task for KeyPackageMaintenance {
         let mut skipped = 0usize;
         let mut errors = 0usize;
 
-        // Process accounts concurrently (max 5 at a time)
         let results: Vec<MaintenanceResult> = stream::iter(accounts)
             .map(|account| async move { maintain_key_packages(whitenoise, &account).await })
-            .buffer_unordered(5)
+            .buffer_unordered(MAX_CONCURRENT_ACCOUNTS)
             .collect()
             .await;
 
