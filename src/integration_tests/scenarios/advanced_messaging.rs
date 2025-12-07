@@ -82,10 +82,12 @@ impl Scenario for AdvancedMessagingScenario {
             .await?;
 
         // Now send reactions to different messages
+        // Track this reaction's ID so we can delete it later
         SendMessageTestCase::basic()
             .with_sender("adv_msg_reactor")
             .with_group("advanced_messaging_group")
             .into_reaction("👍", &basic_message_id)
+            .with_message_id_key("thumbs_up_reaction")
             .execute(&mut self.context)
             .await?;
 
@@ -127,11 +129,38 @@ impl Scenario for AdvancedMessagingScenario {
             .execute(&mut self.context)
             .await?;
 
+        // ============================================================
+        // Test: Reaction Deletion
+        // Delete the 👍 reaction we sent earlier to adv_msg_initial,
+        // verify the reaction no longer appears in aggregated messages
+        // ============================================================
+        tracing::info!("Testing reaction deletion flow...");
+
+        // Delete the thumbs up reaction we sent earlier
+        DeleteMessageTestCase::new(
+            "adv_msg_reactor",
+            "advanced_messaging_group",
+            "thumbs_up_reaction",
+        )
+        .execute(&mut self.context)
+        .await?;
+
+        // Verify the reaction is no longer present on the target message
+        VerifyReactionDeletionTestCase::new(
+            "adv_msg_sender",
+            "advanced_messaging_group",
+            "adv_msg_initial",
+            "adv_msg_reactor",
+        )
+        .execute(&mut self.context)
+        .await?;
+
         tracing::info!("✓ Advanced messaging scenario completed with:");
         tracing::info!("  • Multiple chat messages");
         tracing::info!("  • Reactions with proper targeting");
         tracing::info!("  • Reply messages with e-tag targeting");
         tracing::info!("  • Message deletion with verification");
+        tracing::info!("  • Reaction deletion with verification");
         tracing::info!("  • Message aggregation with complex relationships");
 
         Ok(())
