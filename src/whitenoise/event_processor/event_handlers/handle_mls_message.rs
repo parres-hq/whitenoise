@@ -5,7 +5,7 @@ use nostr_sdk::prelude::*;
 use crate::whitenoise::{
     Whitenoise,
     accounts::Account,
-    database::AggregatedMessage,
+    aggregated_message::AggregatedMessage,
     error::{Result, WhitenoiseError},
     media_files::MediaFile,
     message_aggregator::{emoji_utils, reaction_handler},
@@ -220,6 +220,14 @@ impl Whitenoise {
         let target_ids = Self::extract_deletion_target_ids(&deletion_msg.tags);
 
         for target_id in target_ids {
+            if let Some(reaction) =
+                AggregatedMessage::find_reaction_by_id(&target_id, group_id, &self.database).await?
+            {
+                self.remove_deleted_reaction_from_parent(&reaction, group_id)
+                    .await?;
+            }
+
+            // Mark the target as deleted (works for both messages and reactions)
             AggregatedMessage::mark_deleted(
                 &target_id,
                 group_id,
@@ -227,6 +235,42 @@ impl Whitenoise {
                 &self.database,
             )
             .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn remove_deleted_reaction_from_parent(
+        &self,
+        reaction: &AggregatedMessage,
+        group_id: &GroupId,
+    ) -> Result<()> {
+        let Ok(parent_id) = Self::extract_reaction_target_id(&reaction.tags) else {
+            return Ok(()); // No parent reference found
+        };
+
+        let Some(mut parent_msg) =
+            AggregatedMessage::find_by_id(&parent_id, group_id, &self.database).await?
+        else {
+            return Ok(()); // Parent not cached yet
+        };
+
+        if reaction_handler::remove_reaction_from_message(&mut parent_msg, &reaction.author) {
+            AggregatedMessage::update_reactions(
+                &parent_id,
+                group_id,
+                &parent_msg.reactions,
+                &self.database,
+            )
+            .await?;
+
+            tracing::debug!(
+                target: "whitenoise::cache",
+                "Removed deleted reaction {} by {} from message {}",
+                reaction.event_id,
+                &reaction.author.to_hex()[..8],
+                parent_id
+            );
         }
 
         Ok(())
@@ -269,14 +313,14 @@ impl Whitenoise {
             );
         }
 
-        for reaction_row in orphaned_reactions {
-            let reaction_timestamp = Timestamp::from(reaction_row.created_at.timestamp() as u64);
+        for reaction in orphaned_reactions {
+            let reaction_timestamp = Timestamp::from(reaction.created_at.timestamp() as u64);
 
             if let Some(mut msg) =
                 AggregatedMessage::find_by_id(message_id, group_id, &self.database).await?
             {
                 let reaction_emoji = match emoji_utils::validate_and_normalize_reaction(
-                    &reaction_row.content,
+                    &reaction.content,
                     self.message_aggregator.config().normalize_emoji,
                 ) {
                     Ok(emoji) => emoji,
@@ -284,9 +328,9 @@ impl Whitenoise {
                         tracing::debug!(
                             target: "whitenoise::cache",
                             "Skipping orphaned reaction {} from {} with invalid content '{}': {}",
-                            reaction_row.message_id,
-                            reaction_row.author,
-                            reaction_row.content,
+                            reaction.event_id,
+                            reaction.author,
+                            reaction.content,
                             e
                         );
                         continue;
@@ -295,7 +339,7 @@ impl Whitenoise {
 
                 reaction_handler::add_reaction_to_message(
                     &mut msg,
-                    &reaction_row.author,
+                    &reaction.author,
                     &reaction_emoji,
                     reaction_timestamp,
                 );
@@ -310,11 +354,11 @@ impl Whitenoise {
             }
         }
 
-        for deletion_row in orphaned_deletions {
+        for deletion_event_id in orphaned_deletions {
             AggregatedMessage::mark_deleted(
                 message_id,
                 group_id,
-                &deletion_row.message_id.to_string(),
+                &deletion_event_id.to_string(),
                 &self.database,
             )
             .await?;
@@ -327,7 +371,7 @@ impl Whitenoise {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::whitenoise::{database::AggregatedMessage, test_utils::*};
+    use crate::whitenoise::{aggregated_message::AggregatedMessage, test_utils::*};
     use std::time::Duration;
 
     /// Test handling of different MLS message types: regular messages, reactions, and deletions

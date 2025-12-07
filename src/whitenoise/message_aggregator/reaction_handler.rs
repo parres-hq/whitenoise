@@ -74,6 +74,42 @@ fn extract_target_message_id(tags: &Tags) -> Result<String, ProcessingError> {
     Err(ProcessingError::MissingETag)
 }
 
+/// Remove a user's reaction from a message's reaction summary
+/// Returns true if a reaction was removed, false if user had no reaction
+pub(crate) fn remove_reaction_from_message(
+    target_message: &mut ChatMessage,
+    user: &PublicKey,
+) -> bool {
+    let Some(idx) = target_message
+        .reactions
+        .user_reactions
+        .iter()
+        .position(|ur| ur.user == *user)
+    else {
+        return false;
+    };
+
+    let removed_reaction = target_message.reactions.user_reactions.remove(idx);
+
+    if let Some(emoji_reaction) = target_message
+        .reactions
+        .by_emoji
+        .get_mut(&removed_reaction.emoji)
+    {
+        emoji_reaction.count = emoji_reaction.count.saturating_sub(1);
+        emoji_reaction.users.retain(|u| u != user);
+
+        if emoji_reaction.count == 0 {
+            target_message
+                .reactions
+                .by_emoji
+                .remove(&removed_reaction.emoji);
+        }
+    }
+
+    true
+}
+
 /// Add a reaction to a message's reaction summary
 /// Assumes the emoji has already been validated and normalized
 pub(crate) fn add_reaction_to_message(
@@ -82,34 +118,8 @@ pub(crate) fn add_reaction_to_message(
     emoji: &str,
     created_at: Timestamp,
 ) {
-    // Check if user already has a reaction on this message
-    if let Some(existing_idx) = target_message
-        .reactions
-        .user_reactions
-        .iter()
-        .position(|ur| ur.user == *user)
-    {
-        // Remove the old reaction
-        let old_user_reaction = target_message.reactions.user_reactions.remove(existing_idx);
-
-        // Remove from emoji count
-        if let Some(emoji_reaction) = target_message
-            .reactions
-            .by_emoji
-            .get_mut(&old_user_reaction.emoji)
-        {
-            emoji_reaction.count = emoji_reaction.count.saturating_sub(1);
-            emoji_reaction.users.retain(|u| u != user);
-
-            // Remove emoji entry if count reaches zero
-            if emoji_reaction.count == 0 {
-                target_message
-                    .reactions
-                    .by_emoji
-                    .remove(&old_user_reaction.emoji);
-            }
-        }
-    }
+    // Remove any existing reaction from this user first (one reaction per user)
+    remove_reaction_from_message(target_message, user);
 
     // Add new reaction
     let user_reaction = UserReaction {

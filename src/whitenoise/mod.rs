@@ -12,6 +12,7 @@ use tokio::sync::{
 use tokio::task::JoinHandle;
 
 pub mod accounts;
+pub mod aggregated_message;
 pub mod app_settings;
 pub mod database;
 pub mod error;
