@@ -23,8 +23,6 @@ pub mod user_relays;
 pub mod users;
 pub mod utils;
 
-pub use aggregated_messages::{AggregatedMessage, AggregatedMessageRow};
-
 pub static MIGRATOR: LazyLock<Migrator> = LazyLock::new(|| sqlx::migrate!("./db_migrations"));
 
 const DB_ACQUIRE_TIMEOUT_SECS: u64 = 5;

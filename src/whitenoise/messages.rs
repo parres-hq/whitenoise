@@ -3,7 +3,7 @@ use crate::{
     whitenoise::{
         Whitenoise,
         accounts::Account,
-        database::AggregatedMessage,
+        aggregated_message::AggregatedMessage,
         error::{Result, WhitenoiseError},
         media_files::MediaFile,
         message_aggregator::ChatMessage,

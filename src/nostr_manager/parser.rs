@@ -110,12 +110,13 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use super::*;
-    use crate::whitenoise::event_tracker::WhitenoiseEventTracker;
+    use crate::whitenoise::event_tracker::NoEventTracker;
     use tokio::sync::mpsc;
 
     async fn setup_nostr_manager() -> NostrManager {
         let (event_sender, _event_receiver) = mpsc::channel(500);
-        let event_tracker = Arc::new(WhitenoiseEventTracker::new());
+        // Use NoEventTracker for parser tests since we don't need event tracking
+        let event_tracker = Arc::new(NoEventTracker);
         NostrManager::new(event_sender, event_tracker, Duration::from_secs(3))
             .await
             .unwrap()

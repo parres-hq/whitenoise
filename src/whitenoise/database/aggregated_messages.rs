@@ -7,6 +7,7 @@ use nostr_sdk::prelude::*;
 use super::{Database, DatabaseError, utils::parse_timestamp};
 use crate::nostr_manager::parser::SerializableToken;
 use crate::whitenoise::{
+    aggregated_message::AggregatedMessage,
     media_files::MediaFile,
     message_aggregator::{ChatMessage, ReactionSummary},
     utils::timestamp_to_datetime,
@@ -14,11 +15,8 @@ use crate::whitenoise::{
 
 type Result<T> = std::result::Result<T, DatabaseError>;
 
-/// Database row representing an event in the aggregated_messages table
-/// Uses domain types (EventId, PublicKey, GroupId, DateTime, Kind) following codebase patterns
-/// Public so business logic layer can use it for orphaned reaction/deletion handling
 #[derive(Debug)]
-pub struct AggregatedMessageRow {
+struct AggregatedMessageRow {
     pub id: i64,
     pub message_id: EventId,
     pub mls_group_id: GroupId,
@@ -143,7 +141,20 @@ where
     }
 }
 
-pub struct AggregatedMessage;
+impl AggregatedMessageRow {
+    /// Convert database row to lightweight AggregatedMessage domain type
+    fn into_aggregated_message(self) -> AggregatedMessage {
+        AggregatedMessage {
+            id: self.id,
+            event_id: self.message_id,
+            mls_group_id: self.mls_group_id,
+            author: self.author,
+            content: self.content,
+            created_at: self.created_at,
+            tags: self.tags,
+        }
+    }
+}
 
 impl AggregatedMessage {
     /// Count ALL events (kind 9, 7, 5) in cache for a group
@@ -468,6 +479,27 @@ impl AggregatedMessage {
         row.map(Self::row_to_chat_message).transpose()
     }
 
+    /// Find a cached reaction (kind 7) by its event ID
+    /// Only returns reactions that haven't been deleted yet
+    pub async fn find_reaction_by_id(
+        message_id: &str,
+        group_id: &GroupId,
+        database: &Database,
+    ) -> Result<Option<AggregatedMessage>> {
+        let row: Option<AggregatedMessageRow> = sqlx::query_as(
+            "SELECT * FROM aggregated_messages
+             WHERE message_id = ? AND mls_group_id = ? AND kind = 7
+               AND deletion_event_id IS NULL",
+        )
+        .bind(message_id)
+        .bind(group_id.as_slice())
+        .fetch_optional(&database.pool)
+        .await
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(row.map(AggregatedMessageRow::into_aggregated_message))
+    }
+
     /// Find orphaned reactions targeting a specific message
     /// Returns reactions (kind 7) that reference the target message_id
     /// Uses json_each to properly parse the tags array
@@ -475,8 +507,8 @@ impl AggregatedMessage {
         message_id: &str,
         group_id: &GroupId,
         database: &Database,
-    ) -> Result<Vec<AggregatedMessageRow>> {
-        sqlx::query_as(
+    ) -> Result<Vec<AggregatedMessage>> {
+        let rows: Vec<AggregatedMessageRow> = sqlx::query_as(
             "SELECT am.* FROM aggregated_messages am
              WHERE am.kind = 7
                AND am.mls_group_id = ?
@@ -490,20 +522,25 @@ impl AggregatedMessage {
         .bind(message_id)
         .fetch_all(&database.pool)
         .await
-        .map_err(DatabaseError::Sqlx)
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(rows
+            .into_iter()
+            .map(AggregatedMessageRow::into_aggregated_message)
+            .collect())
     }
 
     /// Find orphaned deletions targeting a specific message
-    /// Returns deletions (kind 5) that reference the target message_id
+    /// Returns the event IDs of deletions (kind 5) that reference the target message_id
     /// Uses json_each to properly parse the tags array
     pub async fn find_orphaned_deletions(
         message_id: &str,
         group_id: &GroupId,
         database: &Database,
-    ) -> Result<Vec<AggregatedMessageRow>> {
-        sqlx::query_as(
-            "SELECT am.* FROM aggregated_messages am
-             WHERE am.kind = 5 
+    ) -> Result<Vec<EventId>> {
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT am.message_id FROM aggregated_messages am
+             WHERE am.kind = 5
                AND am.mls_group_id = ?
                AND EXISTS (
                  SELECT 1 FROM json_each(am.tags) AS tag
@@ -515,7 +552,12 @@ impl AggregatedMessage {
         .bind(message_id)
         .fetch_all(&database.pool)
         .await
-        .map_err(DatabaseError::Sqlx)
+        .map_err(DatabaseError::Sqlx)?;
+
+        Ok(ids
+            .into_iter()
+            .filter_map(|id| EventId::from_hex(&id).ok())
+            .collect())
     }
 
     /// Convert database row to ChatMessage
