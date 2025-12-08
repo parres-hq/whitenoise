@@ -173,7 +173,7 @@ impl Whitenoise {
 
         // Create NostrManager with event_sender for direct event queuing
         let nostr =
-            NostrManager::new(event_sender.clone(), Arc::new(WhitenoiseEventTracker::new()), NostrManager::default_timeout())
+            NostrManager::new(event_sender.clone(), Arc::new(WhitenoiseEventTracker::new(database.clone())), NostrManager::default_timeout())
                 .await?;
 
         // Create SecretsStore
@@ -787,7 +787,7 @@ pub mod test_utils {
         // to use the local development relays running in docker
         let nostr = NostrManager::new(
             event_sender.clone(),
-            Arc::new(event_tracker::TestEventTracker::new(database.clone())),
+            Arc::new(event_tracker::WhitenoiseEventTracker::new(database.clone())),
             NostrManager::default_timeout(),
         )
         .await
