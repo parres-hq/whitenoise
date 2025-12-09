@@ -105,6 +105,8 @@ pub struct Whitenoise {
     secrets_store: SecretsStore,
     storage: storage::Storage,
     message_aggregator: message_aggregator::MessageAggregator,
+    #[allow(dead_code)] // Used by subscribe_to_group_messages (commit 4)
+    message_stream_manager: message_streaming::MessageStreamManager,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
     /// Per-account concurrency guards to prevent race conditions in contact list processing
@@ -126,6 +128,7 @@ impl std::fmt::Debug for Whitenoise {
             .field("secrets_store", &"<REDACTED>")
             .field("storage", &"<REDACTED>")
             .field("message_aggregator", &"<REDACTED>")
+            .field("message_stream_manager", &"<REDACTED>")
             .field("event_sender", &"<REDACTED>")
             .field("shutdown_sender", &"<REDACTED>")
             .field("contact_list_guards", &"<REDACTED>")
@@ -197,6 +200,7 @@ impl Whitenoise {
             secrets_store,
             storage,
             message_aggregator,
+            message_stream_manager: message_streaming::MessageStreamManager::default(),
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),
@@ -816,6 +820,7 @@ pub mod test_utils {
             secrets_store,
             storage,
             message_aggregator,
+            message_stream_manager: message_streaming::MessageStreamManager::default(),
             event_sender,
             shutdown_sender,
             contact_list_guards: DashMap::new(),

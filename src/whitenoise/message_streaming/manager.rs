@@ -32,7 +32,15 @@ impl MessageStreamManager {
     pub fn emit(&self, group_id: &GroupId, update: MessageUpdate) {
         if let Some(sender) = self.streams.get(group_id) {
             // Attempt to send; if all receivers dropped, clean up
-            if sender.send(update).is_err() && sender.receiver_count() == 0 {
+            if let Err(error) = sender.send(update)
+                && sender.receiver_count() == 0
+            {
+                tracing::debug!(
+                    target: "whitenoise::message_streaming",
+                    "Cleaning up stream for group {} (no active receivers, error: {})",
+                    hex::encode(group_id.as_slice()),
+                    error
+                );
                 drop(sender);
                 self.streams.remove(group_id);
             }
