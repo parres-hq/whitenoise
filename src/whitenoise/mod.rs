@@ -24,6 +24,7 @@ pub mod groups;
 pub mod key_packages;
 pub mod media_files;
 pub mod message_aggregator;
+pub mod message_streaming;
 pub mod messages;
 pub mod relays;
 pub mod scheduled_tasks;
