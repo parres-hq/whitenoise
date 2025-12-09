@@ -4,6 +4,8 @@
 //! It enables subscribers to receive live updates as messages, reactions, and
 //! deletions are processed, without requiring polling.
 
+mod manager;
 mod types;
 
+pub use manager::MessageStreamManager;
 pub use types::{GroupMessageSubscription, MessageUpdate, UpdateTrigger};
