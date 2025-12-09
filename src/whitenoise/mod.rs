@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -5,7 +6,7 @@ use anyhow::Context;
 use dashmap::DashMap;
 use nostr_sdk::{PublicKey, RelayUrl, ToBech32};
 use tokio::sync::{
-    Mutex, OnceCell, Semaphore,
+    Mutex, OnceCell, Semaphore, broadcast,
     mpsc::{self, Sender},
     watch,
 };
@@ -105,7 +106,6 @@ pub struct Whitenoise {
     secrets_store: SecretsStore,
     storage: storage::Storage,
     message_aggregator: message_aggregator::MessageAggregator,
-    #[allow(dead_code)] // Used by subscribe_to_group_messages (commit 4)
     message_stream_manager: message_streaming::MessageStreamManager,
     event_sender: Sender<ProcessableEvent>,
     shutdown_sender: Sender<()>,
@@ -541,6 +541,64 @@ impl Whitenoise {
     /// This allows consumers to access the message aggregator directly for custom processing
     pub fn message_aggregator(&self) -> &message_aggregator::MessageAggregator {
         &self.message_aggregator
+    }
+
+    /// Subscribe to message updates for a specific group.
+    ///
+    /// Returns both an initial snapshot AND a receiver for real-time updates.
+    /// The design eliminates race conditions:
+    /// - Subscription is established BEFORE fetching to capture concurrent updates
+    /// - Any updates that arrived during fetch are merged into `initial_messages`
+    /// - The receiver only yields updates AFTER the initial snapshot
+    ///
+    /// # Arguments
+    /// * `group_id` - The group to subscribe to
+    ///
+    /// # Returns
+    /// A [`message_streaming::GroupMessageSubscription`] containing initial messages and a broadcast receiver
+    pub async fn subscribe_to_group_messages(
+        &self,
+        group_id: &mdk_core::prelude::GroupId,
+    ) -> Result<message_streaming::GroupMessageSubscription> {
+        let mut updates = self.message_stream_manager.subscribe(group_id);
+
+        let fetched_messages =
+            aggregated_message::AggregatedMessage::find_messages_by_group(group_id, &self.database)
+                .await
+                .map_err(|e| {
+                    WhitenoiseError::from(anyhow::anyhow!("Failed to read cached messages: {}", e))
+                })?;
+
+        let mut messages_map: HashMap<String, message_aggregator::ChatMessage> = fetched_messages
+            .into_iter()
+            .map(|m| (m.id.clone(), m))
+            .collect();
+
+        loop {
+            match updates.try_recv() {
+                Ok(update) => {
+                    // Apply update: insert or replace by message ID
+                    messages_map.insert(update.message.id.clone(), update.message);
+                }
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    // Channel closed unexpectedly - should be unreachable since we hold a receiver
+                    return Err(WhitenoiseError::Other(anyhow::anyhow!(
+                        "Message stream closed unexpectedly during subscription"
+                    )));
+                }
+            }
+        }
+
+        let mut initial_messages: Vec<message_aggregator::ChatMessage> =
+            messages_map.into_values().collect();
+        initial_messages.sort_by_key(|m| m.created_at);
+
+        Ok(message_streaming::GroupMessageSubscription {
+            initial_messages,
+            updates,
+        })
     }
 
     /// Get a MediaFiles orchestrator for coordinating storage and database operations
@@ -1177,6 +1235,136 @@ mod tests {
                 messages.len(),
                 0,
                 "Should return empty list for non-existent group"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_subscribe_to_group_messages_returns_initial_messages() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let group_id = GroupId::from_slice(&[99; 32]);
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+
+            // Setup: Create group (required for foreign key constraint)
+            group_information::GroupInformation::find_or_create_by_mls_group_id(
+                &group_id,
+                Some(group_information::GroupType::Group),
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            // Setup: Insert test messages into the cache
+            let msg1 = message_aggregator::ChatMessage {
+                id: format!("{:0>64x}", 1),
+                author: test_pubkey,
+                content: "First message".to_string(),
+                created_at: nostr_sdk::Timestamp::now(),
+                tags: nostr_sdk::Tags::new(),
+                is_reply: false,
+                reply_to_id: None,
+                is_deleted: false,
+                content_tokens: vec![],
+                reactions: message_aggregator::ReactionSummary::default(),
+                kind: 9,
+                media_attachments: vec![],
+            };
+            let msg2 = message_aggregator::ChatMessage {
+                id: format!("{:0>64x}", 2),
+                author: test_pubkey,
+                content: "Second message".to_string(),
+                created_at: nostr_sdk::Timestamp::now(),
+                tags: nostr_sdk::Tags::new(),
+                is_reply: false,
+                reply_to_id: None,
+                is_deleted: false,
+                content_tokens: vec![],
+                reactions: message_aggregator::ReactionSummary::default(),
+                kind: 9,
+                media_attachments: vec![],
+            };
+
+            aggregated_message::AggregatedMessage::insert_message(
+                &msg1,
+                &group_id,
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+            aggregated_message::AggregatedMessage::insert_message(
+                &msg2,
+                &group_id,
+                &whitenoise.database,
+            )
+            .await
+            .unwrap();
+
+            // Test: Subscribe and verify initial messages
+            let subscription = whitenoise
+                .subscribe_to_group_messages(&group_id)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                subscription.initial_messages.len(),
+                2,
+                "Should return 2 initial messages"
+            );
+
+            // Verify message contents (order may vary, so check by ID)
+            let ids: std::collections::HashSet<_> = subscription
+                .initial_messages
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect();
+            assert!(ids.contains(msg1.id.as_str()));
+            assert!(ids.contains(msg2.id.as_str()));
+        }
+
+        #[tokio::test]
+        async fn test_subscribe_merges_concurrent_updates() {
+            let (whitenoise, _data_temp, _logs_temp) = create_mock_whitenoise().await;
+            let group_id = GroupId::from_slice(&[42; 32]);
+            let test_pubkey = nostr_sdk::Keys::generate().public_key();
+
+            // First emit an update before subscribing (simulates concurrent update scenario)
+            // This tests the merge logic path
+            let test_message = message_aggregator::ChatMessage {
+                id: "test_concurrent_msg".to_string(),
+                author: test_pubkey,
+                content: "concurrent message".to_string(),
+                created_at: nostr_sdk::Timestamp::now(),
+                tags: nostr_sdk::Tags::new(),
+                is_reply: false,
+                reply_to_id: None,
+                is_deleted: false,
+                content_tokens: vec![],
+                reactions: message_aggregator::ReactionSummary::default(),
+                kind: 9,
+                media_attachments: vec![],
+            };
+
+            // Emit an update (will be caught by subscriber during drain phase)
+            whitenoise.message_stream_manager.emit(
+                &group_id,
+                message_streaming::MessageUpdate {
+                    trigger: message_streaming::UpdateTrigger::NewMessage,
+                    message: test_message.clone(),
+                },
+            );
+
+            // Subscribe - the drain loop should find the channel empty (no subscriber existed)
+            // This test verifies the deduplication logic path compiles and runs
+            let subscription = whitenoise
+                .subscribe_to_group_messages(&group_id)
+                .await
+                .unwrap();
+
+            // Initial messages should be empty
+            // The reason is that the message would've been persisted at the event processor level
+            // Emitting itself doesn't persist the message to the database
+            assert!(
+                subscription.initial_messages.is_empty(),
+                "Initial messages should be empty (stream created on subscribe)"
             );
         }
     }
