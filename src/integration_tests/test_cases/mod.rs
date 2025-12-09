@@ -4,6 +4,7 @@ pub mod app_settings;
 pub mod chat_media_upload;
 pub mod follow_management;
 pub mod group_membership;
+pub mod message_streaming;
 pub mod metadata_management;
 pub mod scheduler;
 pub mod shared;

@@ -81,6 +81,7 @@ scenario_registry! {
     "chat-media-upload" => ChatMediaUploadScenario,
     "user-discovery" => UserDiscoveryScenario,
     "scheduler" => SchedulerScenario,
+    "message-streaming" => MessageStreamingScenario,
 }
 // ============================================================================
 
@@ -202,6 +203,7 @@ mod tests {
         assert!(parse_scenario_name("chat-media-upload").is_ok());
         assert!(parse_scenario_name("user-discovery").is_ok());
         assert!(parse_scenario_name("scheduler").is_ok());
+        assert!(parse_scenario_name("message-streaming").is_ok());
     }
 
     #[test]
@@ -228,10 +230,11 @@ mod tests {
     fn test_get_all_scenario_names() {
         // Test that all scenario names are returned
         let names = get_all_scenario_names();
-        assert_eq!(names.len(), 11);
+        assert_eq!(names.len(), 12);
         assert!(names.contains(&"account-management"));
         assert!(names.contains(&"basic-messaging"));
         assert!(names.contains(&"user-discovery"));
         assert!(names.contains(&"scheduler"));
+        assert!(names.contains(&"message-streaming"));
     }
 }

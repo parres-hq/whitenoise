@@ -6,12 +6,12 @@ use crate::WhitenoiseError;
 use crate::integration_tests::benchmarks::test_cases::FetchAggregatedMessagesBenchmark;
 use crate::integration_tests::benchmarks::{BenchmarkConfig, BenchmarkScenario, BenchmarkTestCase};
 use crate::integration_tests::core::{ScenarioContext, TestCase};
-use crate::integration_tests::test_cases::advanced_messaging::DeleteMessageTestCase;
 use crate::integration_tests::test_cases::chat_media_upload::{
     SendMessageWithMediaTestCase, UploadChatImageTestCase,
 };
 use crate::integration_tests::test_cases::shared::{
-    AcceptGroupInviteTestCase, CreateAccountsTestCase, CreateGroupTestCase, SendMessageTestCase,
+    AcceptGroupInviteTestCase, CreateAccountsTestCase, CreateGroupTestCase, DeleteMessageTestCase,
+    SendMessageTestCase,
 };
 
 /// Configuration for message aggregation benchmark dataset
