@@ -30,19 +30,21 @@ impl MessageStreamManager {
     }
 
     pub fn emit(&self, group_id: &GroupId, update: MessageUpdate) {
-        if let Some(sender) = self.streams.get(group_id) {
-            // Attempt to send; if all receivers dropped, clean up
-            if let Err(error) = sender.send(update)
-                && sender.receiver_count() == 0
+        if let Some(sender) = self.streams.get(group_id)
+            && sender.send(update).is_err()
+        {
+            drop(sender);
+            // Atomically check and remove to avoid race with concurrent subscribe()
+            if self
+                .streams
+                .remove_if(group_id, |_, s| s.receiver_count() == 0)
+                .is_some()
             {
                 tracing::debug!(
                     target: "whitenoise::message_streaming",
-                    "Cleaning up stream for group {} (no active receivers, error: {})",
+                    "Cleaned up stream for group {} (no active receivers)",
                     hex::encode(group_id.as_slice()),
-                    error
                 );
-                drop(sender);
-                self.streams.remove(group_id);
             }
         }
     }
