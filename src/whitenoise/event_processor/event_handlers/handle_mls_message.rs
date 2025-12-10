@@ -50,9 +50,8 @@ impl Whitenoise {
 
                     match message.kind {
                         Kind::Custom(9) => {
-                            if let Some(msg) = self.cache_chat_message(&group_id, &message).await? {
-                                self.emit_message_update(&group_id, UpdateTrigger::NewMessage, msg);
-                            }
+                            let msg = self.cache_chat_message(&group_id, &message).await?;
+                            self.emit_message_update(&group_id, UpdateTrigger::NewMessage, msg);
                         }
                         Kind::Reaction => {
                             if let Some(target) = self.cache_reaction(&group_id, &message).await? {
@@ -150,7 +149,7 @@ impl Whitenoise {
         &self,
         group_id: &GroupId,
         message: &Message,
-    ) -> Result<Option<ChatMessage>> {
+    ) -> Result<ChatMessage> {
         let media_files = MediaFile::find_by_group(&self.database, group_id).await?;
 
         let chat_message = self
@@ -172,7 +171,7 @@ impl Whitenoise {
             hex::encode(group_id.as_slice())
         );
 
-        Ok(Some(final_message))
+        Ok(final_message)
     }
 
     /// Cache a reaction and return the updated target message for emission.

@@ -185,4 +185,22 @@ mod tests {
         let manager = MessageStreamManager::default();
         assert!(manager.streams.is_empty());
     }
+
+    #[tokio::test]
+    async fn emit_delivers_to_all_subscribers() {
+        let manager = MessageStreamManager::new();
+        let group_id = make_test_group_id(8);
+
+        let mut rx1 = manager.subscribe(&group_id);
+        let mut rx2 = manager.subscribe(&group_id);
+
+        let update = make_test_update(super::super::UpdateTrigger::NewMessage, "msg_broadcast");
+        manager.emit(&group_id, update);
+
+        let received1 = rx1.try_recv().expect("rx1 should receive update");
+        let received2 = rx2.try_recv().expect("rx2 should receive update");
+
+        assert_eq!(received1.message.id, "msg_broadcast");
+        assert_eq!(received2.message.id, "msg_broadcast");
+    }
 }
