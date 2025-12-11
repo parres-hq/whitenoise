@@ -43,6 +43,9 @@ pub use whitenoise::message_aggregator::{
 // Nostr integration
 pub use nostr_manager::parser::SerializableToken;
 
+// Group message streaming
+pub use whitenoise::message_streaming::{GroupMessageSubscription, MessageUpdate, UpdateTrigger};
+
 static TRACING_GUARDS: OnceLock<Mutex<Option<(WorkerGuard, WorkerGuard)>>> = OnceLock::new();
 static TRACING_INIT: OnceLock<()> = OnceLock::new();
 

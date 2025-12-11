@@ -8,7 +8,8 @@ use crate::whitenoise::{
     aggregated_message::AggregatedMessage,
     error::{Result, WhitenoiseError},
     media_files::MediaFile,
-    message_aggregator::{emoji_utils, reaction_handler},
+    message_aggregator::{ChatMessage, emoji_utils, reaction_handler},
+    message_streaming::{MessageUpdate, UpdateTrigger},
 };
 
 impl Whitenoise {
@@ -44,8 +45,32 @@ impl Whitenoise {
                         )
                         .await?;
 
-                    // Update aggregated message cache synchronously
-                    self.update_message_cache(&group_id, inner_event).await?;
+                    // Cache the message and emit updates to subscribers
+                    let message = Self::build_message_from_event(&group_id, inner_event)?;
+
+                    match message.kind {
+                        Kind::Custom(9) => {
+                            let msg = self.cache_chat_message(&group_id, &message).await?;
+                            self.emit_message_update(&group_id, UpdateTrigger::NewMessage, msg);
+                        }
+                        Kind::Reaction => {
+                            if let Some(target) = self.cache_reaction(&group_id, &message).await? {
+                                self.emit_message_update(
+                                    &group_id,
+                                    UpdateTrigger::ReactionAdded,
+                                    target,
+                                );
+                            }
+                        }
+                        Kind::EventDeletion => {
+                            for (trigger, msg) in self.cache_deletion(&group_id, &message).await? {
+                                self.emit_message_update(&group_id, trigger, msg);
+                            }
+                        }
+                        _ => {
+                            tracing::debug!("Ignoring message kind {:?} for cache", message.kind);
+                        }
+                    }
                 }
 
                 // Background sync for group images (existing pattern)
@@ -82,11 +107,8 @@ impl Whitenoise {
         }
     }
 
-    async fn update_message_cache(
-        &self,
-        group_id: &GroupId,
-        inner_event: UnsignedEvent,
-    ) -> Result<()> {
+    /// Build a Message struct from an UnsignedEvent.
+    fn build_message_from_event(group_id: &GroupId, inner_event: UnsignedEvent) -> Result<Message> {
         let event_id = inner_event.id.ok_or_else(|| {
             WhitenoiseError::Other(anyhow::anyhow!(
                 "Inner event missing ID in group {}",
@@ -94,8 +116,7 @@ impl Whitenoise {
             ))
         })?;
 
-        // Construct a Message from UnsignedEvent
-        let message = Message {
+        Ok(Message {
             id: event_id,
             pubkey: inner_event.pubkey,
             created_at: inner_event.created_at,
@@ -106,174 +127,255 @@ impl Whitenoise {
             event: inner_event,
             wrapper_event_id: event_id, // Reuse event_id as placeholder, we don't need it
             state: mdk_core::prelude::message_types::MessageState::Processed,
-        };
-
-        match message.kind {
-            Kind::Custom(9) => {
-                let media_files = MediaFile::find_by_group(&self.database, group_id).await?;
-
-                let chat_message = self
-                    .message_aggregator
-                    .process_single_message(&message, &self.nostr, media_files)
-                    .await?;
-
-                AggregatedMessage::insert_message(&chat_message, group_id, &self.database).await?;
-
-                self.apply_orphaned_reactions_and_deletions(&chat_message.id, group_id)
-                    .await?;
-
-                tracing::debug!(
-                    target: "whitenoise::cache",
-                    "Cached kind 9 message {} in group {}",
-                    message.id,
-                    hex::encode(group_id.as_slice())
-                );
-            }
-            Kind::Reaction => {
-                AggregatedMessage::insert_reaction(&message, group_id, &self.database).await?;
-
-                if let Err(e) = self
-                    .update_cached_message_with_reaction(&message, group_id)
-                    .await
-                {
-                    tracing::debug!(
-                        target: "whitenoise::cache",
-                        "Could not apply reaction {} immediately: {}",
-                        message.id,
-                        e
-                    );
-                }
-
-                tracing::debug!(
-                    target: "whitenoise::cache",
-                    "Cached kind 7 reaction {} in group {}",
-                    message.id,
-                    hex::encode(group_id.as_slice())
-                );
-            }
-            Kind::EventDeletion => {
-                AggregatedMessage::insert_deletion(&message, group_id, &self.database).await?;
-
-                if let Err(e) = self
-                    .update_cached_messages_with_deletion(&message, group_id)
-                    .await
-                {
-                    tracing::debug!(
-                        target: "whitenoise::cache",
-                        "Could not apply deletion {} immediately: {}",
-                        message.id,
-                        e
-                    );
-                }
-
-                tracing::debug!(
-                    target: "whitenoise::cache",
-                    "Cached kind 5 deletion {} in group {}",
-                    message.id,
-                    hex::encode(group_id.as_slice())
-                );
-            }
-            _ => {
-                tracing::debug!("Ignoring message kind {:?} for cache", message.kind);
-            }
-        }
-
-        Ok(())
+        })
     }
 
-    async fn update_cached_message_with_reaction(
+    /// Emit a message update to all subscribers of a group.
+    fn emit_message_update(
         &self,
-        reaction_msg: &Message,
         group_id: &GroupId,
-    ) -> Result<()> {
-        let target_id = Self::extract_reaction_target_id(&reaction_msg.tags)?;
+        trigger: UpdateTrigger,
+        message: ChatMessage,
+    ) {
+        self.message_stream_manager
+            .emit(group_id, MessageUpdate { trigger, message });
+    }
 
-        let cached_msg = AggregatedMessage::find_by_id(&target_id, group_id, &self.database)
-            .await?
-            .ok_or_else(|| WhitenoiseError::Other(anyhow::anyhow!("Target message not cached")))?;
+    /// Cache a new chat message and return it for emission.
+    ///
+    /// Processes the message through the aggregator, inserts into database,
+    /// and applies any orphaned reactions/deletions that arrived before this message.
+    async fn cache_chat_message(
+        &self,
+        group_id: &GroupId,
+        message: &Message,
+    ) -> Result<ChatMessage> {
+        let media_files = MediaFile::find_by_group(&self.database, group_id).await?;
 
-        let mut msg = cached_msg;
+        let chat_message = self
+            .message_aggregator
+            .process_single_message(message, &self.nostr, media_files)
+            .await?;
 
-        let reaction_emoji = emoji_utils::validate_and_normalize_reaction(
-            &reaction_msg.content,
+        AggregatedMessage::insert_message(&chat_message, group_id, &self.database).await?;
+
+        // Apply orphaned reactions/deletions - modifies in-place and returns final state
+        let final_message = self
+            .apply_orphaned_reactions_and_deletions(chat_message, group_id)
+            .await?;
+
+        tracing::debug!(
+            target: "whitenoise::cache",
+            "Cached kind 9 message {} in group {}",
+            message.id,
+            hex::encode(group_id.as_slice())
+        );
+
+        Ok(final_message)
+    }
+
+    /// Cache a reaction and return the updated target message for emission.
+    ///
+    /// Returns `Ok(None)` if the target message isn't cached yet (orphaned reaction).
+    /// Propagates real errors (malformed tags, invalid emoji, DB failures).
+    async fn cache_reaction(
+        &self,
+        group_id: &GroupId,
+        message: &Message,
+    ) -> Result<Option<ChatMessage>> {
+        AggregatedMessage::insert_reaction(message, group_id, &self.database).await?;
+
+        let result = self.apply_reaction_to_target(message, group_id).await?;
+
+        if result.is_none() {
+            tracing::debug!(
+                target: "whitenoise::cache",
+                "Reaction {} orphaned (target not yet cached)",
+                message.id,
+            );
+        }
+
+        tracing::debug!(
+            target: "whitenoise::cache",
+            "Cached kind 7 reaction {} in group {}",
+            message.id,
+            hex::encode(group_id.as_slice())
+        );
+
+        Ok(result)
+    }
+
+    /// Apply a reaction to its target message, returning the updated target.
+    ///
+    /// Returns `Ok(None)` if the target message isn't cached yet (true orphan case).
+    /// Returns `Err` for real failures (malformed tags, invalid emoji, DB errors).
+    async fn apply_reaction_to_target(
+        &self,
+        reaction: &Message,
+        group_id: &GroupId,
+    ) -> Result<Option<ChatMessage>> {
+        let target_id = Self::extract_reaction_target_id(&reaction.tags)?;
+
+        let Some(mut target) =
+            AggregatedMessage::find_by_id(&target_id, group_id, &self.database).await?
+        else {
+            return Ok(None); // True orphan: target not yet cached
+        };
+
+        let emoji = emoji_utils::validate_and_normalize_reaction(
+            &reaction.content,
             self.message_aggregator.config().normalize_emoji,
         )?;
 
         reaction_handler::add_reaction_to_message(
-            &mut msg,
-            &reaction_msg.pubkey,
-            &reaction_emoji,
-            reaction_msg.created_at,
+            &mut target,
+            &reaction.pubkey,
+            &emoji,
+            reaction.created_at,
         );
 
-        AggregatedMessage::update_reactions(&msg.id, group_id, &msg.reactions, &self.database)
-            .await?;
+        AggregatedMessage::update_reactions(
+            &target.id,
+            group_id,
+            &target.reactions,
+            &self.database,
+        )
+        .await?;
 
-        Ok(())
+        Ok(Some(target))
     }
 
-    async fn update_cached_messages_with_deletion(
+    /// Cache a deletion and return updates for all affected messages.
+    ///
+    /// A single deletion can target multiple events (reactions and/or messages),
+    /// so this returns a Vec of (trigger, message) pairs.
+    async fn cache_deletion(
         &self,
-        deletion_msg: &Message,
         group_id: &GroupId,
-    ) -> Result<()> {
-        let target_ids = Self::extract_deletion_target_ids(&deletion_msg.tags);
+        message: &Message,
+    ) -> Result<Vec<(UpdateTrigger, ChatMessage)>> {
+        AggregatedMessage::insert_deletion(message, group_id, &self.database).await?;
+
+        let updates = self.apply_deletions_to_targets(message, group_id).await?;
+
+        tracing::debug!(
+            target: "whitenoise::cache",
+            "Cached kind 5 deletion {} in group {} ({} targets affected)",
+            message.id,
+            hex::encode(group_id.as_slice()),
+            updates.len()
+        );
+
+        Ok(updates)
+    }
+
+    /// Apply deletion to all targets and collect updates to emit.
+    async fn apply_deletions_to_targets(
+        &self,
+        deletion: &Message,
+        group_id: &GroupId,
+    ) -> Result<Vec<(UpdateTrigger, ChatMessage)>> {
+        let target_ids = Self::extract_deletion_target_ids(&deletion.tags);
+        let mut updates = Vec::with_capacity(target_ids.len());
 
         for target_id in target_ids {
-            if let Some(reaction) =
-                AggregatedMessage::find_reaction_by_id(&target_id, group_id, &self.database).await?
+            if let Some(update) = self
+                .apply_single_deletion(&target_id, &deletion.id, group_id)
+                .await?
             {
-                self.remove_deleted_reaction_from_parent(&reaction, group_id)
-                    .await?;
+                updates.push(update);
             }
+        }
 
-            // Mark the target as deleted (works for both messages and reactions)
+        Ok(updates)
+    }
+
+    /// Apply deletion to a single target, returning the appropriate update.
+    async fn apply_single_deletion(
+        &self,
+        target_id: &str,
+        deletion_event_id: &EventId,
+        group_id: &GroupId,
+    ) -> Result<Option<(UpdateTrigger, ChatMessage)>> {
+        // Check if target is a reaction
+        if let Some(reaction) =
+            AggregatedMessage::find_reaction_by_id(target_id, group_id, &self.database).await?
+        {
+            let parent_update = self
+                .remove_reaction_from_parent(&reaction, group_id)
+                .await?;
             AggregatedMessage::mark_deleted(
-                &target_id,
+                target_id,
                 group_id,
-                &deletion_msg.id.to_string(),
+                &deletion_event_id.to_string(),
                 &self.database,
             )
             .await?;
+            return Ok(parent_update.map(|msg| (UpdateTrigger::ReactionRemoved, msg)));
         }
 
-        Ok(())
+        // Check if target is a message
+        if let Some(mut msg) =
+            AggregatedMessage::find_by_id(target_id, group_id, &self.database).await?
+        {
+            msg.is_deleted = true;
+            AggregatedMessage::mark_deleted(
+                target_id,
+                group_id,
+                &deletion_event_id.to_string(),
+                &self.database,
+            )
+            .await?;
+            return Ok(Some((UpdateTrigger::MessageDeleted, msg)));
+        }
+
+        // Unknown target - still mark for audit trail (orphaned deletion)
+        AggregatedMessage::mark_deleted(
+            target_id,
+            group_id,
+            &deletion_event_id.to_string(),
+            &self.database,
+        )
+        .await?;
+        Ok(None)
     }
 
-    async fn remove_deleted_reaction_from_parent(
+    /// Remove a reaction from its parent message and return the updated parent.
+    async fn remove_reaction_from_parent(
         &self,
         reaction: &AggregatedMessage,
         group_id: &GroupId,
-    ) -> Result<()> {
+    ) -> Result<Option<ChatMessage>> {
         let Ok(parent_id) = Self::extract_reaction_target_id(&reaction.tags) else {
-            return Ok(()); // No parent reference found
+            return Ok(None);
         };
 
-        let Some(mut parent_msg) =
+        let Some(mut parent) =
             AggregatedMessage::find_by_id(&parent_id, group_id, &self.database).await?
         else {
-            return Ok(()); // Parent not cached yet
+            return Ok(None);
         };
 
-        if reaction_handler::remove_reaction_from_message(&mut parent_msg, &reaction.author) {
+        if reaction_handler::remove_reaction_from_message(&mut parent, &reaction.author) {
             AggregatedMessage::update_reactions(
                 &parent_id,
                 group_id,
-                &parent_msg.reactions,
+                &parent.reactions,
                 &self.database,
             )
             .await?;
 
             tracing::debug!(
                 target: "whitenoise::cache",
-                "Removed deleted reaction {} by {} from message {}",
+                "Removed reaction {} from message {}",
                 reaction.event_id,
-                &reaction.author.to_hex()[..8],
                 parent_id
             );
-        }
 
-        Ok(())
+            Ok(Some(parent))
+        } else {
+            Ok(None)
+        }
     }
 
     fn extract_reaction_target_id(tags: &Tags) -> Result<String> {
@@ -290,17 +392,21 @@ impl Whitenoise {
             .collect()
     }
 
+    /// Apply any orphaned reactions/deletions to a newly cached message.
+    ///
+    /// Takes ownership of the message, modifies in-place, and returns the final state.
+    /// This avoids re-fetching from the database after applying orphans.
     async fn apply_orphaned_reactions_and_deletions(
         &self,
-        message_id: &str,
+        mut message: ChatMessage,
         group_id: &GroupId,
-    ) -> Result<()> {
+    ) -> Result<ChatMessage> {
         let orphaned_reactions =
-            AggregatedMessage::find_orphaned_reactions(message_id, group_id, &self.database)
+            AggregatedMessage::find_orphaned_reactions(&message.id, group_id, &self.database)
                 .await?;
 
         let orphaned_deletions =
-            AggregatedMessage::find_orphaned_deletions(message_id, group_id, &self.database)
+            AggregatedMessage::find_orphaned_deletions(&message.id, group_id, &self.database)
                 .await?;
 
         if !orphaned_reactions.is_empty() || !orphaned_deletions.is_empty() {
@@ -309,54 +415,52 @@ impl Whitenoise {
                 "Found {} orphaned reactions and {} orphaned deletions for message {}, applying...",
                 orphaned_reactions.len(),
                 orphaned_deletions.len(),
-                message_id
+                message.id
             );
         }
 
+        // Apply orphaned reactions in-memory and persist each
         for reaction in orphaned_reactions {
+            let reaction_emoji = match emoji_utils::validate_and_normalize_reaction(
+                &reaction.content,
+                self.message_aggregator.config().normalize_emoji,
+            ) {
+                Ok(emoji) => emoji,
+                Err(e) => {
+                    tracing::debug!(
+                        target: "whitenoise::cache",
+                        "Skipping orphaned reaction {} from {} with invalid content '{}': {}",
+                        reaction.event_id,
+                        reaction.author,
+                        reaction.content,
+                        e
+                    );
+                    continue;
+                }
+            };
+
             let reaction_timestamp = Timestamp::from(reaction.created_at.timestamp() as u64);
+            reaction_handler::add_reaction_to_message(
+                &mut message,
+                &reaction.author,
+                &reaction_emoji,
+                reaction_timestamp,
+            );
 
-            if let Some(mut msg) =
-                AggregatedMessage::find_by_id(message_id, group_id, &self.database).await?
-            {
-                let reaction_emoji = match emoji_utils::validate_and_normalize_reaction(
-                    &reaction.content,
-                    self.message_aggregator.config().normalize_emoji,
-                ) {
-                    Ok(emoji) => emoji,
-                    Err(e) => {
-                        tracing::debug!(
-                            target: "whitenoise::cache",
-                            "Skipping orphaned reaction {} from {} with invalid content '{}': {}",
-                            reaction.event_id,
-                            reaction.author,
-                            reaction.content,
-                            e
-                        );
-                        continue;
-                    }
-                };
-
-                reaction_handler::add_reaction_to_message(
-                    &mut msg,
-                    &reaction.author,
-                    &reaction_emoji,
-                    reaction_timestamp,
-                );
-
-                AggregatedMessage::update_reactions(
-                    &msg.id,
-                    group_id,
-                    &msg.reactions,
-                    &self.database,
-                )
-                .await?;
-            }
+            AggregatedMessage::update_reactions(
+                &message.id,
+                group_id,
+                &message.reactions,
+                &self.database,
+            )
+            .await?;
         }
 
+        // Apply orphaned deletions
         for deletion_event_id in orphaned_deletions {
+            message.is_deleted = true;
             AggregatedMessage::mark_deleted(
-                message_id,
+                &message.id,
                 group_id,
                 &deletion_event_id.to_string(),
                 &self.database,
@@ -364,7 +468,7 @@ impl Whitenoise {
             .await?;
         }
 
-        Ok(())
+        Ok(message)
     }
 }
 
