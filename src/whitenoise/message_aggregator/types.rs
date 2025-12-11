@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -43,6 +44,28 @@ pub struct ChatMessage {
 
     /// Media files attached to this message
     pub media_attachments: Vec<MediaFile>,
+}
+
+/// Lightweight message summary for previews (chat list).
+///
+/// This is a subset of `ChatMessage` optimized for display contexts where full
+/// message data isn't needed. Uses `DateTime<Utc>` for database consistency.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatMessageSummary {
+    /// Public key of the message author
+    pub author: PublicKey,
+
+    /// Author's display name (populated by caller after user lookup, None initially)
+    pub author_display_name: Option<String>,
+
+    /// Message content preview
+    pub content: String,
+
+    /// When the message was sent
+    pub created_at: DateTime<Utc>,
+
+    /// Number of media attachments
+    pub media_attachment_count: usize,
 }
 
 /// Summary of reactions on a message
