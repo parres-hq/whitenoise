@@ -371,7 +371,7 @@ mod tests {
         let group_id2 = GroupId::from_slice(&[9; 32]); // Will be accepted
         let group_id3 = GroupId::from_slice(&[10; 32]); // Will be declined
 
-        let (ag1, _) =
+        let (_ag1, _) =
             AccountGroup::find_or_create(&account.pubkey, &group_id1, &whitenoise.database)
                 .await
                 .unwrap();
