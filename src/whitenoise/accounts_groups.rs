@@ -118,7 +118,10 @@ impl AccountGroup {
     }
 
     /// Resets confirmation to pending state (None).
-    pub async fn reset_confirmation(&self, whitenoise: &Whitenoise) -> Result<Self, WhitenoiseError> {
+    pub async fn reset_confirmation(
+        &self,
+        whitenoise: &Whitenoise,
+    ) -> Result<Self, WhitenoiseError> {
         let updated = self
             .update_user_confirmation(None, &whitenoise.database)
             .await?;
@@ -373,7 +376,10 @@ mod tests {
         let accepted_group = pending_group.accept(&whitenoise).await.unwrap();
         assert!(accepted_group.is_accepted());
 
-        let reset_group = accepted_group.reset_confirmation(&whitenoise).await.unwrap();
+        let reset_group = accepted_group
+            .reset_confirmation(&whitenoise)
+            .await
+            .unwrap();
         assert!(reset_group.is_pending());
     }
 
@@ -383,11 +389,12 @@ mod tests {
         let account = whitenoise.create_identity().await.unwrap();
         let group_id = GroupId::from_slice(&[11; 32]);
 
-        let result = whitenoise
-            .accept_account_group(&account, &group_id)
-            .await;
+        let result = whitenoise.accept_account_group(&account, &group_id).await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), WhitenoiseError::GroupNotFound));
+        assert!(matches!(
+            result.unwrap_err(),
+            WhitenoiseError::GroupNotFound
+        ));
     }
 }

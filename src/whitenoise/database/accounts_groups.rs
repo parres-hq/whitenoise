@@ -49,15 +49,14 @@ where
 
 impl AccountGroupRow {
     fn into_account_group(self) -> Result<AccountGroup, sqlx::Error> {
-        let account_pubkey = PublicKey::parse(&self.account_pubkey).map_err(|e| {
-            sqlx::Error::ColumnDecode {
+        let account_pubkey =
+            PublicKey::parse(&self.account_pubkey).map_err(|e| sqlx::Error::ColumnDecode {
                 index: "account_pubkey".to_string(),
                 source: Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("Invalid public key: {}", e),
                 )),
-            }
-        })?;
+            })?;
 
         Ok(AccountGroup {
             id: Some(self.id),
@@ -179,9 +178,9 @@ impl AccountGroup {
         user_confirmation: Option<bool>,
         database: &Database,
     ) -> Result<Self, sqlx::Error> {
-        let id = self
-            .id
-            .ok_or_else(|| sqlx::Error::Protocol("Cannot update unsaved AccountGroup".to_string()))?;
+        let id = self.id.ok_or_else(|| {
+            sqlx::Error::Protocol("Cannot update unsaved AccountGroup".to_string())
+        })?;
 
         let now_ms = Utc::now().timestamp_millis();
         let confirmation_int: Option<i64> = user_confirmation.map(|v| if v { 1 } else { 0 });
@@ -203,9 +202,9 @@ impl AccountGroup {
 
     /// Deletes this AccountGroup from the database.
     pub(crate) async fn delete(&self, database: &Database) -> Result<(), sqlx::Error> {
-        let id = self
-            .id
-            .ok_or_else(|| sqlx::Error::Protocol("Cannot delete unsaved AccountGroup".to_string()))?;
+        let id = self.id.ok_or_else(|| {
+            sqlx::Error::Protocol("Cannot delete unsaved AccountGroup".to_string())
+        })?;
 
         sqlx::query("DELETE FROM accounts_groups WHERE id = ?")
             .bind(id)
@@ -250,10 +249,13 @@ mod tests {
         let account = whitenoise.create_identity().await.unwrap();
         let group_id = GroupId::from_slice(&[1; 32]);
 
-        let result =
-            AccountGroup::find_by_account_and_group(&account.pubkey, &group_id, &whitenoise.database)
-                .await
-                .unwrap();
+        let result = AccountGroup::find_by_account_and_group(
+            &account.pubkey,
+            &group_id,
+            &whitenoise.database,
+        )
+        .await
+        .unwrap();
 
         assert!(result.is_none());
     }
@@ -443,10 +445,13 @@ mod tests {
 
         account_group.delete(&whitenoise.database).await.unwrap();
 
-        let result =
-            AccountGroup::find_by_account_and_group(&account.pubkey, &group_id, &whitenoise.database)
-                .await
-                .unwrap();
+        let result = AccountGroup::find_by_account_and_group(
+            &account.pubkey,
+            &group_id,
+            &whitenoise.database,
+        )
+        .await
+        .unwrap();
 
         assert!(result.is_none());
     }
