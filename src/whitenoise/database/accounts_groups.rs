@@ -94,19 +94,29 @@ impl AccountGroup {
 
     /// Finds or creates an AccountGroup for the given account and group.
     /// Returns the AccountGroup and a boolean indicating if it was newly created.
+    ///
+    /// This uses an insert-first approach to avoid TOCTOU race conditions:
+    /// - Attempts to insert first
+    /// - On unique constraint violation, fetches the existing record
     pub(crate) async fn find_or_create(
         account_pubkey: &PublicKey,
         mls_group_id: &GroupId,
         database: &Database,
     ) -> Result<(Self, bool), sqlx::Error> {
-        if let Some(existing) =
-            Self::find_by_account_and_group(account_pubkey, mls_group_id, database).await?
-        {
-            return Ok((existing, false));
+        // Try to insert first - this handles the race condition properly
+        match Self::insert_new(account_pubkey, mls_group_id, database).await {
+            Ok(created) => Ok((created, true)),
+            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+                // Another task inserted the record between our check and insert
+                // Fetch the existing record
+                let existing =
+                    Self::find_by_account_and_group(account_pubkey, mls_group_id, database)
+                        .await?
+                        .expect("Record must exist after unique constraint violation");
+                Ok((existing, false))
+            }
+            Err(e) => Err(e),
         }
-
-        let created = Self::insert_new(account_pubkey, mls_group_id, database).await?;
-        Ok((created, true))
     }
 
     /// Finds all AccountGroups for a given account.
