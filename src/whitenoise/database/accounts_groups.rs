@@ -31,8 +31,40 @@ where
         let mls_group_id_bytes: Vec<u8> = row.try_get("mls_group_id")?;
         let user_confirmation_int: Option<i64> = row.try_get("user_confirmation")?;
 
+        // Validate mls_group_id length (must be 32 bytes)
+        if mls_group_id_bytes.len() != 32 {
+            return Err(sqlx::Error::ColumnDecode {
+                index: "mls_group_id".to_string(),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Invalid mls_group_id length: expected 32 bytes, got {}",
+                        mls_group_id_bytes.len()
+                    ),
+                )),
+            });
+        }
         let mls_group_id = GroupId::from_slice(&mls_group_id_bytes);
-        let user_confirmation = user_confirmation_int.map(|v| v != 0);
+
+        // Validate user_confirmation: only 0, 1, or NULL are valid
+        let user_confirmation = match user_confirmation_int {
+            None => None,
+            Some(0) => Some(false),
+            Some(1) => Some(true),
+            Some(v) => {
+                return Err(sqlx::Error::ColumnDecode {
+                    index: "user_confirmation".to_string(),
+                    source: Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Invalid user_confirmation value: expected 0, 1, or NULL, got {}",
+                            v
+                        ),
+                    )),
+                });
+            }
+        };
+
         let created_at = parse_timestamp(row, "created_at")?;
         let updated_at = parse_timestamp(row, "updated_at")?;
 
@@ -112,7 +144,7 @@ impl AccountGroup {
                 let existing =
                     Self::find_by_account_and_group(account_pubkey, mls_group_id, database)
                         .await?
-                        .expect("Record must exist after unique constraint violation");
+                        .ok_or(sqlx::Error::RowNotFound)?;
                 Ok((existing, false))
             }
             Err(e) => Err(e),
