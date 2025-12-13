@@ -6,6 +6,7 @@ use nostr_sdk::prelude::*;
 use crate::whitenoise::{
     Whitenoise,
     accounts::Account,
+    accounts_groups::AccountGroup,
     error::{Result, WhitenoiseError},
     group_information::GroupInformation,
     relays::Relay,
@@ -92,6 +93,11 @@ impl Whitenoise {
             )
             .await?;
 
+            // Update or create AccountGroup with user_confirmation = true (accepted)
+            let (account_group, _was_created) =
+                AccountGroup::get_or_create(self, pubkey, &welcome.mls_group_id).await?;
+            account_group.accept(self).await?;
+
             let groups = mdk.get_groups()?;
             let mut group_relays_set = BTreeSet::new();
             let group_ids = groups
@@ -155,6 +161,12 @@ impl Whitenoise {
         let welcome = mdk.get_welcome(&welcome_event_id)?;
         if let Some(welcome) = welcome {
             mdk.decline_welcome(&welcome)?;
+
+            // Update or create AccountGroup with user_confirmation = false (declined)
+            // This hides the group from the UI but keeps the MLS state intact
+            let (account_group, _was_created) =
+                AccountGroup::get_or_create(self, pubkey, &welcome.mls_group_id).await?;
+            account_group.decline(self).await?;
         } else {
             return Err(WhitenoiseError::WelcomeNotFound);
         }

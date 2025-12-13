@@ -3,6 +3,7 @@ use nostr_sdk::prelude::*;
 use crate::whitenoise::{
     Whitenoise,
     accounts::Account,
+    accounts_groups::AccountGroup,
     error::{Result, WhitenoiseError},
 };
 
@@ -59,6 +60,27 @@ impl Whitenoise {
         // This ensures the image is ready when the UI displays the group
         // Spawn as background task to avoid blocking event processing
         Whitenoise::background_sync_group_image_cache_if_needed(account, &group_id);
+
+        // Create AccountGroup record with user_confirmation = NULL (pending)
+        // This tracks that the account has auto-joined this group but hasn't explicitly accepted/declined
+        let (account_group, was_created) =
+            AccountGroup::get_or_create(self, &account.pubkey, &group_id).await?;
+        if was_created {
+            tracing::debug!(
+                target: "whitenoise::event_processor::process_welcome",
+                "Created AccountGroup record for account {} and group {}",
+                account.pubkey.to_hex(),
+                hex::encode(group_id.as_slice())
+            );
+        } else {
+            tracing::debug!(
+                target: "whitenoise::event_processor::process_welcome",
+                "AccountGroup already exists for account {} and group {} (confirmation: {:?})",
+                account.pubkey.to_hex(),
+                hex::encode(group_id.as_slice()),
+                account_group.user_confirmation
+            );
+        }
 
         let key_package_event_id: Option<EventId> = rumor
             .tags
